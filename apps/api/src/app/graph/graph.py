@@ -20,8 +20,10 @@ from langgraph.graph.message import MessagesState
 from ..config import get_settings
 from ..llm import get_chat_model
 
+class InputState(MessagesState):
+    pass
 
-def _call_model(state: MessagesState, config) -> dict:
+def _call_model(state: InputState, config) -> dict:
     """Single agent node: invoke the configured chat model on the message history."""
     configurable = config.get("configurable", {})
     provider = configurable.get("provider")
@@ -37,9 +39,11 @@ def _call_model(state: MessagesState, config) -> dict:
     response = llm.invoke(messages)
     return {"messages": [response]}
 
+def router_node(state: InputState):
+    pass
 
 def _build_graph():
-    builder = StateGraph(MessagesState)
+    builder = StateGraph(InputState)
     builder.add_node("agent", _call_model)
     builder.add_edge(START, "agent")
     # `MessagesState` + checkpointer gives multi-turn memory keyed by thread_id.
