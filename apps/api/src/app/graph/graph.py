@@ -1,54 +1,171 @@
-"""The LangGraph application.
+"""The flood-exposure agent as a hand-rolled LangGraph.
 
-This is intentionally minimal — a single node that calls the chat model — so it's
-a clean starting point. Build out from here: add tool nodes, conditional edges,
-retrieval, human-in-the-loop, etc.
+    START -> route -> fetch -> operate -> finalize -> END
 
-Conversation memory is handled by the checkpointer: pass a `thread_id` in the run
-config and the graph persists/loads message history for that thread.
+route uses OpenAI tool-calling purely as structured extraction: it picks the
+operation, extracts the place, and selects the hazard layer(s) from the catalog
+descriptions — it runs nothing. fetch acquires the OSM data + clipped raster.
+operate runs the deterministic spatial op (the only place a number is computed).
+finalize phrases the answer, quoting that number and citing its source.
+
+The LLM never computes a number. On a decline (no place / unavailable layer) or a
+fetch/compute failure, `error` is set and finalize returns it verbatim with no LLM
+call. State holds OpenAI-format message dicts and file paths, so it stays
+JSON-serializable for the checkpointer (multi-turn memory keyed by thread_id).
 """
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
+from typing import Annotated, TypedDict
 
-from langchain_core.messages import SystemMessage
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import START, StateGraph
-from langgraph.graph.message import MessagesState
+from langgraph.graph import END, START, StateGraph
 
-from ..config import get_settings
-from ..llm import get_chat_model
+from . import prompts
+from .geo import ingest, operations, tiffs, trace
 
-class InputState(MessagesState):
-    pass
 
-def _call_model(state: InputState, config) -> dict:
-    """Single agent node: invoke the configured chat model on the message history."""
-    configurable = config.get("configurable", {})
-    provider = configurable.get("provider")
-    model = configurable.get("model")
+def _add(left: list | None, right: list | None) -> list:
+    return (left or []) + (right or [])
 
-    llm = get_chat_model(provider=provider, model=model)
 
-    messages = state["messages"]
-    settings = get_settings()
-    if settings.system_prompt:
-        messages = [SystemMessage(content=settings.system_prompt), *messages]
+class State(TypedDict, total=False):
+    messages: Annotated[list[dict], _add]  # OpenAI-format conversation dicts
+    operation: str | None                  # which store op to run
+    place: str | None                      # extracted location
+    op_args: dict                          # remaining op params (layer, min_severity)
+    tiffs: list[str]                       # hazard layers the op needs
+    tool_call_id: str | None               # so finalize can build the tool message
+    aoi: dict | None                       # the ensure_aoi bundle of paths
+    result: dict | None                    # the computed result
+    error: str | None                      # set on refusal/failure -> straight to finalize
+    usage: Annotated[list[dict], _add]     # per-LLM-call {in, out} token counts
 
-    response = llm.invoke(messages)
-    return {"messages": [response]}
 
-def router_node(state: InputState):
-    pass
+def _usage(resp) -> dict:
+    u = getattr(resp, "usage", None)
+    if not u:
+        return {"in": 0, "out": 0}
+    return {"in": getattr(u, "prompt_tokens", 0) or 0, "out": getattr(u, "completion_tokens", 0) or 0}
+
+
+def _last_user(messages: list[dict]) -> str:
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            return m.get("content") or ""
+    return ""
+
+
+def _layer_note(layers: dict[str, str]) -> str:
+    if not layers:
+        return "No hazard layers are available; do not call a hazard operation."
+    listed = "\n".join(f"- {name}: {desc}" for name, desc in layers.items())
+    return ("Hazard layers available — pick the one(s) a question needs by matching these "
+            "descriptions, and pass them as `hazard_layers`. If none fit, do not call a tool:\n"
+            + listed)
+
+
+def route(state: State, config) -> dict:
+    """LLM picks the operation + place + hazard layers. Records intent; runs nothing."""
+    client = config["configurable"]["client"]
+    model = config["configurable"]["model"]
+
+    layers = tiffs.descriptions()
+    system = prompts.system_prompt() + "\n\n" + _layer_note(layers)
+    messages = [{"role": "system", "content": system}, *state["messages"]]
+    resp = client.chat.completions.create(
+        model=model, messages=messages, tools=operations.schema(list(layers)), max_tokens=600)
+
+    msg = resp.choices[0].message
+    out = {"usage": [_usage(resp)]}
+    if not msg.tool_calls:                       # model declined -> plain-text reply
+        out["error"] = msg.content or "I can't answer that with the data I have."
+        return out
+
+    call = msg.tool_calls[0]
+    args = json.loads(call.function.arguments)
+    place = args.pop("place", None)
+    selected = args.pop("hazard_layers", [])
+    if not place:
+        out["error"] = "Name a place (a city or district) and I'll check it."
+        return out
+
+    out.update(operation=call.function.name, place=place, op_args=args,
+               tiffs=selected, tool_call_id=call.id)
+    return out
+
+
+def fetch(state: State) -> dict:
+    """Acquire the OSM data + clipped raster for the place (the fetch->operate handoff)."""
+    try:
+        for layer in state.get("tiffs") or []:
+            ingest.source_raster(layer)          # download-on-demand + validates the layer
+        return {"aoi": ingest.ensure_aoi(state["place"])}
+    except Exception as e:                        # unresolvable place, too large, Overpass down
+        return {"error": f"No data for that request: {e}"}
+
+
+def operate(state: State) -> dict:
+    """Run the deterministic spatial op over the bundle — the only number-producing step."""
+    try:
+        return {"result": operations.dispatch(state["operation"], state["aoi"], **state["op_args"])}
+    except Exception as e:
+        return {"error": f"No data for that request: {e}"}
+
+
+def finalize(state: State, config) -> dict:
+    """Phrase the answer (quoting the number + source). On error, return it without an LLM call."""
+    question = _last_user(state["messages"])
+
+    if state.get("error"):
+        answer = state["error"]
+        trace.record(question, answer, state.get("usage") or [], args=state.get("op_args"))
+        return {"messages": [{"role": "assistant", "content": answer}]}
+
+    client = config["configurable"]["client"]
+    model = config["configurable"]["model"]
+    result = state["result"]
+
+    # Rebuild the tool-call exchange so the model phrases from the real result.
+    arguments = json.dumps({"place": state["place"], **(state.get("op_args") or {})})
+    assistant = {"role": "assistant", "content": None, "tool_calls": [{
+        "id": state["tool_call_id"], "type": "function",
+        "function": {"name": state["operation"], "arguments": arguments}}]}
+    tool_msg = {"role": "tool", "tool_call_id": state["tool_call_id"], "content": str(result)}
+
+    messages = [{"role": "system", "content": prompts.system_prompt()},
+                *state["messages"], assistant, tool_msg]
+    resp = client.chat.completions.create(model=model, messages=messages, max_tokens=400)
+    answer = resp.choices[0].message.content or ""
+
+    usages = (state.get("usage") or []) + [_usage(resp)]
+    trace.record(question, answer, usages, result=result, args=state.get("op_args"))
+    return {"messages": [{"role": "assistant", "content": answer}], "usage": [_usage(resp)]}
+
+
+def _after_route(state: State) -> str:
+    return "finalize" if state.get("error") else "fetch"
+
+
+def _after_fetch(state: State) -> str:
+    return "finalize" if state.get("error") else "operate"
+
 
 def _build_graph():
-    builder = StateGraph(InputState)
-    builder.add_node("agent", _call_model)
-    builder.add_edge(START, "agent")
-    # `MessagesState` + checkpointer gives multi-turn memory keyed by thread_id.
-    # MemorySaver is in-process; swap for a persistent checkpointer (Postgres,
-    # SQLite) when you need durability across restarts.
+    builder = StateGraph(State)
+    builder.add_node("route", route)
+    builder.add_node("fetch", fetch)
+    builder.add_node("operate", operate)
+    builder.add_node("finalize", finalize)
+    builder.add_edge(START, "route")
+    builder.add_conditional_edges("route", _after_route, {"fetch": "fetch", "finalize": "finalize"})
+    builder.add_conditional_edges("fetch", _after_fetch, {"operate": "operate", "finalize": "finalize"})
+    builder.add_edge("operate", "finalize")
+    builder.add_edge("finalize", END)
+    # MemorySaver is in-process; swap for a persistent checkpointer when durability
+    # across restarts is needed. Multi-turn memory is keyed by thread_id.
     return builder.compile(checkpointer=MemorySaver())
 
 

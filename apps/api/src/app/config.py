@@ -15,14 +15,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Provider = Literal["claude", "openai", "gemini"]
 
-# Repo root, derived from this file's location (apps/api/src/app/config.py) so
-# workspace-relative defaults resolve no matter where uvicorn is launched from.
+# Paths derived from this file's location (apps/api/src/app/config.py) so the app
+# resolves config/data no matter which directory uvicorn is launched from.
+_API_ROOT = Path(__file__).resolve().parents[2]   # apps/api
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_API_ROOT / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
