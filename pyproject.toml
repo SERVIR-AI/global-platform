@@ -6,6 +6,10 @@ requires-python = ">=3.11"
 # This root package is just the workspace container; the real app lives in apps/api.
 dependencies = []
 
+[tool.pytest.ini_options]
+pythonpath = ["apps/api/src"]
+testpaths = ["apps/api/tests"]
+
 [tool.uv.workspace]
 members = ["apps/api"]
 
@@ -15,5 +19,6 @@ retreat-api = { workspace = true }
 [dependency-groups]
 # `uv sync` installs these so you can run/lint the whole repo from the root.
 dev = [
+    "pytest>=9.1.1",
     "retreat-api",
 ]
