@@ -1,1 +1,31 @@
-# Description of tiff files
+# Description of tiff files used by the geospatial operations.
+# Paths are relative to the repo root. The app reads rasters from tiffs/, not the cache.
+
+hazard_flood:
+  local_path: tiffs/hazard_flood.tif
+  download_url: https://drive.google.com/file/d/1s5ZSmFGLDH3i2u74RRq0MBOyawV3Fh34/view?usp=drive_link
+  title: 100-year flood hazard (Southeast Asia)
+  description: >
+    Single-band flood-hazard raster for Southeast Asia. Each pixel holds a flood
+    severity class for the 100-year (1% annual probability) flood event: 0 = dry /
+    no hazard, 1 = low, up to 5 = extreme. Values are a hazard class, NOT water
+    depth in metres. The geospatial operations sample this raster per location
+    (point) or per road segment to decide what is "in the flood".
+  source: ADPC hazard_flood.tif, derived from JRC GLOFAS v2.1
+  band:
+    1:
+      name: flood_class
+      dtype: Int8
+      values: 0 (dry) .. 5 (extreme) flood severity
+  crs: EPSG:4326 (WGS 84, lon/lat in degrees)
+  size: { width: 54691, height: 44335 }
+  pixel_size_deg: 0.000898315284120  # ~100 m at the equator
+  layout: COG (Cloud-Optimized GeoTIFF), LZW-compressed, with overviews
+  extent:
+    # Cities outside this window return an error rather than a wrong answer.
+    lon: [92.0270110, 141.1567722]   # ~92E .. 141E
+    lat: [-11.1436011, 28.6832070]   # ~11S .. 29N
+  notes:
+    - Severity is a 1-5 class, not depth in metres.
+    - ~100 m resolution: accurate in aggregate, coarse at individual flood edges.
+    - The raster is itself a model output, not an observed flood.
