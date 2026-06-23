@@ -1,8 +1,31 @@
-# Web frontend (placeholder)
+# Web frontend
 
-No frontend stack chosen yet. This directory reserves the slot in the monorepo;
-drop in whatever you like (React + Vite, Next.js, SvelteKit, plain HTML — the
-backend doesn't care). It only needs to speak the HTTP contract below.
+React 19 + TypeScript on Vite, styled with Tailwind v4 + DaisyUI. State via
+TanStack Query (server) and Zustand (client); Radix UI primitives and
+lucide-react for UI.
+
+## Develop
+
+```bash
+cd apps/web
+npm install
+npm run dev      # http://localhost:5173
+```
+
+Other scripts: `npm run build`, `npm run preview`, `npm run lint`,
+`npm run format`.
+
+### Talking to the API
+
+The backend is a separate cross-origin service (`apps/api` on
+`http://localhost:8000`, all routes under `/api`). In dev, Vite proxies `/api`
+to it (see `vite.config.ts`), so frontend code fetches relative paths
+(`/api/chat`) and never needs CORS or a hardcoded host. Start the API
+separately (see the root `README.md`).
+
+> If you instead deploy the SPA on a different origin and call the API
+> directly, add that origin to the backend's `CORS_ORIGINS`
+> (`apps/api/.env.example`).
 
 ## Backend contract
 
