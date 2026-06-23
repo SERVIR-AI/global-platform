@@ -1,5 +1,6 @@
-# Description of tiff files used by the geospatial operations.
-# Paths are relative to the repo root. The app reads rasters from tiffs/, not the cache.
+# Catalog of tiff files used by the geospatial operations.
+# Each raster is loaded from <TIFFS_DIR>/<basename(local_path)> (TIFFS_DIR defaults
+# to cache/tiffs/); if it isn't present, it's downloaded once from download_url.
 
 hazard_flood:
   local_path: tiffs/hazard_flood.tif
