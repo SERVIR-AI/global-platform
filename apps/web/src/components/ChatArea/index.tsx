@@ -1,13 +1,17 @@
-import { FC, useState } from 'react';
+import { FC } from 'react';
 import { cn } from '../../lib/utils';
+import { useChatStore } from '../../stores/ChatStore';
 import InputMessage from './InputMessage';
 import { AudioWaveform, Database, DropletOff, Droplets, Flame, Tornado } from 'lucide-react';
 
 const ChatArea: FC = () => {
-  const [welcome] = useState(true);
+  const messages = useChatStore((s) => s.messages);
+  const loading = useChatStore((s) => s.loading);
+  const welcome = messages.length === 0;
+
   return (
-    <div className={cn('basis-1 grow flex flex-col', welcome ? 'justify-center' : 'justify-end')}>
-      {welcome && (
+    <div className={cn('basis-1 grow flex flex-col min-h-0', welcome ? 'justify-center' : 'justify-end')}>
+      {welcome ? (
         <div className="flex flex-col gap-2 mb-4">
           <h1 className="px-4 text-center text-3xl font-semibold">
             What risk analysis do you want to visualize?
@@ -38,6 +42,28 @@ const ChatArea: FC = () => {
               Bring your own data
             </button>
           </div>
+        </div>
+      ) : (
+        <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+          {messages.map((m, i) => (
+            <div key={i} className={cn('chat', m.role === 'user' ? 'chat-end' : 'chat-start')}>
+              <div
+                className={cn(
+                  'chat-bubble whitespace-pre-wrap',
+                  m.role === 'user' ? 'chat-bubble-primary' : 'chat-bubble-neutral',
+                )}
+              >
+                {m.content}
+              </div>
+            </div>
+          ))}
+          {loading && (
+            <div className="chat chat-start">
+              <div className="chat-bubble chat-bubble-neutral">
+                <span className="loading loading-dots loading-sm" />
+              </div>
+            </div>
+          )}
         </div>
       )}
       <div className={welcome ? 'px-12' : 'p-4'}>
