@@ -1,5 +1,0 @@
-openai
-rasterio
-shapely
-requests
-gdown
