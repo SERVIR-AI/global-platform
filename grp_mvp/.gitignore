@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+cache/
+traces/
+.env
+*.md
+!README.md
+!DEMO.md
+*.tif
