@@ -54,9 +54,6 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o"
     gemini_model: str = "gemini-2.0-flash"
 
-    # Optional system prompt prepended to every conversation.
-    system_prompt: str | None = None
-
     # Each provider is reached through its OpenAI-compatible endpoint, so it's one
     # SDK with a different base_url per provider. Override to add a custom endpoint.
     claude_base_url: str = "https://api.anthropic.com/v1/"
