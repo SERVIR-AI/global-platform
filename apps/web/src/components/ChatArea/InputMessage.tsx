@@ -1,13 +1,30 @@
 import { cn } from '@/lib/utils';
+import { useChatStore } from '@/stores/ChatStore';
 import { useCustomGeometryStore } from '@/stores/CustomGeometryStore';
 import { ArrowRight, MapPin, MapPinCheck, Pentagon, Square, X } from 'lucide-react';
-import { FC } from 'react';
+import { FC, KeyboardEvent, useState } from 'react';
 
 const InputMessage: FC = () => {
   const geometry = useCustomGeometryStore((store) => store.geometry);
   const setGeometry = useCustomGeometryStore((store) => store.setGeometry);
   const drawMode = useCustomGeometryStore((store) => store.drawMode);
   const setDrawMode = useCustomGeometryStore((store) => store.setDrawMode);
+
+  const [text, setText] = useState('');
+  const send = useChatStore((store) => store.send);
+  const loading = useChatStore((store) => store.loading);
+
+  const submit = () => {
+    const value = text;
+    setText('');
+    void send(value);
+  };
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      submit();
+    }
+  };
 
   const getPlaceholder = (): string => {
     if (drawMode === 'Point' || geometry?.getType() === 'Point') {
@@ -24,6 +41,9 @@ const InputMessage: FC = () => {
       <textarea
         className="border border-zinc-400 rounded-xl w-full resize-none p-2"
         placeholder={getPlaceholder()}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={onKeyDown}
       />
       <div className="flex justify-between">
         <div className="flex flex-row flex-wrap gap-2">
@@ -75,7 +95,12 @@ const InputMessage: FC = () => {
             </>
           )}
         </div>
-        <button type="button" className="btn btn-primary rounded-full w-8 h-8 p-2">
+        <button
+          type="button"
+          className="btn btn-primary rounded-full w-8 h-8 p-2"
+          onClick={submit}
+          disabled={loading || !text.trim()}
+        >
           <ArrowRight className="w-4 h-4" />
         </button>
       </div>

@@ -1,0 +1,34 @@
+{
+  "question": "how many km of road are at risk from a cyclone in Battambang?",
+  "answer": "In Battambang, **616.2 km** of road are at risk from a cyclone (out of a total of 724.4 km of road).\n\nBreakdown by severity class:\n- **Very Low (\u226461 km/h):** 0.0 km\n- **Low (62\u201388 km/h):** 616.2 km\n- **Moderate (89\u2013117 km/h):** 0.0 km\n- **High (118\u2013156 km/h):** 0.0 km\n- **Very High (\u2265157 km/h):** 0.0 km\n\nAll exposed road falls in the Low severity class.\n\nSource: `/Users/puranjaigarg/asean/global_risk_sprint/cache/battambang/hazard_cyclone.tif \u00d7 /Users/puranjaigarg/asean/global_risk_sprint/cache/battambang/roads.geojson`",
+  "tool_call": {},
+  "tool_result": {
+    "length_km": 616.2,
+    "total_road_km": 724.4,
+    "by_severity": {
+      "1": 0.0,
+      "2": 616.2,
+      "3": 0.0,
+      "4": 0.0,
+      "5": 0.0
+    },
+    "legend": {
+      "1": "Very Low (<=61 km/h)",
+      "2": "Low (62-88 km/h)",
+      "3": "Moderate (89-117 km/h)",
+      "4": "High (118-156 km/h)",
+      "5": "Very High (>=157 km/h)"
+    },
+    "hazard": "hazard_cyclone",
+    "place": "Battambang",
+    "min_severity": 1,
+    "source": "/Users/puranjaigarg/asean/global_risk_sprint/cache/battambang/hazard_cyclone.tif \u00d7 /Users/puranjaigarg/asean/global_risk_sprint/cache/battambang/roads.geojson",
+    "method": "roads_in_hazard"
+  },
+  "grounded": true,
+  "cost_usd": 0.022905,
+  "tokens": {
+    "in": 2681,
+    "out": 380
+  }
+}
