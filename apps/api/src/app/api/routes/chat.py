@@ -7,6 +7,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, HTTPException
+from langchain_core.runnables import RunnableConfig
 
 from ...config import get_settings
 from ...graph import get_graph
@@ -37,7 +38,7 @@ def chat(request: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     graph = get_graph()
-    config = {"configurable": {"thread_id": thread_id, "client": client, "model": model}}
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id, "client": client, "model": model}}
     messages = [{"role": m.role, "content": m.content} for m in request.messages]
 
     try:

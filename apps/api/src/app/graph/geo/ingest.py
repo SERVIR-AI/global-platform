@@ -9,7 +9,6 @@ import re
 import time
 import warnings
 
-warnings.filterwarnings("ignore")
 import rasterio
 import requests
 from rasterio.windows import from_bounds
@@ -17,6 +16,8 @@ from shapely.geometry import LineString, Point, box, mapping, shape
 
 from ...config import get_settings
 from . import tiffs
+
+warnings.filterwarnings("ignore")
 
 HEADERS = {"User-Agent": "grp-mvp/0.1 (disaster-risk research prototype)"}
 NOMINATIM = "https://nominatim.openstreetmap.org"
