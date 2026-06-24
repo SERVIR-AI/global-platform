@@ -10,10 +10,12 @@ dependencies = [
     "pydantic-settings>=2.6",
     "langgraph>=0.2.50",
     "langchain-core>=0.3.20",
-    # Provider integrations used by the LLM factory.
-    "langchain-anthropic>=0.3",
-    "langchain-openai>=0.2",
-    "langchain-google-genai>=2",
+    "rasterio>=1.4.4",
+    "shapely>=2.1.2",
+    "requests>=2.34.2",
+    "openai>=2.43.0",
+    "pyyaml>=6.0.3",
+    "gdown>=6.1.0",
 ]
 
 [build-system]

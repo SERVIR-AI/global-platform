@@ -1,11 +1,11 @@
 import Dropdown from '@/components/Inputs/Dropdown';
 import Spinner from '@/components/Spinner';
 import { cn } from '@/lib/utils';
-import { UseChatStore } from '@/stores/ChatStore';
+import { useChatStore } from '@/stores/ChatStore';
 import { useCustomGeometryStore } from '@/stores/CustomGeometryStore';
 import { ChatProvider } from '@/types/chat';
 import { ArrowRight, MapPin, MapPinCheck, Paperclip, Pentagon, Square, X } from 'lucide-react';
-import { FC, useState } from 'react';
+import { FC, KeyboardEvent, useState } from 'react';
 
 const providerOptions: Record<ChatProvider, string> = {
   claude: 'Claude',
@@ -18,9 +18,25 @@ const InputMessage: FC = () => {
   const setGeometry = useCustomGeometryStore((store) => store.setGeometry);
   const drawMode = useCustomGeometryStore((store) => store.drawMode);
   const setDrawMode = useCustomGeometryStore((store) => store.setDrawMode);
-  const provider = UseChatStore((store) => store.provider);
-  const setProvider = UseChatStore((store) => store.setProvider);
-  const [loading] = useState(false);
+  const provider = useChatStore((store) => store.provider);
+  const setProvider = useChatStore((store) => store.setProvider);
+
+  const [text, setText] = useState('');
+  const send = useChatStore((store) => store.send);
+  const loading = useChatStore((store) => store.loading);
+
+  const submit = () => {
+    const value = text;
+    setText('');
+    void send(value);
+  };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      submit();
+    }
+  };
 
   const getPlaceholder = (): string => {
     if (drawMode === 'Point' || geometry?.getType() === 'Point') {
@@ -41,6 +57,9 @@ const InputMessage: FC = () => {
         )}
         placeholder={getPlaceholder()}
         disabled={loading}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={onKeyDown}
       />
       <div className="flex flex-col md:flex-row justify-between gap-4">
         <div className="flex flex-row flex-wrap gap-2">
@@ -117,7 +136,8 @@ const InputMessage: FC = () => {
           <button
             type="button"
             className="btn btn-primary rounded-full w-8 h-8 p-2"
-            disabled={loading}
+            onClick={submit}
+            disabled={loading || !text.trim()}
           >
             {loading ? (
               <Spinner className="loading-xs text-primary" />

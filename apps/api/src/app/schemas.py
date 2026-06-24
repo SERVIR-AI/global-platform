@@ -24,12 +24,17 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(..., min_length=1)
-    # Optional per-call overrides. When omitted, the server defaults apply.
-    provider: Provider | None = None
-    model: str | None = None
-    # Pass a stable thread_id to continue a prior conversation; the graph
-    # checkpointer keeps history server-side keyed by this id.
-    thread_id: str | None = None
+    provider: Provider | None = Field(
+        default=None, description="LLM provider override; defaults to the server's DEFAULT_PROVIDER.")
+    model: str | None = Field(
+        default=None, description="Model override; defaults to the provider's configured model.")
+    thread_id: str | None = Field(
+        default=None,
+        description="Stable id to continue a prior conversation; the graph keeps history server-side by this id.")
+    verbose: bool = Field(
+        default=False,
+        description="When true, the response includes `trace` — a step-by-step narration of how the answer "
+                    "was produced (route → boundary → exposure → overlay), mirroring the CLI's -v output.")
 
 
 class Usage(BaseModel):
@@ -45,6 +50,9 @@ class ChatResponse(BaseModel):
     provider: Provider
     model: str
     usage: Usage | None = None
+    trace: list[str] | None = Field(
+        default=None,
+        description="Step-by-step narration of the run; present only when the request set verbose=true.")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

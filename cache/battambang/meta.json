@@ -1,0 +1,11 @@
+{
+  "name": "Battambang",
+  "area_km2": 115,
+  "how": "admin boundary ~115 km\u00b2",
+  "counts": {
+    "roads": 3026,
+    "hospitals": 6,
+    "schools": 27,
+    "buildings": 929
+  }
+}

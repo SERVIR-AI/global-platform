@@ -1,0 +1,13 @@
+{
+  "name": "Sihanoukville (~12 km radius)",
+  "area_km2": 570,
+  "counts": {
+    "roads": 4517,
+    "hospitals": 4,
+    "schools": 19
+  },
+  "admin": "/Users/puranjaigarg/asean/global_risk_sprint/cache/sihanoukville/admin.geojson",
+  "roads": "/Users/puranjaigarg/asean/global_risk_sprint/cache/sihanoukville/roads.geojson",
+  "hospitals": "/Users/puranjaigarg/asean/global_risk_sprint/cache/sihanoukville/hospitals.geojson",
+  "schools": "/Users/puranjaigarg/asean/global_risk_sprint/cache/sihanoukville/schools.geojson"
+}

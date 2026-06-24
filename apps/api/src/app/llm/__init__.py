@@ -1,3 +1,3 @@
-from .factory import get_chat_model
+from .client import MissingAPIKey, build_client, default_model
 
-__all__ = ["get_chat_model"]
+__all__ = ["build_client", "default_model", "MissingAPIKey"]
