@@ -65,7 +65,7 @@ const Maps: FC = () => {
     const map = new Map({
       target: containerRef.current,
       layers: [basemapLayer, new VectorLayer({ source, style: geometryStyle })],
-      view: new View({ center: [0, 0], zoom: 2 }),
+      view: new View({ center: [11678454, 1295712], zoom: 7 }),
     });
     mapRef.current = map;
 

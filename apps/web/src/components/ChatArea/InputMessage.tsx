@@ -1,13 +1,26 @@
+import Dropdown from '@/components/Inputs/Dropdown';
+import Spinner from '@/components/Spinner';
 import { cn } from '@/lib/utils';
+import { UseChatStore } from '@/stores/ChatStore';
 import { useCustomGeometryStore } from '@/stores/CustomGeometryStore';
-import { ArrowRight, MapPin, MapPinCheck, Pentagon, Square, X } from 'lucide-react';
-import { FC } from 'react';
+import { ChatProvider } from '@/types/chat';
+import { ArrowRight, MapPin, MapPinCheck, Paperclip, Pentagon, Square, X } from 'lucide-react';
+import { FC, useState } from 'react';
+
+const providerOptions: Record<ChatProvider, string> = {
+  claude: 'Claude',
+  gemini: 'Gemini',
+  openai: 'OpenAI',
+};
 
 const InputMessage: FC = () => {
   const geometry = useCustomGeometryStore((store) => store.geometry);
   const setGeometry = useCustomGeometryStore((store) => store.setGeometry);
   const drawMode = useCustomGeometryStore((store) => store.drawMode);
   const setDrawMode = useCustomGeometryStore((store) => store.setDrawMode);
+  const provider = UseChatStore((store) => store.provider);
+  const setProvider = UseChatStore((store) => store.setProvider);
+  const [loading] = useState(false);
 
   const getPlaceholder = (): string => {
     if (drawMode === 'Point' || geometry?.getType() === 'Point') {
@@ -22,20 +35,36 @@ const InputMessage: FC = () => {
   return (
     <div className="flex flex-col gap-2">
       <textarea
-        className="border border-zinc-400 rounded-xl w-full resize-none p-2"
+        className={cn(
+          'border border-zinc-400 rounded-xl w-full resize-none p-2',
+          loading ? ' bg-zinc-100' : undefined,
+        )}
         placeholder={getPlaceholder()}
+        disabled={loading}
       />
-      <div className="flex justify-between">
+      <div className="flex flex-col md:flex-row justify-between gap-4">
         <div className="flex flex-row flex-wrap gap-2">
+          <button
+            type="button"
+            className="btn rounded-xl h-6 p-1 text-xs font-medium text-zinc-500 tooltip"
+            data-tip="Coming Soon"
+          >
+            <Paperclip className="w-4 h-4" />
+            Attach files
+          </button>
           {geometry ? (
-            <div className="badge badge-secondary badge-sm">
+            <div className="badge badge-secondary badge-sm h-6 rounded-xl">
               <MapPinCheck className="w-3 h-3" />
               Geometry Attached
-              <div className="tooltip flex" data-tip="Remove geometry">
-                <button className="p-0 cursor-pointer" onClick={() => setGeometry(null)}>
+              {!loading && (
+                <button
+                  className="p-0 cursor-pointer tooltip"
+                  data-tip="Remove geometry"
+                  onClick={() => setGeometry(null)}
+                >
                   <X className="w-3 h-3" />
                 </button>
-              </div>
+              )}
             </div>
           ) : (
             <>
@@ -46,9 +75,10 @@ const InputMessage: FC = () => {
                   drawMode === 'Point' ? 'btn-secondary text-white' : null,
                 )}
                 onClick={() => setDrawMode(drawMode === 'Point' ? null : 'Point')}
+                disabled={loading}
               >
                 <MapPin className="w-4 h-4" />
-                Draw a Point
+                Draw a point
               </button>
               <button
                 type="button"
@@ -57,9 +87,10 @@ const InputMessage: FC = () => {
                   drawMode === 'Rectangle' ? 'btn-secondary text-white' : null,
                 )}
                 onClick={() => setDrawMode(drawMode === 'Rectangle' ? null : 'Rectangle')}
+                disabled={loading}
               >
                 <Square className="w-4 h-4" />
-                Draw a Rectangle
+                Draw a rectangle
               </button>
               <button
                 type="button"
@@ -68,16 +99,33 @@ const InputMessage: FC = () => {
                   drawMode === 'Polygon' ? 'btn-secondary text-white' : null,
                 )}
                 onClick={() => setDrawMode(drawMode === 'Polygon' ? null : 'Polygon')}
+                disabled={loading}
               >
                 <Pentagon className="w-4 h-4" />
-                Draw a Polygon
+                Draw a polygon
               </button>
             </>
           )}
         </div>
-        <button type="button" className="btn btn-primary rounded-full w-8 h-8 p-2">
-          <ArrowRight className="w-4 h-4" />
-        </button>
+        <div className="flex justify-end gap-2">
+          <Dropdown<ChatProvider>
+            value={provider}
+            setValue={setProvider}
+            options={providerOptions}
+            disabled={loading}
+          />
+          <button
+            type="button"
+            className="btn btn-primary rounded-full w-8 h-8 p-2"
+            disabled={loading}
+          >
+            {loading ? (
+              <Spinner className="loading-xs text-primary" />
+            ) : (
+              <ArrowRight className="w-4 h-4" />
+            )}
+          </button>
+        </div>
       </div>
     </div>
   );

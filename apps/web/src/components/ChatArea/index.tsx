@@ -3,6 +3,13 @@ import { cn } from '../../lib/utils';
 import InputMessage from './InputMessage';
 import { AudioWaveform, Database, DropletOff, Droplets, Flame, Tornado } from 'lucide-react';
 
+const BringYourOwnDataButton: FC = () => (
+  <button className="underline link tooltip text-xs text-zinc-400" data-tip="Coming Soon">
+    <Database className="inline mr-1 w-3 h-3" />
+    Bring your own data
+  </button>
+);
+
 const ChatArea: FC = () => {
   const [welcome] = useState(true);
   return (
@@ -33,14 +40,21 @@ const ChatArea: FC = () => {
               <Flame className="inline mr-1 w-3 h-3" />
               Fire
             </span>
-            <button className="underline link">
-              <Database className="inline mr-1 w-3 h-3" />
-              Bring your own data
-            </button>
+            <BringYourOwnDataButton />
           </div>
         </div>
       )}
-      <div className={welcome ? 'px-12' : 'p-4'}>
+      <div
+        className={cn(
+          'flex flex-col gap-2',
+          welcome ? 'px-12' : 'pt-1 pb-4 px-4 border-t border-zinc-200',
+        )}
+      >
+        {!welcome && (
+          <div className="self-end">
+            <BringYourOwnDataButton />
+          </div>
+        )}
         <InputMessage />
       </div>
     </div>
