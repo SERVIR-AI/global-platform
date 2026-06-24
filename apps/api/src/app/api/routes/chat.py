@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 
 from ...config import get_settings
 from ...graph import get_graph
+from ...graph.geo import viz
 from ...llm import MissingAPIKey, build_client, default_model
 from ...schemas import ChatMessage, ChatRequest, ChatResponse, Usage
 
@@ -41,12 +42,22 @@ def chat(request: ChatRequest) -> ChatResponse:
     messages = [{"role": m.role, "content": m.content} for m in request.messages]
 
     try:
-        result = graph.invoke({"messages": messages}, config)
+        result = graph.invoke(
+            {"messages": messages, "req_geometry": request.geometry, "req_hazard": request.hazard}, config)
     except Exception as exc:  # noqa: BLE001 - surface provider/runtime errors as 502
         raise HTTPException(status_code=502, detail=f"LLM call failed: {exc}") from exc
 
     last = result["messages"][-1]
     answer = last.get("content") or "" if isinstance(last, dict) else ""
+
+    # Additive: when the answer is a geo result, package the map-visualization layers.
+    geo: dict = {}
+    res, aoi = result.get("result"), result.get("aoi")
+    if res and aoi:
+        try:
+            geo = viz.build_payload(aoi, res)
+        except Exception:  # noqa: BLE001 - visualization is best-effort; never break the answer
+            geo = {}
 
     return ChatResponse(
         id=str(uuid.uuid4()),
@@ -56,4 +67,5 @@ def chat(request: ChatRequest) -> ChatResponse:
         model=model,
         usage=_usage(result.get("usage") or []),
         trace=result.get("trace") if request.verbose else None,
+        **geo,
     )

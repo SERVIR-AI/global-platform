@@ -22,4 +22,7 @@ venv/
 .vscode/
 .claude
 
+# local data cache (OSM + downloaded/clipped tifs) — fetched at runtime
 cache/
+
+e2e_*.json

@@ -35,6 +35,14 @@ class ChatRequest(BaseModel):
         default=False,
         description="When true, the response includes `trace` — a step-by-step narration of how the answer "
                     "was produced (route → boundary → exposure → overlay), mirroring the CLI's -v output.")
+    geometry: dict | list | None = Field(
+        default=None,
+        description="Mode 2: a user-drawn AOI — a GeoJSON Polygon geometry OR a [minLon,minLat,maxLon,maxLat] "
+                    "bbox, in EPSG:4326. When set, it's used as the area instead of resolving a place from text.")
+    hazard: str | None = Field(
+        default=None,
+        description="Optional explicit hazard (e.g. 'flood' or 'hazard_flood'), e.g. from a UI button; "
+                    "otherwise the hazard is inferred from the text.")
 
 
 class Usage(BaseModel):
@@ -53,6 +61,19 @@ class ChatResponse(BaseModel):
     trace: list[str] | None = Field(
         default=None,
         description="Step-by-step narration of the run; present only when the request set verbose=true.")
+
+    # --- Map-visualization payload (present when the answer is a geo result; ADDITIVE,
+    # all optional — existing fields are unchanged). Everything is EPSG:4326. ---
+    place: str | None = Field(default=None, description="Resolved place name, or 'drawn area'.")
+    hazard: str | None = Field(default=None, description="Hazard layer used, e.g. 'hazard_flood'.")
+    layer: str | None = Field(default=None, description="Asset layer: roads | hospitals | schools | buildings.")
+    metric: dict | None = Field(default=None, description="value, unit, total, min_severity, by_severity.")
+    legend: dict | None = Field(default=None, description="{class: {label, color}} severity scale (server-owned colors).")
+    bounds: list[float] | None = Field(default=None, description="[minLon,minLat,maxLon,maxLat] AOI bbox, for fitting the map.")
+    aoi: dict | None = Field(default=None, description="AOI boundary as a GeoJSON Feature (drawn / nominatim / radius_box via properties.source).")
+    features: dict | None = Field(default=None, description="GeoJSON FeatureCollection of assets, each properties.severity 0-5.")
+    hazard_layer: dict | None = Field(default=None, description="Hazard raster: {raster_url: clipped GeoTIFF endpoint, geojson: polygons by class, crs}.")
+
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

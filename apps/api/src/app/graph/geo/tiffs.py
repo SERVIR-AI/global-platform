@@ -28,3 +28,16 @@ def legend(layer):
     """{class:int -> 'label (range)'} for a hazard layer, or {} if none is defined."""
     leg = entry(layer).get("legend") or {}
     return {int(k): str(v).strip() for k, v in leg.items()}
+
+
+def resolve(name):
+    """A loose hazard name ('flood', 'hazard_flood', 'landslide') -> a catalog key, or None."""
+    if not name:
+        return None
+    cat = catalog()
+    name = str(name).strip().lower()
+    if name in cat:
+        return name
+    if f"hazard_{name}" in cat:
+        return f"hazard_{name}"
+    return next((k for k in cat if name in k), None)

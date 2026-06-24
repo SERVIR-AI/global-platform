@@ -33,7 +33,6 @@ const InputMessage: FC = () => {
     setText('');
     void send(value);
   };
-
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
