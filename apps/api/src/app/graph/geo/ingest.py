@@ -29,11 +29,30 @@ BUFFER_DEG = 0.01
 
 
 def _slug(place):
+    """Normalize a place name to a filesystem-safe slug (lowercase alphanumeric + hyphens).
+
+    Args:
+        place (str): raw place name, e.g. 'Siem Reap, Cambodia'
+
+    Returns:
+        str: slugified name, e.g. 'siem-reap-cambodia'
+    """
     return re.sub(r"[^a-z0-9]+", "-", place.lower()).strip("-")
 
 
 def _boundary(place):
-    """Nominatim -> the most complete admin boundary under the area cap."""
+    """Query Nominatim for the largest administrative boundary under the area cap.
+
+    Args:
+        place (str): free-text place name, e.g. 'Battambang' or 'Siem Reap, Cambodia'
+
+    Returns:
+        tuple[float, str, shapely.geometry.base.BaseGeometry]:
+            (area_km2, display_name, boundary_polygon)
+
+    Raises:
+        ValueError: if no administrative boundary is found, or all results exceed AREA_CAP_KM2
+    """
     r = requests.get(f"{NOMINATIM}/search", headers=HEADERS, timeout=40, params={
         "q": place, "format": "json", "polygon_geojson": 1, "limit": 10, "accept-language": "en"})
     r.raise_for_status()
@@ -53,7 +72,18 @@ def _boundary(place):
 
 
 def _overpass(query, attempts=3):
-    """Query OSM, trying mirrors and backing off through load/timeout errors."""
+    """Run an Overpass QL query, rotating mirrors and backing off on rate-limit/timeout errors.
+
+    Args:
+        query (str): Overpass QL query string
+        attempts (int): number of full mirror-rotation rounds before giving up (default 3)
+
+    Returns:
+        list[dict]: list of OSM element dicts from the 'elements' key of the Overpass JSON response
+
+    Raises:
+        RuntimeError: if all mirrors fail across all attempts
+    """
     last = "no response"
     for attempt in range(attempts):
         for url in OVERPASS_MIRRORS:
@@ -71,7 +101,19 @@ def _overpass(query, attempts=3):
 
 
 def _drive_id(url):
-    """The file id out of a Google Drive share URL (…/d/<id>/… or …?id=<id>)."""
+    """Extract the file ID from a Google Drive share URL.
+
+    Handles both '/d/<id>/' and '?id=<id>' URL forms.
+
+    Args:
+        url (str): Google Drive share URL
+
+    Returns:
+        str: the Drive file ID
+
+    Raises:
+        ValueError: if neither URL pattern is found
+    """
     m = re.search(r"/d/([^/]+)", url) or re.search(r"[?&]id=([^&]+)", url)
     if not m:
         raise ValueError(f"cannot parse a Google Drive id from {url}")
@@ -79,7 +121,18 @@ def _drive_id(url):
 
 
 def source_raster(layer="hazard_flood"):
-    """The full hazard raster for `layer`, downloaded once if it isn't present."""
+    """Return the local path to the full hazard raster, downloading it on first use.
+
+    Args:
+        layer (str): tiff catalog key (default 'hazard_flood'); must have a download_url
+                     in conf/tiffs.yml if the file is not already cached
+
+    Returns:
+        str: absolute path to the raster file on disk
+
+    Raises:
+        ValueError: if the raster is missing and tiffs.yml has no download_url for it
+    """
     settings = get_settings()
     meta = tiffs.entry(layer)
     path = os.path.join(settings.tiffs_dir, os.path.basename(meta["local_path"]))
@@ -94,7 +147,22 @@ def source_raster(layer="hazard_flood"):
 
 
 def ensure_aoi(place):
-    """Return a cached bundle of file paths for `place`, fetching it if needed."""
+    """Return the AOI bundle for a place, fetching OSM data and clipping the raster if not cached.
+
+    The bundle is a dict with keys: 'name', 'area_km2', 'counts', 'admin', 'roads',
+    'hospitals', 'schools', 'flood' — each a path to the corresponding file on disk.
+    Subsequent calls for the same place return instantly from the on-disk cache.
+
+    Args:
+        place (str): free-text place name, e.g. 'Battambang' or 'Siem Reap, Cambodia'
+
+    Returns:
+        dict: AOI bundle mapping layer names to absolute file paths
+
+    Raises:
+        ValueError: if the place has no administrative boundary or exceeds AREA_CAP_KM2
+        RuntimeError: if the Overpass API is unavailable
+    """
     cache = str(get_settings().cache_dir)
     adir = os.path.join(cache, _slug(place) or "_")
     meta = os.path.join(adir, "meta.json")
@@ -153,9 +221,25 @@ def ensure_aoi(place):
 
 
 def _feature(geom, props):
+    """Wrap a Shapely geometry and property dict into a GeoJSON Feature dict.
+
+    Args:
+        geom: Shapely geometry (Point, LineString, Polygon, etc.)
+        props (dict): GeoJSON properties to embed in the feature
+
+    Returns:
+        dict: GeoJSON Feature object
+    """
     return {"type": "Feature", "properties": props, "geometry": mapping(geom)}
 
 
 def _write(adir, layer, features):
+    """Serialize a list of GeoJSON Feature dicts to {adir}/{layer}.geojson.
+
+    Args:
+        adir (str): directory path where the file will be written
+        layer (str): base filename (without extension), e.g. 'roads' or 'hospitals'
+        features (list[dict]): list of GeoJSON Feature objects
+    """
     json.dump({"type": "FeatureCollection", "features": features},
               open(os.path.join(adir, f"{layer}.geojson"), "w"))

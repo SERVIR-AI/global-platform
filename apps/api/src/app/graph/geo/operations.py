@@ -13,14 +13,31 @@ _POI = {"type": "string", "enum": list(registry.COUNTABLE)}
 
 
 def _hazard(layers):
+    """Build the JSON schema fragment for the hazard_layers tool parameter.
+
+    Args:
+        layers (list[str]): available hazard layer keys from the tiff catalog
+
+    Returns:
+        dict: JSON Schema object (type array, items enum) for hazard_layers
+    """
     return {"type": "array", "items": {"type": "string", "enum": layers},
             "description": "Hazard layer key(s) this needs; choose from the catalog in the "
                            "system message by matching their descriptions."}
 
 
 def schema(hazard_layers):
-    """OpenAI tool schemas, with the available hazard-layer keys injected into the
-    operations that read a hazard raster."""
+    """Return the OpenAI tool-call schemas for all supported operations.
+
+    The available hazard layer keys are injected into the enum for operations that
+    read a raster, so the model can only reference layers that actually exist.
+
+    Args:
+        hazard_layers (list[str]): layer keys from the tiff catalog (e.g. ['hazard_flood'])
+
+    Returns:
+        list[dict]: list of OpenAI function-tool dicts ready for the `tools` parameter
+    """
     hazard = _hazard(hazard_layers)
     tools = [
         {"name": "count_features",
@@ -45,4 +62,18 @@ _DISPATCH = {"count_features": store.count_features,
 
 
 def dispatch(operation, aoi, **op_args):
+    """Route an operation name to its store function and run it over the AOI bundle.
+
+    Args:
+        operation (str): one of 'count_features', 'count_in_flood', 'roads_in_flood'
+        aoi (dict): AOI bundle from ingest.ensure_aoi (maps layer names to file paths)
+        **op_args: remaining keyword arguments forwarded to the store function
+                   (e.g. layer='hospitals', min_severity=2)
+
+    Returns:
+        dict: result dict from the store function (keys vary by operation)
+
+    Raises:
+        KeyError: if `operation` is not one of the three registered operations
+    """
     return _DISPATCH[operation](aoi, **op_args)

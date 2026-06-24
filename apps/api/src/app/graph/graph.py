@@ -28,6 +28,15 @@ from .geo import ingest, operations, tiffs, trace
 
 
 def _add(left: list | None, right: list | None) -> list:
+    """LangGraph list-append reducer used on the 'messages' and 'usage' state keys.
+
+    Args:
+        left (list | None): existing list (or None on first update)
+        right (list | None): new items to append
+
+    Returns:
+        list: concatenated list
+    """
     return (left or []) + (right or [])
 
 
@@ -45,6 +54,14 @@ class State(TypedDict, total=False):
 
 
 def _usage(resp) -> dict:
+    """Extract prompt and completion token counts from an OpenAI response object.
+
+    Args:
+        resp: OpenAI ChatCompletion response object
+
+    Returns:
+        dict: {'in': int, 'out': int} token counts (both 0 if usage is unavailable)
+    """
     u = getattr(resp, "usage", None)
     if not u:
         return {"in": 0, "out": 0}
@@ -52,6 +69,14 @@ def _usage(resp) -> dict:
 
 
 def _last_user(messages: list[dict]) -> str:
+    """Return the content of the most recent user message in the conversation.
+
+    Args:
+        messages (list[dict]): OpenAI-format message dicts with 'role' and 'content' keys
+
+    Returns:
+        str: content string of the last user message, or '' if none found
+    """
     for m in reversed(messages):
         if m.get("role") == "user":
             return m.get("content") or ""
@@ -59,6 +84,14 @@ def _last_user(messages: list[dict]) -> str:
 
 
 def _layer_note(layers: dict[str, str]) -> str:
+    """Format the hazard-layer catalog as a system-prompt block for the route node.
+
+    Args:
+        layers (dict[str, str]): {layer_key: description} from tiffs.descriptions()
+
+    Returns:
+        str: instruction text listing available layers, or a refusal message if empty
+    """
     if not layers:
         return "No hazard layers are available; do not call a hazard operation."
     listed = "\n".join(f"- {name}: {desc}" for name, desc in layers.items())
@@ -68,7 +101,20 @@ def _layer_note(layers: dict[str, str]) -> str:
 
 
 def route(state: State, config) -> dict:
-    """LLM picks the operation + place + hazard layers. Records intent; runs nothing."""
+    """Ask the LLM to pick an operation, extract a place, and select hazard layers.
+
+    Uses OpenAI tool-calling as structured extraction only — nothing is executed here.
+    On decline (no tool call) or missing place, sets 'error' to skip fetch/operate.
+
+    Args:
+        state (State): current graph state with at least a 'messages' list
+        config (dict): LangGraph config with 'configurable' keys 'client' and 'model'
+
+    Returns:
+        dict: partial State update with one of:
+            - {'operation', 'place', 'op_args', 'tiffs', 'tool_call_id', 'usage'} on success
+            - {'error', 'usage'} on model decline or missing place
+    """
     client = config["configurable"]["client"]
     model = config["configurable"]["model"]
 
@@ -98,7 +144,14 @@ def route(state: State, config) -> dict:
 
 
 def fetch(state: State) -> dict:
-    """Acquire the OSM data + clipped raster for the place (the fetch->operate handoff)."""
+    """Download the source raster(s) and fetch/cache OSM data for the extracted place.
+
+    Args:
+        state (State): must contain 'place' and optionally 'tiffs' (hazard layer keys)
+
+    Returns:
+        dict: {'aoi': bundle_dict} on success, or {'error': str} if the place can't be resolved
+    """
     try:
         for layer in state.get("tiffs") or []:
             ingest.source_raster(layer)          # download-on-demand + validates the layer
@@ -108,7 +161,14 @@ def fetch(state: State) -> dict:
 
 
 def operate(state: State) -> dict:
-    """Run the deterministic spatial op over the bundle — the only number-producing step."""
+    """Run the deterministic spatial operation — the only place a number is computed.
+
+    Args:
+        state (State): must contain 'operation', 'aoi', and 'op_args'
+
+    Returns:
+        dict: {'result': result_dict} on success, or {'error': str} on failure
+    """
     try:
         return {"result": operations.dispatch(state["operation"], state["aoi"], **state["op_args"])}
     except Exception as e:
@@ -116,7 +176,19 @@ def operate(state: State) -> dict:
 
 
 def finalize(state: State, config) -> dict:
-    """Phrase the answer (quoting the number + source). On error, return it without an LLM call."""
+    """Phrase the answer for the user, quoting the computed number and its source.
+
+    If 'error' is set in state, returns the error string directly with no LLM call.
+    Otherwise, replays the tool-call exchange so the model phrases from the real result.
+
+    Args:
+        state (State): full graph state; uses 'error', 'result', 'messages', 'place',
+                       'operation', 'op_args', 'tool_call_id', 'usage'
+        config (dict): LangGraph config with 'configurable' keys 'client' and 'model'
+
+    Returns:
+        dict: partial State update with {'messages': [assistant_message_dict], 'usage': [...]}
+    """
     question = _last_user(state["messages"])
 
     if state.get("error"):
@@ -146,14 +218,35 @@ def finalize(state: State, config) -> dict:
 
 
 def _after_route(state: State) -> str:
+    """Conditional edge after route: skip to 'finalize' on error, otherwise proceed to 'fetch'.
+
+    Args:
+        state (State): current graph state
+
+    Returns:
+        str: next node name ('finalize' or 'fetch')
+    """
     return "finalize" if state.get("error") else "fetch"
 
 
 def _after_fetch(state: State) -> str:
+    """Conditional edge after fetch: skip to 'finalize' on error, otherwise proceed to 'operate'.
+
+    Args:
+        state (State): current graph state
+
+    Returns:
+        str: next node name ('finalize' or 'operate')
+    """
     return "finalize" if state.get("error") else "operate"
 
 
 def _build_graph():
+    """Wire up and compile the StateGraph with an in-process MemorySaver checkpointer.
+
+    Returns:
+        langgraph.graph.CompiledGraph: compiled graph ready to invoke
+    """
     builder = StateGraph(State)
     builder.add_node("route", route)
     builder.add_node("fetch", fetch)

@@ -16,7 +16,18 @@ from . import registry
 
 
 def count_features(aoi, layer):
-    """Count hospitals or schools inside `aoi`."""
+    """Count POIs of the given layer that fall inside the AOI's admin boundary.
+
+    Args:
+        aoi (dict): AOI bundle from ingest.ensure_aoi
+        layer (str): POI layer to count — must be one of registry.COUNTABLE ('hospitals', 'schools')
+
+    Returns:
+        dict: {'count': int, 'layer': str, 'place': str, 'source': str, 'method': str}
+
+    Raises:
+        ValueError: if `layer` is not in registry.COUNTABLE
+    """
     if layer not in registry.COUNTABLE:
         raise ValueError(f"unknown layer: {layer}")
     boundary = _boundary(aoi)
@@ -27,7 +38,20 @@ def count_features(aoi, layer):
 
 
 def count_in_flood(aoi, layer, min_severity=1):
-    """Count hospitals or schools sitting in flood severity >= min_severity."""
+    """Count POIs inside the admin boundary that also sit in flood zones at or above a threshold.
+
+    Args:
+        aoi (dict): AOI bundle from ingest.ensure_aoi
+        layer (str): POI layer — must be one of registry.COUNTABLE ('hospitals', 'schools')
+        min_severity (int): minimum flood severity to count (1–5, default 1)
+
+    Returns:
+        dict: {'count': int, 'layer': str, 'place': str, 'min_severity': int,
+               'source': str, 'method': str}
+
+    Raises:
+        ValueError: if `layer` is not in registry.COUNTABLE
+    """
     if layer not in registry.COUNTABLE:
         raise ValueError(f"unknown layer: {layer}")
     boundary = _boundary(aoi)
@@ -41,7 +65,18 @@ def count_in_flood(aoi, layer, min_severity=1):
 
 
 def roads_in_flood(aoi, min_severity=1):
-    """Length (km) of road in `aoi` sitting in flood severity >= min_severity."""
+    """Compute the length of road within the admin boundary that sits in flood zones.
+
+    Uses haversine distances over road segment midpoints to decide flood exposure.
+
+    Args:
+        aoi (dict): AOI bundle from ingest.ensure_aoi
+        min_severity (int): minimum flood severity to count (1–5, default 1)
+
+    Returns:
+        dict: {'length_km': float, 'total_road_km': float, 'place': str,
+               'min_severity': int, 'source': str, 'method': str}
+    """
     boundary = _boundary(aoi)
     flood = _Flood(aoi["flood"])
     flooded = total = 0.0
@@ -63,10 +98,24 @@ def roads_in_flood(aoi, min_severity=1):
 class _Flood:
     """Flood hazard raster: severity 0 (dry) .. 5 (extreme) at a coordinate."""
     def __init__(self, path):
+        """Open the raster and cache band 1 in memory for repeated point lookups.
+
+        Args:
+            path (str): path to a GeoTIFF flood hazard raster
+        """
         self.src = rasterio.open(path)
         self.arr = self.src.read(1)
 
     def severity(self, lon, lat):
+        """Look up flood severity (0–5) at a longitude/latitude point.
+
+        Args:
+            lon (float): longitude in decimal degrees
+            lat (float): latitude in decimal degrees
+
+        Returns:
+            int: severity value 0 (dry or out of bounds) through 5 (extreme flood)
+        """
         try:
             row, col = self.src.index(lon, lat)
         except Exception:
@@ -77,6 +126,15 @@ class _Flood:
 
 
 def haversine_km(a, b):
+    """Return the great-circle distance in kilometres between two (lon, lat) points.
+
+    Args:
+        a (tuple[float, float]): (longitude, latitude) of the first point in decimal degrees
+        b (tuple[float, float]): (longitude, latitude) of the second point in decimal degrees
+
+    Returns:
+        float: distance in kilometres
+    """
     R = 6371.0088
     lon1, lat1, lon2, lat2 = map(math.radians, [a[0], a[1], b[0], b[1]])
     h = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
@@ -84,8 +142,24 @@ def haversine_km(a, b):
 
 
 def _features(path):
+    """Load the features list from a GeoJSON file.
+
+    Args:
+        path (str): path to a GeoJSON FeatureCollection file
+
+    Returns:
+        list[dict]: list of GeoJSON Feature objects
+    """
     return json.load(open(path))["features"]
 
 
 def _boundary(aoi):
+    """Return the admin boundary polygon from an AOI bundle as a Shapely geometry.
+
+    Args:
+        aoi (dict): AOI bundle from ingest.ensure_aoi (must have an 'admin' key)
+
+    Returns:
+        shapely.geometry.base.BaseGeometry: the admin boundary polygon
+    """
     return shape(_features(aoi["admin"])[0]["geometry"])
