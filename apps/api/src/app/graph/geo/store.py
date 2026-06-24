@@ -82,7 +82,10 @@ class _Severity:
         except Exception:
             return 0
         if 0 <= row < self.arr.shape[0] and 0 <= col < self.arr.shape[1]:
-            return max(int(self.arr[row, col]), 0)
+            v = self.arr[row, col]
+            if v != v:               # NaN — nodata in float rasters (e.g. fire) -> no hazard
+                return 0
+            return max(int(v), 0)
         return 0
 
 
