@@ -32,6 +32,7 @@ def aoi(tmp_path):
         [0.001, 0.005], [0.003, 0.005], [0.0049, 0.005], [0.007, 0.005], [0.009, 0.005]]}}]
     hospitals = [point(0.002, 0.005), point(0.008, 0.005)]            # 1 left (flood), 1 right (dry)
     schools = [point(0.003, 0.003), point(0.007, 0.007), point(0.009, 0.002)]  # 1 left, 2 right
+    buildings = [point(0.002, 0.006), point(0.008, 0.006)]            # 1 left (flood), 1 right (dry)
 
     flood = tmp_path / "flood.tif"
     arr = np.zeros((10, 10), dtype="int16")
@@ -43,7 +44,7 @@ def aoi(tmp_path):
     return {"name": "Testville", "area_km2": 1, "counts": {},
             "admin": write("admin", admin), "roads": write("roads", roads),
             "hospitals": write("hospitals", hospitals), "schools": write("schools", schools),
-            "flood": str(flood)}
+            "buildings": write("buildings", buildings), "hazard_flood": str(flood)}
 
 
 class StubClient:

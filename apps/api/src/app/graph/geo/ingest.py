@@ -3,6 +3,7 @@ flood-hazard raster clipped to it. Raises ValueError if the place can't be
 resolved or is too large — it never silently falls back to somewhere else.
 """
 import json
+import math
 import os
 import re
 import time
@@ -12,7 +13,7 @@ warnings.filterwarnings("ignore")
 import rasterio
 import requests
 from rasterio.windows import from_bounds
-from shapely.geometry import LineString, Point, mapping, shape
+from shapely.geometry import LineString, Point, box, mapping, shape
 
 from ...config import get_settings
 from . import tiffs
@@ -26,64 +27,77 @@ OVERPASS_MIRRORS = (
 )
 AREA_CAP_KM2 = 1500.0
 BUFFER_DEG = 0.01
+RADIUS_KM = 12.0          # fallback AOI: box of this radius around the centre point
 
 
 def _slug(place):
-    """Normalize a place name to a filesystem-safe slug (lowercase alphanumeric + hyphens).
-
-    Args:
-        place (str): raw place name, e.g. 'Siem Reap, Cambodia'
-
-    Returns:
-        str: slugified name, e.g. 'siem-reap-cambodia'
-    """
     return re.sub(r"[^a-z0-9]+", "-", place.lower()).strip("-")
 
 
 def _boundary(place):
-    """Query Nominatim for the largest administrative boundary under the area cap.
+    """Resolve `place` to (km², name, geometry, how): the most complete admin boundary
+    under the area cap; if none fits but Nominatim recognised the place, retry with the
+    canonical name it returned (recovers typo'd cities, e.g. 'Batambang' -> Battambang);
+    otherwise a radius box around the centre point. `how` records which path was taken.
+    Raises only when nothing is found."""
+    results = _search(place)
+    if not results:
+        raise ValueError(f"could not find '{place}' (try 'City, Country')")
 
-    Args:
-        place (str): free-text place name, e.g. 'Battambang' or 'Siem Reap, Cambodia'
+    hit = _under_cap_admin(results)
+    if hit:
+        return (*hit, f"admin boundary ~{hit[0]:.0f} km²")
 
-    Returns:
-        tuple[float, str, shapely.geometry.base.BaseGeometry]:
-            (area_km2, display_name, boundary_polygon)
+    center = _best_center(results)
+    canonical = center["display_name"].split(",")[0]
+    if canonical.strip().lower() != place.strip().lower():   # typo -> retry corrected name
+        retry = _search(canonical)
+        hit = _under_cap_admin(retry)
+        if hit:
+            return (*hit, f"admin boundary ~{hit[0]:.0f} km² (corrected '{place}' -> '{canonical}')")
+        if retry:
+            center = _best_center(retry)
 
-    Raises:
-        ValueError: if no administrative boundary is found, or all results exceed AREA_CAP_KM2
-    """
+    lon, lat = float(center["lon"]), float(center["lat"])    # no usable boundary -> box
+    dlat = RADIUS_KM / 111.0
+    dlon = RADIUS_KM / (111.0 * max(math.cos(math.radians(lat)), 0.01))
+    g = box(lon - dlon, lat - dlat, lon + dlon, lat + dlat)
+    name = f"{center['display_name'].split(',')[0]} (~{RADIUS_KM:.0f} km radius)"
+    return (g.area * 111.0 * 108.0, name, g,
+            f"{RADIUS_KM:.0f} km radius box (no admin boundary under cap)")
+
+
+def _search(place):
     r = requests.get(f"{NOMINATIM}/search", headers=HEADERS, timeout=40, params={
         "q": place, "format": "json", "polygon_geojson": 1, "limit": 10, "accept-language": "en"})
     r.raise_for_status()
-    cands = []
-    for d in r.json():
+    return r.json()
+
+
+def _under_cap_admin(results):
+    """The most complete admin boundary under the area cap, or None."""
+    under = []
+    for d in results:
         gj = d.get("geojson", {})
         if d.get("class") == "boundary" and d.get("type") == "administrative" \
                 and gj.get("type") in ("Polygon", "MultiPolygon"):
-            g = shape(gj)
-            cands.append((g.area * 111.0 * 108.0, d["display_name"].split(",")[0], g))
-    if not cands:
-        raise ValueError(f"no administrative boundary for '{place}' (try 'City, Country')")
-    under = [c for c in cands if c[0] <= AREA_CAP_KM2]
-    if not under:
-        raise ValueError(f"'{place}' is too large (>{AREA_CAP_KM2:.0f} km²) — name a city or district")
-    return max(under, key=lambda c: c[0])
+            km2 = shape(gj).area * 111.0 * 108.0
+            if km2 <= AREA_CAP_KM2:
+                under.append((km2, d["display_name"].split(",")[0], shape(gj)))
+    return max(under, key=lambda c: c[0]) if under else None
+
+
+def _best_center(results):
+    """Pick the centre point: prefer a populated-place node over a giant boundary."""
+    for t in ("city", "town", "municipality", "village", "suburb"):
+        for d in results:
+            if d.get("class") == "place" and d.get("type") == t:
+                return d
+    return results[0]
 
 
 def _overpass(query, attempts=3):
-    """Run an Overpass QL query, rotating mirrors and backing off on rate-limit/timeout errors.
-
-    Args:
-        query (str): Overpass QL query string
-        attempts (int): number of full mirror-rotation rounds before giving up (default 3)
-
-    Returns:
-        list[dict]: list of OSM element dicts from the 'elements' key of the Overpass JSON response
-
-    Raises:
-        RuntimeError: if all mirrors fail across all attempts
-    """
+    """Query OSM, trying mirrors and backing off through load/timeout errors."""
     last = "no response"
     for attempt in range(attempts):
         for url in OVERPASS_MIRRORS:
@@ -101,19 +115,7 @@ def _overpass(query, attempts=3):
 
 
 def _drive_id(url):
-    """Extract the file ID from a Google Drive share URL.
-
-    Handles both '/d/<id>/' and '?id=<id>' URL forms.
-
-    Args:
-        url (str): Google Drive share URL
-
-    Returns:
-        str: the Drive file ID
-
-    Raises:
-        ValueError: if neither URL pattern is found
-    """
+    """The file id out of a Google Drive share URL (…/d/<id>/… or …?id=<id>)."""
     m = re.search(r"/d/([^/]+)", url) or re.search(r"[?&]id=([^&]+)", url)
     if not m:
         raise ValueError(f"cannot parse a Google Drive id from {url}")
@@ -121,18 +123,7 @@ def _drive_id(url):
 
 
 def source_raster(layer="hazard_flood"):
-    """Return the local path to the full hazard raster, downloading it on first use.
-
-    Args:
-        layer (str): tiff catalog key (default 'hazard_flood'); must have a download_url
-                     in conf/tiffs.yml if the file is not already cached
-
-    Returns:
-        str: absolute path to the raster file on disk
-
-    Raises:
-        ValueError: if the raster is missing and tiffs.yml has no download_url for it
-    """
+    """The full hazard raster for `layer`, downloaded once if it isn't present."""
     settings = get_settings()
     meta = tiffs.entry(layer)
     path = os.path.join(settings.tiffs_dir, os.path.basename(meta["local_path"]))
@@ -147,29 +138,14 @@ def source_raster(layer="hazard_flood"):
 
 
 def ensure_aoi(place):
-    """Return the AOI bundle for a place, fetching OSM data and clipping the raster if not cached.
-
-    The bundle is a dict with keys: 'name', 'area_km2', 'counts', 'admin', 'roads',
-    'hospitals', 'schools', 'flood' — each a path to the corresponding file on disk.
-    Subsequent calls for the same place return instantly from the on-disk cache.
-
-    Args:
-        place (str): free-text place name, e.g. 'Battambang' or 'Siem Reap, Cambodia'
-
-    Returns:
-        dict: AOI bundle mapping layer names to absolute file paths
-
-    Raises:
-        ValueError: if the place has no administrative boundary or exceeds AREA_CAP_KM2
-        RuntimeError: if the Overpass API is unavailable
-    """
+    """Return a cached bundle of file paths for `place`, fetching it if needed."""
     cache = str(get_settings().cache_dir)
     adir = os.path.join(cache, _slug(place) or "_")
     meta = os.path.join(adir, "meta.json")
     if os.path.exists(meta):
-        return json.load(open(meta))
+        return _bundle(adir, json.load(open(meta)))
 
-    km2, name, boundary = _boundary(place)
+    km2, name, boundary, how = _boundary(place)
     print(f"   [ingest: fetching '{name}' (~{km2:.0f} km²)…]")
     os.makedirs(adir, exist_ok=True)
     minx, miny, maxx, maxy = boundary.bounds
@@ -200,46 +176,54 @@ def ensure_aoi(place):
         _write(adir, layer, pts)
         counts[layer] = len(pts)
 
-    flood_path = os.path.join(adir, "flood.tif")
-    with rasterio.open(source_raster("hazard_flood")) as src:
-        win = from_bounds(minx - BUFFER_DEG, miny - BUFFER_DEG,
-                          maxx + BUFFER_DEG, maxy + BUFFER_DEG, src.transform)
-        arr = src.read(1, window=win)
-        prof = src.profile | {"height": arr.shape[0], "width": arr.shape[1],
-                              "transform": src.window_transform(win), "compress": "lzw"}
-        with rasterio.open(flood_path, "w", **prof) as dst:
-            dst.write(arr, 1)
+    buildings = []
+    for e in _overpass(f'[out:json][timeout:170];way["building"]({bbox});out center;'):
+        c = e.get("center") or {}
+        if c and boundary.contains(Point(c["lon"], c["lat"])):
+            buildings.append(_feature(Point(c["lon"], c["lat"]), {}))
+    _write(adir, "buildings", buildings)
+    counts["buildings"] = len(buildings)
 
-    bundle = {"name": name, "area_km2": round(km2), "counts": counts,
-              "admin": os.path.join(adir, "admin.geojson"),
-              "roads": os.path.join(adir, "roads.geojson"),
-              "hospitals": os.path.join(adir, "hospitals.geojson"),
-              "schools": os.path.join(adir, "schools.geojson"),
-              "flood": flood_path}
-    json.dump(bundle, open(meta, "w"), indent=2)
-    return bundle
+    info = {"name": name, "area_km2": round(km2), "how": how, "counts": counts}
+    json.dump(info, open(meta, "w"), indent=2)
+    return _bundle(adir, info)
+
+
+def _bundle(adir, info):
+    """Rebuild file paths from the AOI dir, so the cache is portable across dirs/machines
+    (meta.json holds only metadata — name/area/how/counts — never absolute paths)."""
+    return {"name": info["name"], "area_km2": info["area_km2"],
+            "how": info.get("how"), "counts": info["counts"],
+            "admin": os.path.join(adir, "admin.geojson"),
+            "roads": os.path.join(adir, "roads.geojson"),
+            "hospitals": os.path.join(adir, "hospitals.geojson"),
+            "schools": os.path.join(adir, "schools.geojson"),
+            "buildings": os.path.join(adir, "buildings.geojson")}
+
+
+def hazard_clip(place, layer):
+    """Clip `layer`'s severity raster to the AOI; cache per (place, layer); return path."""
+    aoi = ensure_aoi(place)
+    adir = os.path.dirname(aoi["admin"])
+    clip = os.path.join(adir, f"{layer}.tif")
+    if not os.path.exists(clip):
+        boundary = shape(json.load(open(aoi["admin"]))["features"][0]["geometry"])
+        minx, miny, maxx, maxy = boundary.bounds
+        with rasterio.open(source_raster(layer)) as src:
+            win = from_bounds(minx - BUFFER_DEG, miny - BUFFER_DEG,
+                              maxx + BUFFER_DEG, maxy + BUFFER_DEG, src.transform)
+            arr = src.read(1, window=win)
+            prof = src.profile | {"height": arr.shape[0], "width": arr.shape[1],
+                                  "transform": src.window_transform(win), "compress": "lzw"}
+            with rasterio.open(clip, "w", **prof) as dst:
+                dst.write(arr, 1)
+    return clip
 
 
 def _feature(geom, props):
-    """Wrap a Shapely geometry and property dict into a GeoJSON Feature dict.
-
-    Args:
-        geom: Shapely geometry (Point, LineString, Polygon, etc.)
-        props (dict): GeoJSON properties to embed in the feature
-
-    Returns:
-        dict: GeoJSON Feature object
-    """
     return {"type": "Feature", "properties": props, "geometry": mapping(geom)}
 
 
 def _write(adir, layer, features):
-    """Serialize a list of GeoJSON Feature dicts to {adir}/{layer}.geojson.
-
-    Args:
-        adir (str): directory path where the file will be written
-        layer (str): base filename (without extension), e.g. 'roads' or 'hospitals'
-        features (list[dict]): list of GeoJSON Feature objects
-    """
     json.dump({"type": "FeatureCollection", "features": features},
               open(os.path.join(adir, f"{layer}.geojson"), "w"))

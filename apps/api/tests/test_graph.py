@@ -14,18 +14,18 @@ def _cfg(client, thread):
 
 def _patch_fetch(monkeypatch, aoi):
     monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda place: aoi)
-    monkeypatch.setattr(gm.ingest, "source_raster", lambda layer="hazard_flood": "x")
+    monkeypatch.setattr(gm.ingest, "hazard_clip", lambda place, layer: aoi[layer])
 
 
 def test_success_path_grounded_and_traced(aoi, make_client, monkeypatch, tmp_path, log):
     """route picks the op, operate computes the number, finalize quotes it, and the trace marks it grounded."""
     _patch_fetch(monkeypatch, aoi)
-    expected = store.roads_in_flood(aoi)["length_km"]
-    client = make_client(("tool", "roads_in_flood", {"place": "Testville", "hazard_layers": ["hazard_flood"]}))
+    expected = store.roads_in_hazard(aoi, "hazard_flood")["length_km"]
+    client = make_client(("tool", "roads_in_hazard", {"place": "Testville", "hazard_layers": ["hazard_flood"]}))
 
     log("INPUT", "user: 'flooded roads in Testville?'")
-    log("ROUTE", "stub LLM -> tool_call roads_in_flood(place=Testville, hazard_layers=[hazard_flood])")
-    log("OPERATE", f"real store.roads_in_flood -> {expected} km (the only place a number is born)")
+    log("ROUTE", "stub LLM -> tool_call roads_in_hazard(place=Testville, hazard_layers=[hazard_flood])")
+    log("OPERATE", f"real store.roads_in_hazard -> {expected} km (the only place a number is born)")
     out = gm._build_graph().invoke(
         {"messages": [{"role": "user", "content": "flooded roads in Testville?"}]}, _cfg(client, "ok"))
     answer = out["messages"][-1]["content"]
@@ -59,7 +59,7 @@ def test_decline_returns_text_without_compute(make_client, log):
 
 def test_no_place_refuses(make_client, log):
     """A tool call with no place can't be run; the graph refuses and asks for a place — no fetch/compute."""
-    client = make_client(("tool", "roads_in_flood", {"hazard_layers": ["hazard_flood"]}))
+    client = make_client(("tool", "roads_in_hazard", {"hazard_layers": ["hazard_flood"]}))
     log("INPUT", "user: 'flooded roads?'  (no place named)")
     log("ROUTE", "stub LLM -> tool_call with no `place` => refusal")
     out = gm._build_graph().invoke(
@@ -77,7 +77,7 @@ def test_fetch_failure_refuses_without_finalize_llm(make_client, monkeypatch, lo
         raise ValueError("no administrative boundary for 'Atlantis'")
     monkeypatch.setattr(gm.ingest, "ensure_aoi", boom)
     monkeypatch.setattr(gm.ingest, "source_raster", lambda layer="hazard_flood": "x")
-    client = make_client(("tool", "roads_in_flood", {"place": "Atlantis", "hazard_layers": ["hazard_flood"]}))
+    client = make_client(("tool", "roads_in_hazard", {"place": "Atlantis", "hazard_layers": ["hazard_flood"]}))
 
     log("INPUT", "user: 'flooded roads in Atlantis?'")
     log("FETCH", "ensure_aoi raises ValueError('no administrative boundary...') => error path")
@@ -93,7 +93,7 @@ def test_fetch_failure_refuses_without_finalize_llm(make_client, monkeypatch, lo
 def test_multi_turn_memory(aoi, make_client, monkeypatch, log):
     """The checkpointer keeps history by thread_id: two turns accumulate user/assistant/user/assistant."""
     _patch_fetch(monkeypatch, aoi)
-    client = make_client(("tool", "roads_in_flood", {"place": "Testville", "hazard_layers": ["hazard_flood"]}))
+    client = make_client(("tool", "roads_in_hazard", {"place": "Testville", "hazard_layers": ["hazard_flood"]}))
     graph, cfg = gm._build_graph(), _cfg(client, "mem")
     log("TURN 1", "user: 'q1'  (thread_id=mem)")
     graph.invoke({"messages": [{"role": "user", "content": "q1"}]}, cfg)

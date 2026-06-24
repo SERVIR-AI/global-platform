@@ -36,13 +36,13 @@ def test_round_trip_with_stub(aoi, make_client, monkeypatch, log):
     """End-to-end through the endpoint (stub LLM, fixture geo): grounded answer + echoed provider + usage."""
     from app.api.routes import chat as chat_route
     monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda place: aoi)
-    monkeypatch.setattr(gm.ingest, "source_raster", lambda layer="hazard_flood": "x")
-    stub = make_client(("tool", "roads_in_flood", {"place": "Testville", "hazard_layers": ["hazard_flood"]}))
+    monkeypatch.setattr(gm.ingest, "hazard_clip", lambda place, layer: aoi[layer])
+    stub = make_client(("tool", "roads_in_hazard", {"place": "Testville", "hazard_layers": ["hazard_flood"]}))
     monkeypatch.setattr(chat_route, "build_client", lambda provider: stub)
-    expected = store.roads_in_flood(aoi)["length_km"]
+    expected = store.roads_in_hazard(aoi, "hazard_flood")["length_km"]
 
     log("REQUEST", "POST /api/chat provider=gemini  'flooded roads in Testville?'")
-    log("OPERATE", f"real store.roads_in_flood -> {expected} km")
+    log("OPERATE", f"real store.roads_in_hazard -> {expected} km")
     r = client.post("/api/chat", json={
         "messages": [{"role": "user", "content": "flooded roads in Testville?"}], "provider": "gemini"})
     body = r.json()

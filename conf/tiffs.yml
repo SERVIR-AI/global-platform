@@ -12,6 +12,12 @@ hazard_flood:
     no hazard, 1 = low, up to 5 = extreme. Values are a hazard class, NOT water
     depth in metres. The geospatial operations sample this raster per location
     (point) or per road segment to decide what is "in the flood".
+  legend:
+    1: Very Low (0-0.5 m)
+    2: Low (0.5-1 m)
+    3: Moderate (1-1.5 m)
+    4: High (1.5-2 m)
+    5: Very High (>2 m)
   source: ADPC hazard_flood.tif, derived from JRC GLOFAS v2.1
   band:
     1:
@@ -30,3 +36,84 @@ hazard_flood:
     - Severity is a 1-5 class, not depth in metres.
     - ~100 m resolution: accurate in aggregate, coarse at individual flood edges.
     - The raster is itself a model output, not an observed flood.
+
+hazard_flashflood:
+  local_path: tiffs/hazard_flashflood.tif
+  download_url: https://drive.google.com/file/d/1l88oCDFxkJgcO5Bzp8MkhYBtUblo06yK/view
+  title: Flash-flood hazard (Southeast Asia)
+  description: >
+    Flash-flood hazard severity class (0 none .. 5 extreme) for Southeast Asia:
+    sudden, localized flooding from intense rainfall, distinct from the riverine
+    100-year flood layer. Sampled per location/road segment.
+  legend: { 1: Very Low, 2: Low, 3: Moderate, 4: High, 5: Very High }
+
+hazard_drought:
+  local_path: tiffs/hazard_drought.tif
+  download_url: https://drive.google.com/file/d/1T5JDp2gkavG79yNFds-1w9gJs3-j6n7G/view
+  title: Drought hazard (Southeast Asia)
+  description: >
+    Drought hazard severity class (0 none .. 5 extreme) for Southeast Asia
+    (rainfall-deficit / dryness). Coarse resolution; a class, not a rainfall value.
+  legend: { 1: Very Low, 2: Low, 3: Moderate, 4: High, 5: Very High }
+
+hazard_fire:
+  local_path: tiffs/hazard_fire.tif
+  download_url: https://drive.google.com/file/d/1n-7VtJKPUN1bfl6TB0a9cvixkC-V8w7b/view
+  title: Wildfire hazard (Southeast Asia)
+  description: >
+    Wildfire hazard severity class (0 none .. 5 extreme) for Southeast Asia.
+  legend: { 1: Very Low, 2: Low, 3: Moderate, 4: High, 5: Very High }
+
+hazard_landslides:
+  local_path: tiffs/hazard_landslides.tif
+  download_url: https://drive.google.com/file/d/1A4AgHZuFI86BNAU92vokb1ZFQZuexCcb/view
+  title: Landslide hazard (Southeast Asia)
+  description: >
+    Landslide hazard severity class (0 none .. 5 extreme) for Southeast Asia
+    (slope-failure susceptibility). Choose for "landslide" / "slope" questions.
+  legend: { 1: Very Low, 2: Low, 3: Moderate, 4: High, 5: Very High }
+
+hazard_cyclone:
+  local_path: tiffs/hazard_cyclone.tif
+  download_url: https://drive.google.com/file/d/1NNXdl7ZOwYLf08lii149M7eC0QaborAa/view
+  title: Tropical cyclone wind hazard (Southeast Asia)
+  description: >
+    Tropical-cyclone wind hazard class (0 none .. 5 extreme) for Southeast Asia,
+    by sustained wind-speed band. Choose for "cyclone" / "typhoon" / "wind" questions.
+  legend:
+    1: Very Low (<=61 km/h)
+    2: Low (62-88 km/h)
+    3: Moderate (89-117 km/h)
+    4: High (118-156 km/h)
+    5: Very High (>=157 km/h)
+
+hazard_storm:
+  local_path: tiffs/hazard_storm.tif
+  download_url: https://drive.google.com/file/d/1BwEMxKze9XwXZL9n-KS5IX867ErRO9Qz/view
+  title: Storm hazard (Southeast Asia)
+  description: >
+    Convective-storm hazard severity class (0 none .. 5 extreme) for Southeast Asia.
+  legend: { 1: Very Low, 2: Low, 3: Moderate, 4: High, 5: Very High }
+
+hazard_tsunami:
+  local_path: tiffs/hazard_tsunami.tif
+  download_url: https://drive.google.com/file/d/19kb42dkl4U1BlO8K_NTaPFw5BpxMFbMw/view
+  title: Tsunami hazard (Southeast Asia)
+  description: >
+    Tsunami hazard severity class (0 none .. 5 extreme) for Southeast Asia coasts
+    (inundation potential). Choose for "tsunami" questions; coastal places only.
+  legend: { 1: Very Low, 2: Low, 3: Moderate, 4: High, 5: Very High }
+
+hazard_earthquake:
+  local_path: tiffs/hazard_earthquake.tif
+  download_url: https://drive.google.com/file/d/1ZoQYtROUxf_YVzj1BgCRNFsqSWALpBxZ/view
+  title: Earthquake hazard (Southeast Asia)
+  description: >
+    Earthquake hazard class (0 none .. 5 extreme) for Southeast Asia by peak ground
+    acceleration (PGA, 250-year return). Choose for "earthquake" / "seismic" questions.
+  legend:
+    1: Very Low (<25 PGA)
+    2: Low (25-50 PGA)
+    3: Moderate (50-150 PGA)
+    4: High (150-300 PGA)
+    5: Very High (>300 PGA)

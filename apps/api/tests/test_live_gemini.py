@@ -18,11 +18,11 @@ pytestmark = pytest.mark.skipif(
 def test_live_gemini_round_trip(aoi, monkeypatch, log):
     """Real Gemini call: route + finalize hit the live API; the answer must quote operate's number."""
     monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda place: aoi)
-    monkeypatch.setattr(gm.ingest, "source_raster", lambda layer="hazard_flood": "x")
-    expected = store.roads_in_flood(aoi)["length_km"]
+    monkeypatch.setattr(gm.ingest, "hazard_clip", lambda place, layer: aoi[layer])
+    expected = store.roads_in_hazard(aoi, "hazard_flood")["length_km"]
 
     log("REQUEST", "POST /api/chat provider=gemini  'How many km of road are flooded in Riverford?'")
-    log("OPERATE", f"real store.roads_in_flood -> {expected} km (geo stubbed; LLM is live)")
+    log("OPERATE", f"real store.roads_in_hazard -> {expected} km (geo stubbed; LLM is live)")
     r = TestClient(app).post("/api/chat", json={
         "messages": [{"role": "user", "content": "How many kilometres of road are flooded in Riverford?"}],
         "provider": "gemini"})

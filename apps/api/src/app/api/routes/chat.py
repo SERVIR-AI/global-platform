@@ -17,14 +17,6 @@ router = APIRouter()
 
 
 def _usage(usages: list[dict]) -> Usage | None:
-    """Collapse a list of per-call token dicts into a single Usage schema object.
-
-    Args:
-        usages (list[dict]): list of {'in': int, 'out': int} dicts from graph state
-
-    Returns:
-        Usage | None: aggregated token counts, or None if the list is empty
-    """
     if not usages:
         return None
     total_in = sum(u["in"] for u in usages)
@@ -34,22 +26,6 @@ def _usage(usages: list[dict]) -> Usage | None:
 
 @router.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
-    """Run the LangGraph agent for one conversation turn and return a structured response.
-
-    Resolves the provider and model (from request or server defaults), invokes the
-    compiled graph, and extracts the final assistant message.
-
-    Args:
-        request (ChatRequest): inbound chat payload with messages, and optional
-                               provider, model, and thread_id overrides
-
-    Returns:
-        ChatResponse: assistant reply with provider, model, token usage, and thread_id
-
-    Raises:
-        HTTPException 400: if the requested provider has no API key configured
-        HTTPException 502: if the LLM call or graph execution fails
-    """
     settings = get_settings()
     provider = request.provider or settings.default_provider
     model = request.model or default_model(provider)
@@ -79,4 +55,5 @@ def chat(request: ChatRequest) -> ChatResponse:
         provider=provider,
         model=model,
         usage=_usage(result.get("usage") or []),
+        trace=result.get("trace") if request.verbose else None,
     )
