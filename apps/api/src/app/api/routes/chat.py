@@ -42,7 +42,8 @@ def chat(request: ChatRequest) -> ChatResponse:
     messages = [{"role": m.role, "content": m.content} for m in request.messages]
 
     try:
-        result = graph.invoke({"messages": messages}, config)
+        result = graph.invoke(
+            {"messages": messages, "req_geometry": request.geometry, "req_hazard": request.hazard}, config)
     except Exception as exc:  # noqa: BLE001 - surface provider/runtime errors as 502
         raise HTTPException(status_code=502, detail=f"LLM call failed: {exc}") from exc
 

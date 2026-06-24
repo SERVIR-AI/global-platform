@@ -43,6 +43,8 @@ class State(TypedDict, total=False):
     error: str | None                      # set on refusal/failure -> straight to finalize
     usage: Annotated[list[dict], _add]     # per-LLM-call {in, out} token counts
     trace: Annotated[list[str], _add]      # plain-text step narration (returned when verbose)
+    req_geometry: dict | list | None       # Mode 2: a drawn AOI from the request
+    req_hazard: str | None                 # explicit hazard from the request (e.g. a UI button)
 
 
 def _usage(resp) -> dict:
@@ -72,9 +74,14 @@ def route(state: State, config) -> dict:
     """LLM picks the operation + place + hazard layers. Records intent; runs nothing."""
     client = config["configurable"]["client"]
     model = config["configurable"]["model"]
+    geom = state.get("req_geometry")
 
     layers = tiffs.descriptions()
     system = prompts.system_prompt() + "\n\n" + _layer_note(layers)
+    if geom is not None:
+        system += ("\n\nThe user has drawn an area on the map, so the area is already given "
+                   "— call the tool for the hazard/asset they ask about and pass "
+                   "place='drawn area'; you do not need to name a place.")
     messages = [{"role": "system", "content": system}, *state["messages"]]
     resp = client.chat.completions.create(
         model=model, messages=messages, tools=operations.schema(list(layers)), max_tokens=600)
@@ -90,12 +97,16 @@ def route(state: State, config) -> dict:
     args = json.loads(call.function.arguments)
     place = args.pop("place", None)
     selected = args.pop("hazard_layers", [])
-    if not place:
+    if state.get("req_hazard"):                  # explicit hazard (e.g. a UI button) overrides
+        forced = tiffs.resolve(state["req_hazard"])
+        if forced:
+            selected = [forced]
+    if not place and geom is None:               # a drawn area makes a place name unnecessary
         out["error"] = "Name a place (a city or district) and I'll check it."
         out["trace"].append(f"route → {call.function.name} but no place named — refusing")
         return out
 
-    out.update(operation=call.function.name, place=place, op_args=args,
+    out.update(operation=call.function.name, place=place or "drawn area", op_args=args,
                tiffs=selected, tool_call_id=call.id)
     out["trace"].append(
         f"route → {call.function.name}(place={place!r}, hazard_layers={selected}, {args})"
@@ -104,11 +115,12 @@ def route(state: State, config) -> dict:
 
 
 def fetch(state: State) -> dict:
-    """Acquire the OSM data + clip the selected hazard rasters to the place."""
+    """Acquire the OSM data + clip the selected hazard rasters to the AOI (place or drawn geometry)."""
     try:
-        aoi = ingest.ensure_aoi(state["place"])
+        geom = state.get("req_geometry")
+        aoi = ingest.ensure_aoi(geometry=geom) if geom is not None else ingest.ensure_aoi(state["place"])
         for layer in state.get("tiffs") or []:
-            aoi = {**aoi, layer: ingest.hazard_clip(state["place"], layer)}
+            aoi = {**aoi, layer: ingest.hazard_clip(aoi, layer)}
         c = aoi.get("counts") or {}
         trace = [f"boundary → {aoi['name']}  [{aoi.get('how') or 'cached AOI'}]",
                  f"exposure (OSM) → roads {c.get('roads', '?')} · hospitals {c.get('hospitals', '?')} · "
@@ -154,7 +166,12 @@ def finalize(state: State, config) -> dict:
         "function": {"name": state["operation"], "arguments": arguments}}]}
     tool_msg = {"role": "tool", "tool_call_id": state["tool_call_id"], "content": str(result)}
 
-    messages = [{"role": "system", "content": prompts.system_prompt()},
+    system = prompts.system_prompt()
+    if state.get("req_geometry"):
+        system += ("\n\nThe user drew the area on the map; the result is for that drawn area. "
+                   "Phrase it naturally (e.g. 'in the selected area') and do not ask for or "
+                   "mention a missing place name.")
+    messages = [{"role": "system", "content": system},
                 *state["messages"], assistant, tool_msg]
     resp = client.chat.completions.create(model=model, messages=messages, max_tokens=400)
     answer = resp.choices[0].message.content or ""

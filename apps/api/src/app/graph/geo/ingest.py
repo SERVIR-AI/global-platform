@@ -2,6 +2,7 @@
 flood-hazard raster clipped to it. Raises ValueError if the place can't be
 resolved or is too large — it never silently falls back to somewhere else.
 """
+import hashlib
 import json
 import math
 import os
@@ -137,15 +138,28 @@ def source_raster(layer="hazard_flood"):
     return path
 
 
-def ensure_aoi(place):
-    """Return a cached bundle of file paths for `place`, fetching it if needed."""
+def ensure_aoi(place=None, geometry=None):
+    """Return a cached bundle of file paths for an AOI — resolved from a `place` name, or
+    from a user-drawn `geometry` (GeoJSON Polygon or [minLon,minLat,maxLon,maxLat] bbox,
+    EPSG:4326). Fetches OSM once and caches it."""
     cache = str(get_settings().cache_dir)
-    adir = os.path.join(cache, _slug(place) or "_")
+    if geometry is not None:
+        boundary = _to_polygon(geometry)
+        slug = "draw-" + hashlib.sha1(boundary.wkt.encode()).hexdigest()[:12]
+    else:
+        slug = _slug(place) or "_"
+    adir = os.path.join(cache, slug)
     meta = os.path.join(adir, "meta.json")
     if os.path.exists(meta):
         return _bundle(adir, json.load(open(meta)))
 
-    km2, name, boundary, how = _boundary(place)
+    if geometry is not None:
+        km2 = boundary.area * 111.0 * 108.0
+        if km2 > AREA_CAP_KM2:
+            raise ValueError(f"drawn area is too large (>{AREA_CAP_KM2:.0f} km²) — draw a smaller box")
+        name, how = "drawn area", "drawn"
+    else:
+        km2, name, boundary, how = _boundary(place)
     print(f"   [ingest: fetching '{name}' (~{km2:.0f} km²)…]")
     os.makedirs(adir, exist_ok=True)
     minx, miny, maxx, maxy = boundary.bounds
@@ -201,9 +215,8 @@ def _bundle(adir, info):
             "buildings": os.path.join(adir, "buildings.geojson")}
 
 
-def hazard_clip(place, layer):
-    """Clip `layer`'s severity raster to the AOI; cache per (place, layer); return path."""
-    aoi = ensure_aoi(place)
+def hazard_clip(aoi, layer):
+    """Clip `layer`'s severity raster to the AOI bundle; cache per (AOI, layer); return path."""
     adir = os.path.dirname(aoi["admin"])
     clip = os.path.join(adir, f"{layer}.tif")
     if not os.path.exists(clip):
@@ -218,6 +231,14 @@ def hazard_clip(place, layer):
             with rasterio.open(clip, "w", **prof) as dst:
                 dst.write(arr, 1)
     return clip
+
+
+def _to_polygon(geometry):
+    """A drawn AOI -> shapely polygon. Accepts a GeoJSON geometry dict, or a
+    [minLon, minLat, maxLon, maxLat] bbox array."""
+    if isinstance(geometry, (list, tuple)) and len(geometry) == 4:
+        return box(*[float(v) for v in geometry])
+    return shape(geometry)
 
 
 def _feature(geom, props):

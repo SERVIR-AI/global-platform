@@ -7,6 +7,7 @@ server-owned colored legend. Kept out of the LLM's result dict so it doesn't blo
 the model context.
 """
 import json
+import os
 import warnings
 
 warnings.filterwarnings("ignore")
@@ -100,7 +101,12 @@ def build_payload(aoi, result):
     }
     hazard_layer = None
     if hazard and hazard in aoi:
-        hazard_layer = {"geojson": _vectorized_hazard(aoi[hazard]), "crs": "EPSG:4326"}
+        slug = os.path.basename(os.path.dirname(aoi["admin"]))
+        hazard_layer = {
+            "raster_url": f"/api/raster/{slug}/{hazard}.tif",   # option A: ol/source/GeoTIFF
+            "geojson": _vectorized_hazard(aoi[hazard]),         # option B: vectorized polygons
+            "crs": "EPSG:4326",
+        }
 
     return {
         "place": result.get("place"),

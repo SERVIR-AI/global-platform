@@ -35,6 +35,14 @@ class ChatRequest(BaseModel):
         default=False,
         description="When true, the response includes `trace` — a step-by-step narration of how the answer "
                     "was produced (route → boundary → exposure → overlay), mirroring the CLI's -v output.")
+    geometry: dict | list | None = Field(
+        default=None,
+        description="Mode 2: a user-drawn AOI — a GeoJSON Polygon geometry OR a [minLon,minLat,maxLon,maxLat] "
+                    "bbox, in EPSG:4326. When set, it's used as the area instead of resolving a place from text.")
+    hazard: str | None = Field(
+        default=None,
+        description="Optional explicit hazard (e.g. 'flood' or 'hazard_flood'), e.g. from a UI button; "
+                    "otherwise the hazard is inferred from the text.")
 
 
 class Usage(BaseModel):
