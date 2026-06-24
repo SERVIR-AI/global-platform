@@ -9,6 +9,12 @@ dependencies = []
 [tool.pytest.ini_options]
 pythonpath = ["apps/api/src"]
 testpaths = ["apps/api/tests"]
+# Silence third-party deprecations we don't control (rasterio/NumPy 2.5 and
+# starlette's TestClient), matched by message so our own warnings still surface.
+filterwarnings = [
+    "ignore:Setting the shape on a NumPy array has been deprecated:DeprecationWarning",
+    "ignore:Using `httpx` with `starlette.testclient`",
+]
 
 [tool.uv.workspace]
 members = ["apps/api"]
