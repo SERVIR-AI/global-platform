@@ -15,21 +15,24 @@ pytestmark = pytest.mark.skipif(
     not get_settings().google_api_key, reason="GOOGLE_API_KEY not configured")
 
 
-def test_live_gemini_round_trip(aoi, monkeypatch, capsys):
+def test_live_gemini_round_trip(aoi, monkeypatch, log):
+    """Real Gemini call: route + finalize hit the live API; the answer must quote operate's number."""
     monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda place: aoi)
     monkeypatch.setattr(gm.ingest, "source_raster", lambda layer="hazard_flood": "x")
     expected = store.roads_in_flood(aoi)["length_km"]
 
+    log("REQUEST", "POST /api/chat provider=gemini  'How many km of road are flooded in Riverford?'")
+    log("OPERATE", f"real store.roads_in_flood -> {expected} km (geo stubbed; LLM is live)")
     r = TestClient(app).post("/api/chat", json={
         "messages": [{"role": "user", "content": "How many kilometres of road are flooded in Riverford?"}],
         "provider": "gemini"})
-
-    assert r.status_code == 200, r.text
     body = r.json()
-    with capsys.disabled():
-        print(f"\n[live gemini] model={body['model']} usage={body['usage']}")
-        print(f"[live gemini] answer: {body['message']['content']}")
+    log("STATUS", r.status_code)
+    log("MODEL", f"{body['model']}  usage={body['usage']}")
+    log("ANSWER", body["message"]["content"])
+    log("CHECK", f"200; real Gemini answer quotes {expected} (grounded, not invented)")
+    assert r.status_code == 200, r.text
     assert body["provider"] == "gemini"
     assert body["message"]["content"].strip()
     assert body["usage"]["total_tokens"] > 0
-    assert str(expected) in body["message"]["content"]   # grounded in the real number
+    assert str(expected) in body["message"]["content"]

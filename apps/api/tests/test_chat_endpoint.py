@@ -11,19 +11,29 @@ from app.main import app
 client = TestClient(app)
 
 
-def test_missing_key_returns_400(monkeypatch):
+def test_missing_key_returns_400(monkeypatch, log):
+    """A request for a provider with no key returns 400 (not 500) with a clear message."""
     monkeypatch.setattr(get_settings(), "google_api_key", None)
+    log("REQUEST", "POST /api/chat provider=gemini  (GOOGLE_API_KEY unset)")
     r = client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}], "provider": "gemini"})
+    log("STATUS", r.status_code)
+    log("DETAIL", r.json()["detail"])
+    log("CHECK", "status 400; detail names GOOGLE_API_KEY")
     assert r.status_code == 400
     assert "GOOGLE_API_KEY" in r.json()["detail"]
 
 
-def test_invalid_provider_returns_422():
+def test_invalid_provider_returns_422(log):
+    """An unknown provider is rejected by request validation (422), per the schema's Literal."""
+    log("REQUEST", "POST /api/chat provider=bogus")
     r = client.post("/api/chat", json={"messages": [{"role": "user", "content": "hi"}], "provider": "bogus"})
+    log("STATUS", r.status_code)
+    log("CHECK", "status 422 (schema validation)")
     assert r.status_code == 422
 
 
-def test_round_trip_with_stub(aoi, make_client, monkeypatch):
+def test_round_trip_with_stub(aoi, make_client, monkeypatch, log):
+    """End-to-end through the endpoint (stub LLM, fixture geo): grounded answer + echoed provider + usage."""
     from app.api.routes import chat as chat_route
     monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda place: aoi)
     monkeypatch.setattr(gm.ingest, "source_raster", lambda layer="hazard_flood": "x")
@@ -31,10 +41,15 @@ def test_round_trip_with_stub(aoi, make_client, monkeypatch):
     monkeypatch.setattr(chat_route, "build_client", lambda provider: stub)
     expected = store.roads_in_flood(aoi)["length_km"]
 
+    log("REQUEST", "POST /api/chat provider=gemini  'flooded roads in Testville?'")
+    log("OPERATE", f"real store.roads_in_flood -> {expected} km")
     r = client.post("/api/chat", json={
         "messages": [{"role": "user", "content": "flooded roads in Testville?"}], "provider": "gemini"})
-    assert r.status_code == 200
     body = r.json()
+    log("STATUS", r.status_code)
+    log("BODY", body)
+    log("CHECK", f"200; provider echoed 'gemini'; answer quotes {expected}; usage + thread_id present")
+    assert r.status_code == 200
     assert body["provider"] == "gemini"
     assert str(expected) in body["message"]["content"]
     assert body["usage"]["total_tokens"] > 0

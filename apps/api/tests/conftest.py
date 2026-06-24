@@ -83,3 +83,16 @@ def make_client():
 def _redirect_traces(tmp_path, monkeypatch):
     """Keep trace writes out of the repo's cache/ during tests."""
     monkeypatch.setattr(get_settings(), "traces_dir", tmp_path / "traces")
+
+
+@pytest.fixture
+def log(request):
+    """Narrate a test (visible with `pytest -s`): its purpose, the calls it makes,
+    and the outputs it gets. Use log("CALL", ...), log("OUTPUT", ...), log("CHECK", ...)."""
+    why = " ".join((request.node.function.__doc__ or "").split())
+    print(f"\n{'─' * 74}\nTEST   {request.node.name}\nWHY    {why}")
+
+    def _log(kind, msg=""):
+        print(f"  {kind:<8}{msg}")
+
+    return _log
