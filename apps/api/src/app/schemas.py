@@ -72,7 +72,7 @@ class ChatResponse(BaseModel):
     bounds: list[float] | None = Field(default=None, description="[minLon,minLat,maxLon,maxLat] AOI bbox, for fitting the map.")
     aoi: dict | None = Field(default=None, description="AOI boundary as a GeoJSON Feature (drawn / nominatim / radius_box via properties.source).")
     features: dict | None = Field(default=None, description="GeoJSON FeatureCollection of assets, each properties.severity 0-5.")
-    hazard_layer: dict | None = Field(default=None, description="Hazard raster: {geojson: polygons by class, crs}. raster_url added in a later step.")
+    hazard_layer: dict | None = Field(default=None, description="Hazard raster: {raster_url: clipped GeoTIFF endpoint, geojson: polygons by class, crs}.")
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
