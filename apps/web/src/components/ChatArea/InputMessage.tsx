@@ -3,9 +3,9 @@ import Spinner from '@/components/Spinner';
 import { useChat, useChatPending } from '@/hooks/useChat';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/ChatStore';
-import { useCustomGeometryStore } from '@/stores/CustomGeometryStore';
+import { DrawMode, useCustomGeometryStore } from '@/stores/CustomGeometryStore';
 import { ChatProvider } from '@/types/chat';
-import { ArrowRight, MapPin, MapPinCheck, Paperclip, Pentagon, Square, X } from 'lucide-react';
+import { ArrowRight, LucideIcon, MapPin, Paperclip, Pentagon, Square } from 'lucide-react';
 import { FC, KeyboardEvent, useEffect, useRef, useState } from 'react';
 
 const providerOptions: Record<ChatProvider, string> = {
@@ -14,9 +14,15 @@ const providerOptions: Record<ChatProvider, string> = {
   openai: 'OpenAI',
 };
 
+const drawButtons: { mode: DrawMode; Icon: LucideIcon; label: string }[] = [
+  { mode: 'Point', Icon: MapPin, label: 'Draw a point' },
+  { mode: 'Rectangle', Icon: Square, label: 'Draw a rectangle' },
+  { mode: 'Polygon', Icon: Pentagon, label: 'Draw a polygon' },
+];
+
 const InputMessage: FC = () => {
   const hasMessages = useChatStore((store) => !!store.messages.length);
-  const geometry = useCustomGeometryStore((store) => store.geometry);
+  const geometryType = useCustomGeometryStore((store) => store.geometryType);
   const setGeometry = useCustomGeometryStore((store) => store.setGeometry);
   const drawMode = useCustomGeometryStore((store) => store.drawMode);
   const setDrawMode = useCustomGeometryStore((store) => store.setDrawMode);
@@ -44,10 +50,10 @@ const InputMessage: FC = () => {
     if (hasMessages) {
       return undefined;
     }
-    if (drawMode === 'Point' || geometry?.getType() === 'Point') {
+    if (drawMode === 'Point' || geometryType === 'Point') {
       return 'Show me schools at high risk of flooding within 5kms from this point.';
     }
-    if (drawMode === 'Polygon' || drawMode === 'Rectangle' || geometry?.getType() === 'Polygon') {
+    if (drawMode === 'Polygon' || drawMode === 'Rectangle' || geometryType) {
       return 'Show me schools at high risk of flooding in the area.';
     }
     return 'Show me schools at high risk of flooding in Battambang.';
@@ -80,64 +86,41 @@ const InputMessage: FC = () => {
             type="button"
             className="btn rounded-xl h-6 p-1 text-xs font-medium text-zinc-500 tooltip"
             data-tip="Coming Soon"
+            disabled={loading}
           >
             <Paperclip className="w-4 h-4" />
             Attach files
           </button>
-          {geometry ? (
-            <div className="badge badge-secondary badge-sm h-6 rounded-xl">
-              <MapPinCheck className="w-3 h-3" />
-              Geometry Attached
-              {!loading && (
+          {drawButtons.map(({ mode, Icon, label }) => {
+            // A geometry of this mode is attached: this button removes it instead
+            // of drawing. A geometry of a *different* mode blocks (disables) this one.
+            const attached = geometryType === mode;
+            const blocked = !!geometryType && !attached;
+            // The tooltip sits on the wrapper since a disabled button gets no hover.
+            return (
+              <span
+                key={mode}
+                className={cn(blocked ? 'tooltip' : null)}
+                data-tip="Only one geometry can be attached at a time"
+              >
                 <button
-                  className="p-0 cursor-pointer tooltip"
-                  data-tip="Remove geometry"
-                  onClick={() => setGeometry(null)}
+                  type="button"
+                  className={cn(
+                    'btn rounded-xl h-6 p-1 text-xs font-medium text-zinc-500',
+                    attached ? 'btn-primary text-white' : null,
+                    drawMode === mode ? 'btn-secondary text-white' : null,
+                  )}
+                  onClick={() =>
+                    attached ? setGeometry(null) : setDrawMode(drawMode === mode ? null : mode)
+                  }
+                  disabled={loading || blocked}
                 >
-                  <X className="w-3 h-3" />
+                  <Icon className="w-4 h-4" />
+                  {attached ? `Remove the ${mode.toLowerCase()}` : label}
                 </button>
-              )}
-            </div>
-          ) : (
-            <>
-              <button
-                type="button"
-                className={cn(
-                  'btn rounded-xl h-6 p-1 text-xs font-medium text-zinc-500',
-                  drawMode === 'Point' ? 'btn-secondary text-white' : null,
-                )}
-                onClick={() => setDrawMode(drawMode === 'Point' ? null : 'Point')}
-                disabled={loading}
-              >
-                <MapPin className="w-4 h-4" />
-                Draw a point
-              </button>
-              <button
-                type="button"
-                className={cn(
-                  'btn rounded-xl h-6 p-1 text-xs font-medium text-zinc-500',
-                  drawMode === 'Rectangle' ? 'btn-secondary text-white' : null,
-                )}
-                onClick={() => setDrawMode(drawMode === 'Rectangle' ? null : 'Rectangle')}
-                disabled={loading}
-              >
-                <Square className="w-4 h-4" />
-                Draw a rectangle
-              </button>
-              <button
-                type="button"
-                className={cn(
-                  'btn rounded-xl h-6 p-1 text-xs font-medium text-zinc-500',
-                  drawMode === 'Polygon' ? 'btn-secondary text-white' : null,
-                )}
-                onClick={() => setDrawMode(drawMode === 'Polygon' ? null : 'Polygon')}
-                disabled={loading}
-              >
-                <Pentagon className="w-4 h-4" />
-                Draw a polygon
-              </button>
-            </>
-          )}
+              </span>
+            );
+          })}
         </div>
         <div className="flex justify-end gap-2">
           <Dropdown<ChatProvider>

@@ -82,9 +82,7 @@ const ChatArea: FC = () => {
       <div
         className={cn(
           'flex flex-col gap-2',
-          welcome
-            ? 'self-center px-8 max-w-3xl'
-            : 'shrink-0 pt-1 pb-4 px-4 border-t border-zinc-200',
+          welcome ? 'self-center px-8' : 'shrink-0 pt-1 pb-4 px-4 border-t border-zinc-200',
         )}
       >
         {!welcome && (

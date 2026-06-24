@@ -26,6 +26,18 @@ export class ApiError extends Error {
 // `${API_BASE_URL}/api/...` never doubles up.
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
 
+/**
+ * Resolve a possibly-relative API path (e.g. a `hazard_layer.raster_url`
+ * returned by the backend) against API_BASE_URL. Absolute URLs pass through
+ * unchanged so it's safe to call on any server-provided URL.
+ */
+export const resolveApiUrl = (path: string): string =>
+  /^https?:\/\//i.test(path) ? path : `${API_BASE_URL}${path.startsWith('/') ? '' : '/'}${path}`;
+
+/** Build the URL for GET /api/raster/{slug}/{layer}.tif — clipped hazard GeoTIFF. */
+export const getRasterUrl = (slug: string, layer: string): string =>
+  `${API_BASE_URL}/api/raster/${encodeURIComponent(slug)}/${encodeURIComponent(layer)}.tif`;
+
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...init,

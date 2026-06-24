@@ -1,6 +1,7 @@
 import { ApiError, postChat } from '@/lib/api';
 import { queryKeys } from '@/lib/queryKeys';
 import { useChatStore } from '@/stores/ChatStore';
+import { toChatGeometry, useCustomGeometryStore } from '@/stores/CustomGeometryStore';
 import type { HTTPValidationError } from '@/types/chat';
 import { useIsMutating, useMutation } from '@tanstack/react-query';
 
@@ -20,13 +21,23 @@ export const useChat = () => {
   const appendMessage = useChatStore((s) => s.appendMessage);
   const provider = useChatStore((s) => s.provider);
   const threadId = useChatStore((s) => s.threadId);
+  const geometry = useCustomGeometryStore((s) => s.geometry);
+  const setGeometry = useCustomGeometryStore((s) => s.setGeometry);
 
   const mutation = useMutation({
     mutationKey: queryKeys.chat.all(),
     mutationFn: (content: string) =>
-      postChat({ messages: [{ role: 'user', content }], provider, thread_id: threadId }),
+      postChat({
+        messages: [{ role: 'user', content }],
+        provider,
+        thread_id: threadId,
+        geometry: toChatGeometry(geometry),
+      }),
     onMutate: (content) => appendMessage({ role: 'user', content }),
-    onSuccess: (data) => appendMessage(data.message),
+    onSuccess: (data) => {
+      appendMessage(data.message);
+      setGeometry(null);
+    },
     onError: (err) => appendMessage({ role: 'assistant', content: errorMessage(err) }),
   });
 

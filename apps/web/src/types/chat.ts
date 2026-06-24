@@ -1,6 +1,14 @@
+import type { Feature, FeatureCollection, Point, Polygon } from 'geojson';
+
 export type ChatProvider = 'claude' | 'gemini' | 'openai';
 
 export type ChatRole = 'system' | 'user' | 'assistant';
+
+/** Asset layer the metric was computed over. */
+export type AssetLayer = 'roads' | 'hospitals' | 'schools' | 'buildings';
+
+/** `[minLon, minLat, maxLon, maxLat]` in EPSG:4326. */
+export type Bbox = [number, number, number, number];
 
 export interface ChatMessage {
   role: ChatRole;
@@ -24,6 +32,59 @@ export interface ChatRequest {
   thread_id?: string | null;
   /** When true, the response includes `trace` — a step-by-step narration of the run. */
   verbose?: boolean;
+  /**
+   * Mode 2: a user-drawn AOI — a GeoJSON Polygon geometry OR a
+   * `[minLon, minLat, maxLon, maxLat]` bbox, in EPSG:4326. When set, it's used
+   * as the area instead of resolving a place from the message text.
+   */
+  geometry?: Point | Polygon | Bbox | null;
+  /**
+   * Optional explicit hazard (e.g. 'flood' or 'hazard_flood'), e.g. from a UI
+   * button; otherwise the hazard is inferred from the text.
+   */
+  hazard?: string | null;
+}
+
+/** Exposure metric for the AOI × hazard × asset layer. Open-ended; server may add keys. */
+export interface Metric {
+  value?: number;
+  unit?: string;
+  total?: number;
+  min_severity?: number;
+  by_severity?: Record<string, number>;
+  [key: string]: unknown;
+}
+
+/** A single severity-scale entry: human label + server-owned color. */
+export interface LegendEntry {
+  label: string;
+  color: string;
+}
+
+/** Severity scale keyed by class, e.g. `{ '3': { label: 'High', color: '#...' } }`. */
+export type Legend = Record<string, LegendEntry>;
+
+/** Where the AOI boundary came from. */
+export type AoiSource = 'drawn' | 'nominatim' | 'radius_box';
+
+/** AOI boundary Feature; `properties.source` records how it was derived. */
+export type AoiFeature = Feature<Polygon, { source?: AoiSource; [key: string]: unknown }>;
+
+/** Asset features; each `properties.severity` is 0–5. */
+export type AssetFeatureCollection = FeatureCollection<
+  Polygon,
+  { severity?: number; [key: string]: unknown }
+>;
+
+/** Hazard raster bundle: clipped GeoTIFF endpoint + vectorized polygons by class. */
+export interface HazardLayer {
+  /** URL of the clipped GeoTIFF (see `getRasterUrl` / `resolveApiUrl`). */
+  raster_url: string;
+  /** Hazard polygons by severity class. */
+  geojson: FeatureCollection;
+  /** Coordinate reference system, e.g. 'EPSG:4326'. */
+  crs: string;
+  [key: string]: unknown;
 }
 
 export interface ChatResponse {
@@ -35,6 +96,24 @@ export interface ChatResponse {
   usage?: Usage | null;
   /** Step-by-step narration; present only when the request set verbose=true. */
   trace?: string[] | null;
+  /** Resolved place name, or 'drawn area'. */
+  place?: string | null;
+  /** Hazard layer used, e.g. 'hazard_flood'. */
+  hazard?: string | null;
+  /** Asset layer the metric covers. */
+  layer?: AssetLayer | null;
+  /** value, unit, total, min_severity, by_severity. */
+  metric?: Metric | null;
+  /** `{ class: { label, color } }` severity scale (server-owned colors). */
+  legend?: Legend | null;
+  /** `[minLon, minLat, maxLon, maxLat]` AOI bbox, for fitting the map. */
+  bounds?: Bbox | null;
+  /** AOI boundary as a GeoJSON Feature (drawn / nominatim / radius_box). */
+  aoi?: AoiFeature | null;
+  /** GeoJSON FeatureCollection of assets, each `properties.severity` 0–5. */
+  features?: AssetFeatureCollection | null;
+  /** Hazard raster: `{ raster_url, geojson, crs }`. */
+  hazard_layer?: HazardLayer | null;
   created_at?: string;
 }
 
