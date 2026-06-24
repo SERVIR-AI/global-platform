@@ -1,11 +1,12 @@
 import Dropdown from '@/components/Inputs/Dropdown';
 import Spinner from '@/components/Spinner';
+import { useChat, useChatPending } from '@/hooks/useChat';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/ChatStore';
 import { useCustomGeometryStore } from '@/stores/CustomGeometryStore';
 import { ChatProvider } from '@/types/chat';
 import { ArrowRight, MapPin, MapPinCheck, Paperclip, Pentagon, Square, X } from 'lucide-react';
-import { FC, KeyboardEvent, useState } from 'react';
+import { FC, KeyboardEvent, useEffect, useRef, useState } from 'react';
 
 const providerOptions: Record<ChatProvider, string> = {
   claude: 'Claude',
@@ -14,6 +15,7 @@ const providerOptions: Record<ChatProvider, string> = {
 };
 
 const InputMessage: FC = () => {
+  const hasMessages = useChatStore((store) => !!store.messages.length);
   const geometry = useCustomGeometryStore((store) => store.geometry);
   const setGeometry = useCustomGeometryStore((store) => store.setGeometry);
   const drawMode = useCustomGeometryStore((store) => store.drawMode);
@@ -22,8 +24,9 @@ const InputMessage: FC = () => {
   const setProvider = useChatStore((store) => store.setProvider);
 
   const [text, setText] = useState('');
-  const send = useChatStore((store) => store.send);
-  const loading = useChatStore((store) => store.loading);
+  const { send, isPending: loading } = useChat();
+  const chatPending = useChatPending();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const submit = () => {
     const value = text;
@@ -38,7 +41,10 @@ const InputMessage: FC = () => {
     }
   };
 
-  const getPlaceholder = (): string => {
+  const getPlaceholder = (): string | undefined => {
+    if (hasMessages) {
+      return undefined;
+    }
     if (drawMode === 'Point' || geometry?.getType() === 'Point') {
       return 'Show me schools at high risk of flooding within 5kms from this point.';
     }
@@ -48,9 +54,17 @@ const InputMessage: FC = () => {
     return 'Show me schools at high risk of flooding in Battambang.';
   };
 
+  useEffect(() => {
+    if (chatPending) {
+      return;
+    }
+    textareaRef.current?.focus();
+  }, [chatPending]);
+
   return (
     <div className="flex flex-col gap-2">
       <textarea
+        ref={textareaRef}
         className={cn(
           'border border-zinc-400 rounded-xl w-full resize-none p-2',
           loading ? ' bg-zinc-100' : undefined,
