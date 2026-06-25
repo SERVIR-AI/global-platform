@@ -75,7 +75,7 @@ const ChatBubble: FC<{ chatItem: ChatItem }> = ({ chatItem }) => {
           <ChatMapLayer key={index} layer={layer} />
         ))}
         {date && (
-          <span className="text-zinc-400 text-xs">
+          <span className={cn('text-zinc-400 text-xs', isUser ? 'self-end' : undefined)}>
             {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </span>
         )}
