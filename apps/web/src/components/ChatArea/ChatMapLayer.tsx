@@ -66,7 +66,7 @@ const ChatMapLayer: FC<ChatMapLayerProps> = ({ layer }) => {
               data-tip="Add opacity"
               onClick={() => setOpacity(1)}
             >
-              <Circle className="w-4 h-4" />
+              <CircleDashed className="w-4 h-4" />
             </button>
           ) : (
             <button
@@ -74,7 +74,7 @@ const ChatMapLayer: FC<ChatMapLayerProps> = ({ layer }) => {
               data-tip="Remove opacity"
               onClick={() => setOpacity(0.5)}
             >
-              <CircleDashed className="w-4 h-4" />
+              <Circle className="w-4 h-4" />
             </button>
           )}
           <button

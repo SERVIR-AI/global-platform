@@ -37,7 +37,20 @@ export const useChatStore = create<ChatStore>((set) => ({
   setProvider: (provider) => set({ provider }),
   messages: [],
   appendMessage: (message) =>
-    set((s) => ({ messages: [...s.messages, { ...message, layers: buildChatLayers(message) }] })),
+    set((s) => {
+      const item: ChatItem = { ...message, layers: buildChatLayers(message) };
+      // A response carrying map layers takes over the map: hide every existing
+      // layer (the reconciler then removes them) so only this turn's layers show.
+      // A layerless response — or any request — just appends.
+      const takesOverMap = 'id' in message && item.layers.length > 0;
+      const prior = takesOverMap
+        ? s.messages.map((m) => ({
+            ...m,
+            layers: m.layers.map((l) => ({ ...l, visible: false })),
+          }))
+        : s.messages;
+      return { messages: [...prior, item] };
+    }),
   toggleLayer: (target) =>
     set((s) => ({
       messages: updateLayer(s.messages, target, (l) => ({ ...l, visible: !l.visible })),

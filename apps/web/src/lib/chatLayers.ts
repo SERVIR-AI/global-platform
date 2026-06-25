@@ -148,29 +148,31 @@ const vectorType = (geojson: GeoJSONFeature | FeatureCollection): ChatLayerType 
 const geometryType = (geometry: NonNullable<ChatRequest['geometry']>): ChatLayerType =>
   Array.isArray(geometry) ? 'Rectangle' : (GEOMETRY_TYPE[geometry.type] ?? 'Vector');
 
-// Every layer starts half-transparent so overlapping layers stay legible.
-const DEFAULT_OPACITY = 0.5;
+// Raster overlays render half-transparent so the layers beneath them stay
+// visible; vector layers render fully opaque.
+const RASTER_OPACITY = 0.5;
+const VECTOR_OPACITY = 1;
 
 /**
  * Build the OpenLayers layers for a chat turn from its geo fields. Layers are
- * ordered bottom-to-top: hazard raster, exposed assets, then the AOI outline.
- * A request only carries a drawn `geometry`; a response carries the rest. Each
- * layer is tagged with a name/description for the layer toggle UI; these are
- * derived from the source field for now. Everything is shown by default except
- * the AOI outline, which is opt-in.
+ * ordered bottom-to-top: the AOI outline, exposed assets, then the hazard
+ * raster on top. A request only carries a drawn `geometry`; a response carries
+ * the rest. Each layer is tagged with a name/description for the layer toggle
+ * UI; these are derived from the source field for now. Everything is shown by
+ * default.
  */
 export const buildChatLayers = (item: ChatRequest | ChatResponse): ChatLayer[] => {
   const layers: ChatLayer[] = [];
   if (isChatResponse(item)) {
     const legend = item.legend ?? null;
-    if (item.hazard_layer?.raster_url)
+    if (item.aoi)
       layers.push({
-        layer: rasterLayer(item.hazard_layer.raster_url, item.bounds, legend),
-        type: 'Raster',
-        name: 'Hazard',
-        description: 'Clipped hazard severity raster.',
+        layer: vectorLayer(item.aoi, aoiStyle),
+        type: vectorType(item.aoi),
+        name: 'Area of interest',
+        description: 'Resolved AOI boundary.',
         visible: true,
-        opacity: DEFAULT_OPACITY,
+        opacity: VECTOR_OPACITY,
       });
     if (item.features)
       layers.push({
@@ -179,16 +181,16 @@ export const buildChatLayers = (item: ChatRequest | ChatResponse): ChatLayer[] =
         name: 'Assets',
         description: 'Exposed assets within the area.',
         visible: true,
-        opacity: DEFAULT_OPACITY,
+        opacity: VECTOR_OPACITY,
       });
-    if (item.aoi)
+    if (item.hazard_layer?.raster_url)
       layers.push({
-        layer: vectorLayer(item.aoi, aoiStyle),
-        type: vectorType(item.aoi),
-        name: 'Area of interest',
-        description: 'Resolved AOI boundary.',
-        visible: false,
-        opacity: DEFAULT_OPACITY,
+        layer: rasterLayer(item.hazard_layer.raster_url, item.bounds, legend),
+        type: 'Raster',
+        name: 'Hazard',
+        description: 'Clipped hazard severity raster.',
+        visible: true,
+        opacity: RASTER_OPACITY,
       });
   } else if (item.geometry) {
     layers.push({
@@ -197,7 +199,7 @@ export const buildChatLayers = (item: ChatRequest | ChatResponse): ChatLayer[] =
       name: 'Drawn area',
       description: 'User-drawn area of interest.',
       visible: true,
-      opacity: DEFAULT_OPACITY,
+      opacity: VECTOR_OPACITY,
     });
   }
   return layers;
