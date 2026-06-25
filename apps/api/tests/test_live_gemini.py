@@ -17,7 +17,7 @@ pytestmark = pytest.mark.skipif(
 
 def test_live_gemini_round_trip(aoi, monkeypatch, log):
     """Real Gemini call: route + finalize hit the live API; the answer must quote operate's number."""
-    monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda place: aoi)
+    monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda *a, **k: aoi)
     monkeypatch.setattr(gm.ingest, "hazard_clip", lambda place, layer: aoi[layer])
     expected = store.roads_in_hazard(aoi, "hazard_flood")["length_km"]
 

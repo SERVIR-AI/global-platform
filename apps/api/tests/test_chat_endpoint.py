@@ -35,7 +35,7 @@ def test_invalid_provider_returns_422(log):
 def test_round_trip_with_stub(aoi, make_client, monkeypatch, log):
     """End-to-end through the endpoint (stub LLM, fixture geo): grounded answer + echoed provider + usage."""
     from app.api.routes import chat as chat_route
-    monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda place: aoi)
+    monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda *a, **k: aoi)
     monkeypatch.setattr(gm.ingest, "hazard_clip", lambda place, layer: aoi[layer])
     stub = make_client(("tool", "roads_in_hazard", {"place": "Testville", "hazard_layers": ["hazard_flood"]}))
     monkeypatch.setattr(chat_route, "build_client", lambda provider: stub)

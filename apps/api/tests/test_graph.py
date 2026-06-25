@@ -13,7 +13,7 @@ def _cfg(client, thread):
 
 
 def _patch_fetch(monkeypatch, aoi):
-    monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda place: aoi)
+    monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda *a, **k: aoi)
     monkeypatch.setattr(gm.ingest, "hazard_clip", lambda place, layer: aoi[layer])
 
 
@@ -73,7 +73,7 @@ def test_no_place_refuses(make_client, log):
 
 def test_fetch_failure_refuses_without_finalize_llm(make_client, monkeypatch, log):
     """If fetch fails (unresolvable place), finalize returns the failure verbatim — no second LLM call."""
-    def boom(place):
+    def boom(*a, **k):
         raise ValueError("no administrative boundary for 'Atlantis'")
     monkeypatch.setattr(gm.ingest, "ensure_aoi", boom)
     monkeypatch.setattr(gm.ingest, "source_raster", lambda layer="hazard_flood": "x")
