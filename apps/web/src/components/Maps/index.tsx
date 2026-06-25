@@ -232,7 +232,7 @@ const Maps: FC = () => {
       <div className="absolute bottom-2 left-2 z-10 flex flex-col gap-2">
         {hovered.length > 0 && (
           <div className="flex flex-col gap-1">
-            {hovered.map((item, index) => (
+            {hovered.slice(0, 10).map((item, index) => (
               <MapItemProperty
                 key={index}
                 layerName={item.layerName}
