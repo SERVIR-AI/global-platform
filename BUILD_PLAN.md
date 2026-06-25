@@ -4,7 +4,7 @@ Technical tracker for the agent in `SOURCE_DATA_APPROACH.md`. Build **one slice 
 demoable upgrade, every task tested on **real data**. Tick boxes as we go.
 
 **Status:** ☐ todo · ◐ in progress · ☑ done · ⤬ blocked
-**Now:** Layer 1 works (sample a precomputed tif at OSM assets). Next task → **S1.1**.
+**Now:** S1 done (verification pass green). Next task → **S2.1** (grid-align).
 
 **Test tags:** `[fast]` synthetic-fixture unit test (no network) · `[slow]` real-data, live Drive pull,
 cached after · `[stub]` graph driven by the existing StubClient · `[guardrail]` the existing suite must stay green.
@@ -44,19 +44,19 @@ math is deterministic Python**. Computed risk grids are written into the per-AOI
 
 ## Layer 2 — S1–S4
 
-### ☐ S1 — Per-file schema + windowed verification pass
+### ☑ S1 — Per-file schema + windowed verification pass
 *Goal:* every raster self-declares its contract and is refused if the file disagrees. *Demo:* `verify hazard_flood vulnerability_pop_all_total global_pc_h100glob` prints PASS/FAIL and auto-flags the mm and 0–4/0–5 traps.
-- ☐ **S1.1** Decide schema fields: `role, dtype, valid_min, valid_max, units, scale, nodata, crs, pixel_size_deg`
-- ☐ **S1.2** `conf/raster_schema.yml` — declare `hazard_flood`, `vulnerability_reclass_blddensity`, `vulnerability_reclass_road`, `vulnerability_pop_all_total`, `risk_flood` + canary `global_pc_h100glob`
-- ☐ **S1.3** `geo/schema.py` — `load()` + `schema_for(name)`, reusing `tiffs.yml` legend/band
-- ☐ **S1.4** `geo/rasterstats.py` — `windowed_stats(path)` → dtype/min/max/nodata/crs/pixel_size via decimated read (the shared no-OOM helper, R1)
-- ☐ **S1.5** `geo/verify.py` — `verify_raster(name)` → `VerifyReport{name, ok, observed, declared, mismatches[]}` (downloads via `source_raster`, calls `windowed_stats`)
-- ☐ **S1.6** `verify.py` CLI — `python -m app.graph.geo.verify <name>…` prints a PASS/FAIL table
-- ☐ **S1.T1** `[fast]` `windowed_stats` on a hand-built 1–5 fixture returns correct dtype/min/max/nodata
-- ☐ **S1.T2** `[slow]` `verify_raster('hazard_flood')` → int8, 0–5, PASS
-- ☐ **S1.T3** `[slow]` `verify_raster('vulnerability_pop_all_total')` → reports 0–4 (scale mismatch visible)
-- ☐ **S1.T4** `[slow]` `verify_raster('global_pc_h100glob')` → uint32, max ~thousands, PASS against mm-declared schema
-- ☐ **S1.T5** `[slow]` negative: declare `units: metres, valid_max: 5` on `global_pc_h100glob` → verify **FAILs** with explicit mismatch
+- ☑ **S1.1** Decide schema fields: `role, dtype, valid_min, valid_max, units, scale, nodata, crs, pixel_size_deg`
+- ☑ **S1.2** `conf/raster_schema.yml` — declare `hazard_flood`, `vulnerability_reclass_blddensity`, `vulnerability_reclass_road`, `vulnerability_pop_all_total`, `risk_flood` + canary `global_pc_h100glob`
+- ☑ **S1.3** `geo/schema.py` — `load()` + `schema_for(name)`, reusing `tiffs.yml` legend/band
+- ☑ **S1.4** `geo/rasterstats.py` — `windowed_stats(path)` → dtype/min/max/nodata/crs/pixel_size via decimated read (the shared no-OOM helper, R1)
+- ☑ **S1.5** `geo/verify.py` — `verify_raster(name)` → `VerifyReport{name, ok, observed, declared, mismatches[]}` (downloads via `source_raster`, calls `windowed_stats`)
+- ☑ **S1.6** `verify.py` CLI — `python -m app.graph.geo.verify <name>…` prints a PASS/FAIL table
+- ☑ **S1.T1** `[fast]` `windowed_stats` on a hand-built 1–5 fixture returns correct dtype/min/max/nodata
+- ☑ **S1.T2** `[slow]` `verify_raster('hazard_flood')` → int8, 0–5, PASS
+- ☑ **S1.T3** `[slow]` `verify_raster('vulnerability_pop_all_total')` → reports 0–4 (scale mismatch visible)
+- ☑ **S1.T4** `[slow]` `verify_raster('global_pc_h100glob')` → uint32, max ~thousands, PASS against mm-declared schema
+- ☑ **S1.T5** `[slow]` negative: declare `units: metres, valid_max: 5` on `global_pc_h100glob` → verify **FAILs** with explicit mismatch
 
 ### ☐ S2 — Grid-align a 1–5 raster onto one AOI grid
 *Goal:* bring any 1–5 tif onto the `hazard_flood` AOI grid with no shift or invented classes. *Demo:* flood clip + aligned vuln print identical width/height/transform/crs.
@@ -183,3 +183,4 @@ math is deterministic Python**. Computed risk grids are written into the per-AOI
 - **☑ Catalog port** — `drive_tifs.py` (65 tif→id); `source_raster` reaches every layer by name. (`efb32f7`)
 - **☑ File-content verification spike** — opened 7 real tifs; proved the units/scale traps (mm-not-metres, 0–4 vs 0–5) → motivates R1/S1.
 - **☑ Layer 1** — sample a precomputed hazard/risk tif at OSM assets (pre-existing).
+- **☑ S1 — Verification pass.** `conf/raster_schema.yml` + `schema.py` + `rasterstats.windowed_stats` + `verify.py` (+ CLI). All 6 flood-L2 layers verified against the real files; 2 fast + 4 slow tests green; suite 18 passed / 5 skipped. Findings: 3 distinct grids (100 m / 30 m / 0.000833°), `global_pc_h100glob` confirmed millimetres, pop is 0–5 (earlier "0–4" was a 512-px sampling artifact).

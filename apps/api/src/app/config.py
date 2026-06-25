@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     traces_dir: Path = cache_dir / "traces"
     prompts_path: Path = _REPO_ROOT / "conf" / "prompts.yml"
     tiffs_config_path: Path = _REPO_ROOT / "conf" / "tiffs.yml"
+    raster_schema_path: Path = _REPO_ROOT / "conf" / "raster_schema.yml"
 
     # --- LLM defaults ---
     # Which provider to use when a request doesn't specify one.

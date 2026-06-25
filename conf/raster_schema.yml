@@ -1,0 +1,78 @@
+# Declared contract per raster. verify.verify_raster opens the file and confirms
+# REALITY matches this — because filenames and the source sheet lie about units and
+# scale (a file the sheet calls "metres" actually held millimetres; a "1-5" layer was
+# really 0-4). The schema is the ground truth a file must satisfy before any op uses it.
+#
+# role: hazard | vulnerability_reclass | raw | risk
+# Checked fields (a field is only checked if declared): dtype (exact), valid_min/valid_max
+# (sampled range must fall within, with float_tol), nodata, crs (epsg), pixel_size_deg.
+# units/scale are carried for provenance and shown in the report; the range check is what
+# actually catches a wrong-units declaration.
+#
+# Measured values come from the file-content verification spike (real reads). Layers marked
+# "expected" are confirmed/locked on the first live verify run.
+
+defaults:
+  crs: EPSG:4326
+  float_tol: 0.0001
+
+layers:
+  # --- Layer-2 flood ingredient set (already-reclassed 1-5) ---
+  hazard_flood:
+    role: hazard
+    dtype: int8
+    valid_min: 0
+    valid_max: 5
+    units: class            # 0 = no hazard, 1..5 severity
+    scale: 1
+    nodata: null
+    pixel_size_deg: 0.000898315284120   # ~100 m
+
+  vulnerability_pop_all_total:
+    role: vulnerability_reclass
+    dtype: uint8
+    valid_min: 0
+    valid_max: 5            # 0-5 (a coarse 512px sample once under-reported this as 0-4)
+    units: class
+    scale: 1
+    nodata: null
+
+  vulnerability_reclass_blddensity:
+    role: vulnerability_reclass
+    dtype: int8
+    valid_min: 0
+    valid_max: 5
+    units: class
+    scale: 1
+    nodata: null
+
+  vulnerability_reclass_road:
+    role: vulnerability_reclass
+    dtype: int8            # expected — locked on first live verify
+    valid_min: 0
+    valid_max: 5
+    units: class
+    scale: 1
+    nodata: null
+
+  # --- Validation oracle (Layer 1) ---
+  risk_flood:
+    role: risk
+    dtype: uint8          # expected — locked on first live verify
+    valid_min: 0
+    valid_max: 5
+    units: class
+    scale: 1
+    nodata: null
+
+  # --- Trap canary: the continuous flood-depth raw layer ---
+  # Caught in the spike: uint32, sampled 1..7180 = MILLIMETRES, NOT metres as the sheet says.
+  # A "units: metres / valid_max: 5" declaration on this file MUST FAIL verify (S1.T5).
+  global_pc_h100glob:
+    role: raw
+    dtype: uint32
+    valid_min: 0
+    valid_max: 20000
+    units: mm
+    scale: 1
+    nodata: 0.0
