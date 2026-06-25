@@ -1,4 +1,4 @@
-import { cn } from '@/lib/utils';
+import { cn, getChatItemDate } from '@/lib/utils';
 import type { ChatItem, ChatMessage } from '@/types/chat';
 import { FC } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
@@ -51,6 +51,7 @@ const itemMessage = (item: ChatItem): ChatMessage =>
 const ChatBubble: FC<{ chatItem: ChatItem }> = ({ chatItem }) => {
   const message = itemMessage(chatItem);
   const isUser = message.role === 'user';
+  const date = getChatItemDate(chatItem);
   return (
     <div className={cn('flex flex-col gap-2', isUser ? 'items-end' : 'items-start')}>
       <div
@@ -73,6 +74,11 @@ const ChatBubble: FC<{ chatItem: ChatItem }> = ({ chatItem }) => {
         {chatItem.layers.map((layer, index) => (
           <ChatMapLayer key={index} layer={layer} />
         ))}
+        {date && (
+          <span className="text-zinc-400 text-xs">
+            {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        )}
       </div>
     </div>
   );

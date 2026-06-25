@@ -1,7 +1,8 @@
-import { FC, useEffect, useRef } from 'react';
+import { FC, useEffect, useRef, useState } from 'react';
 import Map from 'ol/Map';
 import View from 'ol/View';
 import Feature from 'ol/Feature';
+import type MapBrowserEvent from 'ol/MapBrowserEvent';
 import type BaseLayer from 'ol/layer/Base';
 import TileLayer from 'ol/layer/Tile';
 import VectorLayer from 'ol/layer/Vector';
@@ -19,6 +20,7 @@ import { useChatStore } from '../../stores/ChatStore';
 import { useCustomGeometryStore } from '../../stores/CustomGeometryStore';
 import { useMapStore } from '../../stores/MapStore';
 import BasemapSelector from './BasemapSelector';
+import MapItemProperty from './MapItemProperty';
 
 const createBasemapSource = (basemap: 'Street' | 'Satellite') =>
   basemap === 'Satellite'
@@ -43,6 +45,10 @@ const geometryStyle = (feature: FeatureLike, resolution: number) =>
 
 const FIT_OPTIONS = { padding: [40, 40, 40, 40], duration: 300, maxZoom: 16 };
 
+// One readout row under the cursor: a chat layer's name, plus the hit feature's
+// `name` (vector only) and its severity class.
+type HoveredItem = { layerName: string; itemName?: string; severity: number };
+
 const Maps: FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
@@ -57,6 +63,8 @@ const Maps: FC = () => {
   const drawMode = useCustomGeometryStore((s) => s.drawMode);
   const setGeometry = useCustomGeometryStore((s) => s.setGeometry);
   const setDrawMode = useCustomGeometryStore((s) => s.setDrawMode);
+
+  const [hovered, setHovered] = useState<HoveredItem[]>([]);
 
   // Initialise the map once with an OSM basemap and a vector layer for custom geometries.
   useEffect(() => {
@@ -115,6 +123,56 @@ const Maps: FC = () => {
     });
   }, [map, messages]);
 
+  // Show a property readout for whatever sits under the cursor: hit vector
+  // features (name + severity) and hazard raster pixels (severity only). Rebinds
+  // when the layer set changes so the layer->name lookup stays current.
+  useEffect(() => {
+    if (!map) return;
+    const chatLayers = messages.flatMap((m) => m.layers);
+    const chatLayerFor = (layer: BaseLayer | null) =>
+      layer ? chatLayers.find((l) => l.layer === layer) : undefined;
+
+    const handleMove = (event: MapBrowserEvent) => {
+      if (event.dragging) {
+        setHovered([]);
+        return;
+      }
+      const items: HoveredItem[] = [];
+
+      // Vector hits first (topmost feature first) so they sit above raster rows.
+      map.forEachFeatureAtPixel(
+        event.pixel,
+        (feature, layer) => {
+          const chatLayer = chatLayerFor(layer);
+          const severity = feature.get('severity');
+          if (!chatLayer || typeof severity !== 'number') return;
+          const name = feature.get('name');
+          items.push({
+            layerName: chatLayer.name,
+            itemName: typeof name === 'string' ? name : undefined,
+            severity,
+          });
+        },
+        { layerFilter: (l) => !!chatLayerFor(l) },
+      );
+
+      // Raster pixels: read the source band value (rounded to its severity class).
+      chatLayers.forEach((chatLayer) => {
+        if (chatLayer.type !== 'Raster' || !chatLayer.visible) return;
+        const data = chatLayer.layer.getData(event.pixel);
+        if (!data || data instanceof DataView) return;
+        const value = data[0];
+        if (Number.isFinite(value) && value > 0)
+          items.push({ layerName: chatLayer.name, severity: Math.round(value) });
+      });
+
+      setHovered(items);
+    };
+
+    map.on('pointermove', handleMove);
+    return () => map.un('pointermove', handleMove);
+  }, [map, messages]);
+
   // Fit the view to a newly appended response's `bounds`. Guarded on the
   // response id so it fires once per response, not on every layer toggle.
   useEffect(() => {
@@ -171,7 +229,19 @@ const Maps: FC = () => {
         </div>
       )}
       <div ref={containerRef} className="absolute top-0 left-0 w-full h-full" />
-      <div className="absolute bottom-2 left-2 z-10">
+      <div className="absolute bottom-2 left-2 z-10 flex flex-col gap-2">
+        {hovered.length > 0 && (
+          <div className="flex flex-col gap-1">
+            {hovered.map((item, index) => (
+              <MapItemProperty
+                key={index}
+                layerName={item.layerName}
+                itemName={item.itemName}
+                severity={item.severity}
+              />
+            ))}
+          </div>
+        )}
         <BasemapSelector />
       </div>
     </div>

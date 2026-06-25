@@ -54,6 +54,7 @@ export const useChat = () => {
       provider,
       thread_id: threadId,
       geometry: toChatGeometry(geometry),
+      created_at: new Date().toISOString(),
     });
   };
 

@@ -44,6 +44,8 @@ export interface ChatRequest {
    * button; otherwise the hazard is inferred from the text.
    */
   hazard?: string | null;
+  /** ISO 8601 timestamp of when the request was created. */
+  created_at?: string;
 }
 
 /** Exposure metric for the AOI × hazard × asset layer. Open-ended; server may add keys. */

@@ -155,11 +155,11 @@ const VECTOR_OPACITY = 1;
 
 /**
  * Build the OpenLayers layers for a chat turn from its geo fields. Layers are
- * ordered bottom-to-top: the AOI outline, exposed assets, then the hazard
- * raster on top. A request only carries a drawn `geometry`; a response carries
- * the rest. Each layer is tagged with a name/description for the layer toggle
- * UI; these are derived from the source field for now. Everything is shown by
- * default.
+ * ordered bottom-to-top: the AOI outline, the hazard raster, then the exposed
+ * assets on top so the asset points/polygons stay readable over the raster. A
+ * request only carries a drawn `geometry`; a response carries the rest. Each
+ * layer is tagged with a name/description for the layer toggle UI; these are
+ * derived from the source field for now. Everything is shown by default.
  */
 export const buildChatLayers = (item: ChatRequest | ChatResponse): ChatLayer[] => {
   const layers: ChatLayer[] = [];
@@ -174,15 +174,6 @@ export const buildChatLayers = (item: ChatRequest | ChatResponse): ChatLayer[] =
         visible: true,
         opacity: VECTOR_OPACITY,
       });
-    if (item.features)
-      layers.push({
-        layer: vectorLayer(item.features, severityStyle(legend)),
-        type: vectorType(item.features),
-        name: 'Assets',
-        description: 'Exposed assets within the area.',
-        visible: true,
-        opacity: VECTOR_OPACITY,
-      });
     if (item.hazard_layer?.raster_url)
       layers.push({
         layer: rasterLayer(item.hazard_layer.raster_url, item.bounds, legend),
@@ -191,6 +182,15 @@ export const buildChatLayers = (item: ChatRequest | ChatResponse): ChatLayer[] =
         description: 'Clipped hazard severity raster.',
         visible: true,
         opacity: RASTER_OPACITY,
+      });
+    if (item.features)
+      layers.push({
+        layer: vectorLayer(item.features, severityStyle(legend)),
+        type: vectorType(item.features),
+        name: 'Assets',
+        description: 'Exposed assets within the area.',
+        visible: true,
+        opacity: VECTOR_OPACITY,
       });
   } else if (item.geometry) {
     layers.push({
