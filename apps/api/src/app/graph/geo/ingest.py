@@ -29,6 +29,9 @@ OVERPASS_MIRRORS = (
 AREA_CAP_KM2 = 1500.0
 BUFFER_DEG = 0.01
 RADIUS_KM = 12.0          # fallback AOI: box of this radius around the centre point
+ASSET_LAYERS = ("roads", "hospitals", "schools", "buildings")
+OVERPASS_TIMEOUT = 60          # client HTTP timeout (was 180) — fail over a stalled mirror fast
+OVERPASS_SERVER_TIMEOUT = 55   # Overpass server-side [timeout:] budget per query
 
 
 def _slug(place):
@@ -103,7 +106,7 @@ def _overpass(query, attempts=3):
     for attempt in range(attempts):
         for url in OVERPASS_MIRRORS:
             try:
-                r = requests.post(url, data={"data": query}, headers=HEADERS, timeout=180)
+                r = requests.post(url, data={"data": query}, headers=HEADERS, timeout=OVERPASS_TIMEOUT)
                 if r.status_code in (429, 504):
                     last = f"{r.status_code} from {url}"
                     continue
@@ -138,10 +141,18 @@ def source_raster(layer="hazard_flood"):
     return path
 
 
-def ensure_aoi(place=None, geometry=None):
+def ensure_aoi(place=None, geometry=None, layers=None):
     """Return a cached bundle of file paths for an AOI — resolved from a `place` name, or
     from a user-drawn `geometry` (GeoJSON Polygon or [minLon,minLat,maxLon,maxLat] bbox,
-    EPSG:4326). Fetches OSM once and caches it."""
+    EPSG:4326).
+
+    `layers` limits which OSM asset layers to fetch (a subset of ASSET_LAYERS); None
+    fetches all. Each layer is fetched once and cached, so asking later for a different
+    layer only fetches what's still missing. Fetching just the layer a question needs
+    (roads, not buildings) is the main lever on drawn-AOI latency: each Overpass
+    round-trip can stall for tens of seconds, so doing fewer of them is what matters.
+    """
+    needed = tuple(layers) if layers else ASSET_LAYERS
     cache = str(get_settings().cache_dir)
     if geometry is not None:
         boundary = _to_polygon(geometry)
@@ -150,57 +161,73 @@ def ensure_aoi(place=None, geometry=None):
         slug = _slug(place) or "_"
     adir = os.path.join(cache, slug)
     meta = os.path.join(adir, "meta.json")
-    if os.path.exists(meta):
-        return _bundle(adir, json.load(open(meta)))
 
-    if geometry is not None:
-        km2 = boundary.area * 111.0 * 108.0
-        if km2 > AREA_CAP_KM2:
-            raise ValueError(f"drawn area is too large (>{AREA_CAP_KM2:.0f} km²) — draw a smaller box")
-        name, how = "drawn area", "drawn"
+    # Resolve the AOI boundary once (or reload it from a prior fetch of this AOI).
+    if os.path.exists(meta):
+        info = json.load(open(meta))
+        boundary = shape(json.load(open(os.path.join(adir, "admin.geojson")))["features"][0]["geometry"])
     else:
-        km2, name, boundary, how = _boundary(place)
-    print(f"   [ingest: fetching '{name}' (~{km2:.0f} km²)…]")
-    os.makedirs(adir, exist_ok=True)
+        if geometry is not None:
+            km2 = boundary.area * 111.0 * 108.0
+            if km2 > AREA_CAP_KM2:
+                raise ValueError(f"drawn area is too large (>{AREA_CAP_KM2:.0f} km²) — draw a smaller box")
+            name, how = "drawn area", "drawn"
+        else:
+            km2, name, boundary, how = _boundary(place)
+        print(f"   [ingest: resolving '{name}' (~{km2:.0f} km²)…]")
+        os.makedirs(adir, exist_ok=True)
+        _write(adir, "admin", [_feature(boundary, {"name": name})])
+        info = {"name": name, "area_km2": round(km2), "how": how, "counts": {}}
+        json.dump(info, open(meta, "w"), indent=2)
+
+    # Fetch only the requested asset layers that aren't already cached.
     minx, miny, maxx, maxy = boundary.bounds
     bbox = f"{miny - BUFFER_DEG},{minx - BUFFER_DEG},{maxy + BUFFER_DEG},{maxx + BUFFER_DEG}"
-    _write(adir, "admin", [_feature(boundary, {"name": name})])
-
-    roads = []
-    for e in _overpass(f'[out:json][timeout:170];way["highway"]({bbox});out geom;'):
-        g = e.get("geometry") or []
-        if len(g) < 2:
+    fetched = False
+    for layer in needed:
+        if layer not in ASSET_LAYERS or os.path.exists(os.path.join(adir, f"{layer}.geojson")):
             continue
-        clipped = LineString([(p["lon"], p["lat"]) for p in g]).intersection(boundary)
-        for part in getattr(clipped, "geoms", [clipped]):
-            if getattr(part, "geom_type", "") == "LineString" and len(part.coords) >= 2:
-                roads.append(_feature(part, {"highway": e.get("tags", {}).get("highway", "")}))
-    _write(adir, "roads", roads)
+        features = _fetch_layer(layer, bbox, boundary)
+        _write(adir, layer, features)
+        info.setdefault("counts", {})[layer] = len(features)
+        fetched = True
+    if fetched:
+        json.dump(info, open(meta, "w"), indent=2)
+    return _bundle(adir, info)
 
-    counts = {"roads": len(roads)}
-    for amenity in ("hospital", "school"):
-        pts = []
-        for e in _overpass(f'[out:json][timeout:150];(node["amenity"="{amenity}"]({bbox});'
+
+def _fetch_layer(layer, bbox, boundary):
+    """Fetch one OSM asset layer within `bbox`, clipped/filtered to `boundary`."""
+    t = OVERPASS_SERVER_TIMEOUT
+    if layer == "roads":
+        out = []
+        for e in _overpass(f'[out:json][timeout:{t}];way["highway"]({bbox});out geom;'):
+            g = e.get("geometry") or []
+            if len(g) < 2:
+                continue
+            clipped = LineString([(p["lon"], p["lat"]) for p in g]).intersection(boundary)
+            for part in getattr(clipped, "geoms", [clipped]):
+                if getattr(part, "geom_type", "") == "LineString" and len(part.coords) >= 2:
+                    out.append(_feature(part, {"highway": e.get("tags", {}).get("highway", "")}))
+        return out
+    if layer in ("hospitals", "schools"):
+        amenity = "hospital" if layer == "hospitals" else "school"
+        out = []
+        for e in _overpass(f'[out:json][timeout:{t}];(node["amenity"="{amenity}"]({bbox});'
                            f'way["amenity"="{amenity}"]({bbox}););out center;'):
             lat = e.get("lat") or (e.get("center") or {}).get("lat")
             lon = e.get("lon") or (e.get("center") or {}).get("lon")
             if lat is not None and boundary.contains(Point(lon, lat)):
-                pts.append(_feature(Point(lon, lat), {"name": e.get("tags", {}).get("name", "")}))
-        layer = amenity + "s"
-        _write(adir, layer, pts)
-        counts[layer] = len(pts)
-
-    buildings = []
-    for e in _overpass(f'[out:json][timeout:170];way["building"]({bbox});out center;'):
-        c = e.get("center") or {}
-        if c and boundary.contains(Point(c["lon"], c["lat"])):
-            buildings.append(_feature(Point(c["lon"], c["lat"]), {}))
-    _write(adir, "buildings", buildings)
-    counts["buildings"] = len(buildings)
-
-    info = {"name": name, "area_km2": round(km2), "how": how, "counts": counts}
-    json.dump(info, open(meta, "w"), indent=2)
-    return _bundle(adir, info)
+                out.append(_feature(Point(lon, lat), {"name": e.get("tags", {}).get("name", "")}))
+        return out
+    if layer == "buildings":
+        out = []
+        for e in _overpass(f'[out:json][timeout:{t}];way["building"]({bbox});out center;'):
+            c = e.get("center") or {}
+            if c and boundary.contains(Point(c["lon"], c["lat"])):
+                out.append(_feature(Point(c["lon"], c["lat"]), {}))
+        return out
+    raise ValueError(f"unknown asset layer: {layer}")
 
 
 def _bundle(adir, info):

@@ -114,11 +114,25 @@ def route(state: State, config) -> dict:
     return out
 
 
+def _needed_layers(state: State):
+    """Only the OSM asset layer(s) the chosen op actually reads — so a roads question
+    doesn't trigger a buildings fetch (the dominant drawn-AOI latency). None = fetch all."""
+    op = state.get("operation")
+    if op == "roads_in_hazard":
+        return ["roads"]
+    layer = (state.get("op_args") or {}).get("layer")
+    if op in ("count_in_hazard", "count_features") and layer in ingest.ASSET_LAYERS:
+        return [layer]
+    return None
+
+
 def fetch(state: State) -> dict:
     """Acquire the OSM data + clip the selected hazard rasters to the AOI (place or drawn geometry)."""
     try:
         geom = state.get("req_geometry")
-        aoi = ingest.ensure_aoi(geometry=geom) if geom is not None else ingest.ensure_aoi(state["place"])
+        needed = _needed_layers(state)
+        aoi = (ingest.ensure_aoi(geometry=geom, layers=needed) if geom is not None
+               else ingest.ensure_aoi(state["place"], layers=needed))
         for layer in state.get("tiffs") or []:
             aoi = {**aoi, layer: ingest.hazard_clip(aoi, layer)}
         c = aoi.get("counts") or {}
