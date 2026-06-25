@@ -54,9 +54,10 @@ math is deterministic Python**. Computed risk grids are written into the per-AOI
 - ☑ **S1.6** `verify.py` CLI — `python -m app.graph.geo.verify <name>…` prints a PASS/FAIL table
 - ☑ **S1.T1** `[fast]` `windowed_stats` on a hand-built 1–5 fixture returns correct dtype/min/max/nodata
 - ☑ **S1.T2** `[slow]` `verify_raster('hazard_flood')` → int8, 0–5, PASS
-- ☑ **S1.T3** `[slow]` `verify_raster('vulnerability_pop_all_total')` → reports 0–4 (scale mismatch visible)
+- ☑ **S1.T3** `[slow]` `verify_raster('vulnerability_pop_all_total')` → PASS; report exposes its sampled range (0–5; the earlier "0–4" was a coarse-sample artifact)
 - ☑ **S1.T4** `[slow]` `verify_raster('global_pc_h100glob')` → uint32, max ~thousands, PASS against mm-declared schema
 - ☑ **S1.T5** `[slow]` negative: declare `units: metres, valid_max: 5` on `global_pc_h100glob` → verify **FAILs** with explicit mismatch
+- ☑ **S1.T6** `[fast]` coverage: every reclassed (0–5) catalog tif has a schema entry — no drift
 
 ### ☐ S2 — Grid-align a 1–5 raster onto one AOI grid
 *Goal:* bring any 1–5 tif onto the `hazard_flood` AOI grid with no shift or invented classes. *Demo:* flood clip + aligned vuln print identical width/height/transform/crs.
