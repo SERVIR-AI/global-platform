@@ -1,5 +1,5 @@
 import { buildChatLayers } from '@/lib/chatLayers';
-import type { ChatItem, ChatProvider, ChatRequest, ChatResponse } from '@/types/chat';
+import type { ChatItem, ChatLayer, ChatProvider, ChatRequest, ChatResponse } from '@/types/chat';
 import { create } from 'zustand';
 
 interface ChatStore {
@@ -8,6 +8,10 @@ interface ChatStore {
   messages: ChatItem[];
   /** Append a turn (request or response); its map layers are derived on add. */
   appendMessage: (message: ChatRequest | ChatResponse) => void;
+  /** Flip a layer's `visible` flag; the map reconciler picks it up. */
+  toggleLayer: (layer: ChatLayer) => void;
+  /** Set a layer's opacity (0..1); the map reconciler applies it. */
+  setLayerOpacity: (layer: ChatLayer, opacity: number) => void;
   threadId: string;
 }
 
@@ -15,11 +19,30 @@ interface ChatStore {
 const newThreadId = () =>
   globalThis.crypto?.randomUUID?.() ?? `t-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
+// Return a new messages array with `target` replaced by `update(target)`,
+// touching only the turn (and layer) that owns it.
+const updateLayer = (
+  messages: ChatItem[],
+  target: ChatLayer,
+  update: (layer: ChatLayer) => ChatLayer,
+): ChatItem[] =>
+  messages.map((m) =>
+    m.layers.includes(target)
+      ? { ...m, layers: m.layers.map((l) => (l === target ? update(l) : l)) }
+      : m,
+  );
+
 export const useChatStore = create<ChatStore>((set) => ({
   provider: 'gemini',
   setProvider: (provider) => set({ provider }),
   messages: [],
   appendMessage: (message) =>
     set((s) => ({ messages: [...s.messages, { ...message, layers: buildChatLayers(message) }] })),
+  toggleLayer: (target) =>
+    set((s) => ({
+      messages: updateLayer(s.messages, target, (l) => ({ ...l, visible: !l.visible })),
+    })),
+  setLayerOpacity: (target, opacity) =>
+    set((s) => ({ messages: updateLayer(s.messages, target, (l) => ({ ...l, opacity })) })),
   threadId: newThreadId(),
 }));

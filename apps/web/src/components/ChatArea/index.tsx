@@ -1,16 +1,10 @@
 import { FC, useEffect, useRef } from 'react';
 import { useChatPending } from '@/hooks/useChat';
-import type { ChatItem, ChatMessage } from '@/types/chat';
 import { cn } from '../../lib/utils';
 import { useChatStore } from '../../stores/ChatStore';
 import ChatBubble from './ChatBubble';
 import InputMessage from './InputMessage';
 import { AudioWaveform, Database, DropletOff, Droplets, Flame, Tornado } from 'lucide-react';
-
-// The bubble text for a turn: an assistant response carries one `message`; a
-// request carries the conversation, whose last entry is what the user just sent.
-const itemMessage = (item: ChatItem): ChatMessage =>
-  'message' in item ? item.message : item.messages[item.messages.length - 1];
 
 const BringYourOwnDataButton: FC = () => (
   <button className="underline link tooltip text-xs text-zinc-400" data-tip="Coming Soon">
@@ -74,7 +68,7 @@ const ChatArea: FC = () => {
           className="flex-1 min-h-0 overflow-y-auto py-4 px-8 flex flex-col gap-3"
         >
           {messages.map((m, i) => (
-            <ChatBubble key={i} message={itemMessage(m)} />
+            <ChatBubble key={i} chatItem={m} />
           ))}
           {loading && (
             <div className="flex justify-start">

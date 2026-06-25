@@ -2,6 +2,7 @@ import { FC, useEffect, useRef } from 'react';
 import Map from 'ol/Map';
 import View from 'ol/View';
 import Feature from 'ol/Feature';
+import type BaseLayer from 'ol/layer/Base';
 import TileLayer from 'ol/layer/Tile';
 import VectorLayer from 'ol/layer/Vector';
 import OSM from 'ol/source/OSM';
@@ -9,10 +10,12 @@ import XYZ from 'ol/source/XYZ';
 import VectorSource from 'ol/source/Vector';
 import Draw, { createBox } from 'ol/interaction/Draw';
 import Point from 'ol/geom/Point';
+import { transformExtent } from 'ol/proj';
 import type { FeatureLike } from 'ol/Feature';
 import { Circle as CircleStyle, Fill, Stroke, Style } from 'ol/style';
 import { createDefaultStyle } from 'ol/style/Style';
 import 'ol/ol.css';
+import { useChatStore } from '../../stores/ChatStore';
 import { useCustomGeometryStore } from '../../stores/CustomGeometryStore';
 import { useMapStore } from '../../stores/MapStore';
 import BasemapSelector from './BasemapSelector';
@@ -38,13 +41,18 @@ const pointStyle = new Style({
 const geometryStyle = (feature: FeatureLike, resolution: number) =>
   feature.getGeometry() instanceof Point ? pointStyle : createDefaultStyle(feature, resolution);
 
+const FIT_OPTIONS = { padding: [40, 40, 40, 40], duration: 300, maxZoom: 16 };
+
 const Maps: FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<Map | null>(null);
   const sourceRef = useRef<VectorSource | null>(null);
   const basemapLayerRef = useRef<TileLayer | null>(null);
+  const fittedIdRef = useRef<string | null>(null);
 
   const basemap = useMapStore((s) => s.basemap);
+  const map = useMapStore((s) => s.map);
+  const messages = useChatStore((s) => s.messages);
   const geometry = useCustomGeometryStore((s) => s.geometry);
   const drawMode = useCustomGeometryStore((s) => s.drawMode);
   const setGeometry = useCustomGeometryStore((s) => s.setGeometry);
@@ -68,12 +76,14 @@ const Maps: FC = () => {
       view: new View({ center: [11678454, 1295712], zoom: 7 }),
     });
     mapRef.current = map;
+    useMapStore.getState().setMap(map);
 
     return () => {
       map.setTarget(undefined);
       mapRef.current = null;
       sourceRef.current = null;
       basemapLayerRef.current = null;
+      useMapStore.getState().setMap(null);
     };
   }, []);
 
@@ -81,6 +91,39 @@ const Maps: FC = () => {
   useEffect(() => {
     basemapLayerRef.current?.setSource(createBasemapSource(basemap));
   }, [basemap]);
+
+  // Reconcile chat layers onto the map: every visible layer is present, every
+  // chat-managed layer that's now hidden (or gone) is removed — base layers
+  // (basemap, drawn geometry) are left untouched. Re-runs on message/visibility
+  // changes and whenever the map is (re)built, so toggles and panel remounts
+  // both apply.
+  useEffect(() => {
+    if (!map) return;
+    const chatLayers = messages.flatMap((m) => m.layers);
+    const managed = new Set<BaseLayer>(chatLayers.map((l) => l.layer));
+    const desired = new Set<BaseLayer>(chatLayers.filter((l) => l.visible).map((l) => l.layer));
+    const collection = map.getLayers();
+    collection
+      .getArray()
+      .filter((l) => managed.has(l) && !desired.has(l))
+      .forEach((l) => collection.remove(l));
+    desired.forEach((l) => {
+      if (!collection.getArray().includes(l)) collection.push(l);
+    });
+    chatLayers.forEach((l) => {
+      if (l.visible) l.layer.setOpacity(l.opacity);
+    });
+  }, [map, messages]);
+
+  // Fit the view to a newly appended response's `bounds`. Guarded on the
+  // response id so it fires once per response, not on every layer toggle.
+  useEffect(() => {
+    if (!map) return;
+    const last = messages[messages.length - 1];
+    if (!last || !('id' in last) || !last.bounds || last.id === fittedIdRef.current) return;
+    fittedIdRef.current = last.id;
+    map.getView().fit(transformExtent(last.bounds, 'EPSG:4326', 'EPSG:3857'), FIT_OPTIONS);
+  }, [map, messages]);
 
   // Sync the store's geometry into the vector layer.
   useEffect(() => {

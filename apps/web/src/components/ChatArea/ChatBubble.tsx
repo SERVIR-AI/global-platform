@@ -1,8 +1,9 @@
 import { cn } from '@/lib/utils';
-import type { ChatMessage } from '@/types/chat';
+import type { ChatItem, ChatMessage } from '@/types/chat';
 import { FC } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import ChatMapLayer from './ChatMapLayer';
 
 // Tailwind's preflight strips default margins/list styling, so map the elements
 // that show up in assistant replies to get sensible spacing inside a bubble.
@@ -44,10 +45,14 @@ const markdownComponents: Components = {
   ),
 };
 
-const ChatBubble: FC<{ message: ChatMessage }> = ({ message }) => {
+const itemMessage = (item: ChatItem): ChatMessage =>
+  'message' in item ? item.message : item.messages[item.messages.length - 1];
+
+const ChatBubble: FC<{ chatItem: ChatItem }> = ({ chatItem }) => {
+  const message = itemMessage(chatItem);
   const isUser = message.role === 'user';
   return (
-    <div className={cn('flex', isUser ? 'justify-end' : 'justify-start')}>
+    <div className={cn('flex flex-col gap-2', isUser ? 'items-end' : 'items-start')}>
       <div
         className={cn(
           'w-fit max-w-[90%] rounded-xl px-4 py-2',
@@ -63,6 +68,11 @@ const ChatBubble: FC<{ message: ChatMessage }> = ({ message }) => {
             {message.content}
           </ReactMarkdown>
         )}
+      </div>
+      <div className="flex flex-col gap-1">
+        {chatItem.layers.map((layer, index) => (
+          <ChatMapLayer key={index} layer={layer} />
+        ))}
       </div>
     </div>
   );

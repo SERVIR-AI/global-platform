@@ -38,11 +38,11 @@ export const useChat = () => {
     mutationKey: queryKeys.chat.all(),
     mutationFn: (request: ChatRequest) => postChat(request),
     // Echo the request into the store immediately; append the response on success.
-    onMutate: (request) => appendMessage(request),
-    onSuccess: (data) => {
-      appendMessage(data);
+    onMutate: (request) => {
+      appendMessage(request);
       setGeometry(null);
     },
+    onSuccess: (data) => appendMessage(data),
     onError: (err) => appendMessage(errorResponse(err, threadId, provider)),
   });
 

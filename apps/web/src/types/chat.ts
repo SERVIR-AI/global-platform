@@ -124,7 +124,7 @@ export interface ChatResponse {
  * The store keeps one `ChatItem` per turn so the map can render each turn's
  * layers without re-deriving them. See `buildChatLayers`.
  */
-export type ChatItem = (ChatRequest | ChatResponse) & { layers: Layer[] };
+export type ChatItem = (ChatRequest | ChatResponse) & { layers: ChatLayer[] };
 
 export interface HealthResponse {
   status: string;
@@ -143,4 +143,28 @@ export interface ValidationError {
 
 export interface HTTPValidationError {
   detail?: ValidationError[];
+}
+
+/**
+ * Kind of layer, for the layer toggle UI. Vector geometries map to their
+ * GeoJSON type; `Rectangle` is a bbox, `Raster` is the hazard GeoTIFF, and
+ * `Vector` is the fallback for a mixed-geometry collection.
+ */
+export type ChatLayerType =
+  | 'Point'
+  | 'LineString'
+  | 'Polygon'
+  | 'Rectangle'
+  | 'Raster'
+  | 'Vector';
+
+export interface ChatLayer {
+  layer: Layer;
+  type: ChatLayerType;
+  name: string;
+  description: string;
+  /** Whether the layer should be on the map; the map is reconciled to match. */
+  visible: boolean;
+  /** Layer opacity in 0..1; the reconciler applies it to the map layer. */
+  opacity: number;
 }
