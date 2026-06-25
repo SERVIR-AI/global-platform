@@ -1,4 +1,5 @@
 import type { Feature, FeatureCollection, Point, Polygon } from 'geojson';
+import type Layer from 'ol/layer/Layer';
 
 export type ChatProvider = 'claude' | 'gemini' | 'openai';
 
@@ -116,6 +117,14 @@ export interface ChatResponse {
   hazard_layer?: HazardLayer | null;
   created_at?: string;
 }
+
+/**
+ * A single chat turn — the request the user sent or the response the server
+ * returned — bundled with the OpenLayers layers built from its geo fields.
+ * The store keeps one `ChatItem` per turn so the map can render each turn's
+ * layers without re-deriving them. See `buildChatLayers`.
+ */
+export type ChatItem = (ChatRequest | ChatResponse) & { layers: Layer[] };
 
 export interface HealthResponse {
   status: string;

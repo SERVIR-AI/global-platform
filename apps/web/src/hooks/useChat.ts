@@ -2,7 +2,7 @@ import { ApiError, postChat } from '@/lib/api';
 import { queryKeys } from '@/lib/queryKeys';
 import { useChatStore } from '@/stores/ChatStore';
 import { toChatGeometry, useCustomGeometryStore } from '@/stores/CustomGeometryStore';
-import type { HTTPValidationError } from '@/types/chat';
+import type { ChatProvider, ChatRequest, ChatResponse, HTTPValidationError } from '@/types/chat';
 import { useIsMutating, useMutation } from '@tanstack/react-query';
 
 const errorMessage = (err: unknown): string => {
@@ -12,6 +12,16 @@ const errorMessage = (err: unknown): string => {
   }
   return `Request failed: ${String(err)}`;
 };
+
+// A failed call still needs to land in the store as a turn; wrap the error text
+// in a minimal assistant ChatResponse (no geo fields, so no layers).
+const errorResponse = (err: unknown, threadId: string, provider: ChatProvider): ChatResponse => ({
+  id: globalThis.crypto?.randomUUID?.() ?? `err-${Date.now()}`,
+  thread_id: threadId,
+  message: { role: 'assistant', content: errorMessage(err) },
+  provider,
+  model: '',
+});
 
 /**
  * Owns the POST /api/chat round-trip. The store keeps client state (messages,
@@ -26,25 +36,25 @@ export const useChat = () => {
 
   const mutation = useMutation({
     mutationKey: queryKeys.chat.all(),
-    mutationFn: (content: string) =>
-      postChat({
-        messages: [{ role: 'user', content }],
-        provider,
-        thread_id: threadId,
-        geometry: toChatGeometry(geometry),
-      }),
-    onMutate: (content) => appendMessage({ role: 'user', content }),
+    mutationFn: (request: ChatRequest) => postChat(request),
+    // Echo the request into the store immediately; append the response on success.
+    onMutate: (request) => appendMessage(request),
     onSuccess: (data) => {
-      appendMessage(data.message);
+      appendMessage(data);
       setGeometry(null);
     },
-    onError: (err) => appendMessage({ role: 'assistant', content: errorMessage(err) }),
+    onError: (err) => appendMessage(errorResponse(err, threadId, provider)),
   });
 
   const send = (text: string) => {
     const content = text.trim();
     if (!content || mutation.isPending) return;
-    mutation.mutate(content);
+    mutation.mutate({
+      messages: [{ role: 'user', content }],
+      provider,
+      thread_id: threadId,
+      geometry: toChatGeometry(geometry),
+    });
   };
 
   return { send, isPending: mutation.isPending };

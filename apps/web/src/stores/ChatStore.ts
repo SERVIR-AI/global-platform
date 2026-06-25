@@ -1,11 +1,13 @@
-import type { ChatMessage, ChatProvider } from '@/types/chat';
+import { buildChatLayers } from '@/lib/chatLayers';
+import type { ChatItem, ChatProvider, ChatRequest, ChatResponse } from '@/types/chat';
 import { create } from 'zustand';
 
 interface ChatStore {
   provider: ChatProvider;
   setProvider: (provider: ChatProvider) => void;
-  messages: ChatMessage[];
-  appendMessage: (message: ChatMessage) => void;
+  messages: ChatItem[];
+  /** Append a turn (request or response); its map layers are derived on add. */
+  appendMessage: (message: ChatRequest | ChatResponse) => void;
   threadId: string;
 }
 
@@ -17,6 +19,7 @@ export const useChatStore = create<ChatStore>((set) => ({
   provider: 'gemini',
   setProvider: (provider) => set({ provider }),
   messages: [],
-  appendMessage: (message) => set((s) => ({ messages: [...s.messages, message] })),
+  appendMessage: (message) =>
+    set((s) => ({ messages: [...s.messages, { ...message, layers: buildChatLayers(message) }] })),
   threadId: newThreadId(),
 }));
