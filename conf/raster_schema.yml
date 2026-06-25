@@ -76,3 +76,144 @@ layers:
     units: mm
     scale: 1
     nodata: 0.0
+
+  # --- Expected: reclassed 1-5 class layers (range-checked now; dtype/nodata confirmed on
+  #     first live verify). Declared so every reclassed catalog tif has a contract before use. ---
+  # hazard
+  hazard_cyclone:
+    role: hazard
+    valid_min: 0
+    valid_max: 5
+    units: class
+  hazard_drought:
+    role: hazard
+    valid_min: 0
+    valid_max: 5
+    units: class
+  hazard_earthquake:
+    role: hazard
+    valid_min: 0
+    valid_max: 5
+    units: class
+  hazard_fire:
+    role: hazard
+    valid_min: 0
+    valid_max: 5
+    units: class
+  hazard_flashflood:
+    role: hazard
+    valid_min: 0
+    valid_max: 5
+    units: class
+  hazard_landslides:
+    role: hazard
+    valid_min: 0
+    valid_max: 5
+    units: class
+  hazard_storm:
+    role: hazard
+    valid_min: 0
+    valid_max: 5
+    units: class
+  hazard_tsunami:
+    role: hazard
+    valid_min: 0
+    valid_max: 5
+    units: class
+  # risk
+  risk_cyclone:
+    role: risk
+    valid_min: 0
+    valid_max: 5
+    units: class
+  risk_drought:
+    role: risk
+    valid_min: 0
+    valid_max: 5
+    units: class
+  risk_earthquake:
+    role: risk
+    valid_min: 0
+    valid_max: 5
+    units: class
+  risk_fire:
+    role: risk
+    valid_min: 0
+    valid_max: 5
+    units: class
+  risk_flashflood:
+    role: risk
+    valid_min: 0
+    valid_max: 5
+    units: class
+  risk_landslide:
+    role: risk
+    valid_min: 0
+    valid_max: 5
+    units: class
+  risk_storm:
+    role: risk
+    valid_min: 0
+    valid_max: 5
+    units: class
+  risk_tsunami:
+    role: risk
+    valid_min: 0
+    valid_max: 5
+    units: class
+  # vulnerability_reclass
+  vulnerability_F_15_60:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class
+  vulnerability_F_above60:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class
+  vulnerability_F_infant:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class
+  vulnerability_M_15_60:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class
+  vulnerability_M_above60:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class
+  vulnerability_M_infant:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class
+  vulnerability_reclass_bldheight:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class
+  vulnerability_reclass_gdp:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class
+  vulnerability_reclass_lai:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class
+  vulnerability_reclass_tcc:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class
+  vulnerability_reclass_wdpa:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class

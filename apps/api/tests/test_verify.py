@@ -5,14 +5,21 @@ global_pc_h100glob is millimetres (not metres), and a wrong 'metres' declaration
 Run the slow ones with: GRP_RUN_SLOW=1 pytest tests/test_verify.py
 """
 import os
+import re
 
 import numpy as np
 import pytest
 import rasterio
 from rasterio.transform import from_bounds
 
-from app.graph.geo import verify
+from app.graph.geo import drive_tifs, verify
+from app.graph.geo import schema as schema_mod
 from app.graph.geo.rasterstats import windowed_stats
+
+# Reclassed (0-5 class) catalog tifs must each have a schema contract. Raw/continuous
+# layers are declared per-slice (their cutoffs/units land in S9); forest/mangrove aren't risk inputs.
+_RECLASSED = re.compile(
+    r"^(hazard_|risk_|vulnerability_reclass_|vulnerability_(M|F)_(infant|15_60|above60)$|vulnerability_pop_all_total$)")
 
 slow = pytest.mark.skipif(
     os.getenv("GRP_RUN_SLOW") != "1", reason="slow: live Drive download (set GRP_RUN_SLOW=1)")
@@ -24,6 +31,13 @@ def _make_raster(path, arr, nodata=None, crs="EPSG:4326"):
                        dtype=arr.dtype.name, crs=crs, nodata=nodata,
                        transform=from_bounds(0, 0, 0.01, 0.01, w, h)) as dst:
         dst.write(arr, 1)
+
+
+def test_every_reclassed_catalog_tif_has_a_schema_entry():
+    """S1 coverage [fast] every reclassed (0-5) catalog tif has a declared contract — no drift."""
+    stems = [k[:-4] for k in drive_tifs.DRIVE_TIFS]
+    missing = sorted(s for s in stems if _RECLASSED.match(s) and schema_mod.schema_for(s) is None)
+    assert not missing, f"reclassed catalog tifs without a schema entry: {missing}"
 
 
 def test_windowed_stats_reads_dtype_range_nodata(tmp_path):
