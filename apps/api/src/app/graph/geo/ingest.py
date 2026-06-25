@@ -17,7 +17,7 @@ from rasterio.windows import from_bounds
 from shapely.geometry import LineString, Point, box, mapping, shape
 
 from ...config import get_settings
-from . import tiffs
+from . import drive_tifs, tiffs
 
 HEADERS = {"User-Agent": "grp-mvp/0.1 (disaster-risk research prototype)"}
 NOMINATIM = "https://nominatim.openstreetmap.org"
@@ -124,17 +124,29 @@ def _drive_id(url):
 
 
 def source_raster(layer="hazard_flood"):
-    """The full hazard raster for `layer`, downloaded once if it isn't present."""
+    """The full source raster for `layer`, downloaded once if it isn't present.
+
+    `layer` may be a tiffs.yml key (the 9 chat hazards, which also carry rich metadata)
+    or any filename/stem in the Drive catalog — the vulnerability, raw, and risk layers
+    the risk pipeline needs. The Drive id is resolved through drive_tifs (the single id
+    map), falling back to a tiffs.yml download_url for back-compat.
+    """
     settings = get_settings()
-    meta = tiffs.entry(layer)
-    path = os.path.join(settings.tiffs_dir, os.path.basename(meta["local_path"]))
+    try:
+        meta = tiffs.entry(layer)
+        fname = os.path.basename(meta["local_path"])
+        fallback_url = meta.get("download_url")
+    except ValueError:                 # not a tiffs.yml layer -> treat as a catalog filename/stem
+        fname = layer if layer.endswith(".tif") else f"{layer}.tif"
+        fallback_url = None
+    path = os.path.join(settings.tiffs_dir, fname)
     if not os.path.exists(path):
-        url = meta.get("download_url")
-        if not url:
-            raise ValueError(f"raster for '{layer}' not at {path} and no download_url in tiffs.yml")
+        fid = drive_tifs.drive_id(fname) or (_drive_id(fallback_url) if fallback_url else None)
+        if not fid:
+            raise ValueError(f"no Drive id for '{layer}' (looked up '{fname}' in drive_tifs + tiffs.yml)")
         os.makedirs(settings.tiffs_dir, exist_ok=True)
         import gdown
-        gdown.download(id=_drive_id(url), output=path, quiet=True)
+        gdown.download(id=fid, output=path, quiet=True)
     return path
 
 
