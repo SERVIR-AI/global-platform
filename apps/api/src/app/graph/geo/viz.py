@@ -21,12 +21,14 @@ from . import store, tiffs
 # A generic low->high severity ramp (1..5). One source of truth for feature colors,
 # the raster ramp, and the legend swatches.
 SEVERITY_COLORS = {1: "#ffffb2", 2: "#fecc5c", 3: "#fd8d3c", 4: "#f03b20", 5: "#bd0026"}
+_DEFAULT_LABELS = {1: "Very low", 2: "Low", 3: "Moderate", 4: "High", 5: "Very high"}
 
 
 def legend_colored(hazard):
-    """{class: {label, color}} for `hazard` — server owns the colors."""
+    """{class: {label, color}} for `hazard` — server owns the colors. Falls back to a generic
+    severity ramp when the layer carries no catalog legend (e.g. a user-uploaded BYOD layer)."""
     labels = tiffs.legend(hazard) if hazard else {}
-    return {s: {"label": labels.get(s, f"Class {s}"), "color": SEVERITY_COLORS[s]} for s in range(1, 6)}
+    return {s: {"label": labels.get(s, _DEFAULT_LABELS[s]), "color": SEVERITY_COLORS[s]} for s in range(1, 6)}
 
 
 def _features(path):

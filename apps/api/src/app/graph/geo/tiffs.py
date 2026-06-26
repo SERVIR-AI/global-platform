@@ -27,8 +27,12 @@ def descriptions():
 
 
 def legend(layer):
-    """{class:int -> 'label (range)'} for a hazard layer, or {} if none is defined."""
-    leg = entry(layer).get("legend") or {}
+    """{class:int -> 'label (range)'} for a hazard layer, or {} if it has none or isn't in
+    the catalog (e.g. a user-uploaded BYOD layer — the caller falls back to a default ramp)."""
+    try:
+        leg = entry(layer).get("legend") or {}
+    except ValueError:
+        return {}
     return {int(k): str(v).strip() for k, v in leg.items()}
 
 

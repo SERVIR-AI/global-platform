@@ -3,15 +3,9 @@ import { useChatPending } from '@/hooks/useChat';
 import { cn } from '../../lib/utils';
 import { useChatStore } from '../../stores/ChatStore';
 import ChatBubble from './ChatBubble';
+import DataUpload from './DataUpload';
 import InputMessage from './InputMessage';
-import { AudioWaveform, Database, DropletOff, Droplets, Flame, Tornado } from 'lucide-react';
-
-const BringYourOwnDataButton: FC = () => (
-  <button className="underline link tooltip text-xs text-zinc-400" data-tip="Coming Soon">
-    <Database className="inline mr-1 w-3 h-3" />
-    Bring your own data
-  </button>
-);
+import { AudioWaveform, DropletOff, Droplets, Flame, Tornado } from 'lucide-react';
 
 const ChatArea: FC = () => {
   const messages = useChatStore((s) => s.messages);
@@ -59,7 +53,7 @@ const ChatArea: FC = () => {
               <Flame className="inline mr-1 w-3 h-3" />
               Fire
             </span>
-            <BringYourOwnDataButton />
+            <DataUpload />
           </div>
         </div>
       ) : (
@@ -87,7 +81,7 @@ const ChatArea: FC = () => {
       >
         {!welcome && (
           <div className="self-end">
-            <BringYourOwnDataButton />
+            <DataUpload />
           </div>
         )}
         <InputMessage />

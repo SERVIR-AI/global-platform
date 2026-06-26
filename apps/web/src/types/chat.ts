@@ -142,6 +142,29 @@ export interface ChatResponse {
  */
 export type ChatItem = (ChatRequest | ChatResponse) & { layers: ChatLayer[] };
 
+/** Result of `POST /api/tiffs` — the verification report for an uploaded GeoTIFF. */
+export interface TiffUploadResponse {
+  /** true if the file passed verification and was registered for the thread. */
+  ok: boolean;
+  /** The registered layer name (e.g. `byod_flood_ab12cd34`), or null on failure. */
+  layer: string | null;
+  hazard_label: string;
+  /** Why it failed verification (empty on pass). */
+  mismatches: string[];
+  /** Soft signals that didn't fail the gate (e.g. non-EPSG:4326). */
+  warnings: string[];
+  /** A summary of what was observed in the raster. */
+  observed: {
+    dtype?: string | null;
+    crs_epsg?: number | null;
+    sampled_min?: number | null;
+    sampled_max?: number | null;
+    sampled_distinct?: number | null;
+    width?: number | null;
+    height?: number | null;
+  };
+}
+
 export interface ValidationError {
   loc: (string | number)[];
   msg: string;

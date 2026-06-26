@@ -1,4 +1,9 @@
-import type { ChatRequest, ChatResponse, HTTPValidationError } from '@/types/chat';
+import type {
+  ChatRequest,
+  ChatResponse,
+  HTTPValidationError,
+  TiffUploadResponse,
+} from '@/types/chat';
 
 /**
  * Error thrown when an /api call returns a non-2xx response. Carries the HTTP
@@ -47,3 +52,19 @@ export const postChat = (payload: ChatRequest, signal?: AbortSignal): Promise<Ch
     body: JSON.stringify(payload),
     signal,
   });
+
+/**
+ * POST /api/tiffs — upload a GeoTIFF (multipart). The browser sets the multipart
+ * Content-Type/boundary, so this bypasses the JSON `request` helper. A failed
+ * *verification* still returns 200 with `ok:false` (handled by the caller); only a
+ * malformed request (4xx) throws.
+ */
+export const uploadTiff = async (
+  form: FormData,
+  signal?: AbortSignal,
+): Promise<TiffUploadResponse> => {
+  const res = await fetch(`${API_BASE_URL}/api/tiffs`, { method: 'POST', body: form, signal });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new ApiError(res.status, body);
+  return body as TiffUploadResponse;
+};

@@ -24,7 +24,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from . import prompts
-from .geo import combine, ingest, operations, resolver, tiffs, trace
+from .geo import byod_registry, combine, ingest, operations, resolver, tiffs, trace
 
 
 def _add(left: list | None, right: list | None) -> list:
@@ -95,6 +95,16 @@ def _apply_choice(state: State) -> dict:
             "trace": [f"choice → {chosen[0]}: {chosen[1]}"]}
 
 
+def _route_menu(thread_id) -> dict:
+    """The layers the route node offers: the built-in catalog plus any BYOD layers the user
+    uploaded and verified in THIS thread. Per-thread, so one user's layer never leaks into
+    another's menu (or the tool-schema enum that constrains which layer the model may pick)."""
+    layers = tiffs.descriptions()
+    if thread_id:
+        layers = {**layers, **byod_registry.descriptions_for(thread_id)}
+    return layers
+
+
 def route(state: State, config) -> dict:
     """LLM picks the operation + place + hazard layers. Records intent; runs nothing.
     If we're resuming a pending L1/L2 choice, apply it without an LLM call."""
@@ -104,7 +114,7 @@ def route(state: State, config) -> dict:
     model = config["configurable"]["model"]
     geom = state.get("req_geometry")
 
-    layers = tiffs.descriptions()
+    layers = _route_menu(config["configurable"].get("thread_id"))
     system = prompts.system_prompt() + "\n\n" + _layer_note(layers)
     if geom is not None:
         system += ("\n\nThe user has drawn an area on the map, so the area is already given "

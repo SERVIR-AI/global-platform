@@ -22,6 +22,7 @@ class VerifyReport:
     declared: dict
     observed: dict
     mismatches: list = field(default_factory=list)
+    warnings: list = field(default_factory=list)   # soft signals that don't fail the gate
 
     def __str__(self):
         o = self.observed
@@ -30,6 +31,7 @@ class VerifyReport:
                 f"nodata={o.get('nodata')} crs=EPSG:{o.get('crs_epsg')} "
                 f"px={o.get('pixel_size_deg')} size={o.get('width')}x{o.get('height')}")
         body = "".join("\n      x " + m for m in self.mismatches)
+        body += "".join("\n      ! " + w for w in self.warnings)
         return head + "\n" + line + body
 
 
