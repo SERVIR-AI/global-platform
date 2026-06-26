@@ -25,6 +25,27 @@ def _usage(usages: list[dict]) -> Usage | None:
     return Usage(input_tokens=total_in, output_tokens=total_out, total_tokens=total_in + total_out)
 
 
+# Short, layman button labels for the 3-way ask (the agent's option keys -> what a user sees).
+_CHOICE_LABELS = {
+    "exposure": "Exposure — what sits in the hazard zone",
+    "risk-L1": "Risk — official precomputed",
+    "risk-L2": "Risk — recompute from layers",
+}
+
+
+def _choices(awaiting: dict | None) -> list[dict] | None:
+    """Map the agent's paused options to clickable buttons: [{label, value}].
+
+    `value` is the 1-based index the resolver already accepts as a reply, so a click
+    sends the same thing a user typing "1"/"2"/"3" would.
+    """
+    options = (awaiting or {}).get("options")
+    if not options:
+        return None
+    return [{"label": _CHOICE_LABELS.get(key, key), "value": str(i + 1)}
+            for i, (key, *_rest) in enumerate(options)]
+
+
 @router.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
     settings = get_settings()
@@ -59,6 +80,10 @@ def chat(request: ChatRequest) -> ChatResponse:
         except Exception:  # noqa: BLE001 - visualization is best-effort; never break the answer
             geo = {}
 
+    # When the agent paused to ask (exposure vs precomputed-risk L1 vs recomputed-risk L2),
+    # surface the options as buttons: the user clicks one and we send its `value` as the reply.
+    choices = _choices(result.get("awaiting_choice"))
+
     return ChatResponse(
         id=str(uuid.uuid4()),
         thread_id=thread_id,
@@ -67,5 +92,6 @@ def chat(request: ChatRequest) -> ChatResponse:
         model=model,
         usage=_usage(result.get("usage") or []),
         trace=result.get("trace") if request.verbose else None,
+        choices=choices,
         **geo,
     )

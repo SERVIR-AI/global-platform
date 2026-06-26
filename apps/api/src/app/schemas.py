@@ -61,6 +61,10 @@ class ChatResponse(BaseModel):
     trace: list[str] | None = Field(
         default=None,
         description="Step-by-step narration of the run; present only when the request set verbose=true.")
+    choices: list[dict] | None = Field(
+        default=None,
+        description="When the agent is asking the user to choose (exposure vs risk L1/L2): "
+                    "[{label, value}] — render as buttons; send `value` back as the next message.")
 
     # --- Map-visualization payload (present when the answer is a geo result; ADDITIVE,
     # all optional — existing fields are unchanged). Everything is EPSG:4326. ---
