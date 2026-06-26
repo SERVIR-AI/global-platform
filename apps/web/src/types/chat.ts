@@ -22,6 +22,14 @@ export interface Usage {
   total_tokens: number | null;
 }
 
+/** One clickable option in the agent's exposure-vs-risk ask. */
+export interface ChatChoice {
+  /** Layman-friendly button text. */
+  label: string;
+  /** What to send back as the reply when clicked (e.g. "1"). */
+  value: string;
+}
+
 export interface ChatRequest {
   /** Conversation so far; at least one message is required. */
   messages: ChatMessage[];
@@ -99,6 +107,12 @@ export interface ChatResponse {
   usage?: Usage | null;
   /** Step-by-step narration; present only when the request set verbose=true. */
   trace?: string[] | null;
+  /**
+   * When the agent is asking the user to choose (exposure vs precomputed-risk L1 vs
+   * recomputed-risk L2), the options to render as buttons. Clicking one sends its
+   * `value` (e.g. "1") as the next message on the same thread.
+   */
+  choices?: ChatChoice[] | null;
   /** Resolved place name, or 'drawn area'. */
   place?: string | null;
   /** Hazard layer used, e.g. 'hazard_flood'. */

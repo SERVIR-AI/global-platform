@@ -1,5 +1,6 @@
+import { useChat } from '@/hooks/useChat';
 import { cn, getChatItemDate } from '@/lib/utils';
-import type { ChatItem, ChatMessage } from '@/types/chat';
+import type { ChatChoice, ChatItem, ChatMessage } from '@/types/chat';
 import { FC } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -48,11 +49,33 @@ const markdownComponents: Components = {
 const itemMessage = (item: ChatItem): ChatMessage =>
   'message' in item ? item.message : item.messages[item.messages.length - 1];
 
+// The agent's exposure-vs-risk question comes back with `choices`; render them as
+// buttons that send the option's `value` (e.g. "1") as the next reply on this thread.
+const ChoiceButtons: FC<{ choices: ChatChoice[] }> = ({ choices }) => {
+  const { send, isPending } = useChat();
+  return (
+    <div className="flex flex-wrap gap-2">
+      {choices.map((choice) => (
+        <button
+          key={choice.value}
+          type="button"
+          className="btn btn-sm btn-outline btn-primary"
+          disabled={isPending}
+          onClick={() => send(choice.value)}
+        >
+          {choice.label}
+        </button>
+      ))}
+    </div>
+  );
+};
+
 const ChatBubble: FC<{ chatItem: ChatItem }> = ({ chatItem }) => {
   const message = itemMessage(chatItem);
   const isUser = message.role === 'user';
   const date = getChatItemDate(chatItem);
   const trace = (chatItem as { trace?: string[] | null }).trace;
+  const choices = (chatItem as { choices?: ChatChoice[] | null }).choices;
   return (
     <div className={cn('flex flex-col gap-2', isUser ? 'items-end' : 'items-start')}>
       <div
@@ -71,18 +94,22 @@ const ChatBubble: FC<{ chatItem: ChatItem }> = ({ chatItem }) => {
           </ReactMarkdown>
         )}
       </div>
+      {!isUser && choices && choices.length > 0 && (
+        <ChoiceButtons choices={choices} />
+      )}
       <div className="flex flex-col gap-1">
         {chatItem.layers.map((layer, index) => (
           <ChatMapLayer key={index} layer={layer} />
         ))}
         {!isUser && trace && trace.length > 0 && (
           <details className="text-xs text-zinc-400">
-            <summary className="cursor-pointer select-none">how it worked ({trace.length} steps)</summary>
-            <ol className="mt-1 list-decimal list-outside space-y-0.5 pl-5 font-mono">
-              {trace.map((step, index) => (
-                <li key={index}>{step}</li>
-              ))}
-            </ol>
+            <summary className="cursor-pointer select-none">
+              how it works — dev trace ({trace.length} steps)
+            </summary>
+            {/* Dev-facing: the run as recorded, shown verbatim as JSON (not prose). */}
+            <pre className="mt-1 overflow-x-auto rounded-lg bg-black/20 p-3 font-mono text-[0.7rem] leading-relaxed text-zinc-300">
+              {JSON.stringify(trace, null, 2)}
+            </pre>
           </details>
         )}
         {date && (
