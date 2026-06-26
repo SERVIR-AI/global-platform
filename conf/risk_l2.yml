@@ -15,11 +15,31 @@ class_max: 5
 # Per-hazard {reclassed-vulnerability-layer: weight}; weights sum to 1.0. A starting
 # flood recipe over the reclassed layers verified in S1 — to be tuned against
 # risk_flood.tif in S5 (validation). Adjust freely; weights are config, not code (R7).
+# Hazard <-> precomputed-risk tif name map (R5: note landslide's plural/singular mismatch).
+# The resolver uses this to find the right hazard_*.tif and risk_*.tif for a logical hazard.
+hazards:
+  flood:      {hazard: hazard_flood,      risk: risk_flood}
+  flashflood: {hazard: hazard_flashflood, risk: risk_flashflood}
+  cyclone:    {hazard: hazard_cyclone,    risk: risk_cyclone}
+  earthquake: {hazard: hazard_earthquake, risk: risk_earthquake}
+  landslide:  {hazard: hazard_landslides, risk: risk_landslide}   # plural hazard, singular risk
+  storm:      {hazard: hazard_storm,      risk: risk_storm}
+  tsunami:    {hazard: hazard_tsunami,    risk: risk_tsunami}
+  drought:    {hazard: hazard_drought,    risk: risk_drought}
+  fire:       {hazard: hazard_fire,       risk: risk_fire}
+
+# Per-hazard {reclassed-vulnerability-layer: weight}, summing to 1.0. STARTING recipes over the
+# three readily-cached reclassed layers (population density, building density, distance-to-road),
+# with per-hazard emphasis. Expand with bldheight/tcc/gdp/landcover once those are pre-cached and
+# re-validated (S5). Weights are config, not code (R7) — tune against each risk_<hazard>.tif.
+# Keys are the hazard STEM (note landslides, plural, to match the hazard tif name).
 weights:
-  flood:
-    vulnerability_pop_all_total: 0.25       # population density
-    vulnerability_reclass_blddensity: 0.20  # building density
-    vulnerability_reclass_bldheight: 0.15   # building height
-    vulnerability_reclass_road: 0.15        # distance to road
-    vulnerability_reclass_tcc: 0.15         # tree-canopy cover
-    vulnerability_reclass_gdp: 0.10         # GDP per capita
+  flood:      {vulnerability_pop_all_total: 0.40, vulnerability_reclass_blddensity: 0.35, vulnerability_reclass_road: 0.25}
+  flashflood: {vulnerability_pop_all_total: 0.40, vulnerability_reclass_blddensity: 0.35, vulnerability_reclass_road: 0.25}
+  cyclone:    {vulnerability_pop_all_total: 0.40, vulnerability_reclass_blddensity: 0.35, vulnerability_reclass_road: 0.25}
+  storm:      {vulnerability_pop_all_total: 0.40, vulnerability_reclass_blddensity: 0.35, vulnerability_reclass_road: 0.25}
+  tsunami:    {vulnerability_pop_all_total: 0.40, vulnerability_reclass_blddensity: 0.35, vulnerability_reclass_road: 0.25}
+  earthquake: {vulnerability_pop_all_total: 0.35, vulnerability_reclass_blddensity: 0.40, vulnerability_reclass_road: 0.25}
+  landslides: {vulnerability_pop_all_total: 0.25, vulnerability_reclass_blddensity: 0.40, vulnerability_reclass_road: 0.35}
+  drought:    {vulnerability_pop_all_total: 0.50, vulnerability_reclass_blddensity: 0.20, vulnerability_reclass_road: 0.30}
+  fire:       {vulnerability_pop_all_total: 0.30, vulnerability_reclass_blddensity: 0.40, vulnerability_reclass_road: 0.30}

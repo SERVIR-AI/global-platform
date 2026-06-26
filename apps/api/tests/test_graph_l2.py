@@ -28,3 +28,4 @@ def test_risk_question_answers_off_computed_l2_grid(aoi, make_client, monkeypatc
     assert "risk_flood_l2" in res.get("source", "")                 # answered off the computed risk grid
     assert 0 <= res["length_km"] <= res["total_road_km"]            # a sane number
     assert any("computed: Hazard" in t for t in out.get("trace", []))   # trace names the computation
+    assert any("resolve →" in t for t in out.get("trace", []))          # resolver recorded the L1/L2 choice

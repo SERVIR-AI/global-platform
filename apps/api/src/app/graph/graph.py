@@ -24,7 +24,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from . import prompts
-from .geo import combine, ingest, operations, tiffs, trace
+from .geo import combine, ingest, operations, resolver, tiffs, trace
 
 
 def _add(left: list | None, right: list | None) -> list:
@@ -45,6 +45,7 @@ class State(TypedDict, total=False):
     trace: Annotated[list[str], _add]      # plain-text step narration (returned when verbose)
     req_geometry: dict | list | None       # Mode 2: a drawn AOI from the request
     req_hazard: str | None                 # explicit hazard from the request (e.g. a UI button)
+    plan: list | None                      # resolver L1/L2 LayerPlan(s), recorded for the trace
 
 
 def _usage(resp) -> dict:
@@ -112,6 +113,20 @@ def route(state: State, config) -> dict:
         f"route → {call.function.name}(place={place!r}, hazard_layers={selected}, {args})"
         "  [the model extracts these; it computes no numbers]")
     return out
+
+
+def resolve(state: State) -> dict:
+    """Decide L1 (sample the precomputed risk tif) vs L2 (compute it) for any risk layer
+    the route selected, and record the plan + rationale in the trace. Records intent only."""
+    plans, lines = [], []
+    for layer in state.get("tiffs") or []:
+        if not layer.startswith("risk_"):        # only risk layers carry an L1/L2 choice
+            continue
+        req = 2 if layer.endswith("_l2") else None
+        plan = resolver.resolve_layer(layer, requested_level=req)
+        plans.append(vars(plan))
+        lines.append(f"resolve → {plan.rationale}")
+    return {"plan": plans, "trace": lines} if plans else {}
 
 
 def _needed_layers(state: State):
@@ -202,7 +217,7 @@ def finalize(state: State, config) -> dict:
 
 
 def _after_route(state: State) -> str:
-    return "finalize" if state.get("error") else "fetch"
+    return "finalize" if state.get("error") else "resolve"
 
 
 def _after_fetch(state: State) -> str:
@@ -212,11 +227,13 @@ def _after_fetch(state: State) -> str:
 def _build_graph():
     builder = StateGraph(State)
     builder.add_node("route", route)
+    builder.add_node("resolve", resolve)
     builder.add_node("fetch", fetch)
     builder.add_node("operate", operate)
     builder.add_node("finalize", finalize)
     builder.add_edge(START, "route")
-    builder.add_conditional_edges("route", _after_route, {"fetch": "fetch", "finalize": "finalize"})
+    builder.add_conditional_edges("route", _after_route, {"resolve": "resolve", "finalize": "finalize"})
+    builder.add_edge("resolve", "fetch")
     builder.add_conditional_edges("fetch", _after_fetch, {"operate": "operate", "finalize": "finalize"})
     builder.add_edge("operate", "finalize")
     builder.add_edge("finalize", END)

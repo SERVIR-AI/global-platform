@@ -13,6 +13,7 @@ import rasterio
 
 from . import align as align_mod
 from . import combine as combine_mod
+from . import resolver
 
 
 def _metrics(ours, oracle):
@@ -39,21 +40,21 @@ def _metrics(ours, oracle):
 
 
 def _oracle_on_grid(grid_path, hazard, aoi):
-    """Align the precomputed risk_<hazard>.tif onto `grid_path`'s grid; return its array."""
-    hkey = hazard[len("hazard_"):] if hazard.startswith("hazard_") else hazard
+    """Align the precomputed risk tif (correct name via the resolver) onto `grid_path`'s grid."""
+    risk_key = resolver.risk_key_for(hazard) or f"risk_{hazard.replace('hazard_', '')}"
     with rasterio.open(grid_path) as g:
         ref = {"transform": g.transform, "crs": g.crs, "width": g.width, "height": g.height}
-    with rasterio.open(align_mod.align_to(ref, f"risk_{hkey}", aoi)) as o:
+    with rasterio.open(align_mod.align_to(ref, risk_key, aoi)) as o:
         return o.read(1)
 
 
 def diff_against_risk(our_grid_path, hazard, aoi):
-    """Agreement of our computed risk grid vs ADPC's precomputed risk_<hazard>.tif."""
+    """Agreement of our computed risk grid vs ADPC's precomputed risk tif."""
     with rasterio.open(our_grid_path) as g:
         ours = g.read(1)
     oracle = _oracle_on_grid(our_grid_path, hazard, aoi)
     m = _metrics(ours, oracle)
-    m["oracle"] = f"risk_{hazard.replace('hazard_', '')}.tif"
+    m["oracle"] = (resolver.risk_key_for(hazard) or f"risk_{hazard.replace('hazard_', '')}") + ".tif"
     return m
 
 
