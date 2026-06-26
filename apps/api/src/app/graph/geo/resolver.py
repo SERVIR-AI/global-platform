@@ -77,13 +77,22 @@ def options_for(hazard):
     opts = []
     if drive_tifs.drive_id(hazard_key):
         opts.append(("exposure", hazard_key,
-                     f"**Exposure** — which assets sit in the {hz} zone (raw hazard, by severity). Fast."))
+                     f"**Exposure** — which of your assets (roads, schools, hospitals, buildings) physically "
+                     f"sit inside the {hz} zone, ranked from low to extreme severity. This is the simplest and "
+                     f"fastest answer, and just shows the raw hazard footprint — no modelling of how vulnerable "
+                     f"each place is."))
     if drive_tifs.drive_id(risk_key):
         opts.append(("risk-L1", risk_key,
-                     f"**Risk, precomputed (L1)** — ADPC's official {hz} risk = Hazard × Vulnerability. Fast."))
+                     f"**Risk, official precomputed** — the ready-made {hz} risk layer from the regional agency, "
+                     f"which blends how severe it is with how vulnerable the people and buildings in each place "
+                     f"are. Pick this when you want a fast, authoritative answer you can quote as-is."))
     if resolve_layer(hz, requested_level=2).level == 2:
         opts.append(("risk-L2", f"{risk_key}_l2",
-                     f"**Risk, recomputed (L2)** — Hazard × Vulnerability with our weights; tunable; ~94% match to L1."))
+                     f"**Risk, recomputed from layers** — the same kind of {hz} risk, but rebuilt here from the "
+                     f"underlying data so you can adjust how much weight hazard versus each vulnerability factor "
+                     f"carries. It takes a little longer to compute on the fly, and it has been checked to closely "
+                     f"match the official layer — almost every place lands in the same severity class, and none "
+                     f"differ by more than one."))
     return opts
 
 
