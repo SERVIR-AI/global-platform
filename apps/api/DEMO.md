@@ -122,3 +122,18 @@ curl -s localhost:8001/api/chat -H 'Content-Type: application/json' \
 
 The `boundary` line shows the resolution decision — `admin boundary ~115 km²`,
 `… (corrected 'Batambang' -> 'Battambang')`, or `12 km radius box (no admin boundary under cap)`.
+
+## 10. Bring your own data — upload a hazard GeoTIFF
+
+`POST /api/tiffs` (multipart) verifies an uploaded raster and, on a PASS, registers it for the
+`thread_id`; then ask about it on that same thread. A failing file returns `ok:false` with the
+reasons (it is never registered). Full contract in **[API_EXAMPLES.md](API_EXAMPLES.md)**.
+
+```bash
+curl -s -F file=@my_flood.tif -F thread_id=t1 -F hazard_label=flood -F severity_scale=0-5 \
+  localhost:8001/api/tiffs | jq
+
+curl -s localhost:8001/api/chat -H 'Content-Type: application/json' \
+  -d '{"messages":[{"role":"user","content":"how many km of road are in my uploaded flood layer in Battambang?"}],"thread_id":"t1"}' \
+  | jq -r '.message.content'
+```

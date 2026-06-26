@@ -21,9 +21,10 @@ The backend (`apps/api`) runs separately on `http://localhost:8001`, all routes 
 relative paths (`/api/chat`) and never needs CORS or a hardcoded host. Start the API
 separately — see `apps/api/README.md`.
 
-The request/response contract for `POST /api/chat` (both text and drawn-AOI modes, every
-geo field, and the exposure/risk choice flow) is documented in **`apps/api/API_EXAMPLES.md`** —
-the single source of truth. `src/lib/api.ts` and `src/types/chat.ts` mirror it.
+The API contract for both endpoints the app calls — `POST /api/chat` (text and drawn-AOI
+modes, every geo field, the exposure/risk choice flow) and `POST /api/tiffs` (the bring-your-own-data
+upload) — is documented in **`apps/api/API_EXAMPLES.md`**, the single source of truth.
+`src/lib/api.ts` (`postChat`, `uploadTiff`) and `src/types/chat.ts` mirror it.
 
 > Deploying the SPA on a different origin and calling the API directly? Add that origin to
 > the backend's `CORS_ORIGINS` (`apps/api/.env.example`).

@@ -6,13 +6,8 @@ uploaded file has none, so we synthesize a contract from the little the user dec
 observation reuses `windowed_stats` (never full-loads); the range/dtype/nodata checks
 reuse `verify._check`; on top, `_structural_asserts` covers what those don't (band
 count, a present CRS, finite bounds, a pixel-count cap). Registration is gated on
-`ok=True` — an unverified or failing file is never usable.
-
-Hard failures (`ok=False`, unrecoverable): not a readable GeoTIFF, more than one band,
-no CRS, degenerate/non-finite bounds, values outside the declared severity scale,
-oversize. Soft signals warn but pass: many distinct values (looks continuous rather
-than a class raster), a CRS other than EPSG:4326, bounds outside the Southeast-Asia
-window.
+`ok=True` — an unverified or failing file is never usable. Unrecoverable problems fail
+the gate; soft signals (non-4326 CRS, outside SE-Asia, continuous-looking) only warn.
 """
 from __future__ import annotations
 
@@ -98,7 +93,6 @@ def verify_upload(path: str, *, hazard_label: str, severity_scale: str = "0-5",
         decl = _scale_to_contract(severity_scale, units)
     except ValueError as e:
         return VerifyReport(hazard_label, False, {}, {}, [str(e)])
-    decl["hazard_label"] = hazard_label
 
     try:
         obs = windowed_stats(path)

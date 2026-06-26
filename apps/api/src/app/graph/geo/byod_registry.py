@@ -23,13 +23,6 @@ from .verify import VerifyReport
 # {thread_id: {layer_name: entry}}
 _REGISTRY: dict[str, dict[str, dict]] = {}
 
-_SEVERITY_LABELS = {1: "Very low", 2: "Low", 3: "Moderate", 4: "High", 5: "Very high"}
-
-
-def _default_legend(severity_scale: str) -> dict:
-    """A generic 1-5 severity legend for a BYOD layer (the catalog carries none for it)."""
-    return dict(_SEVERITY_LABELS)
-
 
 def _layer_name(hazard_label: str) -> str:
     """A unique, URL-safe layer key, e.g. 'byod_flood_1a2b3c4d'."""
@@ -61,7 +54,6 @@ def register(thread_id: str, *, hazard_label: str, severity_scale: str, src_path
         "local_path": dest,
         "description": (f"User-uploaded {hazard_label} layer (severity classes {severity_scale}); "
                         "the user's own raster, not from the built-in catalog."),
-        "legend": _default_legend(severity_scale),
     }
     return layer, report
 
@@ -74,14 +66,6 @@ def entries_for(thread_id: str) -> dict[str, dict]:
 def descriptions_for(thread_id: str) -> dict[str, str]:
     """{layer: description} to merge into the route menu for `thread_id`."""
     return {layer: e["description"] for layer, e in _REGISTRY.get(thread_id, {}).items()}
-
-
-def get(thread_id: str, layer: str) -> dict | None:
-    return _REGISTRY.get(thread_id, {}).get(layer)
-
-
-def is_byod(thread_id: str, layer: str) -> bool:
-    return layer in _REGISTRY.get(thread_id, {})
 
 
 def clear(thread_id: str | None = None) -> None:

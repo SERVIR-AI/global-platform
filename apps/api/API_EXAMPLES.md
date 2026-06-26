@@ -1,7 +1,8 @@
 # Frontend API — working examples (real, not mocked)
 
-`POST /api/chat` — one endpoint, two modes. Every request body below is a **verified
-working request** (returned HTTP 200 with a real answer against the live backend).
+The frontend uses two endpoints: **`POST /api/chat`** (the question/answer flow, below) and
+**`POST /api/tiffs`** (bring-your-own-data upload, at the end). Every request body below is a
+**verified working request** (returned HTTP 200 with a real answer against the live backend).
 Full sample responses are saved as `e2e_siemreap_landslide.json` and
 `e2e_polygon_mode2.json` at the repo root.
 
@@ -147,3 +148,40 @@ Things we don't have return a plain message, no geo fields:
 - First query for a **new** place/hazard is slow (cold: Nominatim + Overpass + tif download
   + clip). Measured: a fresh place+hazard (Siem Reap + landslides) = **~84 s**. Cached after that.
 - `verbose:true` adds `trace`; otherwise it's `null`.
+
+---
+
+## `POST /api/tiffs` — bring your own data (multipart)
+
+Upload a hazard GeoTIFF (a single-band 0–5 or 1–5 severity raster). It's **verified** before
+it can be used and registered for the given `thread_id` **only on a PASS**; then the user can
+ask about it in chat on that same thread.
+
+| Field (form-data) | Notes |
+|---|---|
+| `file` | the GeoTIFF (`.tif`/`.tiff`), ≤ 200 MB |
+| `thread_id` | **required** — the conversation the layer is registered to (per-thread, in-memory) |
+| `hazard_label` | **required** — what it represents, e.g. `flood` |
+| `severity_scale` | `0-5` (default) or `1-5` |
+
+```bash
+curl -s -F file=@my_flood.tif -F thread_id=t1 -F hazard_label=flood -F severity_scale=0-5 \
+  localhost:8001/api/tiffs
+```
+
+Response (HTTP 200 whether it passes or fails verification; a **rejection is `ok:false`**, not an error):
+```jsonc
+{
+  "ok": true,
+  "layer": "byod_flood_1a2b3c4d",        // the registered layer name (null on failure)
+  "hazard_label": "flood",
+  "mismatches": [],                       // why it failed (empty on pass)
+  "warnings": ["CRS is EPSG:3857 …"],     // soft signals that didn't fail the gate
+  "observed": { "dtype": "int16", "crs_epsg": 4326, "sampled_min": 1, "sampled_max": 5,
+                "sampled_distinct": 5, "width": 160, "height": 160 }
+}
+```
+
+A malformed request (bad extension, empty, or oversize) returns a **4xx** with `{ "detail": "…" }`.
+After `ok:true`, a normal `/api/chat` call on the same `thread_id` (e.g. *"roads in my uploaded
+flood layer in Battambang"*) routes to the new layer.

@@ -53,7 +53,7 @@ src/app/
 ├── main.py                 # FastAPI app factory + CORS
 ├── config.py               # settings (env-driven): providers, paths, pricing
 ├── schemas.py              # request/response models
-├── api/routes/             # HTTP endpoints: health, chat, raster (clipped GeoTIFF)
+├── api/routes/             # HTTP endpoints: health, chat, raster (clipped GeoTIFF), tiffs (BYOD upload)
 ├── llm/client.py           # per-request OpenAI-SDK client: claude | openai | gemini
 └── graph/
     ├── graph.py            # the route → resolve → fetch → operate → finalize graph
@@ -64,6 +64,7 @@ src/app/
         ├── combine.py      # Layer-2 risk = Hazard × weighted vulnerability
         ├── align.py        # resample any 1–5 layer onto the hazard grid
         ├── verify.py / schema.py / rasterstats.py  # per-raster contracts + windowed checks
+        ├── byod_verify.py / byod_registry.py  # verify + per-thread registry for user-uploaded layers
         ├── store.py        # the deterministic spatial ops (the only numbers)
         ├── operations.py   # tool schemas + dispatch
         ├── viz.py          # builds the map-visualization payload for the frontend
@@ -75,6 +76,18 @@ src/app/
 Config lives at the repo root: the hazard catalog (`conf/tiffs.yml`), the grounding prompt
 (`conf/prompts.yml`), the per-raster schema (`conf/raster_schema.yml`), and the Layer-2
 weights + crossing rule (`conf/risk_l2.yml`).
+
+## Bring your own data (BYOD)
+
+`POST /api/tiffs` (multipart) lets a user supply their own hazard raster. The upload is
+quarantined, run through a **verification gate** (`byod_verify.verify_upload` — single-band,
+CRS present, finite bounds, values within the declared 0–5/1–5 severity scale; reuses the
+windowed-read machinery, never full-loads), and **only on a PASS** registered for that
+`thread_id` (`byod_registry`, in-process, per-thread). A registered layer is written into the
+tiff cache so `ingest.source_raster` finds it locally, and `route()` merges it into the menu
+for that thread — so the user can then ask about it in chat exactly like a built-in layer.
+The curated `conf/tiffs.yml` is never mutated. See `API_EXAMPLES.md` for the request/response
+contract.
 
 ## Run
 

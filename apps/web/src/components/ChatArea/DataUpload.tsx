@@ -3,15 +3,28 @@ import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/ChatStore';
 import type { TiffUploadResponse } from '@/types/chat';
 import { useMutation } from '@tanstack/react-query';
-import { Database } from 'lucide-react';
+import { Check, Database, X } from 'lucide-react';
 import { FC, useRef, useState } from 'react';
+
+/** A compact "what we detected" line from the verification report's observed stats. */
+const observedSummary = (o: TiffUploadResponse['observed']): string =>
+  [
+    o.dtype,
+    o.crs_epsg ? `EPSG:${o.crs_epsg}` : null,
+    o.width && o.height ? `${o.width}×${o.height}` : null,
+    o.sampled_min != null && o.sampled_max != null
+      ? `values ${o.sampled_min}–${o.sampled_max}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
 /**
  * "Bring your own data" — upload a GeoTIFF hazard layer. The file is verified
  * server-side (`POST /api/tiffs`) and registered for the current chat thread only
  * on a PASS; the verification report (or rejection reasons) is shown inline.
  */
-const DataUpload: FC<{ className?: string }> = ({ className }) => {
+const DataUpload: FC = () => {
   const threadId = useChatStore((s) => s.threadId);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -45,16 +58,18 @@ const DataUpload: FC<{ className?: string }> = ({ className }) => {
     <>
       <button
         type="button"
-        className={cn('underline link text-xs text-zinc-400', className)}
+        className="link text-xs text-zinc-400"
         onClick={() => dialogRef.current?.showModal()}
       >
         <Database className="inline mr-1 w-3 h-3" />
         Bring your own data
       </button>
 
-      <dialog ref={dialogRef} className="modal">
+      <dialog ref={dialogRef} className="modal" aria-labelledby="byod-title">
         <div className="modal-box">
-          <h3 className="mb-1 text-lg font-semibold">Bring your own data</h3>
+          <h3 id="byod-title" className="mb-1 text-lg font-semibold">
+            Bring your own data
+          </h3>
           <p className="mb-4 text-sm text-zinc-500">
             Upload a GeoTIFF hazard layer — a single-band severity raster on a 0–5 or 1–5 scale.
             It&apos;s verified before it can be used; once it passes, just ask about it in chat.
@@ -64,6 +79,7 @@ const DataUpload: FC<{ className?: string }> = ({ className }) => {
             <input
               type="file"
               accept=".tif,.tiff"
+              aria-label="GeoTIFF file"
               className="file-input file-input-sm w-full"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
@@ -90,42 +106,55 @@ const DataUpload: FC<{ className?: string }> = ({ className }) => {
             </label>
           </div>
 
-          {errMsg && <p className="mt-3 text-sm text-error">{errMsg}</p>}
+          <div role="status" aria-live="polite">
+            {errMsg && <p className="mt-3 text-sm text-error">{errMsg}</p>}
 
-          {report && (
-            <div
-              className={cn(
-                'mt-3 rounded-lg p-3 text-sm',
-                report.ok ? 'bg-success/10' : 'bg-error/10',
-              )}
-            >
-              {report.ok ? (
-                <p className="text-success">
-                  ✓ Verified and added. Ask about it in chat — e.g.{' '}
-                  <span className="italic">
-                    &ldquo;roads in my uploaded {report.hazard_label} layer in Battambang&rdquo;
-                  </span>
-                  .
-                </p>
-              ) : (
-                <>
-                  <p className="font-medium text-error">✗ Rejected — failed verification:</p>
-                  <ul className="mt-1 list-inside list-disc text-error">
-                    {report.mismatches.map((m, i) => (
-                      <li key={i}>{m}</li>
+            {report && (
+              <div
+                className={cn(
+                  'mt-3 rounded-lg p-3 text-sm',
+                  report.ok ? 'bg-success/10' : 'bg-error/10',
+                )}
+              >
+                {report.ok ? (
+                  <>
+                    <p className="text-success">
+                      <Check className="inline mr-1 w-4 h-4" />
+                      Verified and added. Ask about it in chat — e.g.{' '}
+                      <span className="italic">
+                        &ldquo;roads in my uploaded {report.hazard_label} layer in Battambang&rdquo;
+                      </span>
+                      .
+                    </p>
+                    {observedSummary(report.observed) && (
+                      <p className="mt-1 text-xs text-zinc-500">
+                        Detected: {observedSummary(report.observed)}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <p className="font-medium text-error">
+                      <X className="inline mr-1 w-4 h-4" />
+                      Rejected — failed verification:
+                    </p>
+                    <ul className="mt-1 list-inside list-disc text-error">
+                      {report.mismatches.map((m, i) => (
+                        <li key={i}>{m}</li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+                {report.warnings.length > 0 && (
+                  <ul className="mt-2 list-inside list-disc text-warning">
+                    {report.warnings.map((w, i) => (
+                      <li key={i}>{w}</li>
                     ))}
                   </ul>
-                </>
-              )}
-              {report.warnings.length > 0 && (
-                <ul className="mt-2 list-inside list-disc text-warning">
-                  {report.warnings.map((w, i) => (
-                    <li key={i}>{w}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            )}
+          </div>
 
           <div className="modal-action">
             <button

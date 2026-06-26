@@ -49,6 +49,13 @@ single place a number is ever produced.
 L1, L2, and the resolver are implemented; L3–L4 are the remaining work. The rationale is in
 [`SOURCE_DATA_APPROACH.md`](SOURCE_DATA_APPROACH.md).
 
+### Bring your own data
+
+Users can also upload their own hazard GeoTIFF (`POST /api/tiffs`). It passes a verification
+gate before anything else can touch it — single-band, georeferenced, values within the
+declared 0–5/1–5 severity scale — and only then is registered (per conversation, in-memory)
+so the agent can answer against it like a built-in layer. The curated catalog is never touched.
+
 ## Run
 
 Two processes. Backend (from the repo root):
