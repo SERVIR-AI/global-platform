@@ -45,7 +45,6 @@ class State(TypedDict, total=False):
     trace: Annotated[list[str], _add]      # plain-text step narration (returned when verbose)
     req_geometry: dict | list | None       # Mode 2: a drawn AOI from the request
     req_hazard: str | None                 # explicit hazard from the request (e.g. a UI button)
-    plan: list | None                      # resolver L1/L2 LayerPlan(s), recorded for the trace
     awaiting_choice: dict | None           # set when the agent asked L1-vs-L2; resumes on the reply
     _resume: bool                          # transient: this turn applied a pending L1/L2 choice
 
@@ -116,7 +115,13 @@ def route(state: State, config) -> dict:
         model=model, messages=messages, tools=operations.schema(list(layers)), max_tokens=600)
 
     msg = resp.choices[0].message
-    out = {"usage": [_usage(resp)], "trace": [f'question: "{_last_user(state["messages"])}"']}
+    # Fresh routing turn: clear last turn's transients. The checkpointer keeps every non-append
+    # channel, so a prior turn's `error` would re-fire finalize (re-emitting an old refusal even
+    # after we now route correctly), and a prior `result`/`aoi` would attach a stale map. Reset
+    # them so this turn stands on its own. (Choice-resume returns above and is unaffected.)
+    out = {"usage": [_usage(resp)], "trace": [f'question: "{_last_user(state["messages"])}"'],
+           "error": None, "result": None, "aoi": None, "operation": None, "tiffs": [],
+           "op_args": {}, "place": None, "tool_call_id": None}
     if not msg.tool_calls:                       # model declined -> plain-text reply
         out["error"] = msg.content or "I can't answer that with the data I have."
         out["trace"].append("route → declined (no tool call)")

@@ -105,3 +105,34 @@ def test_multi_turn_memory(aoi, make_client, monkeypatch, log):
     log("HISTORY", roles)
     log("CHECK", "roles == ['user','assistant','user','assistant']")
     assert roles == ["user", "assistant", "user", "assistant"]
+
+
+def test_place_followup_after_no_place_decline(aoi, make_client, monkeypatch, log):
+    """Turn 1 declines because no place was named; turn 2 supplies just the place. The agent
+    must route the original request afresh — NOT re-emit the stale decline. Regresses the bug
+    where a prior turn's `error` persisted in the checkpointer and re-fired finalize."""
+    _patch_fetch(monkeypatch, aoi)
+    monkeypatch.setattr(gm.combine, "combine_l2", lambda a, hazard, **k: aoi["hazard_flood"])
+    graph, thread = gm._build_graph(), "placefollow"
+
+    # Turn 1: no place -> the model returns a plain-text request for a place (decline path).
+    decline = make_client(("text", "I need a place — e.g. Battambang or Siem Reap?"))
+    log("TURN 1", "user: 'schools at high flood risk?'  (no place) -> decline asks for a place")
+    t1 = graph.invoke({"messages": [{"role": "user", "content": "schools at high flood risk?"}]},
+                      _cfg(decline, thread))
+    log("ANSWER 1", t1["messages"][-1]["content"])
+    assert "place" in t1["messages"][-1]["content"].lower()
+    assert t1.get("error")                                   # decline set an error this turn
+
+    # Turn 2 (same thread): user names just the place; a fresh route now yields a tool call.
+    route = make_client(("tool", "count_in_hazard",
+                         {"place": "Siem Reap", "hazard_layers": ["hazard_flood"], "layer": "schools"}))
+    log("TURN 2", "user: 'Siem Reap'  (same thread_id) -> should route, not repeat the decline")
+    t2 = graph.invoke({"messages": [{"role": "user", "content": "Siem Reap"}]}, _cfg(route, thread))
+    msg = t2["messages"][-1]["content"]
+    log("ANSWER 2", msg)
+    log("CHECK", "stale decline gone; error cleared; now asking exposure/L1/L2 for Siem Reap")
+    assert "I need a place" not in msg                       # the old decline must NOT re-appear
+    assert t2.get("error") is None                           # stale error was cleared on the fresh turn
+    assert "1)" in msg and "2)" in msg                       # routed -> now asks the 3-way
+    assert t2.get("awaiting_choice")
