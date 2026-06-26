@@ -24,7 +24,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from . import prompts
-from .geo import ingest, operations, tiffs, trace
+from .geo import combine, ingest, operations, tiffs, trace
 
 
 def _add(left: list | None, right: list | None) -> list:
@@ -134,13 +134,19 @@ def fetch(state: State) -> dict:
         aoi = (ingest.ensure_aoi(geometry=geom, layers=needed) if geom is not None
                else ingest.ensure_aoi(state["place"], layers=needed))
         for layer in state.get("tiffs") or []:
-            aoi = {**aoi, layer: ingest.hazard_clip(aoi, layer)}
+            if layer.startswith("risk_") and layer.endswith("_l2"):     # computed Layer-2 risk grid
+                hazard = "hazard_" + layer[len("risk_"):-len("_l2")]    # risk_flood_l2 -> hazard_flood
+                aoi = {**aoi, layer: combine.combine_l2(aoi, hazard)}
+            else:
+                aoi = {**aoi, layer: ingest.hazard_clip(aoi, layer)}
         c = aoi.get("counts") or {}
         trace = [f"boundary → {aoi['name']}  [{aoi.get('how') or 'cached AOI'}]",
                  f"exposure (OSM) → roads {c.get('roads', '?')} · hospitals {c.get('hospitals', '?')} · "
                  f"schools {c.get('schools', '?')} · buildings {c.get('buildings', '?')}"]
         if state.get("tiffs"):
-            trace.append(f"hazard raster → {', '.join(state['tiffs'])} clipped to the AOI")
+            bits = [f"{l} (computed: Hazard × Vulnerability)" if l.startswith("risk_") and l.endswith("_l2")
+                    else f"{l} clipped" for l in state["tiffs"]]
+            trace.append("hazard/risk raster → " + ", ".join(bits))
         return {"aoi": aoi, "trace": trace}
     except Exception as e:                        # unresolvable place, too large, Overpass down
         return {"error": f"No data for that request: {e}", "trace": [f"fetch → failed: {e}"]}
