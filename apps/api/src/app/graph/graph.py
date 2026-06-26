@@ -159,7 +159,11 @@ def resolve(state: State) -> dict:
                     "l1_layer": l1_layer, "l2_layer": l2_layer}
         return {"messages": [{"role": "assistant", "content": q}], "awaiting_choice": awaiting,
                 "trace": [f"resolve → asking L1 vs L2 for {hz} (both available); paused for the user"]}
-    plan = l2 if l2.level == 2 else l1             # only one path available -> proceed
+    if l1.level != 1 and l2.level != 2:            # neither path available -> refuse cleanly
+        missing = l2.missing or l1.missing or [f"no data for {hz} risk"]
+        return {"error": f"I don't have the data to assess {hz} risk: {', '.join(missing)}.",
+                "trace": [f"resolve → neither L1 nor L2 available for {hz}: {missing}"]}
+    plan = l2 if l2.level == 2 else l1             # exactly one path available -> proceed
     return {"trace": [f"resolve → {plan.rationale} (only path available)"]}
 
 
@@ -257,6 +261,8 @@ def _after_route(state: State) -> str:
 
 
 def _after_resolve(state: State) -> str:
+    if state.get("error"):
+        return "finalize"
     return "ask_end" if state.get("awaiting_choice") else "fetch"
 
 
@@ -274,7 +280,8 @@ def _build_graph():
     builder.add_edge(START, "route")
     builder.add_conditional_edges("route", _after_route,
                                   {"resolve": "resolve", "fetch": "fetch", "finalize": "finalize"})
-    builder.add_conditional_edges("resolve", _after_resolve, {"fetch": "fetch", "ask_end": END})
+    builder.add_conditional_edges("resolve", _after_resolve,
+                                  {"fetch": "fetch", "ask_end": END, "finalize": "finalize"})
     builder.add_conditional_edges("fetch", _after_fetch, {"operate": "operate", "finalize": "finalize"})
     builder.add_edge("operate", "finalize")
     builder.add_edge("finalize", END)

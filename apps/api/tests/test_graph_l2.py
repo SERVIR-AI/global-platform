@@ -47,3 +47,15 @@ def test_risk_choice_l1_samples_precomputed(aoi, make_client, monkeypatch):
     res = t2.get("result") or {}
     src = res.get("source", "")
     assert "risk_flood" in src and "_l2" not in src         # L1 = the precomputed risk, not the computed grid
+
+
+def test_risk_hazard_with_no_data_refuses_without_asking(aoi, make_client, monkeypatch):
+    """[stub] a risk hazard with neither L1 nor L2 data refuses cleanly — no question, no fetch."""
+    monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda *a, **k: aoi)
+    client = make_client(("tool", "roads_in_hazard",
+                          {"place": "Testville", "hazard_layers": ["risk_volcano"]}))
+    graph, cfg = _graph_cfg(client, "novolc")
+    out = graph.invoke({"messages": [{"role": "user", "content": "volcano risk in Testville?"}]}, cfg)
+    msg = out["messages"][-1]["content"].lower()
+    assert "data to assess" in msg or "don't have" in msg    # explicit refusal, not a crash
+    assert out.get("result") is None and out.get("awaiting_choice") is None
