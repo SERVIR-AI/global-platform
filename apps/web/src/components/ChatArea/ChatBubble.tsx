@@ -52,6 +52,7 @@ const ChatBubble: FC<{ chatItem: ChatItem }> = ({ chatItem }) => {
   const message = itemMessage(chatItem);
   const isUser = message.role === 'user';
   const date = getChatItemDate(chatItem);
+  const trace = (chatItem as { trace?: string[] | null }).trace;
   return (
     <div className={cn('flex flex-col gap-2', isUser ? 'items-end' : 'items-start')}>
       <div
@@ -74,6 +75,16 @@ const ChatBubble: FC<{ chatItem: ChatItem }> = ({ chatItem }) => {
         {chatItem.layers.map((layer, index) => (
           <ChatMapLayer key={index} layer={layer} />
         ))}
+        {!isUser && trace && trace.length > 0 && (
+          <details className="text-xs text-zinc-400">
+            <summary className="cursor-pointer select-none">how it worked ({trace.length} steps)</summary>
+            <ol className="mt-1 list-decimal list-outside space-y-0.5 pl-5 font-mono">
+              {trace.map((step, index) => (
+                <li key={index}>{step}</li>
+              ))}
+            </ol>
+          </details>
+        )}
         {date && (
           <span className={cn('text-zinc-400 text-xs', isUser ? 'self-end' : undefined)}>
             {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

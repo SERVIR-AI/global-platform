@@ -33,7 +33,7 @@ const updateLayer = (
   );
 
 export const useChatStore = create<ChatStore>((set) => ({
-  provider: 'gemini',
+  provider: 'claude',
   setProvider: (provider) => set({ provider }),
   messages: [],
   appendMessage: (message) =>

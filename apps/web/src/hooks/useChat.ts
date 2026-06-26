@@ -53,6 +53,7 @@ export const useChat = () => {
       messages: [{ role: 'user', content }],
       provider,
       thread_id: threadId,
+      verbose: true, // return the step trace (route → resolve L1/L2 → compute → overlay)
       geometry: toChatGeometry(geometry),
       created_at: new Date().toISOString(),
     });
