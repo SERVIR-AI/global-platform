@@ -46,6 +46,8 @@ class State(TypedDict, total=False):
     req_geometry: dict | list | None       # Mode 2: a drawn AOI from the request
     req_hazard: str | None                 # explicit hazard from the request (e.g. a UI button)
     plan: list | None                      # resolver L1/L2 LayerPlan(s), recorded for the trace
+    awaiting_choice: dict | None           # set when the agent asked L1-vs-L2; resumes on the reply
+    _resume: bool                          # transient: this turn applied a pending L1/L2 choice
 
 
 def _usage(resp) -> dict:
@@ -71,8 +73,26 @@ def _layer_note(layers: dict[str, str]) -> str:
             + listed)
 
 
+def _apply_choice(state: State) -> dict:
+    """The user just answered the L1-vs-L2 question — apply it (no LLM call) and resume."""
+    p = state["awaiting_choice"]
+    reply = _last_user(state["messages"]).lower()
+    if any(k in reply for k in ("2", "l2", "recomp", "comput", "custom", "weight", "vulnerab")):
+        layer, label = p["l2_layer"], "L2 (recomputed: Hazard × Vulnerability)"
+    else:                                   # 1 / precomputed / default
+        layer, label = p["l1_layer"], "L1 (precomputed risk)"
+    return {"operation": p["operation"], "place": p.get("place"),
+            "op_args": p.get("op_args") or {}, "tiffs": [layer],
+            "tool_call_id": p.get("tool_call_id"), "req_geometry": p.get("req_geometry"),
+            "awaiting_choice": None, "_resume": True,
+            "trace": [f"choice → {label}: {layer}"]}
+
+
 def route(state: State, config) -> dict:
-    """LLM picks the operation + place + hazard layers. Records intent; runs nothing."""
+    """LLM picks the operation + place + hazard layers. Records intent; runs nothing.
+    If we're resuming a pending L1/L2 choice, apply it without an LLM call."""
+    if state.get("awaiting_choice"):
+        return _apply_choice(state)
     client = config["configurable"]["client"]
     model = config["configurable"]["model"]
     geom = state.get("req_geometry")
@@ -108,7 +128,7 @@ def route(state: State, config) -> dict:
         return out
 
     out.update(operation=call.function.name, place=place or "drawn area", op_args=args,
-               tiffs=selected, tool_call_id=call.id)
+               tiffs=selected, tool_call_id=call.id, _resume=False)
     out["trace"].append(
         f"route → {call.function.name}(place={place!r}, hazard_layers={selected}, {args})"
         "  [the model extracts these; it computes no numbers]")
@@ -116,17 +136,31 @@ def route(state: State, config) -> dict:
 
 
 def resolve(state: State) -> dict:
-    """Decide L1 (sample the precomputed risk tif) vs L2 (compute it) for any risk layer
-    the route selected, and record the plan + rationale in the trace. Records intent only."""
-    plans, lines = [], []
-    for layer in state.get("tiffs") or []:
-        if not layer.startswith("risk_"):        # only risk layers carry an L1/L2 choice
-            continue
-        req = 2 if layer.endswith("_l2") else None
-        plan = resolver.resolve_layer(layer, requested_level=req)
-        plans.append(vars(plan))
-        lines.append(f"resolve → {plan.rationale}")
-    return {"plan": plans, "trace": lines} if plans else {}
+    """For a risk question with both L1 and L2 available, ASK the user which to use
+    (human-in-the-loop) and pause. Otherwise proceed, recording the chosen path."""
+    risk_layer = next((l for l in (state.get("tiffs") or []) if l.startswith("risk_")), None)
+    if not risk_layer:
+        return {}                                  # not a risk question -> straight to fetch
+    hz = resolver._logical(risk_layer)
+    l1 = resolver.resolve_layer(hz, requested_level=1)
+    l2 = resolver.resolve_layer(hz, requested_level=2)
+    if l1.level == 1 and l2.level == 2:            # both available -> ask the user
+        l1_layer = resolver.risk_key_for(hz)                                  # e.g. risk_flood
+        l2_layer = risk_layer if risk_layer.endswith("_l2") else f"{l1_layer}_l2"
+        q = (f"For **{hz} risk** I can do it two ways — which would you like?\n\n"
+             f"  **1) Precomputed (Layer 1)** — sample ADPC's official `{l1_layer}.tif`. "
+             f"Fast (~instant), the reference map.\n"
+             f"  **2) Recompute (Layer 2)** — Hazard × Vulnerability with our weights. "
+             f"Slower; lets you adjust the weighting; ~94% match to L1.\n\n"
+             f"Reply **1** or **2** (or 'precomputed' / 'recompute').")
+        awaiting = {"operation": state.get("operation"), "place": state.get("place"),
+                    "op_args": state.get("op_args") or {}, "tool_call_id": state.get("tool_call_id"),
+                    "req_geometry": state.get("req_geometry"),
+                    "l1_layer": l1_layer, "l2_layer": l2_layer}
+        return {"messages": [{"role": "assistant", "content": q}], "awaiting_choice": awaiting,
+                "trace": [f"resolve → asking L1 vs L2 for {hz} (both available); paused for the user"]}
+    plan = l2 if l2.level == 2 else l1             # only one path available -> proceed
+    return {"trace": [f"resolve → {plan.rationale} (only path available)"]}
 
 
 def _needed_layers(state: State):
@@ -217,7 +251,13 @@ def finalize(state: State, config) -> dict:
 
 
 def _after_route(state: State) -> str:
-    return "finalize" if state.get("error") else "resolve"
+    if state.get("error"):
+        return "finalize"
+    return "fetch" if state.get("_resume") else "resolve"   # _resume = a choice was just applied
+
+
+def _after_resolve(state: State) -> str:
+    return "ask_end" if state.get("awaiting_choice") else "fetch"
 
 
 def _after_fetch(state: State) -> str:
@@ -232,8 +272,9 @@ def _build_graph():
     builder.add_node("operate", operate)
     builder.add_node("finalize", finalize)
     builder.add_edge(START, "route")
-    builder.add_conditional_edges("route", _after_route, {"resolve": "resolve", "finalize": "finalize"})
-    builder.add_edge("resolve", "fetch")
+    builder.add_conditional_edges("route", _after_route,
+                                  {"resolve": "resolve", "fetch": "fetch", "finalize": "finalize"})
+    builder.add_conditional_edges("resolve", _after_resolve, {"fetch": "fetch", "ask_end": END})
     builder.add_conditional_edges("fetch", _after_fetch, {"operate": "operate", "finalize": "finalize"})
     builder.add_edge("operate", "finalize")
     builder.add_edge("finalize", END)

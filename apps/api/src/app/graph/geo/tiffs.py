@@ -20,8 +20,10 @@ def entry(layer):
 
 
 def descriptions():
-    """{layer: description} — the only fields the route node sees when choosing a layer."""
-    return {name: (meta.get("description") or "").strip() for name, meta in catalog().items()}
+    """{layer: description} — the only fields the route node sees when choosing a layer.
+    `internal: true` entries (e.g. the precomputed risk offered via the L1/L2 question) are hidden."""
+    return {name: (meta.get("description") or "").strip()
+            for name, meta in catalog().items() if not meta.get("internal")}
 
 
 def legend(layer):
