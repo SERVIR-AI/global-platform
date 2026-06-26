@@ -32,8 +32,9 @@ For each piece of data a request needs, it works out:
 3. **Trust nothing blindly** — every file is opened and checked that it really is what it claims (right
    units, right scale). *(We already caught a map labelled "metres" that was actually millimetres — a
    1000× error avoided only by looking.)*
-4. **Come back with a plan** — what it will use, fetch, and compute, and how confident it is — and wait
-   for your **approval** before running anything.
+4. **Ask before deciding** — where there's a real choice (e.g. raw exposure vs precomputed vs
+   recomputed risk), it surfaces the options and waits for you to pick rather than guessing. A fuller
+   "here is the whole plan and its cost, approve before I fetch" gate is the direction this is heading.
 
 ## How we build it
 
@@ -43,5 +44,5 @@ Strictly one small, **demoable** step at a time, each tested on real data. We ha
 hazard) → **the resolver** (the brain that picks the layer) → **Layer 3** (grading raw maps) →
 **Layer 4** (upstream sources) → **the approval step** (plan-before-run).
 
-> The detailed, technical, step-by-step tracker — every slice, its test, and its status — lives in
-> **`BUILD_PLAN.md`**.
+Layers 1–2 and the resolver are implemented today; Layers 3–4 and the full plan-approval gate are the
+remaining work.

@@ -79,8 +79,3 @@ class ChatResponse(BaseModel):
     hazard_layer: dict | None = Field(default=None, description="Hazard raster: {raster_url: clipped GeoTIFF endpoint, geojson: polygons by class, crs}.")
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-class ErrorResponse(BaseModel):
-    error: str
-    detail: str | None = None

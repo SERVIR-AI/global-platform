@@ -15,10 +15,6 @@ def _doc():
         return yaml.safe_load(f) or {}
 
 
-def defaults():
-    return _doc().get("defaults", {})
-
-
 def schema_for(name):
     """Declared schema for a layer name/stem ('hazard_flood' or 'hazard_flood.tif'),
     merged over the file's `defaults`, or None if the layer isn't declared."""

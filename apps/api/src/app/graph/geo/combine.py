@@ -1,10 +1,10 @@
 """Layer-2 combine: Risk = Hazard x weighted-sum(Vulnerability), all on a 1-5 scale.
 
-Inputs are already-reclassed 1-5 rasters (verified by S1), aligned onto the hazard
-grid (S2). The crossing rule and per-hazard weights live in conf/risk_l2.yml.
+Inputs are already-reclassed 1-5 rasters (verified against the schema), aligned onto
+the hazard grid. The crossing rule and per-hazard weights live in conf/risk_l2.yml.
 
 Per cell: V = weighted average of the vulnerability classes (a nodata vulnerability
-cell is dropped and its weight renormalized, R6); Risk = clip(round(Hazard*V/5), 1, 5);
+cell is dropped and its weight renormalized); Risk = clip(round(Hazard*V/5), 1, 5);
 nodata (0) where the hazard is nodata or every vulnerability layer is nodata there.
 The result is written in the same 1-5 contract as a clipped hazard, so store._Severity
 samples it and the map renders it with no new code.
@@ -52,7 +52,7 @@ def _combine(hazard, vulns, weights, class_max=5):
 
 def combine_l2(aoi, hazard="hazard_flood", vuln_weights=None, recompute=False):
     """Compute the Layer-2 risk grid for `aoi` and write <aoi>/risk_<hazard>_l2.tif (the
-    same 1-5 contract as a clipped hazard). Cached by file existence unless recompute (R8)."""
+    same 1-5 contract as a clipped hazard). Cached by file existence unless recompute."""
     weights = vuln_weights or weights_for(hazard)
     if not weights:
         raise ValueError(f"no Layer-2 weights for {hazard} (pass vuln_weights or add to conf)")

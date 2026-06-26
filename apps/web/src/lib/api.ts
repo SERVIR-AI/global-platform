@@ -1,9 +1,4 @@
-import type {
-  ChatRequest,
-  ChatResponse,
-  HealthResponse,
-  HTTPValidationError,
-} from '@/types/chat';
+import type { ChatRequest, ChatResponse, HTTPValidationError } from '@/types/chat';
 
 /**
  * Error thrown when an /api call returns a non-2xx response. Carries the HTTP
@@ -34,10 +29,6 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, ''
 export const resolveApiUrl = (path: string): string =>
   /^https?:\/\//i.test(path) ? path : `${API_BASE_URL}${path.startsWith('/') ? '' : '/'}${path}`;
 
-/** Build the URL for GET /api/raster/{slug}/{layer}.tif — clipped hazard GeoTIFF. */
-export const getRasterUrl = (slug: string, layer: string): string =>
-  `${API_BASE_URL}/api/raster/${encodeURIComponent(slug)}/${encodeURIComponent(layer)}.tif`;
-
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
@@ -48,10 +39,6 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   if (!res.ok) throw new ApiError(res.status, body);
   return body as T;
 };
-
-/** GET /api/health — service liveness and active configuration summary. */
-export const getHealth = (signal?: AbortSignal): Promise<HealthResponse> =>
-  request<HealthResponse>('/api/health', { method: 'GET', signal });
 
 /** POST /api/chat — send a conversation and get the assistant's reply. */
 export const postChat = (payload: ChatRequest, signal?: AbortSignal): Promise<ChatResponse> =>

@@ -92,12 +92,42 @@ answer is a spatial result (null otherwise).
 | `hazard_layer.geojson` | FeatureCollection — polygons per class | a `VectorLayer` (option B) |
 | `hazard_layer.crs` | `"EPSG:4326"` | source projection |
 | `trace` | (only if `verbose:true`) step narration | optional "how it worked" panel |
+| `choices` | (when the agent asks) `[{label, value}, …]` | render as buttons; send `value` back to resume (see below) |
 
 ### Fetching the raster (option A)
 ```bash
 curl -s "localhost:8001/api/raster/siem-reap/hazard_landslides.tif" -o clip.tif
 # -> HTTP 200, image/tiff (EPSG:4326). Returns 404 if that place/hazard wasn't queried yet.
 ```
+
+---
+
+## The exposure / risk choice (human-in-the-loop)
+
+A hazard question doesn't compute immediately — the agent first asks **how** to answer it
+and returns a `choices` array instead of a metric:
+
+```jsonc
+{ "messages": [{"role":"user","content":"schools at risk of flooding in Battambang"}] }
+// -> message.content asks the question; choices: [
+//      {"label":"Exposure — what sits in the hazard zone", "value":"1"},
+//      {"label":"Risk — official precomputed",             "value":"2"},
+//      {"label":"Risk — recompute from layers",            "value":"3"} ]
+//    metric / features / legend = null (nothing computed yet)
+```
+
+Render `choices` as buttons. When the user picks one, send its `value` as the next message
+on the **same `thread_id`** to resume and get the spatial result:
+
+```bash
+curl -s localhost:8001/api/chat -H 'Content-Type: application/json' -d '{
+  "messages": [{"role": "user", "content": "2"}],
+  "thread_id": "<thread_id from the previous response>"
+}'
+```
+
+Only the paths whose data exists are offered (a hazard with no precomputed risk shows two
+buttons, not three); a hazard with no data at all returns a plain refusal and no `choices`.
 
 ---
 

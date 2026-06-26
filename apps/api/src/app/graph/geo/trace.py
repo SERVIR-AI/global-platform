@@ -6,22 +6,8 @@ from ...config import get_settings
 
 
 def record(question, answer, usages, result=None, args=None):
-    """Write a per-query trace JSON to disk and return it.
-
-    Computes USD cost from token counts and checks groundedness (whether the
-    tool's number appears verbatim in the answer).
-
-    Args:
-        question (str): the user's original question
-        answer (str): the assistant's final response
-        usages (list[dict]): per-LLM-call {'in': int, 'out': int} token dicts
-        result (dict | None): the tool result dict (used to check groundedness)
-        args (dict | None): the tool arguments passed to the operation
-
-    Returns:
-        dict: the trace record that was written to disk, with keys: question, answer,
-              tool_call, tool_result, grounded, cost_usd, tokens
-    """
+    """Write a per-query trace JSON to disk and return it: token cost (USD) and a
+    groundedness check (whether the tool's number appears verbatim in the answer)."""
     usages = [u for u in usages if u]
     settings = get_settings()
     price_in, price_out = settings.price_in / 1_000_000, settings.price_out / 1_000_000

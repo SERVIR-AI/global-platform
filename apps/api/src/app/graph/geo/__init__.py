@@ -1,4 +1,4 @@
-"""The deterministic geospatial core, moved from grp_mvp.
+"""The deterministic geospatial core.
 
 `ingest` resolves a place to cached OSM data + a clipped hazard raster (a bundle
 of file paths); `store` runs the spatial operations over that bundle; `registry`

@@ -8,8 +8,8 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "retreat-api",
-    "retreat-platform",
+    "global-risk-api",
+    "global-risk-platform",
 ]
 
 [[package]]
@@ -266,6 +266,57 @@ sdist = { url = "https://files.pythonhosted.org/packages/6a/b5/a45f62f20664031bf
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7d/56/a99f0f159cce5b26d267317d436afee184f45fc7911938757d7cbbd2d10c/gdown-6.1.0-py3-none-any.whl", hash = "sha256:38a36a94275b8272f684db469bbd73b4d1f64cbbc1751bcb993a1b2be8f013c8", size = 19216, upload-time = "2026-05-30T11:56:20.016Z" },
 ]
+
+[[package]]
+name = "global-risk-api"
+version = "0.1.0"
+source = { editable = "apps/api" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "gdown" },
+    { name = "langchain-core" },
+    { name = "langgraph" },
+    { name = "openai" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyyaml" },
+    { name = "rasterio", version = "1.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "rasterio", version = "1.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "requests" },
+    { name = "shapely" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "gdown", specifier = ">=6.1.0" },
+    { name = "langchain-core", specifier = ">=0.3.20" },
+    { name = "langgraph", specifier = ">=0.2.50" },
+    { name = "openai", specifier = ">=2.43.0" },
+    { name = "pydantic", specifier = ">=2.9" },
+    { name = "pydantic-settings", specifier = ">=2.6" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "rasterio", specifier = ">=1.4.4" },
+    { name = "requests", specifier = ">=2.34.2" },
+    { name = "shapely", specifier = ">=2.1.2" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
+]
+
+[[package]]
+name = "global-risk-platform"
+version = "0.1.0"
+source = { virtual = "." }
+
+[package.dev-dependencies]
+dev = [
+    { name = "global-risk-api" },
+]
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [{ name = "global-risk-api", editable = "apps/api" }]
 
 [[package]]
 name = "h11"
@@ -1210,57 +1261,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/f3/61/d7545dafb7ac2230c
 wheels = [
     { url = "https://files.pythonhosted.org/packages/3f/51/d4db610ef29373b879047326cbf6fa98b6c1969d6f6dc423279de2b1be2c/requests_toolbelt-1.0.0-py2.py3-none-any.whl", hash = "sha256:cccfdd665f0a24fcf4726e690f65639d272bb0637b9b92dfd91a5568ccf6bd06", size = 54481, upload-time = "2023-05-01T04:11:28.427Z" },
 ]
-
-[[package]]
-name = "retreat-api"
-version = "0.1.0"
-source = { editable = "apps/api" }
-dependencies = [
-    { name = "fastapi" },
-    { name = "gdown" },
-    { name = "langchain-core" },
-    { name = "langgraph" },
-    { name = "openai" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pyyaml" },
-    { name = "rasterio", version = "1.4.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "rasterio", version = "1.5.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "requests" },
-    { name = "shapely" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastapi", specifier = ">=0.115" },
-    { name = "gdown", specifier = ">=6.1.0" },
-    { name = "langchain-core", specifier = ">=0.3.20" },
-    { name = "langgraph", specifier = ">=0.2.50" },
-    { name = "openai", specifier = ">=2.43.0" },
-    { name = "pydantic", specifier = ">=2.9" },
-    { name = "pydantic-settings", specifier = ">=2.6" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "rasterio", specifier = ">=1.4.4" },
-    { name = "requests", specifier = ">=2.34.2" },
-    { name = "shapely", specifier = ">=2.1.2" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
-]
-
-[[package]]
-name = "retreat-platform"
-version = "0.1.0"
-source = { virtual = "." }
-
-[package.dev-dependencies]
-dev = [
-    { name = "retreat-api" },
-]
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [{ name = "retreat-api", editable = "apps/api" }]
 
 [[package]]
 name = "shapely"

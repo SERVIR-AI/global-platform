@@ -5,9 +5,7 @@ what the risk pipeline downloads: hazard, vulnerability, raw, and risk layers.
 `conf/tiffs.yml` is separate and narrower on purpose: it carries the human/LLM-facing
 metadata (descriptions, legends, bands) for only the 9 chat-selectable hazard layers,
 which the route node lists to the model. Here we list all of them, by filename, so any
-layer can be fetched by name with gdown.
-
-Ported from grp_mvp/hazards.py; kept in step with the `notes` tab.
+layer can be fetched by name with gdown. Kept in step with the source sheet's `notes` tab.
 """
 
 DRIVE_TIFS = {
@@ -84,11 +82,3 @@ def drive_id(name):
     if name in DRIVE_TIFS:
         return DRIVE_TIFS[name]
     return DRIVE_TIFS.get(f"{name}.tif")
-
-
-def filename(name):
-    """Canonical '<name>.tif' for a catalog entry given a filename or stem, or None."""
-    if name in DRIVE_TIFS:
-        return name
-    fn = f"{name}.tif"
-    return fn if fn in DRIVE_TIFS else None

@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     )
 
     # --- Service ---
-    app_name: str = "retreat-platform-api"
+    app_name: str = "global-risk-platform-api"
     # Origins allowed to call the API from a browser. Override in prod with a
     # comma-separated env var, e.g. CORS_ORIGINS='["https://app.example.com"]'.
     cors_origins: list[str] = Field(

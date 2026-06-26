@@ -1,11 +1,11 @@
 """The layer resolver: for a hazard, decide whether to use Layer 1 (sample ADPC's
 precomputed risk_<hazard>.tif) or Layer 2 (compute Hazard x Vulnerability ourselves),
 by what's available + what the request asks for. Returns a LayerPlan the agent can
-explain and act on. (Slice S6.)
+explain and act on.
 
 Default preference is L1 (cheapest, already validated); L2 is chosen when explicitly
 requested (e.g. custom weights / validation) or when no precomputed risk exists. The
-hazard<->risk name map (conf/risk_l2.yml) handles the landslides/landslide mismatch (R5).
+hazard<->risk name map (conf/risk_l2.yml) handles the landslides/landslide mismatch.
 """
 from dataclasses import dataclass, field
 
@@ -52,12 +52,6 @@ def _logical(name):
                 f"hazard_{stem}" == v.get("hazard") or f"risk_{stem}" == v.get("risk"):
             return key
     return stem
-
-
-def hazard_key_for(hazard):
-    """The hazard_<x> reclass tif key for a hazard (handles landslides/landslide), or None."""
-    nm = _name_map().get(_logical(hazard))
-    return nm["hazard"] if nm else None
 
 
 def risk_key_for(hazard):
@@ -125,7 +119,7 @@ def resolve_layer(hazard, requested_level=None):
     plan = LayerPlan(h, level, oracle_tif=oracle, l2_available=l2_ok)
     if level == 1:
         plan.rationale = (f"L1: {risk_key}.tif exists -> sample the precomputed risk (cheapest)"
-                          + (f"; L2 also buildable" if l2_ok else ""))
+                          + ("; L2 also buildable" if l2_ok else ""))
     elif level == 2:
         plan.hazard_input, plan.vuln_inputs, plan.weights = hazard_key, list(weights), weights
         plan.rationale = (f"L2: compute risk = {hazard_key} x weighted[{', '.join(weights)}]"

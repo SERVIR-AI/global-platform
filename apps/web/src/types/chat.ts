@@ -89,7 +89,7 @@ export type AssetFeatureCollection = FeatureCollection<
 
 /** Hazard raster bundle: clipped GeoTIFF endpoint + vectorized polygons by class. */
 export interface HazardLayer {
-  /** URL of the clipped GeoTIFF (see `getRasterUrl` / `resolveApiUrl`). */
+  /** URL of the clipped GeoTIFF; resolve against the API base with `resolveApiUrl`. */
   raster_url: string;
   /** Hazard polygons by severity class. */
   geojson: FeatureCollection;
@@ -141,13 +141,6 @@ export interface ChatResponse {
  * layers without re-deriving them. See `buildChatLayers`.
  */
 export type ChatItem = (ChatRequest | ChatResponse) & { layers: ChatLayer[] };
-
-export interface HealthResponse {
-  status: string;
-  app: string;
-  default_provider: string;
-  [key: string]: unknown;
-}
 
 export interface ValidationError {
   loc: (string | number)[];

@@ -1,5 +1,5 @@
 [project]
-name = "retreat-platform"
+name = "global-risk-platform"
 version = "0.1.0"
 description = "Monorepo: FastAPI + LangGraph backend and a frontend that consumes it."
 requires-python = ">=3.11"
@@ -10,10 +10,10 @@ dependencies = []
 members = ["apps/api"]
 
 [tool.uv.sources]
-retreat-api = { workspace = true }
+global-risk-api = { workspace = true }
 
 [dependency-groups]
 # `uv sync` installs these so you can run/lint the whole repo from the root.
 dev = [
-    "retreat-api",
+    "global-risk-api",
 ]

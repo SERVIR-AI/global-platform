@@ -27,11 +27,7 @@ class _Row:
 
 
 def _registry() -> dict[Provider, _Row]:
-    """Build a mapping of each Provider to its connection details from settings.
-
-    Returns:
-        dict[Provider, _Row]: per-provider base_url, api_key, default_model, and key_env name
-    """
+    """Per-provider connection details (base_url, api_key, default_model, key_env) from settings."""
     s = get_settings()
     return {
         "claude": _Row(s.claude_base_url, s.anthropic_api_key, s.claude_model, "ANTHROPIC_API_KEY"),
@@ -41,31 +37,13 @@ def _registry() -> dict[Provider, _Row]:
 
 
 def default_model(provider: Provider) -> str:
-    """Return the configured default model name for a provider.
-
-    Args:
-        provider (Provider): one of 'claude', 'openai', 'gemini'
-
-    Returns:
-        str: model identifier string (e.g. 'gemini-2.0-flash')
-    """
+    """The configured default model for a provider."""
     return _registry()[provider].default_model
 
 
 def build_client(provider: Provider) -> OpenAI:
-    """Build an OpenAI-compatible client for the given provider.
-
-    All providers share the same OpenAI SDK; only base_url and api_key differ.
-
-    Args:
-        provider (Provider): one of 'claude', 'openai', 'gemini'
-
-    Returns:
-        openai.OpenAI: configured client pointed at the provider's endpoint
-
-    Raises:
-        MissingAPIKey: if the provider's API key environment variable is not set
-    """
+    """An OpenAI-compatible client for the provider (base_url + api_key from settings).
+    Raises MissingAPIKey if the provider's key is unset."""
     row = _registry()[provider]
     if not row.api_key:
         raise MissingAPIKey(
