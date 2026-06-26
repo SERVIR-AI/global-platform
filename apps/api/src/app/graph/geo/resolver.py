@@ -66,6 +66,27 @@ def risk_key_for(hazard):
     return nm["risk"] if nm else None
 
 
+def options_for(hazard):
+    """The answer paths available for a hazard, in order: exposure (raw hazard), risk L1
+    (precomputed), risk L2 (computed). Each is (key, layer, label); only available ones."""
+    hz = _logical(hazard)
+    nm = _name_map().get(hz)
+    if not nm:
+        return []
+    hazard_key, risk_key = nm["hazard"], nm["risk"]
+    opts = []
+    if drive_tifs.drive_id(hazard_key):
+        opts.append(("exposure", hazard_key,
+                     f"**Exposure** — which assets sit in the {hz} zone (raw hazard, by severity). Fast."))
+    if drive_tifs.drive_id(risk_key):
+        opts.append(("risk-L1", risk_key,
+                     f"**Risk, precomputed (L1)** — ADPC's official {hz} risk = Hazard × Vulnerability. Fast."))
+    if resolve_layer(hz, requested_level=2).level == 2:
+        opts.append(("risk-L2", f"{risk_key}_l2",
+                     f"**Risk, recomputed (L2)** — Hazard × Vulnerability with our weights; tunable; ~94% match to L1."))
+    return opts
+
+
 def resolve_layer(hazard, requested_level=None):
     """Pick L1 vs L2 for `hazard` and return a LayerPlan. `requested_level` (1 or 2)
     forces a level; otherwise prefer L1 when a precomputed risk tif exists."""

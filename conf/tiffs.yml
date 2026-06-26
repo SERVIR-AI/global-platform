@@ -122,6 +122,7 @@ hazard_earthquake:
 risk_flood_l2:
   local_path: tiffs/risk_flood_l2.tif
   computed: true
+  internal: true
   title: Computed flood risk (Layer 2)
   description: >
     Computed flood RISK = Hazard x weighted Vulnerability (class 1-5), built on the fly

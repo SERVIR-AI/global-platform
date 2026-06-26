@@ -74,18 +74,26 @@ def _layer_note(layers: dict[str, str]) -> str:
 
 
 def _apply_choice(state: State) -> dict:
-    """The user just answered the L1-vs-L2 question — apply it (no LLM call) and resume."""
+    """The user just answered the exposure/L1/L2 question — apply it (no LLM call) and resume."""
     p = state["awaiting_choice"]
-    reply = _last_user(state["messages"]).lower()
-    if any(k in reply for k in ("2", "l2", "recomp", "comput", "custom", "weight", "vulnerab")):
-        layer, label = p["l2_layer"], "L2 (recomputed: Hazard × Vulnerability)"
-    else:                                   # 1 / precomputed / default
-        layer, label = p["l1_layer"], "L1 (precomputed risk)"
+    options = p["options"]                       # [(key, layer, label), ...]
+    reply = _last_user(state["messages"]).strip().lower()
+    chosen = None
+    if reply[:1].isdigit():                      # picked by number
+        i = int(reply[:1]) - 1
+        if 0 <= i < len(options):
+            chosen = options[i]
+    if chosen is None:                           # picked by keyword
+        kw = {"exposure": ("exposure", "raw", "hazard", "flooded", "expos"),
+              "risk-L1": ("l1", "precomp", "official", "adpc"),
+              "risk-L2": ("l2", "recomp", "comput", "custom", "weight")}
+        chosen = next((o for o in options if any(k in reply for k in kw.get(o[0], ()))), None)
+    chosen = chosen or options[0]
     return {"operation": p["operation"], "place": p.get("place"),
-            "op_args": p.get("op_args") or {}, "tiffs": [layer],
+            "op_args": p.get("op_args") or {}, "tiffs": [chosen[1]],
             "tool_call_id": p.get("tool_call_id"), "req_geometry": p.get("req_geometry"),
             "awaiting_choice": None, "_resume": True,
-            "trace": [f"choice → {label}: {layer}"]}
+            "trace": [f"choice → {chosen[0]}: {chosen[1]}"]}
 
 
 def route(state: State, config) -> dict:
@@ -136,35 +144,29 @@ def route(state: State, config) -> dict:
 
 
 def resolve(state: State) -> dict:
-    """For a risk question with both L1 and L2 available, ASK the user which to use
-    (human-in-the-loop) and pause. Otherwise proceed, recording the chosen path."""
-    risk_layer = next((l for l in (state.get("tiffs") or []) if l.startswith("risk_")), None)
-    if not risk_layer:
-        return {}                                  # not a risk question -> straight to fetch
-    hz = resolver._logical(risk_layer)
-    l1 = resolver.resolve_layer(hz, requested_level=1)
-    l2 = resolver.resolve_layer(hz, requested_level=2)
-    if l1.level == 1 and l2.level == 2:            # both available -> ask the user
-        l1_layer = resolver.risk_key_for(hz)                                  # e.g. risk_flood
-        l2_layer = risk_layer if risk_layer.endswith("_l2") else f"{l1_layer}_l2"
-        q = (f"For **{hz} risk** I can do it two ways — which would you like?\n\n"
-             f"  **1) Precomputed (Layer 1)** — sample ADPC's official `{l1_layer}.tif`. "
-             f"Fast (~instant), the reference map.\n"
-             f"  **2) Recompute (Layer 2)** — Hazard × Vulnerability with our weights. "
-             f"Slower; lets you adjust the weighting; ~94% match to L1.\n\n"
-             f"Reply **1** or **2** (or 'precomputed' / 'recompute').")
+    """For any hazard question, ASK the user how to answer it — exposure vs precomputed risk
+    (L1) vs recomputed risk (L2) — and pause (human-in-the-loop). With one path, use it; with
+    none, refuse cleanly. The LLM only picks the hazard; the agent never guesses exposure vs risk."""
+    layer = next((l for l in (state.get("tiffs") or []) if l.startswith(("hazard_", "risk_"))), None)
+    if not layer:
+        return {}                                  # e.g. count_features (no hazard) -> fetch
+    hz = resolver._logical(layer)
+    options = resolver.options_for(layer)
+    if len(options) >= 2:                          # a real choice -> ask
+        lines = "\n".join(f"  **{i + 1})** {label}" for i, (_, _, label) in enumerate(options))
+        where = state.get("place") or "the drawn area"
+        q = (f"For **{hz}** in {where}, how would you like me to answer?\n\n{lines}\n\n"
+             f"Reply with the number (1–{len(options)}).")
         awaiting = {"operation": state.get("operation"), "place": state.get("place"),
                     "op_args": state.get("op_args") or {}, "tool_call_id": state.get("tool_call_id"),
-                    "req_geometry": state.get("req_geometry"),
-                    "l1_layer": l1_layer, "l2_layer": l2_layer}
+                    "req_geometry": state.get("req_geometry"), "options": options}
         return {"messages": [{"role": "assistant", "content": q}], "awaiting_choice": awaiting,
-                "trace": [f"resolve → asking L1 vs L2 for {hz} (both available); paused for the user"]}
-    if l1.level != 1 and l2.level != 2:            # neither path available -> refuse cleanly
-        missing = l2.missing or l1.missing or [f"no data for {hz} risk"]
-        return {"error": f"I don't have the data to assess {hz} risk: {', '.join(missing)}.",
-                "trace": [f"resolve → neither L1 nor L2 available for {hz}: {missing}"]}
-    plan = l2 if l2.level == 2 else l1             # exactly one path available -> proceed
-    return {"trace": [f"resolve → {plan.rationale} (only path available)"]}
+                "trace": [f"resolve → asking {hz}: {', '.join(o[0] for o in options)}; paused for the user"]}
+    if options:                                    # exactly one path -> use it, no question
+        return {"tiffs": [options[0][1]],
+                "trace": [f"resolve → only {options[0][0]} available for {hz}"]}
+    return {"error": f"I don't have the data to assess {hz} in {state.get('place') or 'that area'}.",
+            "trace": [f"resolve → no data for {hz}"]}
 
 
 def _needed_layers(state: State):

@@ -26,8 +26,9 @@ def test_success_path_grounded_and_traced(aoi, make_client, monkeypatch, tmp_pat
     log("INPUT", "user: 'flooded roads in Testville?'")
     log("ROUTE", "stub LLM -> tool_call roads_in_hazard(place=Testville, hazard_layers=[hazard_flood])")
     log("OPERATE", f"real store.roads_in_hazard -> {expected} km (the only place a number is born)")
-    out = gm._build_graph().invoke(
-        {"messages": [{"role": "user", "content": "flooded roads in Testville?"}]}, _cfg(client, "ok"))
+    graph, cfg = gm._build_graph(), _cfg(client, "ok")
+    graph.invoke({"messages": [{"role": "user", "content": "flooded roads in Testville?"}]}, cfg)  # agent asks
+    out = graph.invoke({"messages": [{"role": "user", "content": "1"}]}, cfg)  # choose exposure (raw hazard)
     answer = out["messages"][-1]["content"]
     log("ANSWER", answer)
     log("CALLS", f"{client.calls} (route + finalize)")
@@ -81,8 +82,9 @@ def test_fetch_failure_refuses_without_finalize_llm(make_client, monkeypatch, lo
 
     log("INPUT", "user: 'flooded roads in Atlantis?'")
     log("FETCH", "ensure_aoi raises ValueError('no administrative boundary...') => error path")
-    out = gm._build_graph().invoke(
-        {"messages": [{"role": "user", "content": "flooded roads in Atlantis?"}]}, _cfg(client, "fail"))
+    graph, cfg = gm._build_graph(), _cfg(client, "fail")
+    graph.invoke({"messages": [{"role": "user", "content": "flooded roads in Atlantis?"}]}, cfg)  # agent asks
+    out = graph.invoke({"messages": [{"role": "user", "content": "1"}]}, cfg)  # choose exposure -> fetch boom
     log("ANSWER", out["messages"][-1]["content"])
     log("CALLS", f"{client.calls} (route only; finalize made no LLM call)")
     log("CHECK", "answer says 'No data ...'; exactly 1 LLM call")

@@ -1,7 +1,9 @@
-"""S4 + ask-flow — a RISK question now ASKS L1 vs L2 first (human-in-the-loop), then on
-the reply samples the precomputed risk (L1) or computes Hazard x Vulnerability (L2).
-Two turns on one thread_id (the checkpointer resumes). No network / no real LLM (StubClient).
+"""The unified ask: a hazard question ASKS exposure vs precomputed-risk (L1) vs
+recomputed-risk (L2) — the LLM only picks the hazard, the agent never guesses. The
+reply (same thread_id) resumes and routes to the right layer. No network / real LLM (StubClient).
 """
+import pytest
+
 from app.graph import graph as gm
 
 
@@ -9,53 +11,41 @@ def _graph_cfg(client, thread):
     return gm._build_graph(), {"configurable": {"thread_id": thread, "client": client, "model": "stub"}}
 
 
-def test_risk_question_asks_then_answers_l2(aoi, make_client, monkeypatch, log):
-    """[stub] turn 1 asks L1 vs L2 (computes nothing); turn 2 reply '2' computes L2 and answers."""
+@pytest.mark.parametrize("reply, expect_src", [
+    ("1", "hazard_flood.tif"),       # exposure  -> raw hazard
+    ("2", "risk_flood.tif"),         # risk L1   -> precomputed risk
+    ("3", "risk_flood_l2.tif"),      # risk L2   -> computed risk
+])
+def test_hazard_question_asks_then_routes(aoi, make_client, monkeypatch, log, reply, expect_src):
+    """[stub] turn 1 asks the 3 options; turn 2's number routes to exposure / L1 / L2."""
     monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda *a, **k: aoi)
     monkeypatch.setattr(gm.combine, "combine_l2", lambda a, hazard, **k: aoi["hazard_flood"])
     monkeypatch.setattr(gm.ingest, "hazard_clip", lambda a, layer: a.get(layer) or a["hazard_flood"])
     client = make_client(("tool", "roads_in_hazard",
-                          {"place": "Testville", "hazard_layers": ["risk_flood_l2"]}))
-    graph, cfg = _graph_cfg(client, "ask-l2")
+                          {"place": "Testville", "hazard_layers": ["hazard_flood"]}))
+    graph, cfg = _graph_cfg(client, f"3way-{reply}")
 
-    t1 = graph.invoke({"messages": [{"role": "user", "content": "road at flood risk in Testville?"}]}, cfg)
+    t1 = graph.invoke({"messages": [{"role": "user", "content": "flood on roads in Testville?"}]}, cfg)
     q = t1["messages"][-1]["content"]
-    log("TURN1", q)
-    assert "1)" in q and "2)" in q                          # presented both options
-    assert t1.get("awaiting_choice")                        # paused for the choice
-    assert t1.get("result") is None                         # nothing computed yet
-    assert any("asking L1 vs L2" in t for t in t1.get("trace", []))
+    log("ASK", q)
+    assert "1)" in q and "2)" in q and "3)" in q            # exposure, L1, L2 all offered
+    assert t1.get("awaiting_choice") and t1.get("result") is None
 
-    t2 = graph.invoke({"messages": [{"role": "user", "content": "2"}]}, cfg)
+    t2 = graph.invoke({"messages": [{"role": "user", "content": reply}]}, cfg)
     res = t2.get("result") or {}
-    log("TURN2", f"{res.get('method')} source={res.get('source')} len={res.get('length_km')}")
+    log("ANSWER", f"{res.get('method')} source={res.get('source')}")
     assert res.get("method") == "roads_in_hazard"
-    assert "risk_flood_l2" in res.get("source", "")         # answered off the computed L2 grid
-    assert t2.get("awaiting_choice") is None                # choice consumed
+    assert expect_src in res.get("source", "")              # routed to the chosen layer
+    assert t2.get("awaiting_choice") is None
 
 
-def test_risk_choice_l1_samples_precomputed(aoi, make_client, monkeypatch):
-    """[stub] replying '1' samples the precomputed risk (risk_flood), not the computed L2 grid."""
-    monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda *a, **k: aoi)
-    monkeypatch.setattr(gm.ingest, "hazard_clip", lambda a, layer: a.get(layer) or a["hazard_flood"])
-    client = make_client(("tool", "roads_in_hazard",
-                          {"place": "Testville", "hazard_layers": ["risk_flood_l2"]}))
-    graph, cfg = _graph_cfg(client, "ask-l1")
-
-    graph.invoke({"messages": [{"role": "user", "content": "road at flood risk in Testville?"}]}, cfg)
-    t2 = graph.invoke({"messages": [{"role": "user", "content": "1"}]}, cfg)
-    res = t2.get("result") or {}
-    src = res.get("source", "")
-    assert "risk_flood" in src and "_l2" not in src         # L1 = the precomputed risk, not the computed grid
-
-
-def test_risk_hazard_with_no_data_refuses_without_asking(aoi, make_client, monkeypatch):
-    """[stub] a risk hazard with neither L1 nor L2 data refuses cleanly — no question, no fetch."""
+def test_unknown_hazard_refuses_without_asking(aoi, make_client, monkeypatch):
+    """[stub] a hazard with no exposure and no risk data refuses cleanly — no question, no fetch."""
     monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda *a, **k: aoi)
     client = make_client(("tool", "roads_in_hazard",
-                          {"place": "Testville", "hazard_layers": ["risk_volcano"]}))
+                          {"place": "Testville", "hazard_layers": ["hazard_volcano"]}))
     graph, cfg = _graph_cfg(client, "novolc")
-    out = graph.invoke({"messages": [{"role": "user", "content": "volcano risk in Testville?"}]}, cfg)
+    out = graph.invoke({"messages": [{"role": "user", "content": "volcano on roads in Testville?"}]}, cfg)
     msg = out["messages"][-1]["content"].lower()
-    assert "data to assess" in msg or "don't have" in msg    # explicit refusal, not a crash
+    assert "data to assess" in msg or "don't have" in msg
     assert out.get("result") is None and out.get("awaiting_choice") is None

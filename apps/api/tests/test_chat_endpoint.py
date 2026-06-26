@@ -43,8 +43,11 @@ def test_round_trip_with_stub(aoi, make_client, monkeypatch, log):
 
     log("REQUEST", "POST /api/chat provider=gemini  'flooded roads in Testville?'")
     log("OPERATE", f"real store.roads_in_hazard -> {expected} km")
-    r = client.post("/api/chat", json={
+    r1 = client.post("/api/chat", json={
         "messages": [{"role": "user", "content": "flooded roads in Testville?"}], "provider": "gemini"})
+    tid = r1.json()["thread_id"]                          # turn 1 -> the agent asks exposure / L1 / L2
+    r = client.post("/api/chat", json={
+        "messages": [{"role": "user", "content": "1"}], "provider": "gemini", "thread_id": tid})  # exposure
     body = r.json()
     log("STATUS", r.status_code)
     log("BODY", body)
