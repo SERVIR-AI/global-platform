@@ -102,12 +102,13 @@ const ChatBubble: FC<{ chatItem: ChatItem }> = ({ chatItem }) => {
           <ChatMapLayer key={index} layer={layer} />
         ))}
         {!isUser && trace && trace.length > 0 && (
-          <details className="text-xs text-zinc-400">
-            <summary className="cursor-pointer select-none">
+          <details className="text-xs text-base-content/70">
+            <summary className="cursor-pointer select-none font-medium">
               how it works — dev trace ({trace.length} steps)
             </summary>
-            {/* Dev-facing: the run as recorded, shown verbatim as JSON (not prose). */}
-            <pre className="mt-1 overflow-x-auto rounded-lg bg-black/20 p-3 font-mono text-[0.7rem] leading-relaxed text-zinc-300">
+            {/* Dev-facing: the run as recorded, shown verbatim as JSON (not prose).
+                Dark box + light text so it's legible on the light chat surface. */}
+            <pre className="mt-1 max-w-2xl overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-900 p-3 font-mono text-[0.7rem] leading-relaxed text-zinc-100">
               {JSON.stringify(trace, null, 2)}
             </pre>
           </details>

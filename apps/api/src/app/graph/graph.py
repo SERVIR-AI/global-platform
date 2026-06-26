@@ -153,10 +153,12 @@ def resolve(state: State) -> dict:
     hz = resolver._logical(layer)
     options = resolver.options_for(layer)
     if len(options) >= 2:                          # a real choice -> ask
-        lines = "\n".join(f"  **{i + 1})** {label}" for i, (_, _, label) in enumerate(options))
+        # Blank line between options so each renders on its own line (markdown collapses
+        # single newlines into one paragraph); the UI also shows these as buttons.
+        lines = "\n\n".join(f"**{i + 1})** {label}" for i, (_, _, label) in enumerate(options))
         where = state.get("place") or "the drawn area"
         q = (f"For **{hz}** in {where}, how would you like me to answer?\n\n{lines}\n\n"
-             f"Reply with the number (1–{len(options)}).")
+             f"Reply with the number (1–{len(options)}) — or tap an option below.")
         awaiting = {"operation": state.get("operation"), "place": state.get("place"),
                     "op_args": state.get("op_args") or {}, "tool_call_id": state.get("tool_call_id"),
                     "req_geometry": state.get("req_geometry"), "options": options}
