@@ -1,5 +1,6 @@
 import { useChat } from '@/hooks/useChat';
 import { cn, getChatItemDate } from '@/lib/utils';
+import { useChatStore } from '@/stores/ChatStore';
 import type { ChatChoice, ChatItem, ChatMessage } from '@/types/chat';
 import { FC } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
@@ -51,7 +52,9 @@ const itemMessage = (item: ChatItem): ChatMessage =>
 
 // The agent's exposure-vs-risk question comes back with `choices`; render them as
 // buttons that send the option's `value` (e.g. "1") as the next reply on this thread.
-const ChoiceButtons: FC<{ choices: ChatChoice[] }> = ({ choices }) => {
+// Only the latest turn's choices are actionable; once a newer turn exists the user
+// has already moved on, so older buttons are disabled.
+const ChoiceButtons: FC<{ choices: ChatChoice[]; isLast: boolean }> = ({ choices, isLast }) => {
   const { send, isPending } = useChat();
   return (
     <div className="flex flex-wrap gap-2">
@@ -60,7 +63,7 @@ const ChoiceButtons: FC<{ choices: ChatChoice[] }> = ({ choices }) => {
           key={choice.value}
           type="button"
           className="btn btn-sm btn-outline btn-primary"
-          disabled={isPending}
+          disabled={isPending || !isLast}
           onClick={() => send(choice.value)}
         >
           {choice.label}
@@ -76,6 +79,7 @@ const ChatBubble: FC<{ chatItem: ChatItem }> = ({ chatItem }) => {
   const date = getChatItemDate(chatItem);
   const trace = (chatItem as { trace?: string[] | null }).trace;
   const choices = (chatItem as { choices?: ChatChoice[] | null }).choices;
+  const isLast = useChatStore((s) => s.messages[s.messages.length - 1] === chatItem);
   return (
     <div className={cn('flex flex-col gap-2', isUser ? 'items-end' : 'items-start')}>
       <div
@@ -95,7 +99,7 @@ const ChatBubble: FC<{ chatItem: ChatItem }> = ({ chatItem }) => {
         )}
       </div>
       {!isUser && choices && choices.length > 0 && (
-        <ChoiceButtons choices={choices} />
+        <ChoiceButtons choices={choices} isLast={isLast} />
       )}
       <div className="flex flex-col gap-1">
         {chatItem.layers.map((layer, index) => (
@@ -108,7 +112,7 @@ const ChatBubble: FC<{ chatItem: ChatItem }> = ({ chatItem }) => {
             </summary>
             {/* Dev-facing: the run as recorded, shown verbatim as JSON (not prose).
                 Dark box + light text so it's legible on the light chat surface. */}
-            <pre className="mt-1 max-w-2xl overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-900 p-3 font-mono text-[0.7rem] leading-relaxed text-zinc-100">
+            <pre className="mt-1 max-w-2xl overflow-x-auto whitespace-pre-wrap wrap-break-words rounded-lg bg-zinc-900 p-3 font-mono text-[0.7rem] leading-relaxed text-zinc-100">
               {JSON.stringify(trace, null, 2)}
             </pre>
           </details>

@@ -9,6 +9,23 @@ import type { ChatLayer } from '@/types/chat';
 
 const FIT_OPTIONS = { padding: [40, 40, 40, 40], duration: 300, maxZoom: 16 };
 
+/** Trigger a browser download of `href` under `filename` via a transient anchor. */
+const triggerDownload = (href: string, filename: string) => {
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+};
+
+/** A filesystem-friendly base name from the layer name, e.g. `area-of-interest`. */
+const fileSlug = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'layer';
+
 /** The layer's extent in the view projection, or undefined when it has none. */
 const layerExtent = (layer: Layer): Extent | undefined => {
   const source = layer.getSource();
@@ -28,8 +45,8 @@ const layerExtent = (layer: Layer): Extent | undefined => {
  *
  * Returns whether a map is `available`, whether the layer is `shown`, its
  * `opacity` plus `setOpacity`, `toggle` (show/hide), `zoomTo` (fit the view to
- * its extent), and `bringToFront` / `bringToBack` (reorder it within the chat
- * layers).
+ * its extent), `download` (save the layer's source data to disk), and
+ * `bringToFront` / `bringToBack` (reorder it within the chat layers).
  */
 export const useMapLayer = (chatLayer: ChatLayer) => {
   const map = useMapStore((s) => s.map);
@@ -55,13 +72,29 @@ export const useMapLayer = (chatLayer: ChatLayer) => {
     collection.push(chatLayer.layer);
   }, [map, chatLayer]);
 
+  const download = useCallback(() => {
+    const { download, name } = chatLayer;
+    if (download.kind === 'raster') {
+      triggerDownload(download.url, `${fileSlug(name)}.tiff`);
+      return;
+    }
+    // Serialize the raw GeoJSON to a blob URL, download it, then release it.
+    const blob = new Blob([JSON.stringify(download.geojson)], { type: 'application/geo+json' });
+    const url = URL.createObjectURL(blob);
+    triggerDownload(url, `${fileSlug(name)}.geojson`);
+    URL.revokeObjectURL(url);
+  }, [chatLayer]);
+
   const bringToBack = useCallback(() => {
     if (!map) return;
     const collection = map.getLayers();
     // Keep chat layers above the base layers (basemap + drawn geometry), which
     // belong to no chat turn — drop it just above them rather than to index 0.
     const managed = new Set<BaseLayer>(
-      useChatStore.getState().messages.flatMap((m) => m.layers).map((l) => l.layer),
+      useChatStore
+        .getState()
+        .messages.flatMap((m) => m.layers)
+        .map((l) => l.layer),
     );
     const baseCount = collection.getArray().filter((l) => !managed.has(l)).length;
     collection.remove(chatLayer.layer);
@@ -75,6 +108,7 @@ export const useMapLayer = (chatLayer: ChatLayer) => {
     setOpacity,
     toggle,
     zoomTo,
+    download,
     bringToFront,
     bringToBack,
   };

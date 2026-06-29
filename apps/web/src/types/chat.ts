@@ -182,13 +182,17 @@ export interface HTTPValidationError {
  * GeoJSON type; `Rectangle` is a bbox, `Raster` is the hazard GeoTIFF, and
  * `Vector` is the fallback for a mixed-geometry collection.
  */
-export type ChatLayerType =
-  | 'Point'
-  | 'LineString'
-  | 'Polygon'
-  | 'Rectangle'
-  | 'Raster'
-  | 'Vector';
+export type ChatLayerType = 'Point' | 'LineString' | 'Polygon' | 'Rectangle' | 'Raster' | 'Vector';
+
+/**
+ * Source data for a layer's "save" action, captured at build time so the
+ * download serves the original payload rather than re-deriving it from the
+ * (reprojected, styled) OpenLayers layer: raw GeoJSON for vectors, or the
+ * resolved GeoTIFF URL for rasters.
+ */
+export type ChatLayerDownload =
+  | { kind: 'geojson'; geojson: object }
+  | { kind: 'raster'; url: string };
 
 export interface ChatLayer {
   layer: Layer;
@@ -199,4 +203,12 @@ export interface ChatLayer {
   visible: boolean;
   /** Layer opacity in 0..1; the reconciler applies it to the map layer. */
   opacity: number;
+  /** Source data backing the "save layer" action. */
+  download: ChatLayerDownload;
+  /**
+   * Legend swatches for the layer's symbology, in display order: the AOI/drawn
+   * outline color, or the hazard/asset severity scale. Empty when the layer has
+   * nothing to legend, in which case the symbology toggle is hidden.
+   */
+  symbology: LegendEntry[];
 }

@@ -12,13 +12,18 @@ const ChatArea: FC = () => {
   const loading = useChatPending();
   const welcome = messages.length === 0;
 
-  // Scroll to the bottom on every new message — both when the user sends and
-  // when the API response arrives.
+  // Scroll to the bottom only when a message is appended — both when the user
+  // sends and when the API response arrives. We key off the message count, not
+  // the `messages` array itself: toggling a layer's visibility/opacity rebuilds
+  // the array, which must not yank the view back to the bottom.
   const scrollRef = useRef<HTMLDivElement>(null);
+  const prevCount = useRef(messages.length);
   useEffect(() => {
+    if (messages.length <= prevCount.current) return;
+    prevCount.current = messages.length;
     const el = scrollRef.current;
     el?.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-  }, [messages]);
+  }, [messages.length]);
 
   return (
     <div

@@ -15,10 +15,12 @@ import type { Feature as GeoJSONFeature, FeatureCollection } from 'geojson';
 import type {
   Bbox,
   ChatLayer,
+  ChatLayerDownload,
   ChatLayerType,
   ChatRequest,
   ChatResponse,
   Legend,
+  LegendEntry,
 } from '@/types/chat';
 
 // The backend emits all geometry in EPSG:4326; the map view is EPSG:3857, so
@@ -28,6 +30,9 @@ const VIEW_PROJECTION = 'EPSG:3857';
 const readOptions = { dataProjection: DATA_PROJECTION, featureProjection: VIEW_PROJECTION };
 
 const geoJSON = new GeoJSON();
+
+// AOI / drawn boundary outline color, shared by the style and its legend swatch.
+const AOI_COLOR = '#2563eb';
 
 // AOI / drawn boundary: blue outline, faint fill, dot for point geometries.
 const aoiStyle = new Style({
@@ -77,6 +82,20 @@ const severityStyle =
   (legend: Legend | null): StyleLike =>
   (feature: FeatureLike) =>
     colorStyle(legend?.[String(feature.get('severity'))]?.color ?? FALLBACK_COLOR);
+
+/** AOI / drawn-boundary legend: a single swatch in the boundary color. */
+const aoiSymbology = (label: string): LegendEntry[] => [{ label, color: AOI_COLOR }];
+
+/**
+ * Legend swatches for a severity scale, ordered by ascending class so the
+ * symbology reads low-to-high. Empty when the response carried no legend.
+ */
+const severitySymbology = (legend: Legend | null): LegendEntry[] =>
+  legend
+    ? Object.entries(legend)
+        .sort(([a], [b]) => Number(a) - Number(b))
+        .map(([, entry]) => entry)
+    : [];
 
 /** Vector layer from a GeoJSON Feature or FeatureCollection. */
 const vectorLayer = (geojson: object, style: StyleLike): Layer =>
@@ -148,6 +167,33 @@ const vectorType = (geojson: GeoJSONFeature | FeatureCollection): ChatLayerType 
 const geometryType = (geometry: NonNullable<ChatRequest['geometry']>): ChatLayerType =>
   Array.isArray(geometry) ? 'Rectangle' : (GEOMETRY_TYPE[geometry.type] ?? 'Vector');
 
+/** GeoJSON Polygon Feature (EPSG:4326) for a bbox, so it saves as valid GeoJSON. */
+const bboxFeature = (bbox: Bbox): GeoJSONFeature => {
+  const [minLon, minLat, maxLon, maxLat] = bbox;
+  return {
+    type: 'Feature',
+    properties: {},
+    geometry: {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [minLon, minLat],
+          [maxLon, minLat],
+          [maxLon, maxLat],
+          [minLon, maxLat],
+          [minLon, minLat],
+        ],
+      ],
+    },
+  };
+};
+
+/** Download descriptor for a `ChatRequest.geometry` — bbox wrapped as a Feature. */
+const geometryDownload = (geometry: NonNullable<ChatRequest['geometry']>): ChatLayerDownload => ({
+  kind: 'geojson',
+  geojson: Array.isArray(geometry) ? bboxFeature(geometry) : geometry,
+});
+
 // Raster overlays render half-transparent so the layers beneath them stay
 // visible; vector layers render fully opaque.
 const RASTER_OPACITY = 0.5;
@@ -173,6 +219,8 @@ export const buildChatLayers = (item: ChatRequest | ChatResponse): ChatLayer[] =
         description: 'Resolved AOI boundary.',
         visible: true,
         opacity: VECTOR_OPACITY,
+        download: { kind: 'geojson', geojson: item.aoi },
+        symbology: aoiSymbology('Area of interest'),
       });
     if (item.hazard_layer?.raster_url)
       layers.push({
@@ -182,6 +230,8 @@ export const buildChatLayers = (item: ChatRequest | ChatResponse): ChatLayer[] =
         description: 'Clipped hazard severity raster.',
         visible: true,
         opacity: RASTER_OPACITY,
+        download: { kind: 'raster', url: resolveApiUrl(item.hazard_layer.raster_url) },
+        symbology: severitySymbology(legend),
       });
     if (item.features)
       layers.push({
@@ -191,6 +241,8 @@ export const buildChatLayers = (item: ChatRequest | ChatResponse): ChatLayer[] =
         description: 'Exposed assets within the area.',
         visible: true,
         opacity: VECTOR_OPACITY,
+        download: { kind: 'geojson', geojson: item.features },
+        symbology: severitySymbology(legend),
       });
   } else if (item.geometry) {
     layers.push({
@@ -200,6 +252,8 @@ export const buildChatLayers = (item: ChatRequest | ChatResponse): ChatLayer[] =
       description: 'User-drawn area of interest.',
       visible: true,
       opacity: VECTOR_OPACITY,
+      download: geometryDownload(item.geometry),
+      symbology: aoiSymbology('Drawn area'),
     });
   }
   return layers;
