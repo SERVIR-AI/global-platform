@@ -14,7 +14,14 @@ from .config import get_settings
 
 
 def create_app() -> FastAPI:
-    """Build the app: CORS from settings, API router mounted at /api."""
+    """Build and configure the FastAPI application instance.
+
+    Sets up CORS middleware with origins from settings and mounts the API router
+    at /api. Called once at module load to produce the `app` singleton.
+
+    Returns:
+        FastAPI: configured application instance
+    """
     settings = get_settings()
     app = FastAPI(title=settings.app_name, version="0.1.0")
 
@@ -30,6 +37,11 @@ def create_app() -> FastAPI:
 
     @app.get("/")
     def root() -> dict:
+        """Return service name and link to the interactive API docs.
+
+        Returns:
+            dict: {'service': str, 'docs': str}
+        """
         return {"service": settings.app_name, "docs": "/docs"}
 
     return app

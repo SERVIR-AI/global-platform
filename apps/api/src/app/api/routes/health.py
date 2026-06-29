@@ -7,7 +7,11 @@ router = APIRouter()
 
 @router.get("/health")
 def health() -> dict:
-    """Liveness plus the active app name and default provider."""
+    """Return service liveness status and active configuration summary.
+
+    Returns:
+        dict: {'status': 'ok', 'app': str, 'default_provider': str}
+    """
     settings = get_settings()
     return {
         "status": "ok",

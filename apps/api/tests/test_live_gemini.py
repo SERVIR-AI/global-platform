@@ -23,9 +23,12 @@ def test_live_gemini_round_trip(aoi, monkeypatch, log):
 
     log("REQUEST", "POST /api/chat provider=gemini  'How many km of road are flooded in Riverford?'")
     log("OPERATE", f"real store.roads_in_hazard -> {expected} km (geo stubbed; LLM is live)")
-    r = TestClient(app).post("/api/chat", json={
+    r1 = TestClient(app).post("/api/chat", json={
         "messages": [{"role": "user", "content": "How many kilometres of road are flooded in Riverford?"}],
         "provider": "gemini"})
+    tid = r1.json()["thread_id"]          # turn 1: live Gemini routes -> agent asks exposure/L1/L2
+    r = TestClient(app).post("/api/chat", json={
+        "messages": [{"role": "user", "content": "1"}], "provider": "gemini", "thread_id": tid})  # exposure
     body = r.json()
     log("STATUS", r.status_code)
     log("MODEL", f"{body['model']}  usage={body['usage']}")

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
-from typing import Annotated, TypedDict
+from typing import Annotated, Any, TypedDict, NotRequired
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -31,20 +31,31 @@ def _add(left: list | None, right: list | None) -> list:
     return (left or []) + (right or [])
 
 
-class State(TypedDict, total=False):
+class InputState(TypedDict):
+    """The only keys a caller must supply to graph.invoke() — everything else is internal."""
+    messages: list[dict]
+    req_geometry: NotRequired[dict | list | None]       # Mode 2: a drawn AOI from the request
+    req_hazard: NotRequired[str | None]          # explicit hazard from the request (e.g. a UI button)
+
+
+class State(TypedDict):  # total=True by default: keys are required unless NotRequired
+    # Reducer keys: kept as bare Annotated (required) so LangGraph reliably detects
+    # the _add reducer. Always present — messages comes in via InputState, and route
+    # writes usage on every path.
     messages: Annotated[list[dict], _add]  # OpenAI-format conversation dicts
-    operation: str | None                  # which store op to run
-    place: str | None                      # extracted location
-    op_args: dict                          # remaining op params (layer, min_severity)
-    tiffs: list[str]                       # hazard layers the op needs
-    tool_call_id: str | None               # so finalize can build the tool message
-    aoi: dict | None                       # the ensure_aoi bundle of paths
-    result: dict | None                    # the computed result
-    error: str | None                      # set on refusal/failure -> straight to finalize
     usage: Annotated[list[dict], _add]     # per-LLM-call {in, out} token counts
+    
+    # Flow-dependent keys: absent on the decline/error short-circuits, so NotRequired.
+    # Read them with state.get(...)
+    operation: NotRequired[str]            # which store op to run
+    place: NotRequired[str]                # extracted location
+    op_args: NotRequired[dict]             # remaining op params (layer, min_severity)
+    tiffs: NotRequired[list[str]]          # hazard layers the op needs
+    tool_call_id: NotRequired[str]         # so finalize can build the tool message
+    aoi: NotRequired[dict]                 # the ensure_aoi bundle of paths
+    result: NotRequired[dict]              # the computed result
+    error: NotRequired[str]                # set on refusal/failure -> straight to finalize
     trace: Annotated[list[str], _add]      # plain-text step narration (returned when verbose)
-    req_geometry: dict | list | None       # Mode 2: a drawn AOI from the request
-    req_hazard: str | None                 # explicit hazard from the request (e.g. a UI button)
     awaiting_choice: dict | None           # set when the agent asked L1-vs-L2; resumes on the reply
     _resume: bool                          # transient: this turn applied a pending L1/L2 choice
 
@@ -74,7 +85,7 @@ def _layer_note(layers: dict[str, str]) -> str:
 
 def _apply_choice(state: State) -> dict:
     """The user just answered the exposure/L1/L2 question — apply it (no LLM call) and resume."""
-    p = state["awaiting_choice"]
+    p: dict = state["awaiting_choice"]
     options = p["options"]                       # [(key, layer, label), ...]
     reply = _last_user(state["messages"]).strip().lower()
     chosen = None
@@ -106,8 +117,22 @@ def _route_menu(thread_id) -> dict:
 
 
 def route(state: State, config) -> dict:
-    """LLM picks the operation + place + hazard layers. Records intent; runs nothing.
-    If we're resuming a pending L1/L2 choice, apply it without an LLM call."""
+    """
+    Ask the LLM to pick an operation, extract a place, and select hazard layers.
+    If we're resuming a pending L1/L2 choice, apply it without an LLM call.
+    Uses OpenAI tool-calling as structured extraction only — nothing is executed here.
+    On decline (no tool call) or missing place, sets 'error' to skip fetch/operate.
+
+    Args:
+        state (State): current graph state with at least a 'messages' list
+        config (dict): LangGraph config with 'configurable' keys 'client' and 'model'
+
+    Returns:
+        dict: partial State update with one of:
+            - {'operation', 'place', 'op_args', 'tiffs', 'tool_call_id', 'usage'} on success
+            - {'error', 'usage'} on model decline or missing place
+    """
+
     if state.get("awaiting_choice"):
         return _apply_choice(state)
     client = config["configurable"]["client"]
@@ -225,9 +250,16 @@ def fetch(state: State) -> dict:
 
 
 def operate(state: State) -> dict:
-    """Run the deterministic spatial op over the bundle — the only number-producing step."""
+    """Run the deterministic spatial operation — the only place a number is computed.
+
+    Args:
+        state (State): must contain 'operation', 'aoi', and 'op_args'
+
+    Returns:
+        dict: {'result': result_dict} on success, or {'error': str} on failure
+    """
     try:
-        result = operations.dispatch(state["operation"], state["aoi"],
+        result = operations.dispatch(state.get("operation"), state.get("aoi"),
                                      hazard_layers=state.get("tiffs"), **state["op_args"])
         num = result.get("length_km", result.get("count"))
         line = f"overlay (deterministic, no LLM) → {result['method']} = {num}"
@@ -290,7 +322,7 @@ def _after_fetch(state: State) -> str:
 
 
 def _build_graph():
-    builder = StateGraph(State)
+    builder = StateGraph(State, input_schema=InputState)
     builder.add_node("route", route)
     builder.add_node("resolve", resolve)
     builder.add_node("fetch", fetch)

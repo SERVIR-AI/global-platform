@@ -130,3 +130,6 @@ See **[DEMO.md](DEMO.md)** for an exhaustive set of example queries, and
 uv run --project apps/api pytest apps/api -q                  # fast suite (stubs, no network)
 GRP_RUN_SLOW=1 uv run --project apps/api pytest apps/api -q   # + slow real-data / Drive tests
 ```
+
+See **[DEMO.md](DEMO.md)** for an exhaustive set of example queries — every hazard, every
+asset, severity, the boundary fallbacks, honest refusals, multi-turn, and verbose.
