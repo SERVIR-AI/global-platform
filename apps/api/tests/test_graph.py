@@ -13,7 +13,7 @@ def _cfg(client, thread):
 
 
 def _patch_fetch(monkeypatch, aoi):
-    monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda place: aoi)
+    monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda *a, **k: aoi)
     monkeypatch.setattr(gm.ingest, "hazard_clip", lambda place, layer: aoi[layer])
 
 
@@ -26,8 +26,9 @@ def test_success_path_grounded_and_traced(aoi, make_client, monkeypatch, tmp_pat
     log("INPUT", "user: 'flooded roads in Testville?'")
     log("ROUTE", "stub LLM -> tool_call roads_in_hazard(place=Testville, hazard_layers=[hazard_flood])")
     log("OPERATE", f"real store.roads_in_hazard -> {expected} km (the only place a number is born)")
-    out = gm._build_graph().invoke(
-        {"messages": [{"role": "user", "content": "flooded roads in Testville?"}]}, _cfg(client, "ok"))
+    graph, cfg = gm._build_graph(), _cfg(client, "ok")
+    graph.invoke({"messages": [{"role": "user", "content": "flooded roads in Testville?"}]}, cfg)  # agent asks
+    out = graph.invoke({"messages": [{"role": "user", "content": "1"}]}, cfg)  # choose exposure (raw hazard)
     answer = out["messages"][-1]["content"]
     log("ANSWER", answer)
     log("CALLS", f"{client.calls} (route + finalize)")
@@ -73,7 +74,7 @@ def test_no_place_refuses(make_client, log):
 
 def test_fetch_failure_refuses_without_finalize_llm(make_client, monkeypatch, log):
     """If fetch fails (unresolvable place), finalize returns the failure verbatim — no second LLM call."""
-    def boom(place):
+    def boom(*a, **k):
         raise ValueError("no administrative boundary for 'Atlantis'")
     monkeypatch.setattr(gm.ingest, "ensure_aoi", boom)
     monkeypatch.setattr(gm.ingest, "source_raster", lambda layer="hazard_flood": "x")
@@ -81,8 +82,9 @@ def test_fetch_failure_refuses_without_finalize_llm(make_client, monkeypatch, lo
 
     log("INPUT", "user: 'flooded roads in Atlantis?'")
     log("FETCH", "ensure_aoi raises ValueError('no administrative boundary...') => error path")
-    out = gm._build_graph().invoke(
-        {"messages": [{"role": "user", "content": "flooded roads in Atlantis?"}]}, _cfg(client, "fail"))
+    graph, cfg = gm._build_graph(), _cfg(client, "fail")
+    graph.invoke({"messages": [{"role": "user", "content": "flooded roads in Atlantis?"}]}, cfg)  # agent asks
+    out = graph.invoke({"messages": [{"role": "user", "content": "1"}]}, cfg)  # choose exposure -> fetch boom
     log("ANSWER", out["messages"][-1]["content"])
     log("CALLS", f"{client.calls} (route only; finalize made no LLM call)")
     log("CHECK", "answer says 'No data ...'; exactly 1 LLM call")
@@ -103,3 +105,34 @@ def test_multi_turn_memory(aoi, make_client, monkeypatch, log):
     log("HISTORY", roles)
     log("CHECK", "roles == ['user','assistant','user','assistant']")
     assert roles == ["user", "assistant", "user", "assistant"]
+
+
+def test_place_followup_after_no_place_decline(aoi, make_client, monkeypatch, log):
+    """Turn 1 declines because no place was named; turn 2 supplies just the place. The agent
+    must route the original request afresh — NOT re-emit the stale decline. Regresses the bug
+    where a prior turn's `error` persisted in the checkpointer and re-fired finalize."""
+    _patch_fetch(monkeypatch, aoi)
+    monkeypatch.setattr(gm.combine, "combine_l2", lambda a, hazard, **k: aoi["hazard_flood"])
+    graph, thread = gm._build_graph(), "placefollow"
+
+    # Turn 1: no place -> the model returns a plain-text request for a place (decline path).
+    decline = make_client(("text", "I need a place — e.g. Battambang or Siem Reap?"))
+    log("TURN 1", "user: 'schools at high flood risk?'  (no place) -> decline asks for a place")
+    t1 = graph.invoke({"messages": [{"role": "user", "content": "schools at high flood risk?"}]},
+                      _cfg(decline, thread))
+    log("ANSWER 1", t1["messages"][-1]["content"])
+    assert "place" in t1["messages"][-1]["content"].lower()
+    assert t1.get("error")                                   # decline set an error this turn
+
+    # Turn 2 (same thread): user names just the place; a fresh route now yields a tool call.
+    route = make_client(("tool", "count_in_hazard",
+                         {"place": "Siem Reap", "hazard_layers": ["hazard_flood"], "layer": "schools"}))
+    log("TURN 2", "user: 'Siem Reap'  (same thread_id) -> should route, not repeat the decline")
+    t2 = graph.invoke({"messages": [{"role": "user", "content": "Siem Reap"}]}, _cfg(route, thread))
+    msg = t2["messages"][-1]["content"]
+    log("ANSWER 2", msg)
+    log("CHECK", "stale decline gone; error cleared; now asking exposure/L1/L2 for Siem Reap")
+    assert "I need a place" not in msg                       # the old decline must NOT re-appear
+    assert t2.get("error") is None                           # stale error was cleared on the fresh turn
+    assert "1)" in msg and "2)" in msg                       # routed -> now asks the 3-way
+    assert t2.get("awaiting_choice")

@@ -117,3 +117,37 @@ hazard_earthquake:
     3: Moderate (50-150 PGA)
     4: High (150-300 PGA)
     5: Very High (>300 PGA)
+
+# --- Computed (not downloaded): Layer-2 risk, built per-AOI by combine.combine_l2 ---
+risk_flood_l2:
+  local_path: tiffs/risk_flood_l2.tif
+  computed: true
+  internal: true
+  title: Computed flood risk (Layer 2)
+  description: >
+    Computed flood RISK = Hazard x weighted Vulnerability (class 1-5), built on the fly
+    from the reclassed flood-hazard and vulnerability layers. Choose this when the user
+    asks about flood RISK (who/what is at risk); NOT for raw flood exposure / "flooded"
+    (use hazard_flood for those). 0 = no risk, 1 low .. 5 very high.
+  legend:
+    1: Very Low
+    2: Low
+    3: Moderate
+    4: High
+    5: Very High
+
+# --- Internal: the precomputed (Layer-1) risk, offered via the L1/L2 question, NOT the router menu ---
+risk_flood:
+  local_path: tiffs/risk_flood.tif
+  internal: true
+  title: Precomputed flood risk (Layer 1, ADPC)
+  description: >
+    ADPC's precomputed flood RISK (class 1-5) — the official reference map. Used for the
+    Layer-1 path (sample the precomputed risk). The agent offers this through the L1/L2
+    question, so it is hidden from the router menu.
+  legend:
+    1: Very Low
+    2: Low
+    3: Moderate
+    4: High
+    5: Very High

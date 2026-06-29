@@ -1,5 +1,5 @@
 [project]
-name = "retreat-api"
+name = "global-risk-api"
 version = "0.1.0"
 description = "FastAPI service hosting a LangGraph application."
 requires-python = ">=3.11"
@@ -16,6 +16,7 @@ dependencies = [
     "openai>=2.43.0",
     "pyyaml>=6.0.3",
     "gdown>=6.1.0",
+    "python-multipart>=0.0.9",
 ]
 
 [build-system]

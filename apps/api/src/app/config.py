@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     )
 
     # --- Service ---
-    app_name: str = "retreat-platform-api"
+    app_name: str = "global-risk-platform-api"
     # Origins allowed to call the API from a browser. Override in prod with a
     # comma-separated env var, e.g. CORS_ORIGINS='["https://app.example.com"]'.
     cors_origins: list[str] = Field(
@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     traces_dir: Path = cache_dir / "traces"
     prompts_path: Path = _REPO_ROOT / "conf" / "prompts.yml"
     tiffs_config_path: Path = _REPO_ROOT / "conf" / "tiffs.yml"
+    raster_schema_path: Path = _REPO_ROOT / "conf" / "raster_schema.yml"
+    risk_l2_config_path: Path = _REPO_ROOT / "conf" / "risk_l2.yml"
 
     # --- LLM defaults ---
     # Which provider to use when a request doesn't specify one.

@@ -1,0 +1,219 @@
+# Declared contract per raster. verify.verify_raster opens the file and confirms
+# REALITY matches this — because filenames and the source sheet lie about units and
+# scale (a file the sheet calls "metres" actually held millimetres; a "1-5" layer was
+# really 0-4). The schema is the ground truth a file must satisfy before any op uses it.
+#
+# role: hazard | vulnerability_reclass | raw | risk
+# Checked fields (a field is only checked if declared): dtype (exact), valid_min/valid_max
+# (sampled range must fall within, with float_tol), nodata, crs (epsg), pixel_size_deg.
+# units/scale are carried for provenance and shown in the report; the range check is what
+# actually catches a wrong-units declaration.
+#
+# Measured values come from the file-content verification spike (real reads). Layers marked
+# "expected" are confirmed/locked on the first live verify run.
+
+defaults:
+  crs: EPSG:4326
+  float_tol: 0.0001
+
+layers:
+  # --- Layer-2 flood ingredient set (already-reclassed 1-5) ---
+  hazard_flood:
+    role: hazard
+    dtype: int8
+    valid_min: 0
+    valid_max: 5
+    units: class            # 0 = no hazard, 1..5 severity
+    scale: 1
+    nodata: null
+    pixel_size_deg: 0.000898315284120   # ~100 m
+
+  vulnerability_pop_all_total:
+    role: vulnerability_reclass
+    dtype: uint8
+    valid_min: 0
+    valid_max: 5            # 0-5 (a coarse 512px sample once under-reported this as 0-4)
+    units: class
+    scale: 1
+    nodata: null
+
+  vulnerability_reclass_blddensity:
+    role: vulnerability_reclass
+    dtype: int8
+    valid_min: 0
+    valid_max: 5
+    units: class
+    scale: 1
+    nodata: null
+
+  vulnerability_reclass_road:
+    role: vulnerability_reclass
+    dtype: int8            # expected — locked on first live verify
+    valid_min: 0
+    valid_max: 5
+    units: class
+    scale: 1
+    nodata: null
+
+  # --- Validation oracle (Layer 1) ---
+  risk_flood:
+    role: risk
+    dtype: uint8          # expected — locked on first live verify
+    valid_min: 0
+    valid_max: 5
+    units: class
+    scale: 1
+    nodata: null
+
+  # --- Trap canary: the continuous flood-depth raw layer ---
+  # Caught in the spike: uint32, sampled 1..7180 = MILLIMETRES, NOT metres as the sheet says.
+  # A "units: metres / valid_max: 5" declaration on this file MUST FAIL verify (S1.T5).
+  global_pc_h100glob:
+    role: raw
+    dtype: uint32
+    valid_min: 0
+    valid_max: 20000
+    units: mm
+    scale: 1
+    nodata: 0.0
+
+  # --- Expected: reclassed 1-5 class layers (range-checked now; dtype/nodata confirmed on
+  #     first live verify). Declared so every reclassed catalog tif has a contract before use. ---
+  # hazard
+  hazard_cyclone:
+    role: hazard
+    valid_min: 0
+    valid_max: 5
+    units: class
+  hazard_drought:
+    role: hazard
+    valid_min: 0
+    valid_max: 5
+    units: class
+  hazard_earthquake:
+    role: hazard
+    valid_min: 0
+    valid_max: 5
+    units: class
+  hazard_fire:
+    role: hazard
+    valid_min: 0
+    valid_max: 5
+    units: class
+  hazard_flashflood:
+    role: hazard
+    valid_min: 0
+    valid_max: 5
+    units: class
+  hazard_landslides:
+    role: hazard
+    valid_min: 0
+    valid_max: 5
+    units: class
+  hazard_storm:
+    role: hazard
+    valid_min: 0
+    valid_max: 5
+    units: class
+  hazard_tsunami:
+    role: hazard
+    valid_min: 0
+    valid_max: 5
+    units: class
+  # risk
+  risk_cyclone:
+    role: risk
+    valid_min: 0
+    valid_max: 5
+    units: class
+  risk_drought:
+    role: risk
+    valid_min: 0
+    valid_max: 5
+    units: class
+  risk_earthquake:
+    role: risk
+    valid_min: 0
+    valid_max: 5
+    units: class
+  risk_fire:
+    role: risk
+    valid_min: 0
+    valid_max: 5
+    units: class
+  risk_flashflood:
+    role: risk
+    valid_min: 0
+    valid_max: 5
+    units: class
+  risk_landslide:
+    role: risk
+    valid_min: 0
+    valid_max: 5
+    units: class
+  risk_storm:
+    role: risk
+    valid_min: 0
+    valid_max: 5
+    units: class
+  risk_tsunami:
+    role: risk
+    valid_min: 0
+    valid_max: 5
+    units: class
+  # vulnerability_reclass
+  vulnerability_F_15_60:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class
+  vulnerability_F_above60:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class
+  vulnerability_F_infant:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class
+  vulnerability_M_15_60:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class
+  vulnerability_M_above60:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class
+  vulnerability_M_infant:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class
+  vulnerability_reclass_bldheight:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class
+  vulnerability_reclass_gdp:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class
+  vulnerability_reclass_lai:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class
+  vulnerability_reclass_tcc:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class
+  vulnerability_reclass_wdpa:
+    role: vulnerability_reclass
+    valid_min: 0
+    valid_max: 5
+    units: class

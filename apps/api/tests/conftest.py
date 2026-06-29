@@ -87,6 +87,32 @@ def _redirect_traces(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def tif_writer(tmp_path):
+    """Factory used across the BYOD tests: write a tiny real GeoTIFF and return its path."""
+    def _write(data, *, crs="EPSG:4326", count=1, dtype="int16", nodata=None,
+               bounds=(103.0, 13.0, 103.1, 13.1), name="t.tif"):
+        h, w = data.shape
+        path = tmp_path / name
+        with rasterio.open(path, "w", driver="GTiff", height=h, width=w, count=count,
+                           dtype=dtype, crs=crs, transform=from_bounds(*bounds, w, h),
+                           nodata=nodata) as dst:
+            for band in range(1, count + 1):
+                dst.write(data.astype(dtype), band)
+        return str(path)
+    return _write
+
+
+@pytest.fixture
+def byod_env(tmp_path, monkeypatch):
+    """Isolate BYOD state for a test: a tmp tiff cache + a cleared per-thread registry."""
+    from app.graph.geo import byod_registry
+    monkeypatch.setattr(get_settings(), "tiffs_dir", tmp_path / "tiffs")
+    byod_registry.clear()
+    yield tmp_path / "tiffs"
+    byod_registry.clear()
+
+
+@pytest.fixture
 def log(request):
     """Narrate a test (visible with `pytest -s`): its purpose, the calls it makes,
     and the outputs it gets. Use log("CALL", ...), log("OUTPUT", ...), log("CHECK", ...)."""

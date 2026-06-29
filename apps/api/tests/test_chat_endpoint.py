@@ -35,7 +35,7 @@ def test_invalid_provider_returns_422(log):
 def test_round_trip_with_stub(aoi, make_client, monkeypatch, log):
     """End-to-end through the endpoint (stub LLM, fixture geo): grounded answer + echoed provider + usage."""
     from app.api.routes import chat as chat_route
-    monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda place: aoi)
+    monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda *a, **k: aoi)
     monkeypatch.setattr(gm.ingest, "hazard_clip", lambda place, layer: aoi[layer])
     stub = make_client(("tool", "roads_in_hazard", {"place": "Testville", "hazard_layers": ["hazard_flood"]}))
     monkeypatch.setattr(chat_route, "build_client", lambda provider: stub)
@@ -43,8 +43,11 @@ def test_round_trip_with_stub(aoi, make_client, monkeypatch, log):
 
     log("REQUEST", "POST /api/chat provider=gemini  'flooded roads in Testville?'")
     log("OPERATE", f"real store.roads_in_hazard -> {expected} km")
-    r = client.post("/api/chat", json={
+    r1 = client.post("/api/chat", json={
         "messages": [{"role": "user", "content": "flooded roads in Testville?"}], "provider": "gemini"})
+    tid = r1.json()["thread_id"]                          # turn 1 -> the agent asks exposure / L1 / L2
+    r = client.post("/api/chat", json={
+        "messages": [{"role": "user", "content": "1"}], "provider": "gemini", "thread_id": tid})  # exposure
     body = r.json()
     log("STATUS", r.status_code)
     log("BODY", body)

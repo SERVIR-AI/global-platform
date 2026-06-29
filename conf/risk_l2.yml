@@ -1,0 +1,45 @@
+# Layer-2 risk recipe: Risk = Hazard x weighted-sum(Vulnerability), all on a 1-5 scale.
+#
+# Inputs are already-reclassed 1-5 rasters (verified 0-5 by S1, where 0 = nodata),
+# aligned onto the hazard grid (S2). No rescaling is needed: S1 confirmed every
+# reclassed layer shares the 0-5 scale (the earlier "0-4" was a sampling artifact).
+#
+# Per cell:  V = weighted average of the vulnerability classes; a nodata vulnerability
+#            cell is dropped and its weight renormalized (rule R6).
+#            Risk = clip(round(Hazard * V / class_max), 1, 5).
+#            nodata (0) where the hazard is nodata or every vulnerability is nodata.
+# The crossing rule is implemented once in combine._combine and documented here (R2).
+crossing: "clip(round(hazard * V / class_max), 1, class_max)"
+class_max: 5
+
+# Per-hazard {reclassed-vulnerability-layer: weight}; weights sum to 1.0. A starting
+# flood recipe over the reclassed layers verified in S1 — to be tuned against
+# risk_flood.tif in S5 (validation). Adjust freely; weights are config, not code (R7).
+# Hazard <-> precomputed-risk tif name map (R5: note landslide's plural/singular mismatch).
+# The resolver uses this to find the right hazard_*.tif and risk_*.tif for a logical hazard.
+hazards:
+  flood:      {hazard: hazard_flood,      risk: risk_flood}
+  flashflood: {hazard: hazard_flashflood, risk: risk_flashflood}
+  cyclone:    {hazard: hazard_cyclone,    risk: risk_cyclone}
+  earthquake: {hazard: hazard_earthquake, risk: risk_earthquake}
+  landslide:  {hazard: hazard_landslides, risk: risk_landslide}   # plural hazard, singular risk
+  storm:      {hazard: hazard_storm,      risk: risk_storm}
+  tsunami:    {hazard: hazard_tsunami,    risk: risk_tsunami}
+  drought:    {hazard: hazard_drought,    risk: risk_drought}
+  fire:       {hazard: hazard_fire,       risk: risk_fire}
+
+# Per-hazard {reclassed-vulnerability-layer: weight}, summing to 1.0. STARTING recipes over the
+# three readily-cached reclassed layers (population density, building density, distance-to-road),
+# with per-hazard emphasis. Expand with bldheight/tcc/gdp/landcover once those are pre-cached and
+# re-validated (S5). Weights are config, not code (R7) — tune against each risk_<hazard>.tif.
+# Keys are the hazard STEM (note landslides, plural, to match the hazard tif name).
+weights:
+  flood:      {vulnerability_pop_all_total: 0.40, vulnerability_reclass_blddensity: 0.35, vulnerability_reclass_road: 0.25}
+  flashflood: {vulnerability_pop_all_total: 0.40, vulnerability_reclass_blddensity: 0.35, vulnerability_reclass_road: 0.25}
+  cyclone:    {vulnerability_pop_all_total: 0.40, vulnerability_reclass_blddensity: 0.35, vulnerability_reclass_road: 0.25}
+  storm:      {vulnerability_pop_all_total: 0.40, vulnerability_reclass_blddensity: 0.35, vulnerability_reclass_road: 0.25}
+  tsunami:    {vulnerability_pop_all_total: 0.40, vulnerability_reclass_blddensity: 0.35, vulnerability_reclass_road: 0.25}
+  earthquake: {vulnerability_pop_all_total: 0.35, vulnerability_reclass_blddensity: 0.40, vulnerability_reclass_road: 0.25}
+  landslides: {vulnerability_pop_all_total: 0.25, vulnerability_reclass_blddensity: 0.40, vulnerability_reclass_road: 0.35}
+  drought:    {vulnerability_pop_all_total: 0.50, vulnerability_reclass_blddensity: 0.20, vulnerability_reclass_road: 0.30}
+  fire:       {vulnerability_pop_all_total: 0.30, vulnerability_reclass_blddensity: 0.40, vulnerability_reclass_road: 0.30}

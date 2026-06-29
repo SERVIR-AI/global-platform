@@ -22,5 +22,14 @@ venv/
 .vscode/
 .claude
 
+# local data cache (OSM + downloaded/clipped tifs) — fetched at runtime
+cache/
+
+e2e_*.json
+Copy of Data List_ASEAN.xlsx
+
+# local-only working tracker (kept out of the repo on purpose)
+BUILD_PLAN.md
+
 cache/
 CLAUDE.md
