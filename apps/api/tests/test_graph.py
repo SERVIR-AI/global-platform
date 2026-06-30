@@ -136,3 +136,20 @@ def test_place_followup_after_no_place_decline(aoi, make_client, monkeypatch, lo
     assert t2.get("error") is None                           # stale error was cleared on the fresh turn
     assert "1)" in msg and "2)" in msg                       # routed -> now asks the 3-way
     assert t2.get("awaiting_choice")
+
+
+def test_drawn_geometry_needs_no_place(aoi, make_client, monkeypatch, log):
+    """[stub] Mode 2: a drawn `req_geometry` makes a place name unnecessary — route uses the
+    drawn area instead of declining. Regresses the State refactor that dropped req_geometry from
+    the graph channels, so it never reached route() and the agent kept asking for a place."""
+    monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda *a, **k: aoi)
+    client = make_client(("tool", "count_features", {"layer": "buildings"}))
+    out = gm._build_graph().invoke(
+        {"messages": [{"role": "user", "content": "how many buildings are at risk of flooding here?"}],
+         "req_geometry": [103.0, 13.0, 103.5, 13.5]},
+        _cfg(client, "drawn"))
+    log("PLACE", out.get("place"))
+    log("RESULT", out.get("result"))
+    assert out.get("error") is None                          # not declined for a missing place
+    assert out.get("place") == "drawn area"                  # used the drawn AOI
+    assert out.get("result") and out["result"]["method"] == "count_features"

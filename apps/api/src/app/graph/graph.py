@@ -55,6 +55,11 @@ class State(TypedDict):  # total=True by default: keys are required unless NotRe
     aoi: NotRequired[dict]                 # the ensure_aoi bundle of paths
     result: NotRequired[dict]              # the computed result
     error: NotRequired[str]                # set on refusal/failure -> straight to finalize
+    # Request inputs (arrive via InputState) — MUST also be State channels so they persist
+    # for route()/fetch() to read. Without these as channels LangGraph drops them after the
+    # input step, which silently breaks Mode 2 (drawn AOI) and the UI-button hazard override.
+    req_geometry: NotRequired[dict | list | None]   # Mode 2: a drawn AOI from the request
+    req_hazard: NotRequired[str | None]             # explicit hazard from the request (e.g. a UI button)
     trace: Annotated[list[str], _add]      # plain-text step narration (returned when verbose)
     awaiting_choice: dict | None           # set when the agent asked L1-vs-L2; resumes on the reply
     _resume: bool                          # transient: this turn applied a pending L1/L2 choice
