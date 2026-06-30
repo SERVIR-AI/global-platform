@@ -136,3 +136,49 @@ def test_place_followup_after_no_place_decline(aoi, make_client, monkeypatch, lo
     assert t2.get("error") is None                           # stale error was cleared on the fresh turn
     assert "1)" in msg and "2)" in msg                       # routed -> now asks the 3-way
     assert t2.get("awaiting_choice")
+
+
+def test_drawn_geometry_needs_no_place(aoi, make_client, monkeypatch, log):
+    """[stub] Mode 2: a drawn `req_geometry` makes a place name unnecessary — route uses the
+    drawn area instead of declining. Regresses the State refactor that dropped req_geometry from
+    the graph channels, so it never reached route() and the agent kept asking for a place."""
+    monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda *a, **k: aoi)
+    client = make_client(("tool", "count_features", {"layer": "buildings"}))
+    out = gm._build_graph().invoke(
+        {"messages": [{"role": "user", "content": "how many buildings are at risk of flooding here?"}],
+         "req_geometry": [103.0, 13.0, 103.5, 13.5]},
+        _cfg(client, "drawn"))
+    log("PLACE", out.get("place"))
+    log("RESULT", out.get("result"))
+    assert out.get("error") is None                          # not declined for a missing place
+    assert out.get("place") == "drawn area"                  # used the drawn AOI
+    assert out.get("result") and out["result"]["method"] == "count_features"
+
+
+def test_drawn_area_persists_across_turns(aoi, make_client, monkeypatch, log):
+    """[stub] Mode 2 multi-turn: draw an area (turn 1), then ask about 'the same area' (turn 2)
+    WITHOUT re-sending geometry. The drawn AOI must persist via the checkpointer channel — never
+    geocode the literal string 'drawn area'. Regresses the 'could not find drawn area' bug."""
+    def fake_ensure_aoi(place=None, geometry=None, layers=None):
+        if geometry is not None:
+            return aoi
+        if place == "drawn area":                            # the bug: geocoding the literal string
+            raise ValueError("could not find 'drawn area' (try 'City, Country')")
+        return aoi
+    monkeypatch.setattr(gm.ingest, "ensure_aoi", fake_ensure_aoi)
+    graph, thread = gm._build_graph(), "drawnmulti"
+
+    # Turn 1: a drawn polygon + a question about it.
+    c1 = make_client(("tool", "count_features", {"layer": "schools"}))
+    t1 = graph.invoke({"messages": [{"role": "user", "content": "schools at flood risk here?"}],
+                       "req_geometry": [103.0, 13.0, 103.5, 13.5]}, _cfg(c1, thread))
+    assert t1.get("result") and t1.get("error") is None
+
+    # Turn 2: 'same area', NO geometry re-sent; the model carries place='drawn area'.
+    c2 = make_client(("tool", "count_features", {"place": "drawn area", "layer": "buildings"}))
+    t2 = graph.invoke({"messages": [{"role": "user", "content": "what about buildings in the same area?"}]},
+                      _cfg(c2, thread))
+    log("TURN 2 result", t2.get("result"))
+    log("TURN 2 error", t2.get("error"))
+    assert t2.get("error") is None                           # must NOT fail with 'could not find drawn area'
+    assert t2.get("result") and t2["result"]["method"] == "count_features"

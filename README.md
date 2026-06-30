@@ -77,8 +77,8 @@ Vite proxies `/api` to the backend on `:8001`, so the UI works with no CORS setu
 ## Test
 
 ```bash
-uv run --project apps/api pytest apps/api -q                  # fast suite (stubs, no network)
-GRP_RUN_SLOW=1 uv run --project apps/api pytest apps/api -q   # + slow real-data / Drive tests
+uv run pytest                                  # fast suite (stubs, no network)
+GRP_RUN_SLOW=1 uv run pytest                   # + slow real-data / Drive tests
 ```
 
 ## More

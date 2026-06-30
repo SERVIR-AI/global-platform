@@ -57,3 +57,38 @@ def test_round_trip_with_stub(aoi, make_client, monkeypatch, log):
     assert str(expected) in body["message"]["content"]
     assert body["usage"]["total_tokens"] > 0
     assert body["thread_id"]
+
+
+def test_drawn_area_followup_reuses_geometry(aoi, make_client, monkeypatch, log):
+    """[endpoint] Mode 2 multi-turn: draw an area, then ask about 'the same area' with geometry=null
+    (exactly what the UI sends after drawing once). The drawn AOI must persist — chat.py must not
+    overwrite it with null, so the follow-up never fails with 'could not find drawn area'."""
+    from app.api.routes import chat as chat_route
+
+    def fake_aoi(place=None, geometry=None, layers=None):
+        if geometry is not None:
+            return aoi
+        if place == "drawn area":                            # the bug: geocoding the literal string
+            raise ValueError("could not find 'drawn area' (try 'City, Country')")
+        return aoi
+    monkeypatch.setattr(gm.ingest, "ensure_aoi", fake_aoi)
+    stub = make_client(("tool", "count_features", {"layer": "schools"}))
+    monkeypatch.setattr(chat_route, "build_client", lambda provider: stub)
+
+    # Turn 1: a drawn polygon (bbox) + a question about it -> must compute (use the drawn area).
+    r1 = client.post("/api/chat", json={
+        "messages": [{"role": "user", "content": "schools at flood risk here?"}],
+        "geometry": [103.0, 13.0, 103.5, 13.5]})
+    c1 = r1.json().get("message", {}).get("content") or ""
+    log("TURN 1 content", c1)
+    assert r1.status_code == 200 and "count_features" in c1   # used the drawn area, did not ask for a place
+    tid = r1.json()["thread_id"]
+
+    # Turn 2: 'same area', geometry=null (the UI clears the draw after the first send).
+    r2 = client.post("/api/chat", json={
+        "messages": [{"role": "user", "content": "what about buildings in the same area?"}],
+        "geometry": None, "thread_id": tid})
+    content = r2.json().get("message", {}).get("content") or ""
+    log("TURN 2 content", content)
+    assert r2.status_code == 200 and "count_features" in content  # reused the drawn area
+    assert "could not find" not in content and "No data" not in content

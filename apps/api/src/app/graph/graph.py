@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
-from typing import Annotated, TypedDict
+from typing import Annotated, Any, TypedDict, NotRequired
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -31,20 +31,36 @@ def _add(left: list | None, right: list | None) -> list:
     return (left or []) + (right or [])
 
 
-class State(TypedDict, total=False):
+class InputState(TypedDict):
+    """The only keys a caller must supply to graph.invoke() — everything else is internal."""
+    messages: list[dict]
+    req_geometry: NotRequired[dict | list | None]       # Mode 2: a drawn AOI from the request
+    req_hazard: NotRequired[str | None]          # explicit hazard from the request (e.g. a UI button)
+
+
+class State(TypedDict):  # total=True by default: keys are required unless NotRequired
+    # Reducer keys: kept as bare Annotated (required) so LangGraph reliably detects
+    # the _add reducer. Always present — messages comes in via InputState, and route
+    # writes usage on every path.
     messages: Annotated[list[dict], _add]  # OpenAI-format conversation dicts
-    operation: str | None                  # which store op to run
-    place: str | None                      # extracted location
-    op_args: dict                          # remaining op params (layer, min_severity)
-    tiffs: list[str]                       # hazard layers the op needs
-    tool_call_id: str | None               # so finalize can build the tool message
-    aoi: dict | None                       # the ensure_aoi bundle of paths
-    result: dict | None                    # the computed result
-    error: str | None                      # set on refusal/failure -> straight to finalize
     usage: Annotated[list[dict], _add]     # per-LLM-call {in, out} token counts
+    
+    # Flow-dependent keys: absent on the decline/error short-circuits, so NotRequired.
+    # Read them with state.get(...)
+    operation: NotRequired[str]            # which store op to run
+    place: NotRequired[str]                # extracted location
+    op_args: NotRequired[dict]             # remaining op params (layer, min_severity)
+    tiffs: NotRequired[list[str]]          # hazard layers the op needs
+    tool_call_id: NotRequired[str]         # so finalize can build the tool message
+    aoi: NotRequired[dict]                 # the ensure_aoi bundle of paths
+    result: NotRequired[dict]              # the computed result
+    error: NotRequired[str]                # set on refusal/failure -> straight to finalize
+    # Request inputs (arrive via InputState) — MUST also be State channels so they persist
+    # for route()/fetch() to read. Without these as channels LangGraph drops them after the
+    # input step, which silently breaks Mode 2 (drawn AOI) and the UI-button hazard override.
+    req_geometry: NotRequired[dict | list | None]   # Mode 2: a drawn AOI from the request
+    req_hazard: NotRequired[str | None]             # explicit hazard from the request (e.g. a UI button)
     trace: Annotated[list[str], _add]      # plain-text step narration (returned when verbose)
-    req_geometry: dict | list | None       # Mode 2: a drawn AOI from the request
-    req_hazard: str | None                 # explicit hazard from the request (e.g. a UI button)
     awaiting_choice: dict | None           # set when the agent asked L1-vs-L2; resumes on the reply
     _resume: bool                          # transient: this turn applied a pending L1/L2 choice
 
@@ -74,7 +90,7 @@ def _layer_note(layers: dict[str, str]) -> str:
 
 def _apply_choice(state: State) -> dict:
     """The user just answered the exposure/L1/L2 question — apply it (no LLM call) and resume."""
-    p = state["awaiting_choice"]
+    p: dict = state["awaiting_choice"]
     options = p["options"]                       # [(key, layer, label), ...]
     reply = _last_user(state["messages"]).strip().lower()
     chosen = None
@@ -199,12 +215,19 @@ def _needed_layers(state: State):
 
 
 def fetch(state: State) -> dict:
-    """Acquire the OSM data + clip the selected hazard rasters to the AOI (place or drawn geometry)."""
+    """Acquire the OSM data + clip the selected hazard rasters to the AOI (place or drawn geometry).
+    A drawn AOI persists across turns via the req_geometry channel, so a 'same area' follow-up that
+    re-sends no geometry still resolves — `place='drawn area'` is never geocoded as a literal string."""
     try:
         geom = state.get("req_geometry")
+        place = state.get("place")
         needed = _needed_layers(state)
-        aoi = (ingest.ensure_aoi(geometry=geom, layers=needed) if geom is not None
-               else ingest.ensure_aoi(state["place"], layers=needed))
+        if geom is not None and place in (None, "drawn area"):
+            aoi = ingest.ensure_aoi(geometry=geom, layers=needed)        # Mode 2: drawn / persisted AOI
+        elif place == "drawn area":
+            raise ValueError("draw an area on the map first, then ask about it")
+        else:
+            aoi = ingest.ensure_aoi(place, layers=needed)               # named place
         for layer in state.get("tiffs") or []:
             if layer.startswith("risk_") and layer.endswith("_l2"):     # computed Layer-2 risk grid
                 hazard = "hazard_" + layer[len("risk_"):-len("_l2")]    # risk_flood_l2 -> hazard_flood
@@ -227,7 +250,7 @@ def fetch(state: State) -> dict:
 def operate(state: State) -> dict:
     """Run the deterministic spatial op over the bundle — the only number-producing step."""
     try:
-        result = operations.dispatch(state["operation"], state["aoi"],
+        result = operations.dispatch(state.get("operation"), state.get("aoi"),
                                      hazard_layers=state.get("tiffs"), **state["op_args"])
         num = result.get("length_km", result.get("count"))
         line = f"overlay (deterministic, no LLM) → {result['method']} = {num}"
@@ -290,7 +313,7 @@ def _after_fetch(state: State) -> str:
 
 
 def _build_graph():
-    builder = StateGraph(State)
+    builder = StateGraph(State, input_schema=InputState)
     builder.add_node("route", route)
     builder.add_node("resolve", resolve)
     builder.add_node("fetch", fetch)

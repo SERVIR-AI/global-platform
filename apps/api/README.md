@@ -126,7 +126,9 @@ See **[DEMO.md](DEMO.md)** for an exhaustive set of example queries, and
 
 ## Test
 
+Run from the repo root (the workspace owns pytest + its config):
+
 ```bash
-uv run --project apps/api pytest apps/api -q                  # fast suite (stubs, no network)
-GRP_RUN_SLOW=1 uv run --project apps/api pytest apps/api -q   # + slow real-data / Drive tests
+uv run pytest                                  # fast suite (stubs, no network)
+GRP_RUN_SLOW=1 uv run pytest                   # + slow real-data / Drive tests
 ```
