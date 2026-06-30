@@ -117,22 +117,8 @@ def _route_menu(thread_id) -> dict:
 
 
 def route(state: State, config) -> dict:
-    """
-    Ask the LLM to pick an operation, extract a place, and select hazard layers.
-    If we're resuming a pending L1/L2 choice, apply it without an LLM call.
-    Uses OpenAI tool-calling as structured extraction only — nothing is executed here.
-    On decline (no tool call) or missing place, sets 'error' to skip fetch/operate.
-
-    Args:
-        state (State): current graph state with at least a 'messages' list
-        config (dict): LangGraph config with 'configurable' keys 'client' and 'model'
-
-    Returns:
-        dict: partial State update with one of:
-            - {'operation', 'place', 'op_args', 'tiffs', 'tool_call_id', 'usage'} on success
-            - {'error', 'usage'} on model decline or missing place
-    """
-
+    """LLM picks the operation + place + hazard layers. Records intent; runs nothing.
+    If we're resuming a pending L1/L2 choice, apply it without an LLM call."""
     if state.get("awaiting_choice"):
         return _apply_choice(state)
     client = config["configurable"]["client"]
@@ -250,14 +236,7 @@ def fetch(state: State) -> dict:
 
 
 def operate(state: State) -> dict:
-    """Run the deterministic spatial operation — the only place a number is computed.
-
-    Args:
-        state (State): must contain 'operation', 'aoi', and 'op_args'
-
-    Returns:
-        dict: {'result': result_dict} on success, or {'error': str} on failure
-    """
+    """Run the deterministic spatial op over the bundle — the only number-producing step."""
     try:
         result = operations.dispatch(state.get("operation"), state.get("aoi"),
                                      hazard_layers=state.get("tiffs"), **state["op_args"])
