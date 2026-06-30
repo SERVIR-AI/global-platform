@@ -63,9 +63,16 @@ def chat(request: ChatRequest) -> ChatResponse:
     config: RunnableConfig = {"configurable": {"thread_id": thread_id, "client": client, "model": model}}
     messages = [{"role": m.role, "content": m.content} for m in request.messages]
 
+    # Only send req_geometry/req_hazard when present: a follow-up that omits them must NOT
+    # overwrite the drawn AOI persisted from an earlier turn (the "same area" case).
+    graph_input: dict = {"messages": messages}
+    if request.geometry is not None:
+        graph_input["req_geometry"] = request.geometry
+    if request.hazard is not None:
+        graph_input["req_hazard"] = request.hazard
+
     try:
-        result = graph.invoke(
-            {"messages": messages, "req_geometry": request.geometry, "req_hazard": request.hazard}, config)
+        result = graph.invoke(graph_input, config)
     except Exception as exc:  # noqa: BLE001 - surface provider/runtime errors as 502
         raise HTTPException(status_code=502, detail=f"LLM call failed: {exc}") from exc
 

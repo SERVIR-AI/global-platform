@@ -215,12 +215,19 @@ def _needed_layers(state: State):
 
 
 def fetch(state: State) -> dict:
-    """Acquire the OSM data + clip the selected hazard rasters to the AOI (place or drawn geometry)."""
+    """Acquire the OSM data + clip the selected hazard rasters to the AOI (place or drawn geometry).
+    A drawn AOI persists across turns via the req_geometry channel, so a 'same area' follow-up that
+    re-sends no geometry still resolves — `place='drawn area'` is never geocoded as a literal string."""
     try:
         geom = state.get("req_geometry")
+        place = state.get("place")
         needed = _needed_layers(state)
-        aoi = (ingest.ensure_aoi(geometry=geom, layers=needed) if geom is not None
-               else ingest.ensure_aoi(state["place"], layers=needed))
+        if geom is not None and place in (None, "drawn area"):
+            aoi = ingest.ensure_aoi(geometry=geom, layers=needed)        # Mode 2: drawn / persisted AOI
+        elif place == "drawn area":
+            raise ValueError("draw an area on the map first, then ask about it")
+        else:
+            aoi = ingest.ensure_aoi(place, layers=needed)               # named place
         for layer in state.get("tiffs") or []:
             if layer.startswith("risk_") and layer.endswith("_l2"):     # computed Layer-2 risk grid
                 hazard = "hazard_" + layer[len("risk_"):-len("_l2")]    # risk_flood_l2 -> hazard_flood
