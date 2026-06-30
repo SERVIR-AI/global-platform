@@ -65,6 +65,13 @@ class ChatResponse(BaseModel):
         default=None,
         description="When the agent is asking the user to choose (exposure vs risk L1/L2): "
                     "[{label, value}] — render as buttons; send `value` back as the next message.")
+    trace_events: dict | None = Field(
+        default=None,
+        description="Structured execution trace (present only when verbose=true): a per-turn envelope "
+                    "{thread_id, turn_id, path, mode, provider, model, usage_total, steps:[...]} where each "
+                    "step records a node's decision, API calls, downloads, and state changes. Group turns "
+                    "by thread_id to reconstruct a multi-turn conversation (e.g. the pause + resume of the "
+                    "exposure-vs-risk question).")
 
     # --- Map-visualization payload (present when the answer is a geo result; ADDITIVE,
     # all optional — existing fields are unchanged). Everything is EPSG:4326. ---

@@ -17,7 +17,7 @@ from rasterio.windows import from_bounds
 from shapely.geometry import LineString, Point, box, mapping, shape
 
 from ...config import get_settings
-from . import drive_tifs, tiffs
+from . import drive_tifs, tiffs, trace
 
 HEADERS = {"User-Agent": "grp-mvp/0.1 (disaster-risk research prototype)"}
 NOMINATIM = "https://nominatim.openstreetmap.org"
@@ -75,7 +75,10 @@ def _search(place):
     r = requests.get(f"{NOMINATIM}/search", headers=HEADERS, timeout=40, params={
         "q": place, "format": "json", "polygon_geojson": 1, "limit": 10, "accept-language": "en"})
     r.raise_for_status()
-    return r.json()
+    results = r.json()
+    trace.emit({"kind": "api", "api": "Nominatim", "op": "geocode", "query": place,
+                "n_results": len(results)})
+    return results
 
 
 def _under_cap_admin(results):
@@ -111,7 +114,10 @@ def _overpass(query, attempts=3):
                     last = f"{r.status_code} from {url}"
                     continue
                 r.raise_for_status()
-                return r.json()["elements"]
+                elements = r.json()["elements"]
+                trace.emit({"kind": "api", "api": "Overpass", "mirror_used": url,
+                            "attempts": attempt + 1, "n_elements": len(elements)})
+                return elements
             except requests.RequestException as e:
                 last = str(e)
         time.sleep(2 ** attempt)
@@ -150,6 +156,11 @@ def source_raster(layer="hazard_flood"):
         os.makedirs(settings.tiffs_dir, exist_ok=True)
         import gdown
         gdown.download(id=fid, output=path, quiet=True)
+        trace.emit({"kind": "download", "api": "Google Drive", "layer": layer, "filename": fname,
+                    "drive_id": fid, "dest": path, "was_cached": False})
+    else:
+        trace.emit({"kind": "download", "api": "Google Drive", "layer": layer, "filename": fname,
+                    "dest": path, "was_cached": True})
     return path
 
 
@@ -258,7 +269,9 @@ def hazard_clip(aoi, layer):
     """Clip `layer`'s severity raster to the AOI bundle; cache per (AOI, layer); return path."""
     adir = os.path.dirname(aoi["admin"])
     clip = os.path.join(adir, f"{layer}.tif")
-    if not os.path.exists(clip):
+    was_cached = os.path.exists(clip)
+    trace.emit({"kind": "clip", "op": "clip", "layer": layer, "dest": clip, "was_cached": was_cached})
+    if not was_cached:
         boundary = shape(json.load(open(aoi["admin"]))["features"][0]["geometry"])
         minx, miny, maxx, maxy = boundary.bounds
         with rasterio.open(source_raster(layer)) as src:

@@ -11,7 +11,7 @@ from langchain_core.runnables import RunnableConfig
 
 from ...config import get_settings
 from ...graph import get_graph
-from ...graph.geo import viz
+from ...graph.geo import trace, viz
 from ...llm import MissingAPIKey, build_client, default_model
 from ...schemas import ChatMessage, ChatRequest, ChatResponse, Usage
 
@@ -60,7 +60,8 @@ def chat(request: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     graph = get_graph()
-    config: RunnableConfig = {"configurable": {"thread_id": thread_id, "client": client, "model": model}}
+    config: RunnableConfig = {"configurable": {
+        "thread_id": thread_id, "client": client, "model": model, "provider": provider}}
     messages = [{"role": m.role, "content": m.content} for m in request.messages]
 
     # Only send req_geometry/req_hazard when present: a follow-up that omits them must NOT
@@ -92,14 +93,33 @@ def chat(request: ChatRequest) -> ChatResponse:
     # surface the options as buttons: the user clicks one and we send its `value` as the reply.
     choices = _choices(result.get("awaiting_choice"))
 
+    response_id = str(uuid.uuid4())
+
+    # Structured execution trace: assemble the per-turn envelope from the node step events,
+    # persist it, and return it when verbose. Best-effort — it never breaks the answer.
+    trace_events = None
+    try:
+        user_query = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
+        mode = "drawn_area" if request.geometry is not None else "place_lookup"
+        envelope = trace.build_envelope(
+            result.get("events"), thread_id=thread_id, turn_id=response_id, user_query=user_query,
+            provider=provider, model=model, mode=mode, usages=result.get("usage"),
+            result=result.get("result"), answer=answer)
+        trace.write_envelope(envelope)
+        if request.verbose:
+            trace_events = envelope
+    except Exception:  # noqa: BLE001 - tracing is best-effort; never break the answer
+        trace_events = None
+
     return ChatResponse(
-        id=str(uuid.uuid4()),
+        id=response_id,
         thread_id=thread_id,
         message=ChatMessage(role="assistant", content=answer),
         provider=provider,
         model=model,
         usage=_usage(result.get("usage") or []),
         trace=result.get("trace") if request.verbose else None,
+        trace_events=trace_events,
         choices=choices,
         **geo,
     )

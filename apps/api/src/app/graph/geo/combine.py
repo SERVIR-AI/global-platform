@@ -18,7 +18,7 @@ import rasterio
 import yaml
 
 from ...config import get_settings
-from . import align as align_mod
+from . import align as align_mod, trace
 
 
 def _recipe():
@@ -59,6 +59,8 @@ def combine_l2(aoi, hazard="hazard_flood", vuln_weights=None, recompute=False):
     adir = os.path.dirname(aoi["admin"])
     out = os.path.join(adir, f"risk_{hazard.replace('hazard_', '')}_l2.tif")
     if os.path.exists(out) and not recompute:
+        trace.emit({"kind": "compute", "op": "combine_l2", "layer": os.path.basename(out),
+                    "was_cached": True})
         return out
 
     ref = align_mod.reference_grid(aoi, hazard)
@@ -76,4 +78,6 @@ def combine_l2(aoi, hazard="hazard_flood", vuln_weights=None, recompute=False):
             "compress": "lzw", "nodata": 0}
     with rasterio.open(out, "w", **prof) as d:
         d.write(risk, 1)
+    trace.emit({"kind": "compute", "op": "combine_l2", "layer": os.path.basename(out),
+                "was_cached": False, "weights": {k: float(v) for k, v in weights.items()}})
     return out
