@@ -16,7 +16,7 @@ import numpy as np
 import rasterio
 from rasterio.warp import Resampling, reproject
 
-from . import ingest, verify
+from . import ingest, trace, verify
 
 
 def reference_grid(aoi, hazard):
@@ -55,4 +55,5 @@ def align_to(ref, layer, aoi, verify_first=True):
                 "transform": ref["transform"], "compress": "lzw", "nodata": 0}
     with rasterio.open(out, "w", **prof) as d:
         d.write(dst, 1)
+    trace.emit({"kind": "compute", "op": "align", "layer": layer, "dest": out, "was_cached": False})
     return out
