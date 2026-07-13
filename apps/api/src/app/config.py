@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     # Default model per provider; a request may override `model` per call.
     claude_model: str = "claude-opus-4-8"
     openai_model: str = "gpt-4o"
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-3.1-flash-lite"
 
     # Each provider is reached through its OpenAI-compatible endpoint, so it's one
     # SDK with a different base_url per provider. Override to add a custom endpoint.
