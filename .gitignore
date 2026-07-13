@@ -38,6 +38,9 @@ CLAUDE.md
 # (built out later; progress tracked in docs/food-security/ISSUE-TRACKER.md)
 docs/food-security/
 
+# local-only internal playbooks (repo standards, etc.) — never pushed
+docs/internal/
+
 # reference PDFs (not part of the build)
 SERVIR Global Platform PoC.pdf
 screencapture-localhost-5173-2026-06-29-19_41_17.pdf
