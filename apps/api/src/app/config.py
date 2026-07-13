@@ -62,6 +62,19 @@ class Settings(BaseSettings):
     cropmonitor_ca_extra: Path = _REPO_ROOT / "conf" / "cropmonitor_ca.pem"
     cropmonitor_verify_tls: bool = True
 
+    # --- RAG engine (the shared document library) ---
+    # Embeddings go through a provider's OpenAI-compat /embeddings endpoint.
+    # Separate from default_provider because claude serves no embeddings; swap
+    # the backend entirely by handing Corpus any object with .embed(texts).
+    embedding_provider: Provider = "gemini"
+    embedding_model: str = "gemini-embedding-001"
+    # Cosine floor below which retrieval returns nothing and the caller declines
+    # ("no relevant document") — never a weak match dressed up as an answer.
+    # UNCALIBRATED default: score distributions are model-specific; calibrate
+    # against real bulletins once the corpus lands (A4) — the live test logs the
+    # related-vs-unrelated similarity spread to support that.
+    rag_min_relevance: float = 0.5
+
     # --- LLM defaults ---
     # Which provider to use when a request doesn't specify one.
     default_provider: Provider = "gemini"
