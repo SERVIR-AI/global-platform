@@ -1,5 +1,12 @@
 import { buildChatLayers } from '@/lib/chatLayers';
-import type { ChatItem, ChatLayer, ChatProvider, ChatRequest, ChatResponse } from '@/types/chat';
+import type {
+  ChatItem,
+  ChatLayer,
+  ChatProvider,
+  ChatRequest,
+  ChatResponse,
+  SeasonSpec,
+} from '@/types/chat';
 import { create } from 'zustand';
 
 export type UseCase = 'risk' | 'food-security';
@@ -10,6 +17,10 @@ interface ChatStore {
   /** Which capability the chat talks to; each mode has its own endpoint. */
   useCase: UseCase;
   setUseCase: (useCase: UseCase) => void;
+  /** Per-request crop-calendar adjustment (null = hub default). Sent with every
+   *  food-security question and cited in the brief as ADJUSTED. */
+  calendarAdjust: SeasonSpec[] | null;
+  setCalendarAdjust: (seasons: SeasonSpec[] | null) => void;
   messages: ChatItem[];
   /** Append a turn (request or response); its map layers are derived on add. */
   appendMessage: (message: ChatRequest | ChatResponse) => void;
@@ -42,6 +53,8 @@ export const useChatStore = create<ChatStore>((set) => ({
   setProvider: (provider) => set({ provider }),
   useCase: 'risk',
   setUseCase: (useCase) => set({ useCase }),
+  calendarAdjust: null,
+  setCalendarAdjust: (calendarAdjust) => set({ calendarAdjust }),
   messages: [],
   appendMessage: (message) =>
     set((s) => {

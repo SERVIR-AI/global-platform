@@ -101,6 +101,11 @@ const SourceCard: FC<{ citation: Citation; bubbleId: string }> = ({ citation: c,
         </span>
       )}
       {c.kind === 'conditions' && <span className="badge badge-xs badge-outline">live data feed</span>}
+      {c.kind === 'calendar' && (
+        <span className={cn('badge badge-xs', c.adjusted ? 'badge-warning' : 'badge-outline')}>
+          {c.adjusted ? 'requester-adjusted calendar' : 'hub-default calendar'}
+        </span>
+      )}
       {typeof c.score === 'number' && (
         <span className="text-base-content/40">relevance {c.score.toFixed(2)}</span>
       )}

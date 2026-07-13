@@ -45,6 +45,7 @@ export const useChat = () => {
         question: request.messages[0].content,
         provider: request.provider,
         verbose: true,
+        calendar: useChatStore.getState().calendarAdjust,
       });
       return {
         id: globalThis.crypto?.randomUUID?.() ?? `fs-${Date.now()}`,

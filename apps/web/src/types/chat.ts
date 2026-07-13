@@ -98,10 +98,19 @@ export interface HazardLayer {
   [key: string]: unknown;
 }
 
+/** One crop-season window (months 1-12; windows may wrap the year end). */
+export interface SeasonSpec {
+  season: string;
+  planting: number[];
+  harvest: number[];
+}
+
 /** One numbered evidence entry behind a food-security brief. */
 export interface Citation {
   n: number;
-  kind: 'document' | 'conditions';
+  kind: 'document' | 'conditions' | 'calendar';
+  /** For calendar entries: true when the requester adjusted the season windows. */
+  adjusted?: boolean;
   source: string | null;
   title?: string | null;
   pub_date?: string | null;

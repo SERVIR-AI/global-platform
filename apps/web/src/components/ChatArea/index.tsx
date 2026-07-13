@@ -2,6 +2,7 @@ import { FC, useEffect, useRef } from 'react';
 import { useChatPending } from '@/hooks/useChat';
 import { cn } from '../../lib/utils';
 import { useChatStore, type UseCase } from '../../stores/ChatStore';
+import CalendarPanel from './CalendarPanel';
 import ChatBubble from './ChatBubble';
 import DataUpload from './DataUpload';
 import InputMessage from './InputMessage';
@@ -155,6 +156,7 @@ const ChatArea: FC = () => {
             {useCase === 'risk' && <DataUpload />}
           </div>
         )}
+        {useCase === 'food-security' && <CalendarPanel />}
         <InputMessage />
       </div>
     </div>
