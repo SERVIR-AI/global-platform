@@ -15,11 +15,11 @@ from fastapi.responses import FileResponse
 from openai import OpenAIError
 from pydantic import BaseModel, Field
 
-from ..config import get_settings
+from ..config import Provider, get_settings
 from ..llm import MissingAPIKey
 from ..rag import docloader
 from ..rag.store import Corpus, CorpusError
-from . import cropmonitor
+from . import cropmonitor, synthesis
 
 router = APIRouter(prefix="/food-security")
 
@@ -205,6 +205,36 @@ def rag_search(q: str, k: int = Query(default=5, ge=1, le=50),
                            "best match fell below the relevance floor "
                            f"({get_settings().rag_min_relevance}), so the honest answer "
                            "is a decline, not a weak match.")
+    return out
+
+
+class BriefRequest(BaseModel):
+    messages: list[dict] | None = Field(default=None, description="Chat-style; last user message is the question.")
+    question: str | None = Field(default=None, description="Or the question directly.")
+    provider: Provider | None = None
+    model: str | None = None
+    verbose: bool = False
+
+
+@router.post("/chat")
+def food_security_chat(req: BriefRequest) -> dict:
+    """The El Nino brief: parse -> evidence pack (conditions + two retrieval
+    slices) -> grounded cited synthesis -> blocking groundedness check."""
+    question = (req.question or next(
+        (m.get("content") for m in reversed(req.messages or [])
+         if m.get("role") == "user" and isinstance(m.get("content"), str)), "") or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="provide a question")
+    try:
+        out = synthesis.synthesize(question, provider=req.provider, model=req.model)
+    except MissingAPIKey as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except CorpusError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except OpenAIError as exc:
+        raise HTTPException(status_code=502, detail=f"LLM call failed: {exc}") from exc
+    if not req.verbose:
+        out.pop("trace", None)
     return out
 
 
