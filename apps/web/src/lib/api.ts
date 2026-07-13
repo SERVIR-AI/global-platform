@@ -53,6 +53,17 @@ export const postChat = (payload: ChatRequest, signal?: AbortSignal): Promise<Ch
     signal,
   });
 
+/** POST /api/food-security/chat — one question in, a grounded cited brief out. */
+export const postFoodSecurityChat = (
+  payload: { question: string; provider?: string | null; model?: string | null; verbose?: boolean },
+  signal?: AbortSignal,
+): Promise<Partial<ChatResponse>> =>
+  request<Partial<ChatResponse>>('/api/food-security/chat', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+    signal,
+  });
+
 /**
  * POST /api/tiffs — upload a GeoTIFF (multipart). The browser sets the multipart
  * Content-Type/boundary, so this bypasses the JSON `request` helper. A failed

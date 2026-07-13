@@ -1,4 +1,4 @@
-import { ApiError, postChat } from '@/lib/api';
+import { ApiError, postChat, postFoodSecurityChat } from '@/lib/api';
 import { queryKeys } from '@/lib/queryKeys';
 import { useChatStore } from '@/stores/ChatStore';
 import { toChatGeometry, useCustomGeometryStore } from '@/stores/CustomGeometryStore';
@@ -30,13 +30,34 @@ const errorResponse = (err: unknown, threadId: string, provider: ChatProvider): 
 export const useChat = () => {
   const appendMessage = useChatStore((s) => s.appendMessage);
   const provider = useChatStore((s) => s.provider);
+  const useCase = useChatStore((s) => s.useCase);
   const threadId = useChatStore((s) => s.threadId);
   const geometry = useCustomGeometryStore((s) => s.geometry);
   const setGeometry = useCustomGeometryStore((s) => s.setGeometry);
 
   const mutation = useMutation({
     mutationKey: queryKeys.chat.all(),
-    mutationFn: (request: ChatRequest) => postChat(request),
+    mutationFn: async (request: ChatRequest): Promise<ChatResponse> => {
+      if (useCase !== 'food-security') return postChat(request);
+      // The brief endpoint: adapt its response into the ChatResponse shape the
+      // store/bubbles already know; brief-specific fields ride along.
+      const body = await postFoodSecurityChat({
+        question: request.messages[0].content,
+        provider: request.provider,
+        verbose: true,
+      });
+      return {
+        id: globalThis.crypto?.randomUUID?.() ?? `fs-${Date.now()}`,
+        thread_id: threadId,
+        message: {
+          role: 'assistant',
+          content: body.declined
+            ? (body.decline_reason ?? 'The system declined to answer.')
+            : (body.brief ?? ''),
+        },
+        ...body,
+      } as ChatResponse;
+    },
     // Echo the request into the store immediately; append the response on success.
     onMutate: (request) => {
       appendMessage(request);
@@ -54,7 +75,7 @@ export const useChat = () => {
       provider,
       thread_id: threadId,
       verbose: true, // return the step trace (route → resolve L1/L2 → compute → overlay)
-      geometry: toChatGeometry(geometry),
+      geometry: useCase === 'risk' ? toChatGeometry(geometry) : null,
       created_at: new Date().toISOString(),
     });
   };

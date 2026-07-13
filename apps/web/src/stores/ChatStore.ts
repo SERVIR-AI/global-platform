@@ -2,9 +2,14 @@ import { buildChatLayers } from '@/lib/chatLayers';
 import type { ChatItem, ChatLayer, ChatProvider, ChatRequest, ChatResponse } from '@/types/chat';
 import { create } from 'zustand';
 
+export type UseCase = 'risk' | 'food-security';
+
 interface ChatStore {
   provider: ChatProvider;
   setProvider: (provider: ChatProvider) => void;
+  /** Which capability the chat talks to; each mode has its own endpoint. */
+  useCase: UseCase;
+  setUseCase: (useCase: UseCase) => void;
   messages: ChatItem[];
   /** Append a turn (request or response); its map layers are derived on add. */
   appendMessage: (message: ChatRequest | ChatResponse) => void;
@@ -35,6 +40,8 @@ const updateLayer = (
 export const useChatStore = create<ChatStore>((set) => ({
   provider: 'claude',
   setProvider: (provider) => set({ provider }),
+  useCase: 'risk',
+  setUseCase: (useCase) => set({ useCase }),
   messages: [],
   appendMessage: (message) =>
     set((s) => {
