@@ -119,7 +119,7 @@ class IngestRequest(BaseModel):
 
 
 _TEMPORAL = ("forecast", "retrospective")
-_VALIDATION = ("multi-agency-consensus", "single-agency", "model-output")
+_VALIDATION = ("multi-agency-consensus", "single-agency", "model-output", "peer-reviewed")
 
 
 def _require_provenance(metadata: dict, url: str | None) -> None:

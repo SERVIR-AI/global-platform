@@ -398,6 +398,26 @@ def test_stale_served_conditions_carry_a_visible_marker(fs_env, monkeypatch):
     assert "newer months may exist" in str(exc.value)
 
 
+def test_seed_corpus_sources_are_wellformed():
+    """Every seed entry carries the provenance the ingest endpoint enforces, valid
+    enum tags, https URLs, and correct CPC month->pub_date derivation."""
+    import re
+    from app.food_security.seed_corpus import SOURCES, cpc_discussions
+    assert len(SOURCES) >= 60
+    for e in SOURCES:
+        m = e["metadata"]
+        assert e["url"].startswith("https://"), e["url"]
+        assert m["source"] and m["title"] and m["pub_date"]
+        assert re.fullmatch(r"\d{4}-\d{2}", m["pub_date"]), m["title"]
+        assert m["temporal"] in ("forecast", "retrospective"), m["title"]
+        assert m["validation"] in ("multi-agency-consensus", "single-agency",
+                                   "model-output", "peer-reviewed"), m["title"]
+    months = {d["metadata"]["title"]: d["metadata"]["pub_date"] for d in cpc_discussions()}
+    assert months["ENSO Diagnostic Discussion Jan 2026"] == "2026-01"
+    assert months["ENSO Diagnostic Discussion Dec 2015"] == "2015-12"
+    assert months["ENSO Diagnostic Discussion Jul 2026"] == "2026-07"
+
+
 def test_cache_writes_are_atomic(fs_env, tmp_path, monkeypatch):
     """Writers go through temp-file + os.replace, so a reader can never observe a
     partial cache file."""
