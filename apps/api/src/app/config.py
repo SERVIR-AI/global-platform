@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     raster_schema_path: Path = _REPO_ROOT / "conf" / "raster_schema.yml"
     risk_l2_config_path: Path = _REPO_ROOT / "conf" / "risk_l2.yml"
 
+    # --- Food security ---
+    # Hub-adjustable crop calendars (the Call-2 ministry ask); per-request
+    # overrides are cited in the brief as ADJUSTED.
+    crop_calendar_path: Path = _REPO_ROOT / "conf" / "crop_calendar.yml"
+
     # --- Food security (GEOGLAM Crop Monitor) ---
     # The CMET Global_SHP FeatureServer: per-region crop-condition expert
     # assessments, one layer per month. Layer ids are discovered live, never derived.

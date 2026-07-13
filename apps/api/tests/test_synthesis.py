@@ -122,14 +122,15 @@ def test_grounded_brief_ships_with_sources_and_receipts(brief_env):
     for section in synthesis.SECTIONS + ("## Sources",):
         assert section in out["brief"]
     assert out["grounded"]["passed"] and out["grounded"]["attempts"] == 1
-    assert [c["n"] for c in out["citations"]] == [1, 2, 3]
+    assert [c["n"] for c in out["citations"]] == [1, 2, 3, 4]
     assert out["citations"][0]["temporal"] == "forecast"
     assert out["citations"][2]["kind"] == "conditions"
+    assert out["citations"][3]["kind"] == "calendar"   # hub default rides along
     assert "source: https://icpac.net/g.pdf" in out["brief"]
     assert "archived: /api/food-security/rag/document/" in out["brief"]
     assert "query: Crop IN" in out["brief"]            # the conditions receipt
     assert out["evidence"] == {"forecast_hits": 1, "retrospective_hits": 1,
-                               "conditions": True}
+                               "conditions": True, "calendar": "default"}
     # the model was shown exactly the numbered pack and the gaps line
     synth_prompt = stub.seen[-1][-1]["content"]
     assert "[1] ICPAC GHACOF" in synth_prompt and "[3] GEOGLAM Crop Monitor" in synth_prompt
@@ -253,6 +254,62 @@ def test_conditions_truncation_is_visible(brief_env, monkeypatch):
                         else big)
     citation, gap = synthesis._conditions_citation("maize", "Kenya", trace=[])
     assert gap is None and "(first 12 of 16 rows)" in citation["text"]
+
+
+def test_calendar_phase_math_handles_wrapping_windows():
+    """Deterministic season phases, incl. windows that wrap the year end (A7.1:
+    the asked-in month changes the framing)."""
+    from app.food_security import calendar as cal
+    zambia = {"season": "Main season", "planting": [11, 12], "harvest": [4, 6]}
+    assert cal._phase(11, zambia) == "planting window"
+    assert cal._phase(2, zambia) == "growing season"          # wraps the year end
+    assert cal._phase(5, zambia) == "harvest window"
+    assert cal._phase(8, zambia) == "off-season"
+    kenya_short = {"season": "Short rains", "planting": [10, 11], "harvest": [1, 2]}
+    assert cal._phase(1, kenya_short) == "harvest window"     # wrapped harvest
+
+
+def test_calendar_citation_default_vs_adjusted(brief_env):
+    """A7.2 AC: changing season start/end changes the brief's evidence — and the
+    adjustment is visibly marked, never silently absorbed."""
+    from app.food_security import calendar as cal
+    default = cal.citation("Kenya", "maize", asked_month=7)
+    assert default and default["adjusted"] is False
+    assert "hub default" in default["text"] and "Long rains" in default["text"]
+    assert default["url"]                                  # traceable baseline
+
+    adjusted = cal.citation("Kenya", "maize", asked_month=7, override=[
+        {"season": "Long rains (late onset)", "planting": [4, 6], "harvest": [9, 11]}])
+    assert adjusted["adjusted"] is True
+    assert "ADJUSTED by the requester" in adjusted["text"]
+    assert "Long rains (late onset)" in adjusted["text"]
+    assert adjusted["text"] != default["text"]
+
+
+def test_calendar_flows_into_the_evidence_pack_and_prompt(brief_env):
+    """The adjusted calendar becomes a numbered citation the model must use for
+    the Season timing caveat."""
+    good = GOOD_BRIEF + "\n\nAdjusted calendar applies [4]."
+    stub = brief_env([good])
+    out = synthesis.synthesize(
+        "maize in Kenya?",
+        calendar=[{"season": "Long rains", "planting": [4, 6], "harvest": [9, 11]}])
+    assert out["declined"] is False
+    cal_cite = next(c for c in out["citations"] if c["kind"] == "calendar")
+    assert cal_cite["adjusted"] is True and cal_cite["n"] == 4
+    assert out["evidence"]["calendar"] == "adjusted"
+    assert "ADJUSTED by the requester" in stub.seen[-1][-1]["content"]
+
+
+def test_calendar_endpoint_and_request_validation(brief_env):
+    client = TestClient(app)
+    r = client.get("/api/food-security/calendar")
+    assert r.status_code == 200 and "kenya" in r.json()["calendar"]
+
+    r = client.post("/api/food-security/chat", json={
+        "question": "maize?",
+        "calendar": [{"season": "x", "planting": [13, 2], "harvest": [4, 6]}]})
+    assert r.status_code == 422                            # months must be 1-12
 
 
 def test_chat_endpoint_round_trip_and_trace(brief_env):

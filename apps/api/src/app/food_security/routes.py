@@ -13,12 +13,13 @@ import requests
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from openai import OpenAIError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ..config import Provider, get_settings
 from ..llm import MissingAPIKey
 from ..rag import docloader
 from ..rag.store import Corpus, CorpusError
+from . import calendar as crop_calendar
 from . import cropmonitor, synthesis
 
 router = APIRouter(prefix="/food-security")
@@ -208,12 +209,29 @@ def rag_search(q: str, k: int = Query(default=5, ge=1, le=50),
     return out
 
 
+class SeasonSpec(BaseModel):
+    season: str
+    planting: list[int] = Field(min_length=2, max_length=2)
+    harvest: list[int] = Field(min_length=2, max_length=2)
+
+    @field_validator("planting", "harvest")
+    @classmethod
+    def _months(cls, v: list[int]) -> list[int]:
+        if any(not 1 <= m <= 12 for m in v):
+            raise ValueError("months must be 1-12")
+        return v
+
+
 class BriefRequest(BaseModel):
     messages: list[dict] | None = Field(default=None, description="Chat-style; last user message is the question.")
     question: str | None = Field(default=None, description="Or the question directly.")
     provider: Provider | None = None
     model: str | None = None
     verbose: bool = False
+    calendar: list[SeasonSpec] | None = Field(
+        default=None,
+        description="Per-request crop-calendar adjustment (the ministry ask): season "
+                    "windows to use INSTEAD of the hub default — cited in the brief as ADJUSTED.")
 
 
 @router.post("/chat")
@@ -226,7 +244,9 @@ def food_security_chat(req: BriefRequest) -> dict:
     if not question:
         raise HTTPException(status_code=400, detail="provide a question")
     try:
-        out = synthesis.synthesize(question, provider=req.provider, model=req.model)
+        out = synthesis.synthesize(
+            question, provider=req.provider, model=req.model,
+            calendar=[s.model_dump() for s in req.calendar] if req.calendar else None)
     except MissingAPIKey as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except CorpusError as exc:
@@ -236,6 +256,14 @@ def food_security_chat(req: BriefRequest) -> dict:
     if not req.verbose:
         out.pop("trace", None)
     return out
+
+
+@router.get("/calendar")
+def get_crop_calendar() -> dict:
+    """The hub-default crop calendars (conf/crop_calendar.yml) the UI editor loads."""
+    return {"calendar": crop_calendar.load(),
+            "note": "Hub defaults; adjust per request via the chat calendar field — "
+                    "adjustments are cited in the brief as ADJUSTED."}
 
 
 def _doc_trace(corpus: Corpus, doc_id: str, metadata: dict) -> dict:

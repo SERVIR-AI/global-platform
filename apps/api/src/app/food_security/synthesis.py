@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from ..config import get_settings
 from ..llm import build_client, default_model
 from ..rag.store import Corpus, source_block
+from . import calendar as crop_calendar
 from . import cropmonitor
 
 CORPUS = "food-security"
@@ -52,6 +53,7 @@ Non-negotiable rules:
 - Never state a number, rating, or projection that does not appear in the evidence.
 - Attribute every claim to its authority by name ("The GEOGLAM Crop Monitor rates...", "FEWS NET reported...", "ICPAC's outlook projects..."). Never say "we computed" or "our model predicts"; never present a projection as fact.
 - Forecast/outlook statements may only cite evidence marked temporal=forecast, presented as dated projections of the issuing authority.
+- The Season timing caveat MUST be based on the crop-calendar evidence entry (when present) and the asked-in month; if that entry is marked ADJUSTED, the caveat must say the calendar was adjusted by the requester.
 - The "Known gaps" in the request MUST be reflected in the What's missing section.
 - If the evidence cannot support an answer, write no sections; reply with one paragraph starting "DECLINE:" naming exactly what is missing.
 
@@ -138,9 +140,9 @@ def _conditions_citation(crop, country, trace):
             "text": text}, None
 
 
-def gather_evidence(parsed, trace):
-    """Deterministic evidence assembly: two retrieval slices + the conditions feed.
-    Returns (citations, gaps, stats) — citations numbered, documents first."""
+def gather_evidence(parsed, trace, calendar_override=None):
+    """Deterministic evidence assembly: two retrieval slices + the conditions feed
+    + the crop calendar. Returns (citations, gaps, stats), citations numbered."""
     corpus = Corpus(CORPUS)
     crop, country, focus = parsed["crop"], parsed["country"], parsed["focus"]
     gaps = []
@@ -172,10 +174,21 @@ def gather_evidence(parsed, trace):
         citations.append(cond)
     else:
         gaps.append(gap)
+    asked_month = datetime.now(timezone.utc).month
+    cal = crop_calendar.citation(country, crop, asked_month, override=calendar_override)
+    if cal:
+        citations.append(cal)
+        trace.append("calendar -> " + ("ADJUSTED by requester" if cal["adjusted"]
+                                       else "hub default") + f" ({country} {crop})")
+    elif calendar_override:
+        gaps.append("a calendar adjustment was sent but no country/crop could be "
+                    "resolved to apply it to")
     for n, c in enumerate(citations, 1):
         c["n"] = n
     stats = {"forecast_hits": len(forecast_hits), "retrospective_hits": len(retro_hits),
-             "conditions": cond is not None}
+             "conditions": cond is not None,
+             "calendar": (cal or {}).get("adjusted") is not None and (
+                 "adjusted" if (cal or {}).get("adjusted") else "default")}
     return citations, gaps, stats
 
 
@@ -253,7 +266,7 @@ def _declined(reason, *, trace, usage, citations=None, check=None, stats=None):
             "grounded": check, "trace": trace, "usage": usage}
 
 
-def synthesize(question, provider=None, model=None):
+def synthesize(question, provider=None, model=None, calendar=None):
     """The full pipeline. Returns a dict the route serves as-is."""
     settings = get_settings()
     provider = provider or settings.default_provider
@@ -266,8 +279,9 @@ def synthesize(question, provider=None, model=None):
         return _declined(decline, trace=trace, usage=usage) | {
             "provider": provider, "model": model}
 
-    citations, gaps, stats = gather_evidence(parsed, trace)
-    if not citations:
+    citations, gaps, stats = gather_evidence(parsed, trace, calendar_override=calendar)
+    # A calendar is context, not evidence — it cannot carry a brief alone.
+    if not any(c["kind"] != "calendar" for c in citations):
         trace.append("evidence -> empty; declining without a synthesis call")
         return _declined(
             "No evidence available: " + "; ".join(gaps), trace=trace, usage=usage,
