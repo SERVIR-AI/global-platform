@@ -149,15 +149,33 @@ class Corpus:
                 write(f)
             os.replace(tmp, self.dir / fname)
 
-    def ingest(self, text: str, metadata: dict) -> dict:
+    def raw_path(self, doc_id: str) -> Path | None:
+        """The archived original document, if one was stored at ingest."""
+        hits = list((self.dir / "raw").glob(f"{doc_id}.*")) if (self.dir / "raw").exists() else []
+        return hits[0] if hits else None
+
+    def _archive_raw(self, doc_id: str, raw: bytes, filename: str | None) -> None:
+        ext = Path(filename or "").suffix or ".txt"
+        target = self.dir / "raw" / f"{doc_id}{ext}"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(f"{target.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+        tmp.write_bytes(raw)
+        os.replace(tmp, target)
+
+    def ingest(self, text: str, metadata: dict, raw: bytes | None = None,
+               filename: str | None = None) -> dict:
         """Idempotent per document text; same text with different metadata updates
-        provenance in place and reports metadata_updated."""
+        provenance in place and reports metadata_updated. When `raw` is given, the
+        exact original bytes are archived so every citation stays auditable even
+        after the source URL rots or is overwritten upstream."""
         doc_id = hashlib.sha1(text.encode()).hexdigest()[:16]
         parts = _chunk(text)
         if not parts:
             raise EmptyDocument("the document contains no usable text")
         with self._lock:
             self._load()  # another thread may have written since construction
+            if raw is not None and self.raw_path(doc_id) is None:
+                self._archive_raw(doc_id, raw, filename)  # backfills on re-ingest too
             existing = [c for c in self._chunks if c["doc_id"] == doc_id]
             if existing:
                 out = {"doc_id": doc_id, "chunks": len(existing), "already_ingested": True}
@@ -221,5 +239,7 @@ def source_block(hits: list[dict]) -> str:
         bits += [str(m[k]) for k in ("title", "pub_date") if m.get(k)]
         if m.get("validation"):
             bits.append(f"validation: {m['validation']}")
+        if m.get("url"):
+            bits.append(str(m["url"]))
         lines.append(f"[{n}] {' — '.join(bits)}\n{h['text']}")
     return "\n\n".join(lines)

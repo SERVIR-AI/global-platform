@@ -232,8 +232,9 @@ def main() -> int:
         url, meta = entry["url"], entry["metadata"]
         name = entry["filename"] or url.split("?")[0].rsplit("/", 1)[-1] or "doc.pdf"
         try:
-            text = docloader.extract_text(fetch(url), name)
-            res = corpus.ingest(text, meta)
+            raw = fetch(url)
+            text = docloader.extract_text(raw, name)
+            res = corpus.ingest(text, meta, raw=raw, filename=name)
             ok += 0 if res["already_ingested"] else 1
             skipped += 1 if res["already_ingested"] else 0
             print(f"  ok   {meta['source']}: {meta['title']}"

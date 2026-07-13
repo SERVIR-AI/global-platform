@@ -5,11 +5,13 @@ Coverage gaps decline honestly throughout."""
 from __future__ import annotations
 
 import ipaddress
+import re
 import socket
 from urllib.parse import urljoin, urlparse
 
 import requests
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse
 from openai import OpenAIError
 from pydantic import BaseModel, Field
 
@@ -144,19 +146,19 @@ def rag_ingest(req: IngestRequest) -> dict:
     metadata = dict(req.metadata)
     _require_provenance(metadata, req.url)
     if req.text is not None:
-        text = req.text
+        text, raw, name = req.text, req.text.encode(), "document.txt"
     elif req.url:
-        data, final_url = _fetch_document(req.url)
+        raw, final_url = _fetch_document(req.url)
         name = req.filename or final_url.split("?")[0].rsplit("/", 1)[-1] or "document"
         try:
-            text = docloader.extract_text(data, name)
+            text = docloader.extract_text(raw, name)
         except docloader.DocLoadError as exc:  # typed, honest: OCR-needed, wrong format...
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         metadata.setdefault("url", req.url)
     else:
         raise HTTPException(status_code=400, detail="provide either url or text")
     try:
-        return Corpus(_CORPUS).ingest(text, metadata)
+        return Corpus(_CORPUS).ingest(text, metadata, raw=raw, filename=name)
     except docloader.DocLoadError as exc:      # e.g. whitespace-only inline text
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except MissingAPIKey as exc:
@@ -184,6 +186,8 @@ def rag_search(q: str, k: int = Query(default=5, ge=1, le=50),
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except OpenAIError as exc:
         raise HTTPException(status_code=502, detail=f"embedding call failed: {exc}") from exc
+    for h in hits:  # the receipt: live source + our archived copy of what we read
+        h["trace"] = _doc_trace(corpus, h["doc_id"], h["metadata"])
     n_docs = len(corpus.documents())
     out = {"query": q, "corpus": _CORPUS, "documents": n_docs,
            "min_relevance": get_settings().rag_min_relevance, "hits": hits}
@@ -202,3 +206,38 @@ def rag_search(q: str, k: int = Query(default=5, ge=1, le=50),
                            f"({get_settings().rag_min_relevance}), so the honest answer "
                            "is a decline, not a weak match.")
     return out
+
+
+def _doc_trace(corpus: Corpus, doc_id: str, metadata: dict) -> dict:
+    archived = corpus.raw_path(doc_id)
+    return {"source_url": metadata.get("url"),
+            "archived_copy": f"/api/food-security/rag/document/{doc_id}" if archived else None,
+            "doc_id": doc_id}
+
+
+@router.get("/rag/documents")
+def rag_documents() -> dict:
+    """The library catalog — the explicit boundary on where information comes from.
+    Every entry carries its live source URL and our archived copy."""
+    corpus = Corpus(_CORPUS)
+    items = corpus.documents()
+    for d in items:
+        d["trace"] = _doc_trace(corpus, d["doc_id"], d["metadata"])
+    return {"corpus": _CORPUS, "documents": len(items), "items": items}
+
+
+@router.get("/rag/document/{doc_id}")
+def rag_document(doc_id: str):
+    """Serve the archived original — the exact bytes the cited text was extracted
+    from, immune to the source URL rotting or being overwritten upstream."""
+    if not re.fullmatch(r"[0-9a-f]{16}", doc_id):
+        raise HTTPException(status_code=404, detail="unknown doc_id")
+    corpus = Corpus(_CORPUS)
+    path = corpus.raw_path(doc_id)
+    if path is None:
+        known = any(d["doc_id"] == doc_id for d in corpus.documents())
+        raise HTTPException(status_code=404, detail=(
+            "document is in the library but has no archived original (ingested before "
+            "archiving existed) — re-ingest it, or fetch it from its source_url"
+            if known else "unknown doc_id"))
+    return FileResponse(path)

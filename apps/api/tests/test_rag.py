@@ -243,6 +243,20 @@ def test_embedder_model_mismatch_fails_loudly(corpus, rag_env):
         Corpus("test", embedder=OtherEmbedder())
 
 
+def test_ingest_archives_the_original_and_backfills_on_reingest(rag_env):
+    """The exact ingested bytes stay auditable: archived at ingest, re-archived on
+    a duplicate ingest if the archive went missing."""
+    c = Corpus("audit", embedder=HashEmbedder())
+    res = c.ingest("El Nino outlook text for the audit trail.", {"source": "s"},
+                   raw=b"%PDF-original-bytes", filename="brief.pdf")
+    path = c.raw_path(res["doc_id"])
+    assert path and path.read_bytes() == b"%PDF-original-bytes" and path.suffix == ".pdf"
+    path.unlink()
+    c.ingest("El Nino outlook text for the audit trail.", {"source": "s"},
+             raw=b"%PDF-original-bytes", filename="brief.pdf")
+    assert c.raw_path(res["doc_id"]).read_bytes() == b"%PDF-original-bytes"
+
+
 def test_corpus_persists_and_reloads(corpus, rag_env):
     """A fresh Corpus instance answers from disk — the library outlives the process."""
     reloaded = Corpus("test", embedder=HashEmbedder())
@@ -291,6 +305,13 @@ def test_source_block_formats_citations(corpus):
     block = source_block(hits)
     assert block.startswith("[1] FAO GIEWS — Zambia outlook — 2026-06 — validation: single-agency")
     assert "rainfall deficits across Zambia" in block
+
+
+def test_source_block_includes_the_source_url(rag_env):
+    c = Corpus("cited", embedder=HashEmbedder())
+    c.ingest("Some bulletin passage.", {"source": "FAO", "url": "https://fao.org/x.pdf"})
+    block = source_block(c.search("Some bulletin passage.", k=1))
+    assert "https://fao.org/x.pdf" in block
 
 
 def test_source_block_survives_missing_metadata():
@@ -349,6 +370,29 @@ def test_ingest_and_search_round_trip_over_http(rag_env):
     assert body["hits"][0]["metadata"]["source"] == "FEWS NET"
     assert body["min_relevance"] == get_settings().rag_min_relevance
     assert "note" not in body
+
+
+def test_every_insight_traces_back_to_its_source(rag_env):
+    """The trust contract end-to-end: a hit carries the live source URL AND our
+    archived copy of the exact bytes we read; the catalog lists the whole boundary."""
+    client = TestClient(app)
+    client.post("/api/food-security/rag/ingest",
+                json={"text": KENYA_DOC,
+                      "metadata": {**KENYA_META, "url": "https://fews.net/ken.pdf"}})
+    hit = client.get("/api/food-security/rag/search",
+                     params={"q": KENYA_DOC, "k": 1}).json()["hits"][0]
+    assert hit["trace"]["source_url"] == "https://fews.net/ken.pdf"
+    archived = hit["trace"]["archived_copy"]
+    assert archived and hit["doc_id"] in archived
+    r = client.get(archived)
+    assert r.status_code == 200 and KENYA_DOC.encode() in r.content
+
+    catalog = client.get("/api/food-security/rag/documents").json()
+    assert catalog["documents"] == 1
+    assert catalog["items"][0]["trace"]["archived_copy"] == archived
+
+    assert client.get("/api/food-security/rag/document/0000000000000000").status_code == 404
+    assert client.get("/api/food-security/rag/document/not-a-doc-id").status_code == 404
 
 
 def test_search_decline_notes_name_the_actual_cause(rag_env):
