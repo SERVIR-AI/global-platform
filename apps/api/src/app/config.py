@@ -47,6 +47,21 @@ class Settings(BaseSettings):
     raster_schema_path: Path = _REPO_ROOT / "conf" / "raster_schema.yml"
     risk_l2_config_path: Path = _REPO_ROOT / "conf" / "risk_l2.yml"
 
+    # --- Food security (GEOGLAM Crop Monitor) ---
+    # The CMET Global_SHP FeatureServer: per-region crop-condition expert
+    # assessments, one layer per month. Layer ids are discovered live, never derived.
+    cropmonitor_url: str = (
+        "https://data.cropmonitor.org/arcgis/rest/services/CMET/Global_SHP/FeatureServer")
+    # Hours a cached service response stays fresh (0 disables caching). Assessments
+    # are monthly, so a long TTL keeps repeat demo runs off the service entirely.
+    cropmonitor_cache_ttl_hours: float = 24.0
+    # The host sends a leaf-only TLS chain, so plain certifi can't build a path.
+    # This published intermediate is appended to the certifi bundle at runtime to
+    # complete the chain; if the file is absent, plain certifi is used. Setting
+    # CROPMONITOR_VERIFY_TLS=false is the last-ditch fallback, never the default.
+    cropmonitor_ca_extra: Path = _REPO_ROOT / "conf" / "cropmonitor_ca.pem"
+    cropmonitor_verify_tls: bool = True
+
     # --- LLM defaults ---
     # Which provider to use when a request doesn't specify one.
     default_provider: Provider = "gemini"
