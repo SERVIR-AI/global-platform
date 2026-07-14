@@ -140,9 +140,11 @@ def _conditions_citation(crop, country, trace):
             "text": text}, None
 
 
-def gather_evidence(parsed, trace, calendar_override=None):
+def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None, None)):
     """Deterministic evidence assembly: two retrieval slices + the conditions feed
-    + the crop calendar. Returns (citations, gaps, stats), citations numbered."""
+    + the crop calendar. Returns (citations, gaps, stats), citations numbered.
+    A calendar override made for one country/crop is never silently applied to
+    another — a mismatch drops it and declares the drop as a gap."""
     corpus = Corpus(CORPUS)
     crop, country, focus = parsed["crop"], parsed["country"], parsed["focus"]
     gaps = []
@@ -165,7 +167,7 @@ def gather_evidence(parsed, trace, calendar_override=None):
             "kind": "document", "source": m.get("source"), "title": m.get("title"),
             "pub_date": m.get("pub_date"), "validation": m.get("validation"),
             "temporal": m.get("temporal"), "url": m.get("url"), "score": h["score"],
-            "doc_id": h["doc_id"],
+            "doc_id": h["doc_id"], "chunk_id": h["id"],
             "archived_copy": (f"/api/food-security/rag/document/{h['doc_id']}"
                               if corpus.raw_path(h["doc_id"]) else None),
             "text": h["text"]})
@@ -175,6 +177,15 @@ def gather_evidence(parsed, trace, calendar_override=None):
     else:
         gaps.append(gap)
     asked_month = datetime.now(timezone.utc).month
+    t_country, t_crop = calendar_target
+    if calendar_override and (
+            (t_country and t_country.lower() != (country or "").lower())
+            or (t_crop and t_crop.lower() != (crop or "").lower())):
+        gaps.append(f"a calendar adjustment made for {t_country or '?'} {t_crop or '?'} "
+                    f"was NOT applied — the question is about {country or '?'} "
+                    f"{crop or '?'}; the hub-default calendar was used instead")
+        trace.append("calendar -> override target mismatch; ignored")
+        calendar_override = None
     cal = crop_calendar.citation(country, crop, asked_month, override=calendar_override)
     if cal:
         citations.append(cal)
@@ -188,7 +199,9 @@ def gather_evidence(parsed, trace, calendar_override=None):
     stats = {"forecast_hits": len(forecast_hits), "retrospective_hits": len(retro_hits),
              "conditions": cond is not None,
              "calendar": (cal or {}).get("adjusted") is not None and (
-                 "adjusted" if (cal or {}).get("adjusted") else "default")}
+                 "adjusted" if (cal or {}).get("adjusted") else "default"),
+             # the literal retrieval queries — provenance for the retrieval step itself
+             "queries": {"forecast": q_now, "retrospective": q_past}}
     return citations, gaps, stats
 
 
@@ -266,7 +279,8 @@ def _declined(reason, *, trace, usage, citations=None, check=None, stats=None):
             "grounded": check, "trace": trace, "usage": usage}
 
 
-def synthesize(question, provider=None, model=None, calendar=None):
+def synthesize(question, provider=None, model=None, calendar=None,
+               calendar_target=(None, None)):
     """The full pipeline. Returns a dict the route serves as-is."""
     settings = get_settings()
     provider = provider or settings.default_provider
@@ -279,7 +293,8 @@ def synthesize(question, provider=None, model=None, calendar=None):
         return _declined(decline, trace=trace, usage=usage) | {
             "provider": provider, "model": model}
 
-    citations, gaps, stats = gather_evidence(parsed, trace, calendar_override=calendar)
+    citations, gaps, stats = gather_evidence(parsed, trace, calendar_override=calendar,
+                                             calendar_target=calendar_target)
     # A calendar is context, not evidence — it cannot carry a brief alone.
     if not any(c["kind"] != "calendar" for c in citations):
         trace.append("evidence -> empty; declining without a synthesis call")
@@ -316,8 +331,8 @@ def synthesize(question, provider=None, model=None, calendar=None):
         if check["passed"]:
             brief = draft + "\n\n## Sources\n" + _sources_md(citations)
             return {"declined": False, "brief": brief, "citations": citations,
-                    "evidence": stats, "grounded": check, "provider": provider,
-                    "model": model, "trace": trace, "usage": usage}
+                    "parsed": parsed, "evidence": stats, "grounded": check,
+                    "provider": provider, "model": model, "trace": trace, "usage": usage}
         messages += [{"role": "assistant", "content": draft},
                      {"role": "user", "content":
                       "Your draft failed the groundedness check — "

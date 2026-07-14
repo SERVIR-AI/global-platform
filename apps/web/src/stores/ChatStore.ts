@@ -17,10 +17,13 @@ interface ChatStore {
   /** Which capability the chat talks to; each mode has its own endpoint. */
   useCase: UseCase;
   setUseCase: (useCase: UseCase) => void;
-  /** Per-request crop-calendar adjustment (null = hub default). Sent with every
-   *  food-security question and cited in the brief as ADJUSTED. */
-  calendarAdjust: SeasonSpec[] | null;
-  setCalendarAdjust: (seasons: SeasonSpec[] | null) => void;
+  /** Per-request crop-calendar adjustment (null = hub default), pinned to the
+   *  country/crop it was edited for — the backend refuses to apply it to a
+   *  different target and declares the drop instead. */
+  calendarAdjust: { country: string; crop: string; seasons: SeasonSpec[] } | null;
+  setCalendarAdjust: (
+    adjust: { country: string; crop: string; seasons: SeasonSpec[] } | null,
+  ) => void;
   messages: ChatItem[];
   /** Append a turn (request or response); its map layers are derived on add. */
   appendMessage: (message: ChatRequest | ChatResponse) => void;

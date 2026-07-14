@@ -46,7 +46,7 @@ const CalendarPanel: FC = () => {
   const countries = Object.keys(data?.calendar ?? {});
   const crops = Object.keys(data?.calendar?.[country] ?? {});
   const defaults = data?.calendar?.[country]?.[crop] ?? [];
-  const seasons = calendarAdjust ?? defaults;
+  const seasons = calendarAdjust?.seasons ?? defaults;
   const adjusted = calendarAdjust !== null;
 
   const edit = (si: number, field: 'planting' | 'harvest', wi: number, month: number) => {
@@ -54,8 +54,13 @@ const CalendarPanel: FC = () => {
       i === si ? { ...s, [field]: s[field].map((m, j) => (j === wi ? month : m)) } : s,
     );
     // Back at the hub default -> drop the override entirely (an unchanged
-    // calendar must not be presented as adjusted).
-    setCalendarAdjust(JSON.stringify(next) === JSON.stringify(defaults) ? null : next);
+    // calendar must not be presented as adjusted). The adjustment is pinned to
+    // the country/crop it was edited for.
+    setCalendarAdjust(
+      JSON.stringify(next) === JSON.stringify(defaults)
+        ? null
+        : { country, crop, seasons: next },
+    );
   };
 
   if (!data) return null;
@@ -66,7 +71,9 @@ const CalendarPanel: FC = () => {
         <CalendarCog className="w-3.5 h-3.5" />
         Crop calendar
         <span className={cn('badge badge-xs', adjusted ? 'badge-warning' : 'badge-ghost')}>
-          {adjusted ? 'adjusted — will be cited in the brief' : 'hub default'}
+          {adjusted
+            ? `adjusted for ${title(calendarAdjust!.country)} ${calendarAdjust!.crop} — cited in the brief`
+            : 'hub default'}
         </span>
       </summary>
       <div className="collapse-content px-3 pb-2 flex flex-col gap-2 text-xs">
@@ -125,7 +132,8 @@ const CalendarPanel: FC = () => {
         ))}
         <p className="text-base-content/50">
           Season windows the brief's timing caveat is computed against. Changes apply to your
-          next question and are cited in the brief as an adjusted calendar — never silently.
+          next question about {title(country)} {crop} and are cited in the brief as an adjusted
+          calendar — a question about a different country/crop uses the hub default and says so.
         </p>
       </div>
     </details>

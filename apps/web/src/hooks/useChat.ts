@@ -7,8 +7,10 @@ import { useIsMutating, useMutation } from '@tanstack/react-query';
 
 const errorMessage = (err: unknown): string => {
   if (err instanceof ApiError) {
-    const detail = (err.body as HTTPValidationError | undefined)?.detail?.[0]?.msg;
-    return detail ?? `Request failed (${err.status}).`;
+    const detail = (err.body as { detail?: unknown } | undefined)?.detail;
+    if (typeof detail === 'string') return detail; // FastAPI string details (400/404/502)
+    const msg = (err.body as HTTPValidationError | undefined)?.detail?.[0]?.msg;
+    return msg ?? `Request failed (${err.status}).`;
   }
   return `Request failed: ${String(err)}`;
 };
@@ -41,12 +43,20 @@ export const useChat = () => {
       if (useCase !== 'food-security') return postChat(request);
       // The brief endpoint: adapt its response into the ChatResponse shape the
       // store/bubbles already know; brief-specific fields ride along.
+      const adjust = useChatStore.getState().calendarAdjust;
       const body = await postFoodSecurityChat({
         question: request.messages[0].content,
         provider: request.provider,
         verbose: true,
-        calendar: useChatStore.getState().calendarAdjust,
+        calendar: adjust?.seasons ?? null,
+        calendar_country: adjust?.country ?? null,
+        calendar_crop: adjust?.crop ?? null,
       });
+      // The brief endpoint returns usage as a per-call [{in, out}] list; fold it
+      // into the Usage shape the UI types expect.
+      const calls = (body.usage as unknown as { in: number; out: number }[] | undefined) ?? [];
+      const input = calls.reduce((a, u) => a + (u.in ?? 0), 0);
+      const output = calls.reduce((a, u) => a + (u.out ?? 0), 0);
       return {
         id: globalThis.crypto?.randomUUID?.() ?? `fs-${Date.now()}`,
         thread_id: threadId,
@@ -56,7 +66,9 @@ export const useChat = () => {
             ? (body.decline_reason ?? 'The system declined to answer.')
             : (body.brief ?? ''),
         },
+        created_at: new Date().toISOString(),
         ...body,
+        usage: { input_tokens: input, output_tokens: output, total_tokens: input + output },
       } as ChatResponse;
     },
     // Echo the request into the store immediately; append the response on success.

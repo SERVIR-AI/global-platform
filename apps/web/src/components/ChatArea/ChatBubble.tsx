@@ -50,14 +50,28 @@ const markdownComponents: Components = {
 const itemMessage = (item: ChatItem): ChatMessage =>
   'message' in item ? item.message : item.messages[item.messages.length - 1];
 
-// Brief prose carries [n] markers; turn each into a link (`cite:` protocol) that
-// the `a` component renders as a chip jumping to its source card. The markdown's
-// own "## Sources" block is dropped from display — the structured cards replace
-// it (the full text, sources included, remains behind the copy button).
+// Brief prose carries [n] markers — single, clustered [1, 9], or ranged [1-3]
+// (all forms the backend gate accepts). Each cited number becomes a chip link
+// (`cite:` protocol); bracketed years stay plain text. The markdown's own
+// "## Sources" block is dropped from display — the structured cards replace it
+// (the full text, sources included, remains behind the copy button).
 const briefBody = (markdown: string): string =>
-  markdown
-    .split(/\n## Sources\b/)[0]
-    .replace(/\[(\d{1,3})\]/g, (_m, n) => `[**[${n}]**](cite:${n})`);
+  markdown.split(/\n## Sources\b/)[0].replace(/\[([\d\s,\-–]{1,24})\]/g, (match, group: string) => {
+    const nums = new Set<number>();
+    for (const part of group.replace(/–/g, '-').split(/[\s,]+/)) {
+      const range = part.match(/^(\d+)-(\d+)$/);
+      if (range) {
+        const a = Number(range[1]);
+        const b = Math.min(Number(range[2]), a + 50);
+        for (let n = a; n <= b; n++) nums.add(n);
+      } else if (/^\d+$/.test(part)) {
+        nums.add(Number(part));
+      }
+    }
+    const cites = [...nums].filter((n) => n > 0 && n < 1000).sort((a, b) => a - b);
+    if (cites.length === 0) return match; // e.g. [2016] — a year, not a citation
+    return cites.map((n) => `[**[${n}]**](cite:${n})`).join('');
+  });
 
 // The agent's exposure-vs-risk question comes back with `choices`; render them as
 // buttons that send the option's `value` (e.g. "1") as the next reply on this thread.
@@ -148,7 +162,7 @@ const ChatBubble: FC<{ chatItem: ChatItem }> = ({ chatItem }) => {
             </ReactMarkdown>
             <BriefSources citations={citations} bubbleId={bubbleId} />
             <div className="self-end">
-              <CopyBriefButton brief={brief!} />
+              <CopyBriefButton brief={brief!} grounded={grounded} model={model} />
             </div>
           </div>
         ) : (

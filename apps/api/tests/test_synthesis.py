@@ -129,8 +129,12 @@ def test_grounded_brief_ships_with_sources_and_receipts(brief_env):
     assert "source: https://icpac.net/g.pdf" in out["brief"]
     assert "archived: /api/food-security/rag/document/" in out["brief"]
     assert "query: Crop IN" in out["brief"]            # the conditions receipt
-    assert out["evidence"] == {"forecast_hits": 1, "retrospective_hits": 1,
-                               "conditions": True, "calendar": "default"}
+    ev = out["evidence"]
+    assert (ev["forecast_hits"], ev["retrospective_hits"]) == (1, 1)
+    assert ev["conditions"] is True and ev["calendar"] == "default"
+    assert ev["queries"]["forecast"].startswith("El Nino")   # retrieval provenance
+    assert out["parsed"] == PARSED                           # the model's parse, exposed
+    assert out["citations"][0]["chunk_id"].endswith(":0")    # chunk-level trace
     # the model was shown exactly the numbered pack and the gaps line
     synth_prompt = stub.seen[-1][-1]["content"]
     assert "[1] ICPAC GHACOF" in synth_prompt and "[3] GEOGLAM Crop Monitor" in synth_prompt
@@ -299,6 +303,20 @@ def test_calendar_flows_into_the_evidence_pack_and_prompt(brief_env):
     assert cal_cite["adjusted"] is True and cal_cite["n"] == 4
     assert out["evidence"]["calendar"] == "adjusted"
     assert "ADJUSTED by the requester" in stub.seen[-1][-1]["content"]
+
+
+def test_calendar_override_for_another_country_is_dropped_and_declared(brief_env):
+    """An adjustment made for Zambia must never be cited as Kenya's ADJUSTED
+    calendar — it is dropped, the hub default used, and the drop declared."""
+    stub = brief_env([GOOD_BRIEF])
+    out = synthesis.synthesize(
+        "maize in Kenya?",
+        calendar=[{"season": "Main season", "planting": [12, 1], "harvest": [5, 7]}],
+        calendar_target=("Zambia", "maize"))
+    assert out["declined"] is False
+    cal = next(c for c in out["citations"] if c["kind"] == "calendar")
+    assert cal["adjusted"] is False                     # hub default used
+    assert "NOT applied" in stub.seen[-1][-1]["content"]  # gap reached the prompt
 
 
 def test_calendar_endpoint_and_request_validation(brief_env):

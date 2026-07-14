@@ -125,6 +125,8 @@ export interface Citation {
   query?: string | null;
   score?: number;
   doc_id?: string;
+  /** The exact chunk within the document (doc_id:index). */
+  chunk_id?: string;
   text?: string;
 }
 
@@ -182,7 +184,16 @@ export interface ChatResponse {
   grounded?: Grounded | null;
   declined?: boolean;
   decline_reason?: string | null;
-  evidence?: { forecast_hits?: number; retrospective_hits?: number; conditions?: boolean };
+  /** The model's parse of the question — the first pipeline step, exposed. */
+  parsed?: { crop?: string; country?: string; focus?: string } | null;
+  evidence?: {
+    forecast_hits?: number;
+    retrospective_hits?: number;
+    conditions?: boolean;
+    calendar?: string | false;
+    /** The literal retrieval queries — provenance for the retrieval step itself. */
+    queries?: { forecast?: string; retrospective?: string };
+  };
 }
 
 /**

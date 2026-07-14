@@ -232,6 +232,11 @@ class BriefRequest(BaseModel):
         default=None,
         description="Per-request crop-calendar adjustment (the ministry ask): season "
                     "windows to use INSTEAD of the hub default — cited in the brief as ADJUSTED.")
+    calendar_country: str | None = Field(
+        default=None, description="Which country the adjustment was made for; if the "
+                                   "question parses to a different one, the adjustment is "
+                                   "ignored and declared as a gap — never silently applied.")
+    calendar_crop: str | None = None
 
 
 @router.post("/chat")
@@ -246,7 +251,8 @@ def food_security_chat(req: BriefRequest) -> dict:
     try:
         out = synthesis.synthesize(
             question, provider=req.provider, model=req.model,
-            calendar=[s.model_dump() for s in req.calendar] if req.calendar else None)
+            calendar=[s.model_dump() for s in req.calendar] if req.calendar else None,
+            calendar_target=(req.calendar_country, req.calendar_crop))
     except MissingAPIKey as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except CorpusError as exc:

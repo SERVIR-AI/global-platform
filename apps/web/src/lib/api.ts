@@ -63,6 +63,9 @@ export const postFoodSecurityChat = (
     verbose?: boolean;
     /** Per-request crop-calendar adjustment; cited in the brief as ADJUSTED. */
     calendar?: SeasonSpec[] | null;
+    /** The target the adjustment was made for — a mismatching question drops it, declared. */
+    calendar_country?: string | null;
+    calendar_crop?: string | null;
   },
   signal?: AbortSignal,
 ): Promise<Partial<ChatResponse>> =>
