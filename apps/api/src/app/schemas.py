@@ -61,6 +61,10 @@ class ChatResponse(BaseModel):
     trace: list[str] | None = Field(
         default=None,
         description="Step-by-step narration of the run; present only when the request set verbose=true.")
+    trace_events: list[dict] | None = Field(
+        default=None,
+        description="Structured per-step trace events for this turn (currently only the "
+                    "router step is instrumented); present only when the request set verbose=true.")
     choices: list[dict] | None = Field(
         default=None,
         description="When the agent is asking the user to choose (exposure vs risk L1/L2): "
