@@ -60,7 +60,7 @@ def chat(request: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     graph = get_graph()
-    config: RunnableConfig = {"configurable": {"thread_id": thread_id, "client": client, "model": model}}
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id, "client": client, "model": model, "provider": provider}}
     messages = [{"role": m.role, "content": m.content} for m in request.messages]
 
     # Only send req_geometry/req_hazard when present: a follow-up that omits them must NOT
@@ -100,6 +100,7 @@ def chat(request: ChatRequest) -> ChatResponse:
         model=model,
         usage=_usage(result.get("usage") or []),
         trace=result.get("trace") if request.verbose else None,
+        trace_events=result.get("events"),
         choices=choices,
         **geo,
     )
