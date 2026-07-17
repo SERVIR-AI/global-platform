@@ -8,7 +8,7 @@ from app.graph import graph as gm
 
 
 def _graph_cfg(client, thread):
-    return gm._build_graph(), {"configurable": {"thread_id": thread, "client": client, "model": "stub"}}
+    return gm._build_graph(), {"configurable": {"thread_id": thread, "client": client, "model": "stub", "provider": "stub"}}
 
 
 @pytest.mark.parametrize("reply, expect_src", [

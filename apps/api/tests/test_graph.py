@@ -9,7 +9,7 @@ from app.graph.geo import store
 
 
 def _cfg(client, thread):
-    return {"configurable": {"thread_id": thread, "client": client, "model": "stub"}}
+    return {"configurable": {"thread_id": thread, "client": client, "model": "stub", "provider": "stub"}}
 
 
 def _patch_fetch(monkeypatch, aoi):
