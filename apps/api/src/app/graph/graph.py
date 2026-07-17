@@ -17,13 +17,14 @@ JSON-serializable for the checkpointer (multi-turn memory keyed by thread_id).
 from __future__ import annotations
 
 import json
+import time
+from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Annotated, Any, TypedDict, NotRequired
-
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
-from . import prompts
+from . import prompts, tracing
 from .geo import byod_registry, combine, ingest, operations, resolver, tiffs, trace
 
 
@@ -61,6 +62,8 @@ class State(TypedDict):  # total=True by default: keys are required unless NotRe
     req_geometry: NotRequired[dict | list | None]   # Mode 2: a drawn AOI from the request
     req_hazard: NotRequired[str | None]             # explicit hazard from the request (e.g. a UI button)
     trace: Annotated[list[str], _add]      # plain-text step narration (returned when verbose)
+    events: Annotated[list[dict], _add]    # structured per-step trace events (Commit 2 will add
+                                            # a per-turn reset; for now this grows across turns)
     awaiting_choice: dict | None           # set when the agent asked L1-vs-L2; resumes on the reply
     _resume: bool                          # transient: this turn applied a pending L1/L2 choice
 
@@ -124,8 +127,26 @@ def _route_menu(thread_id) -> dict:
 def route(state: State, config) -> dict:
     """LLM picks the operation + place + hazard layers. Records intent; runs nothing.
     If we're resuming a pending L1/L2 choice, apply it without an LLM call."""
+    t_start = time.perf_counter()
+    started_at = datetime.now(timezone.utc).isoformat()
     if state.get("awaiting_choice"):
-        return _apply_choice(state)
+        awaiting_choice = state["awaiting_choice"]
+        out = _apply_choice(state)
+        t_end = time.perf_counter()
+        ended_at = datetime.now(timezone.utc).isoformat()
+        trace_event = tracing.make_trace_event_no_llm(
+            start_time=t_start,
+            end_time=t_end,
+            started_at=started_at,
+            ended_at=ended_at,
+            state=state,
+            config=config,
+            resumed_delta=out,
+            awaiting_choice=awaiting_choice,
+        )
+        out["events"] = [trace_event]
+        return out
+
     client = config["configurable"]["client"]
     model = config["configurable"]["model"]
     geom = state.get("req_geometry")
@@ -151,26 +172,71 @@ def route(state: State, config) -> dict:
     if not msg.tool_calls:                       # model declined -> plain-text reply
         out["error"] = msg.content or "I can't answer that with the data I have."
         out["trace"].append("route → declined (no tool call)")
+        t_end = time.perf_counter()
+        ended_at = datetime.now(timezone.utc).isoformat()
+        trace_event = tracing.make_trace_event_router(
+            start_time=t_start,
+            end_time=t_end,
+            started_at=started_at,
+            ended_at=ended_at,
+            state=state,
+            config=config,
+            llm_response=resp,
+            messages=messages,
+            available_layers=layers,
+            error=out["error"],
+        )
+        out["events"] = [trace_event]
         return out
 
     call = msg.tool_calls[0]
     args = json.loads(call.function.arguments)
     place = args.pop("place", None)
-    selected = args.pop("hazard_layers", [])
+    selected_hazard_layers = args.pop("hazard_layers", [])
     if state.get("req_hazard"):                  # explicit hazard (e.g. a UI button) overrides
         forced = tiffs.resolve(state["req_hazard"])
         if forced:
-            selected = [forced]
+            selected_hazard_layers = [forced]
     if not place and geom is None:               # a drawn area makes a place name unnecessary
         out["error"] = "Name a place (a city or district) and I'll check it."
         out["trace"].append(f"route → {call.function.name} but no place named — refusing")
+        t_end = time.perf_counter()
+        ended_at = datetime.now(timezone.utc).isoformat()
+        trace_event = tracing.make_trace_event_router(
+            start_time=t_start,
+            end_time=t_end,
+            started_at=started_at,
+            ended_at=ended_at,
+            state=state,
+            config=config,
+            llm_response=resp,
+            messages=messages,
+            available_layers=layers,
+            error=out["error"],
+        )
+        out["events"] = [trace_event]
         return out
 
     out.update(operation=call.function.name, place=place or "drawn area", op_args=args,
-               tiffs=selected, tool_call_id=call.id, _resume=False)
+               tiffs=selected_hazard_layers, tool_call_id=call.id, _resume=False)
     out["trace"].append(
-        f"route → {call.function.name}(place={place!r}, hazard_layers={selected}, {args})"
+        f"route → {call.function.name}(place={place!r}, hazard_layers={selected_hazard_layers}, {args})"
         "  [the model extracts these; it computes no numbers]")
+    t_end = time.perf_counter()
+    ended_at = datetime.now(timezone.utc).isoformat()
+    trace_event = tracing.make_trace_event_router(
+        start_time=t_start,
+        end_time=t_end,
+        started_at=started_at,
+        ended_at=ended_at,
+        state=state,
+        config=config,
+        llm_response=resp,
+        messages=messages,
+        available_layers=layers,
+        error=out["error"],
+    )
+    out["events"] = [trace_event]
     return out
 
 
