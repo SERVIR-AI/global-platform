@@ -6,11 +6,19 @@ called modules, not here (the tool-vs-prompt litmus, ARCHITECTURE §1).
 
 from __future__ import annotations
 
+import os
+
 from mcp.server.fastmcp import FastMCP
 
 from . import fetch, registry
 
-mcp = FastMCP("global-risk-platform")
+# Host/port for the remote (streamable-http) transport. Remote is the faithful
+# build surface: consumers connect by URL, so no filesystem path leaks into a
+# client config for a coding agent to follow into our source (ARCHITECTURE §6).
+mcp = FastMCP("global-risk-platform",
+              host=os.environ.get("GRP_MCP_HOST", "127.0.0.1"),
+              port=int(os.environ.get("GRP_MCP_PORT", "8000")),
+              stateless_http=True)  # each tool call is self-contained; no session to terminate
 
 
 @mcp.tool()
@@ -54,7 +62,12 @@ def corpus_document(doc_id: str | None = None) -> dict:
 
 
 def main() -> None:
-    mcp.run(transport="stdio")
+    """Default stdio (local dev). `--http` serves streamable-http on
+    GRP_MCP_HOST:GRP_MCP_PORT/mcp — the faithful remote build surface."""
+    import sys
+    transport = "streamable-http" if "--http" in sys.argv else "stdio"
+    os.environ["GRP_MCP_TRANSPORT"] = transport  # so capabilities reports it honestly
+    mcp.run(transport=transport)
 
 
 if __name__ == "__main__":

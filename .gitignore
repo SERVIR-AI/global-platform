@@ -41,6 +41,9 @@ docs/food-security/
 # local-only internal playbooks (repo standards, etc.) — never pushed
 docs/internal/
 
+# all documentation is local-only — never commit docs (mcp architecture, build logs, trackers)
+docs/
+
 # reference PDFs (not part of the build)
 SERVIR Global Platform PoC.pdf
 screencapture-localhost-5173-2026-06-29-19_41_17.pdf

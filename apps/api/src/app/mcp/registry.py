@@ -5,6 +5,8 @@ Pure/no-network; safe to call before anything else in a build session.
 
 from __future__ import annotations
 
+import os
+
 from ..food_security import calendar as fs_calendar
 from ..rag.store import Corpus, CorpusError
 
@@ -63,7 +65,7 @@ def capabilities() -> dict:
     gaps are declared, not omitted."""
     return {
         "server": {"name": "global-risk-platform", "version": VERSION,
-                   "transport": "stdio"},
+                   "transport": os.environ.get("GRP_MCP_TRANSPORT", "stdio")},
         "contract": CONTRACT,
         "bones": _BONES,
         "packs": [{
