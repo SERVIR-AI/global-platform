@@ -22,8 +22,11 @@ def groundedness(draft: str, pack_id: str) -> dict:
         return {"status": "declined",
                 "note": f"no evidence pack with id {pack_id!r} — call assemble_pack first",
                 "required_sections": list(synthesis.SECTIONS)}
+    # Sections come from the PACK, not a food-security import — so a second domain
+    # pack is gated against ITS OWN contract, not this one's.
+    sections = pack.get("required_sections") or list(synthesis.SECTIONS)
     citations = pack.get("citations", [])
-    r = synthesis.check_grounded(draft, citations)
+    r = synthesis.check_grounded(draft, citations, sections=sections)
     # Store the FULL verified text + its hash: a receipt that can't show what
     # passed can't answer "is the circulating copy the one you verified?".
     digest = hashlib.sha256(draft.encode("utf-8")).hexdigest()
@@ -34,7 +37,7 @@ def groundedness(draft: str, pack_id: str) -> dict:
     report_id = store.save_report(report)
     return {"status": "ok", "report_id": report_id, "passed": r["passed"],
             "evidence_tier": "platform-registered", "draft_sha256": digest,
-            "required_sections": list(synthesis.SECTIONS),
+            "required_sections": list(sections),
             "failures": r["failures"], "cited": r["cited"],
             "phantom_citations": r["phantom_citations"],
             "missing_sections": r["missing_sections"],

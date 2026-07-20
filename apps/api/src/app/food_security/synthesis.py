@@ -233,14 +233,16 @@ def _render_pack(citations):
     return source_block(doc_like)
 
 
-def check_grounded(draft, citations):
+def check_grounded(draft, citations, sections=None):
     """Blocking: required sections present, no model-written Sources, citations
     resolve, every paragraph cites. Recorded (not yet blocking): numbers absent
-    from the evidence (whole-token compare over chunk text + citation metadata)."""
+    from the evidence (whole-token compare over chunk text + citation metadata).
+    `sections` defaults to this pack's SECTIONS; a caller with another domain
+    pack passes that pack's own contract."""
     valid = {c["n"] for c in citations}
     used = _cited_numbers(draft)
     phantom = sorted(used - valid)
-    missing_sections = [s for s in SECTIONS if s not in draft]
+    missing_sections = [s for s in (sections or SECTIONS) if s not in draft]
     wrote_sources = "## Sources" in draft
     paragraphs = []                    # header lines don't shield the prose under them
     for block in draft.split("\n\n"):
