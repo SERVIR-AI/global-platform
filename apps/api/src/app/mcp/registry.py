@@ -75,18 +75,21 @@ def _calendars() -> list[dict]:
     return [{"country": c, "crops": sorted(crops)} for c, crops in sorted(cal.items())]
 
 
-def capabilities(available_tools=None, available_prompts=None) -> dict:
-    """The honest platform map. Bone status + the tool/prompt lists are DERIVED
-    from the live registry (passed in by the tool), so the map cannot drift from
-    what the server actually exposes. Sources/calendars are real; gaps declared."""
+def capabilities(available_tools=None, available_prompts=None,
+                 available_resources=None) -> dict:
+    """The honest platform map. Bone status + the tool/prompt/resource lists are
+    DERIVED from the live registry (passed in by the tool), so the map cannot drift
+    from what the server actually exposes. Sources/calendars real; gaps declared."""
     tools = sorted(available_tools or [])
     prompts = sorted(available_prompts or [])
+    resources = sorted(available_resources or [])
     return {
         "server": {"name": "global-risk-platform", "version": VERSION,
                    "transport": os.environ.get("GRP_MCP_TRANSPORT", "stdio")},
         "contract": CONTRACT,
         "usage": {"instructions": "delivered to the LLM at connect (initialize)",
                   "prompts": prompts,  # user-selectable in the host menu (build vs run)
+                  "resources": resources,  # human-readable guides (e.g. grp://how-to-use)
                   "modes": ["build-time: build a reusable app on the tools",
                             "run-time: answer one question now"]},
         "tools_available": tools,

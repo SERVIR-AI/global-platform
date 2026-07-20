@@ -50,7 +50,8 @@ def platform_capabilities() -> dict:
     """
     return registry.capabilities(
         available_tools=[t.name for t in mcp._tool_manager.list_tools()],
-        available_prompts=[p.name for p in mcp._prompt_manager.list_prompts()])
+        available_prompts=[p.name for p in mcp._prompt_manager.list_prompts()],
+        available_resources=[str(r.uri) for r in mcp._resource_manager.list_resources()])
 
 
 @mcp.tool()
@@ -169,6 +170,40 @@ def corpus_document(doc_id: str | None = None) -> dict:
     Whenever status != "ok", render `note`.
     """
     return fetch.document(doc_id)
+
+
+@mcp.resource("grp://how-to-use", mime_type="text/markdown")
+def how_to_use() -> str:
+    """How to use the Global Risk Platform (human-readable) — attach/open in the host."""
+    return """# How to use the Global Risk Platform
+
+A **governed toolkit** for food-security decision support — not a chatbot. Every
+insight carries its evidence, declines say why, and a groundedness gate blocks
+ungrounded briefs. You use it in one of two ways.
+
+## Build-time — build your own tool on ours
+Ask your AI client to *build* something. It produces a reusable app/script that
+calls these tools, so the guardrails live in your tool, not in a one-off chat.
+- Claude Code: run the `build_a_tool` prompt (`/` menu) or just say
+  "build me a bulletin tool for a country and crop".
+- Claude Desktop: pick **build_a_tool** from the prompt (+) menu.
+
+## Run-time — get one governed answer now
+Ask a question. The assistant runs the loop and returns a grounded, cited brief.
+- Use the `run_analysis` prompt, or ask e.g. "what should I expect for maize in
+  Kenya this season?"
+
+## The canonical loop (what a good answer does)
+platform_capabilities (scope honestly) → assemble_pack(country, crop) → your LLM
+drafts a brief from the pack citing [n] in its required_sections →
+verify_groundedness(draft, pack_id) → publish only if it passes →
+record_receipt mints a replayable receipt.
+
+## See what's actually live (never trust a stale doc)
+Call **platform_capabilities** (or run the `explain_platform` prompt) for the
+current tools, bones, and DECLARED gaps — that map is derived from the live
+server, so it's always accurate.
+"""
 
 
 @mcp.prompt()
