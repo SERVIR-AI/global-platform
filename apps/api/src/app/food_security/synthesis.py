@@ -64,6 +64,15 @@ Do not write a Sources section — the system appends it."""
 
 _CITE_GROUP = re.compile(r"\[([\d\s,–\-]+)\]")   # [3], [1, 9], [1-3], [2016]
 
+# Thousands separators: a comma OR space between a digit and a 3-digit group
+# (chained) — "800 000"/"800,000" are one number. UN/African docs use spaces,
+# so a comma-only strip false-flagged legitimate figures as unverified.
+_THOUSANDS = re.compile(r"(?<=\d)[ ,](?=\d{3}(?:[ ,]\d{3})*(?!\d))")
+
+
+def _norm_nums(text: str) -> str:
+    return _THOUSANDS.sub("", text)
+
 
 def _cited_numbers(text: str) -> set[int]:
     """All citation numbers in bracket groups, ranges expanded; 4-digit values
@@ -232,12 +241,12 @@ def check_grounded(draft, citations):
         if body:
             paragraphs.append(body)
     uncited = [p[:70] for p in paragraphs if not _CITE_GROUP.search(p)]
-    evid_blob = " ".join(" ".join(str(c.get(k) or "") for k in
+    evid_blob = _norm_nums(" ".join(" ".join(str(c.get(k) or "") for k in
                                   ("text", "pub_date", "title", "source"))
-                         for c in citations).replace(",", "")
+                         for c in citations))
     evid_nums = set(re.findall(r"\d+(?:\.\d+)?", evid_blob))
     draft_nums = set(re.findall(r"\d+(?:\.\d+)?",
-                                _CITE_GROUP.sub("", draft).replace(",", "")))
+                                _norm_nums(_CITE_GROUP.sub("", draft))))
     unverified = sorted(draft_nums - evid_nums)
     failures = []
     if missing_sections:

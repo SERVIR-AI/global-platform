@@ -87,7 +87,9 @@ def assemble_pack(country: str, crop: str, focus: str | None = None,
     them; they are what's missing, said honestly.
 
     Returns: {status, pack_id, country, crop, citations:[{n,...}], gaps, queries,
-    stats}. status "declined" -> `note` (missing key / torn corpus / bad override).
+    required_sections, stats}. `required_sections` is what verify_groundedness
+    will demand — draft those exact section headers so the gate passes in one shot.
+    status "declined" -> `note` (missing key / torn corpus / bad override).
     """
     return assemble.assemble(country, crop, focus=focus, override=override,
                              override_country=override_country, override_crop=override_crop)

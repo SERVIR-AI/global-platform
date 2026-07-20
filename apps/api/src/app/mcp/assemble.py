@@ -35,6 +35,9 @@ def assemble(country: str, crop: str, focus: str | None = None,
         return {"status": "declined", "note": str(exc)}
     pack = {"country": parsed["country"], "crop": parsed["crop"], "focus": parsed["focus"],
             "citations": citations, "gaps": gaps, "queries": stats.get("queries"),
+            # the sections verify_groundedness will require — so a drafter conforms
+            # in one shot, without a throwaway probe call to learn them
+            "required_sections": list(synthesis.SECTIONS),
             "stats": {k: v for k, v in stats.items() if k != "queries"}, "trace": trace}
     pack_id = store.save_pack(pack)
     return {"status": "ok", "pack_id": pack_id, **pack}
