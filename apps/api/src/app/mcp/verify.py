@@ -6,6 +6,8 @@ evidence tier (rule 6). Thin over synthesis.check_grounded.
 
 from __future__ import annotations
 
+import hashlib
+
 from ..food_security import synthesis
 from . import store
 
@@ -22,12 +24,16 @@ def groundedness(draft: str, pack_id: str) -> dict:
                 "required_sections": list(synthesis.SECTIONS)}
     citations = pack.get("citations", [])
     r = synthesis.check_grounded(draft, citations)
+    # Store the FULL verified text + its hash: a receipt that can't show what
+    # passed can't answer "is the circulating copy the one you verified?".
+    digest = hashlib.sha256(draft.encode("utf-8")).hexdigest()
     report = {"pack_id": pack_id, "passed": r["passed"],
               "evidence_tier": "platform-registered",
-              "checks": r, "draft_excerpt": draft[:280]}
+              "checks": r, "draft": draft, "draft_sha256": digest,
+              "draft_excerpt": draft[:280]}
     report_id = store.save_report(report)
     return {"status": "ok", "report_id": report_id, "passed": r["passed"],
-            "evidence_tier": "platform-registered",
+            "evidence_tier": "platform-registered", "draft_sha256": digest,
             "required_sections": list(synthesis.SECTIONS),
             "failures": r["failures"], "cited": r["cited"],
             "phantom_citations": r["phantom_citations"],

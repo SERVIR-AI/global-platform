@@ -34,6 +34,10 @@ def record(pack_id: str | None = None, report_id: str | None = None,
         "pack_id": pack_id, "report_id": report_id,
         "passed": (report or {}).get("passed"),
         "evidence_tier": (report or {}).get("evidence_tier", "platform-registered"),
+        # the fingerprint of the exact text that passed — hash a circulating copy
+        # and compare to prove it IS the verified one (full text lives in the report)
+        "draft_sha256": (report or {}).get("draft_sha256"),
+        "verified_text": "full text stored in the linked report_id",
         "sources": [{"n": c.get("n"), "source": c.get("source"), "title": c.get("title"),
                      "validation": c.get("validation"),
                      "archived_copy": c.get("archived_copy")}

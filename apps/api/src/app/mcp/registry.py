@@ -94,7 +94,11 @@ def capabilities(available_tools=None, available_prompts=None,
                             "run-time: answer one question now"]},
         "tools_available": tools,
         "bones": _bones(set(tools)),
-        "packs": [{
+        # NB two different things are called "pack": a DOMAIN PACK (below) is the
+        # versioned bundle of sources/calendars/composition — there is one per
+        # domain. An EVIDENCE PACK (pack_id, from assemble_pack) is a per-question
+        # snapshot of gathered evidence — a new one is minted on every call.
+        "domain_packs": [{
             "id": "food-security",
             "profile": "v0",
             "question": ("early signs of maize failure in the current season "
