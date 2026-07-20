@@ -10,7 +10,7 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 
-from . import fetch, registry
+from . import context, fetch, registry
 
 # Host/port for the remote (streamable-http) transport. Remote is the faithful
 # build surface: consumers connect by URL, so no filesystem path leaks into a
@@ -46,6 +46,28 @@ def corpus_search(query: str, k: int = 5, country: str | None = None,
     """
     return fetch.search(query, k=k, country=country, crop=crop,
                         temporal=temporal, doc_type=doc_type)
+
+
+@mcp.tool()
+def context_get(country: str, crop: str, asked_month: int | None = None,
+                override: list[dict] | None = None,
+                override_country: str | None = None,
+                override_crop: str | None = None) -> dict:
+    """The hub-default crop calendar for a country/crop, and the phase the asked
+    month falls in (asked_month defaults to the current month — "this season").
+
+    A human `override` (list of {season, planting:[m,m], harvest:[m,m]}) is
+    honored but LABELED: the returned calendar is marked adjusted=true and cited
+    as "ADJUSTED by the requester". Pass override_country/override_crop to pin it
+    to its target — if they mismatch the requested country/crop the override is
+    DROPPED and the drop is declared in `gaps` (a swap never applies silently).
+
+    Returns: {status, country, crop, asked_month, adjusted, calendar, gaps}.
+      status "empty"    -> no calendar configured for this country/crop (`note`)
+      status "declined" -> bad asked_month / malformed override (`note`)
+    """
+    return context.get(country, crop, asked_month=asked_month, override=override,
+                       override_country=override_country, override_crop=override_crop)
 
 
 @mcp.tool()
