@@ -94,6 +94,73 @@ def _calendars() -> list[dict]:
     return [{"country": c, "crops": sorted(crops)} for c, crops in sorted(cal.items())]
 
 
+def pack_manifest() -> dict:
+    """The Food-Security DOMAIN PACK, v0 — the versioned bundle a hub adopts: what
+    ships, what it produces, and what is missing. Real state where derivable; every
+    gap declared in one place rather than scattered."""
+    from ..food_security import synthesis  # local: avoids importing llm deps at module load
+    corpus = _corpus_summary()
+    gaps = [
+        "climate feeds (CHIRPS/CHIRTS/ERA5) — pending hub data lists",
+        "analytics / threshold formulas — pending hub contribution (compute bone is phase2)",
+        "acreage-under-stress — needs crop-type/land-cover masks (deferred)",
+        "MCP Apps widgets — phase2 (web widgets exist in apps/web)",
+        "sub-national regions are not resolved to geometries — gazetteer is phase2",
+        "archived ORIGINAL bytes need the REST mount; over MCP corpus_document "
+        "returns the extracted text that was cited",
+    ]
+    if corpus.get("status") != "available":
+        gaps.append(f"corpus unavailable: {corpus.get('reason')}")
+    demo = store_latest_receipt()
+    return {
+        "id": "food-security", "version": "v0",
+        "profile": "Phase-1 profile — what ships today, gaps declared",
+        "built_for": ("early signs of maize failure in the current season "
+                      "(Kenya Trans-Nzoia vs Zambia — the hub-locked PoC question)"),
+        "output_contract": {
+            "required_sections": list(synthesis.SECTIONS),
+            "gate": ("verify_groundedness — BLOCKING on: required sections present, "
+                     "no self-written Sources, citations resolve to the pack, every "
+                     "paragraph cited. Recorded not blocking: numbers absent from evidence."),
+            "receipt": "record_receipt — question + pack + verdict + verified-text hash",
+        },
+        "sources": {
+            "corpus": corpus,
+            "conditions": {"status": "available", "source": "GEOGLAM Crop Monitor",
+                           "note": "staleness is flagged in the evidence when served "
+                                   "from last-good cache"},
+            "climate_feeds": {"status": "declared_gap",
+                              "reason": "CHIRPS/CHIRTS/ERA5 pending hub data lists"},
+        },
+        "calendars": _calendars(),
+        "calendar_provenance": ("hub defaults are hand-authored approximations of "
+                                "GEOGLAM/FAO baselines; a hub-provided passported "
+                                "calendar is pending. Per-request overrides are honored "
+                                "and labelled ADJUSTED."),
+        "compositions": sorted(COMPOSITIONS),
+        "guidance": {"instructions": "delivered at connect",
+                     "prompts": ["build_a_tool", "run_analysis", "explain_platform"],
+                     "resources": ["grp://how-to-use", "grp://pack/food-security"]},
+        "gaps": gaps,
+        "worked_example": ({"receipt_id": demo,
+                            "resolve_with": f"record_receipt(receipt_id='{demo}')",
+                            "note": "a real receipt from this server — resolve it "
+                                    "instead of inventing a sample payload"}
+                           if demo else
+                           {"receipt_id": None,
+                            "note": "none yet — run compose_run (or the "
+                                    "assemble→verify→record loop) to mint one"}),
+    }
+
+
+def store_latest_receipt():
+    from . import store  # local import keeps registry importable without the DB
+    try:
+        return store.latest_receipt_id()
+    except Exception:
+        return None
+
+
 def capabilities(available_tools=None, available_prompts=None,
                  available_resources=None) -> dict:
     """The honest platform map. Bone status + the tool/prompt/resource lists are
@@ -119,29 +186,5 @@ def capabilities(available_tools=None, available_prompts=None,
         # versioned bundle of sources/calendars/composition — there is one per
         # domain. An EVIDENCE PACK (pack_id, from assemble_pack) is a per-question
         # snapshot of gathered evidence — a new one is minted on every call.
-        "domain_packs": [{
-            "id": "food-security",
-            "profile": "v0",
-            "question": ("early signs of maize failure in the current season "
-                         "(Kenya Trans-Nzoia vs Zambia)"),
-            "sources": {
-                "corpus": _corpus_summary(),
-                "conditions": {"status": "available", "source": "GEOGLAM Crop Monitor"},
-                "climate_feeds": {"status": "declared_gap",
-                                  "reason": "CHIRPS/CHIRTS/ERA5 pending hub data lists"},
-            },
-            "calendars": _calendars(),
-            "analytics": {"status": "declared_gap",
-                          "reason": "threshold formulas pending hub contribution"},
-            "widgets": {"status": "declared_gap",
-                        "reason": "MCP Apps widgets phase2; web widgets exist in apps/web"},
-            "skills": {"status": "partial",
-                       "reason": "canonical loop shipped via server instructions + the "
-                                 "build_a_tool prompt; a fuller skill/usage resource pending"},
-        }],
-        "declared_deferrals": [
-            "acreage-under-stress (needs crop-type/land-cover masks)",
-            "climate feeds (pending hub data lists)",
-            "compute/analytics registry (pending hub contribution)",
-        ],
+        "domain_packs": [pack_manifest()],
     }

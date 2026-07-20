@@ -84,6 +84,18 @@ def load_report(report_id: str) -> dict | None:
     return _load("reports", report_id)
 
 
+def latest_receipt_id() -> str | None:
+    """Most recent receipt — the pack manifest points at it as a REAL worked example
+    (so a builder resolves a genuine receipt instead of faking a payload)."""
+    con = _connect()
+    try:
+        row = con.execute(
+            "SELECT id FROM receipts ORDER BY created_at DESC LIMIT 1").fetchone()
+    finally:
+        con.close()
+    return row[0] if row else None
+
+
 def save_receipt(receipt: dict) -> str:
     return _save("receipts", receipt, "receipt_id")
 

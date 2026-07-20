@@ -217,6 +217,13 @@ def corpus_document(doc_id: str | None = None) -> dict:
     return fetch.document(doc_id)
 
 
+@mcp.resource("grp://pack/food-security", mime_type="application/json")
+def food_security_pack() -> dict:
+    """The Food-Security domain pack manifest (v0): what ships, what it produces,
+    and every declared gap — plus a real worked-example receipt to resolve."""
+    return registry.pack_manifest()
+
+
 @mcp.resource("grp://how-to-use", mime_type="text/markdown")
 def how_to_use() -> str:
     """How to use the Global Risk Platform (human-readable) — attach/open in the host."""
