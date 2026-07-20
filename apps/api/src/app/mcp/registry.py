@@ -25,18 +25,33 @@ CONTRACT = [
     "receipts outlive everything",
 ]
 
-# Bone availability by phase (ARCHITECTURE §8). "available" = callable now.
-_BONES = [
-    {"bone": "resolve", "tool": "resolve_place_time", "status": "phase2"},
-    {"bone": "fetch", "tool": "corpus_search / corpus_document / feeds_query",
-     "status": "partial", "note": "corpus available; live feeds phase2"},
-    {"bone": "compute", "tool": "compute_run", "status": "phase2"},
-    {"bone": "context", "tool": "context_get", "status": "available"},
-    {"bone": "assemble", "tool": "assemble_pack", "status": "phase1"},
-    {"bone": "verify", "tool": "verify_groundedness", "status": "phase1"},
-    {"bone": "record", "tool": "record_receipt", "status": "phase1"},
-    {"bone": "contribute", "tool": "contribute_submit", "status": "phase2"},
+# Bone -> its tool(s) + where it's headed if not built yet. STATUS IS DERIVED from
+# the live tool registry (see _bones), so the map can never drift from reality.
+_BONE_DEFS = [
+    {"bone": "resolve", "tools": ["resolve_place_time"], "planned": "planned (phase2)"},
+    {"bone": "fetch", "tools": ["corpus_search", "corpus_document", "feeds_query"],
+     "planned": "planned (phase2)", "note": "corpus tools built; live feeds (feeds_query) phase2"},
+    {"bone": "compute", "tools": ["compute_run"], "planned": "planned (phase2)"},
+    {"bone": "context", "tools": ["context_get"], "planned": "planned (phase1)"},
+    {"bone": "assemble", "tools": ["assemble_pack"], "planned": "planned (phase1)"},
+    {"bone": "verify", "tools": ["verify_groundedness"], "planned": "planned (phase1)"},
+    {"bone": "record", "tools": ["record_receipt"], "planned": "planned (phase1)"},
+    {"bone": "contribute", "tools": ["contribute_submit"], "planned": "planned (phase2)"},
 ]
+
+
+def _bones(available: set[str]) -> list[dict]:
+    """Status derived from which tools are actually registered — never hand-set."""
+    out = []
+    for b in _BONE_DEFS:
+        built = [t for t in b["tools"] if t in available]
+        status = ("available" if len(built) == len(b["tools"])
+                  else "partial" if built else b["planned"])
+        row = {"bone": b["bone"], "tools": b["tools"], "status": status}
+        if b.get("note"):
+            row["note"] = b["note"]
+        out.append(row)
+    return out
 
 
 def _corpus_summary() -> dict:
@@ -60,14 +75,22 @@ def _calendars() -> list[dict]:
     return [{"country": c, "crops": sorted(crops)} for c, crops in sorted(cal.items())]
 
 
-def capabilities() -> dict:
-    """The honest platform map for a build session. Sources/calendars are real;
-    gaps are declared, not omitted."""
+def capabilities(available_tools=None, available_prompts=None) -> dict:
+    """The honest platform map. Bone status + the tool/prompt lists are DERIVED
+    from the live registry (passed in by the tool), so the map cannot drift from
+    what the server actually exposes. Sources/calendars are real; gaps declared."""
+    tools = sorted(available_tools or [])
+    prompts = sorted(available_prompts or [])
     return {
         "server": {"name": "global-risk-platform", "version": VERSION,
                    "transport": os.environ.get("GRP_MCP_TRANSPORT", "stdio")},
         "contract": CONTRACT,
-        "bones": _BONES,
+        "usage": {"instructions": "delivered to the LLM at connect (initialize)",
+                  "prompts": prompts,  # user-selectable in the host menu (build vs run)
+                  "modes": ["build-time: build a reusable app on the tools",
+                            "run-time: answer one question now"]},
+        "tools_available": tools,
+        "bones": _bones(set(tools)),
         "packs": [{
             "id": "food-security",
             "profile": "v0",
@@ -84,7 +107,9 @@ def capabilities() -> dict:
                           "reason": "threshold formulas pending hub contribution"},
             "widgets": {"status": "declared_gap",
                         "reason": "MCP Apps widgets phase2; web widgets exist in apps/web"},
-            "skills": {"status": "declared_gap", "reason": "compose-a-brief skill phase2"},
+            "skills": {"status": "partial",
+                       "reason": "canonical loop shipped via server instructions + the "
+                                 "build_a_tool prompt; a fuller skill/usage resource pending"},
         }],
         "declared_deferrals": [
             "acreage-under-stress (needs crop-type/land-cover masks)",

@@ -10,7 +10,7 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 
-from . import assemble, context, fetch, registry, verify
+from . import assemble, context, fetch, record, registry, verify
 
 # Orientation shown to a connecting LLM at initialize — so it isn't a headless
 # chicken. DESCRIBE the two consumption patterns; don't enforce (no mode switch).
@@ -27,8 +27,9 @@ Two ways to use it:
 Canonical loop: platform_capabilities (scope honestly; surface declared gaps) -> \
 assemble_pack(country, crop) -> YOUR LLM drafts a brief from the pack, citing [n] \
 in the pack's required_sections -> verify_groundedness(draft, pack_id) -> publish \
-ONLY if it passes. Use corpus_search/corpus_document for evidence with provenance, \
-context_get for the (adjustable) crop calendar. Start with platform_capabilities."""
+ONLY if it passes -> record_receipt(pack_id, report_id) mints a replayable receipt. \
+Use corpus_search/corpus_document for evidence with provenance, context_get for the \
+(adjustable) crop calendar. Start with platform_capabilities."""
 
 # Host/port for the remote (streamable-http) transport. Remote is the faithful
 # build surface: consumers connect by URL, so no filesystem path leaks into a
@@ -42,10 +43,14 @@ mcp = FastMCP("global-risk-platform",
 
 @mcp.tool()
 def platform_capabilities() -> dict:
-    """The platform map: packs, sources with provenance, calendars, and DECLARED
-    gaps. Call this first in a build session to scope honestly before writing code.
+    """The platform map: which tools/prompts are live, the bones and their status,
+    packs, sources with provenance, calendars, and DECLARED gaps. Bone status is
+    derived from the live registry, so it never drifts. Call this first in a build
+    session to scope honestly before writing code.
     """
-    return registry.capabilities()
+    return registry.capabilities(
+        available_tools=[t.name for t in mcp._tool_manager.list_tools()],
+        available_prompts=[p.name for p in mcp._prompt_manager.list_prompts()])
 
 
 @mcp.tool()
@@ -132,6 +137,25 @@ def verify_groundedness(draft: str, pack_id: str) -> dict:
     numbers_unverified_recorded}. status "declined" -> unknown pack_id (`note`).
     """
     return verify.groundedness(draft, pack_id)
+
+
+@mcp.tool()
+def record_receipt(pack_id: str | None = None, report_id: str | None = None,
+                   receipt_id: str | None = None, question: str | None = None) -> dict:
+    """Mint or resolve a replayable RECEIPT — the shareable proof of an answer.
+
+    Mint (pass pack_id, and report_id from verify_groundedness): ties the question,
+    the evidence pack, and the verdict into one persisted receipt_id. Resolve (pass
+    receipt_id): returns that receipt. The receipt is claim-scoped — it attests that
+    every cited claim traces to the pack, NOT the truth of the underlying sources.
+
+    Returns: {status, receipt_id, question, pack_id, report_id, passed,
+    evidence_tier, sources, claim_scope, minted_at, resolve_with}. A hosted,
+    copy-paste-survivable resolver URL is a declared Phase-2 gap. status "declined"
+    -> `note` (no pack for mint / unknown receipt_id).
+    """
+    return record.record(pack_id=pack_id, report_id=report_id,
+                         receipt_id=receipt_id, question=question)
 
 
 @mcp.tool()
