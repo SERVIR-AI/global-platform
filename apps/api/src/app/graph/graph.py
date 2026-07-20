@@ -336,16 +336,34 @@ def fetch(state: State) -> dict:
 
 def operate(state: State) -> dict:
     """Run the deterministic spatial op over the bundle — the only number-producing step."""
+    t_start = time.perf_counter()
+    started_at = datetime.now(timezone.utc).isoformat()
+    operation = state.get("operation")
+    min_severity = (state.get("op_args") or {}).get("min_severity")   # failure-branch value only
     try:
-        result = operations.dispatch(state.get("operation"), state.get("aoi"),
+        result = operations.dispatch(operation, state.get("aoi"),
                                      hazard_layers=state.get("tiffs"), **state["op_args"])
         num = result.get("length_km", result.get("count"))
         line = f"overlay (deterministic, no LLM) → {result['method']} = {num}"
         if result.get("by_severity"):
             line += f"  by_severity={result['by_severity']}"
-        return {"result": result, "trace": [line]}
+        t_end = time.perf_counter()
+        ended_at = datetime.now(timezone.utc).isoformat()
+        trace_event = tracing.make_trace_event_operate(
+            start_time=t_start, end_time=t_end, started_at=started_at, ended_at=ended_at,
+            state=state, operation=operation, min_severity=result.get("min_severity"),
+            result=result, num=num, error=None)
+        
+        return {"result": result, "trace": [line], "events": [trace_event]}
     except Exception as e:
-        return {"error": f"No data for that request: {e}", "trace": [f"operate → failed: {e}"]}
+        t_end = time.perf_counter()
+        ended_at = datetime.now(timezone.utc).isoformat()
+        error_msg = f"No data for that request: {e}"
+        trace_event = tracing.make_trace_event_operate(
+            start_time=t_start, end_time=t_end, started_at=started_at, ended_at=ended_at,
+            state=state, operation=operation, min_severity=min_severity,
+            result=None, num=None, error=error_msg)
+        return {"error": error_msg, "trace": [f"operate → failed: {e}"], "events": [trace_event]}
 
 
 def finalize(state: State, config) -> dict:

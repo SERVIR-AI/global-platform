@@ -230,3 +230,51 @@ def make_trace_event_no_llm(
         "error": None,
     }
     return trace_event
+
+def make_trace_event_operate(
+        start_time: float,
+        end_time: float,
+        started_at: str,
+        ended_at: str,
+        state: dict,
+        operation: str | None,
+        min_severity: int | None,
+        result: dict | None,
+        num: int | float | None,
+        error: str | None,
+) -> dict:
+    """Build one operateStep trace event. operate() never calls an LLM.
+
+    `result` is the raw store.py dict (None on failure); 
+    `num` is operate()'s own already-computed result.get("length_km", result.get("count")).
+    `min_severity` is passed in rather than read from `result` here. 
+    on success it's `result.get("min_severity")`; 
+    on failure there's no `result` to read it from, so the caller falls back to 
+    `op_args` instead - passing None when the model never explicitly supplied one.
+    """
+    state = state or {}
+
+    if result is not None:
+        result_out = {"method": result.get("method"), "value": num,
+                      "by_severity": result.get("by_severity"), "source": result.get("source")}
+        summary = f"Computed {result.get('method')} = {num}"
+        why = "This is the only step that produces a number — a deterministic overlay, no model involved."
+    else:
+        result_out = None
+        summary = f"Couldn't compute {operation}" if operation else "Couldn't compute the result"
+        why = f"The overlay failed: {error}"
+
+    trace_event = {
+        "node": "operate",
+        "step": len(state.get("events", [])),
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "duration": (end_time - start_time)*1000,
+        "summary": summary,
+        "why": why,
+        "operation": operation,
+        "min_severity": min_severity,
+        "result": result_out,
+        "error": error,
+    }
+    return trace_event
