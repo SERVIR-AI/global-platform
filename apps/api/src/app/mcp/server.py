@@ -10,7 +10,7 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 
-from . import assemble, context, fetch, registry
+from . import assemble, context, fetch, registry, verify
 
 # Host/port for the remote (streamable-http) transport. Remote is the faithful
 # build surface: consumers connect by URL, so no filesystem path leaks into a
@@ -91,6 +91,26 @@ def assemble_pack(country: str, crop: str, focus: str | None = None,
     """
     return assemble.assemble(country, crop, focus=focus, override=override,
                              override_country=override_country, override_crop=override_crop)
+
+
+@mcp.tool()
+def verify_groundedness(draft: str, pack_id: str) -> dict:
+    """Gate a draft brief against the evidence pack it was written from. The
+    verdict is computed SERVER-SIDE (you cannot pass a "passed" flag) and a
+    resolvable report_id is persisted.
+
+    The draft must be built from a pack minted by assemble_pack, cite its items
+    as [n], and contain the required sections (returned as `required_sections` —
+    conform to them or the gate fails "missing sections"). Blocking failures:
+    missing sections, a model-written "## Sources", no citations, phantom
+    citations (numbers not in the pack), uncited paragraphs. Recorded but not
+    blocking: numbers in the draft absent from the evidence.
+
+    Returns: {status, report_id, passed, evidence_tier, required_sections,
+    failures, cited, phantom_citations, missing_sections, uncited_paragraphs,
+    numbers_unverified_recorded}. status "declined" -> unknown pack_id (`note`).
+    """
+    return verify.groundedness(draft, pack_id)
 
 
 @mcp.tool()
