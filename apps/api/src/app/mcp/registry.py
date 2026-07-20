@@ -49,7 +49,12 @@ COMPOSITIONS = {
         "params": ["question", "override?", "override_country?", "override_crop?",
                    "provider?", "model?"],
         "runs_llm_server_side": True,
-        "for": "consumers with NO LLM of their own (dashboards, cron, REST)",
+        "llm": ("the PLATFORM's model and key; `provider`/`model` choose among the "
+                "platform's configured providers, NOT your own credentials. To use "
+                "YOUR model, run the loop instead: assemble_pack -> you draft -> "
+                "verify_groundedness (same evidence, same gate, same receipt)."),
+        "for": ("consumers with no model credentials or no place to run code "
+                "(dashboards, cron, REST) — the accompanied path"),
     },
 }
 

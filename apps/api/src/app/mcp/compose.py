@@ -17,6 +17,22 @@ from ..rag.store import CorpusError
 from . import context, record, registry, store
 
 
+def _run_foodsecurity_brief(question, override, override_country, override_crop,
+                            provider, model) -> dict:
+    """Runner for `foodsecurity.brief`. Runners return a synthesize-shaped dict:
+    {declined, brief, citations, parsed, evidence, gaps, grounded, provider, model,
+    trace} — compose.run does the persistence generically."""
+    return synthesis.synthesize(question, provider=provider, model=model,
+                                calendar=override,
+                                calendar_target=(override_country, override_crop))
+
+
+# name -> runner. A composition needs BOTH a metadata entry (registry.COMPOSITIONS,
+# for capabilities) and a runner here; a metadata entry without one is declined as
+# not-implemented rather than silently running someone else's pipeline.
+_RUNNERS = {"foodsecurity.brief": _run_foodsecurity_brief}
+
+
 def run(composition: str = "foodsecurity.brief", question: str = "",
         override: list[dict] | None = None, override_country: str | None = None,
         override_crop: str | None = None, provider: str | None = None,
@@ -27,15 +43,18 @@ def run(composition: str = "foodsecurity.brief", question: str = "",
     if spec is None:
         return {"status": "declined", "note": f"unknown composition {composition!r}",
                 "available": sorted(registry.COMPOSITIONS)}
+    runner = _RUNNERS.get(composition)
+    if runner is None:
+        return {"status": "declined",
+                "note": f"composition {composition!r} is registered but has no runner "
+                        "(not implemented)"}
     if not (question or "").strip():
         return {"status": "declined", "note": "question is required"}
     if override is not None and not context._valid_override(override):
         return {"status": "declined",
                 "note": "override must be a list of {season, planting:[m,m], harvest:[m,m]}"}
     try:
-        out = synthesis.synthesize(question, provider=provider, model=model,
-                                   calendar=override,
-                                   calendar_target=(override_country, override_crop))
+        out = runner(question, override, override_country, override_crop, provider, model)
     except MissingAPIKey as exc:
         return {"status": "declined", "note": f"LLM key missing: {exc}"}
     except CorpusError as exc:

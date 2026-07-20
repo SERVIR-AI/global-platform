@@ -168,9 +168,12 @@ def compose_run(composition: str = "foodsecurity.brief", question: str = "",
     """Run a pre-wired COMPOSITION end-to-end — for consumers with NO LLM of their
     own (dashboards, cron jobs, automated bulletins).
 
-    NOTE this runs the PLATFORM's LLM server-side (metered). If you have your own
-    model, prefer the loop — assemble_pack → you draft → verify_groundedness — which
-    uses YOUR model. Either way you get the same governed output and receipt.
+    NOTE this runs the PLATFORM's LLM server-side, on the platform's key and bill.
+    `provider`/`model` pick among the platform's CONFIGURED providers — they do not
+    accept your credentials. If you have your own model, prefer the loop —
+    assemble_pack → you draft → verify_groundedness — which uses YOUR model for the
+    same evidence, the same gate and the same receipt. Use this tool when you have
+    no model credentials or nowhere to run code.
 
     Compositions are registry rows (see `compositions` in platform_capabilities), so
     new ones add no tools. Returns: {status, brief, citations, gaps, grounded,
