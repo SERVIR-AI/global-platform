@@ -340,7 +340,7 @@ def synthesize(question, provider=None, model=None, calendar=None,
         if check["passed"]:
             brief = draft + "\n\n## Sources\n" + _sources_md(citations)
             return {"declined": False, "brief": brief, "citations": citations,
-                    "parsed": parsed, "evidence": stats, "grounded": check,
+                    "parsed": parsed, "evidence": stats, "gaps": gaps, "grounded": check,
                     "provider": provider, "model": model, "trace": trace, "usage": usage}
         messages += [{"role": "assistant", "content": draft},
                      {"role": "user", "content":

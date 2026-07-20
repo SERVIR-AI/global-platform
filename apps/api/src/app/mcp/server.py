@@ -10,7 +10,7 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 
-from . import assemble, context, fetch, record, registry, verify
+from . import assemble, compose, context, fetch, record, registry, resolve, verify
 
 # Orientation shown to a connecting LLM at initialize — so it isn't a headless
 # chicken. DESCRIBE the two consumption patterns; don't enforce (no mode switch).
@@ -29,7 +29,10 @@ assemble_pack(country, crop) -> YOUR LLM drafts a brief from the pack, citing [n
 in the pack's required_sections -> verify_groundedness(draft, pack_id) -> publish \
 ONLY if it passes -> record_receipt(pack_id, report_id) mints a replayable receipt. \
 Use corpus_search/corpus_document for evidence with provenance, context_get for the \
-(adjustable) crop calendar. Start with platform_capabilities."""
+(adjustable) crop calendar. Start with platform_capabilities.
+
+If the user asks how to use this server, read the `grp://how-to-use` resource (a \
+human-readable guide) — or run the `explain_platform` prompt — and answer from it."""
 
 # Host/port for the remote (streamable-http) transport. Remote is the faithful
 # build surface: consumers connect by URL, so no filesystem path leaks into a
@@ -138,6 +141,45 @@ def verify_groundedness(draft: str, pack_id: str) -> dict:
     numbers_unverified_recorded}. status "declined" -> unknown pack_id (`note`).
     """
     return verify.groundedness(draft, pack_id)
+
+
+@mcp.tool()
+def resolve_place_time(country: str, crop: str, region: str | None = None,
+                       when: str | None = None) -> dict:
+    """Turn human place-and-time into machine place-and-time: country/crop + a time
+    expression (`when`: a month name, 1-12, or "this season" — the default) → the
+    season windows and which phase that month falls in.
+
+    Returns: {status, country, crop, region, asked_month, month_name, seasons,
+    active_seasons, region_resolution}. `region` is currently passed through
+    UNRESOLVED — a sub-national gazetteer/admin geometries are a declared Phase-2
+    gap, stated in `region_resolution`. status "empty" -> no calendar for that
+    country/crop; "declined" -> unparseable `when` (`note`).
+    """
+    return resolve.place_time(country, crop, region=region, when=when)
+
+
+@mcp.tool()
+def compose_run(composition: str = "foodsecurity.brief", question: str = "",
+                override: list[dict] | None = None,
+                override_country: str | None = None,
+                override_crop: str | None = None,
+                provider: str | None = None, model: str | None = None) -> dict:
+    """Run a pre-wired COMPOSITION end-to-end — for consumers with NO LLM of their
+    own (dashboards, cron jobs, automated bulletins).
+
+    NOTE this runs the PLATFORM's LLM server-side (metered). If you have your own
+    model, prefer the loop — assemble_pack → you draft → verify_groundedness — which
+    uses YOUR model. Either way you get the same governed output and receipt.
+
+    Compositions are registry rows (see `compositions` in platform_capabilities), so
+    new ones add no tools. Returns: {status, brief, citations, gaps, grounded,
+    pack_id, report_id, receipt_id, draft_sha256, provider, model}. status
+    "declined" -> `note` (unknown composition / no question / ungroundable).
+    """
+    return compose.run(composition=composition, question=question, override=override,
+                       override_country=override_country, override_crop=override_crop,
+                       provider=provider, model=model)
 
 
 @mcp.tool()

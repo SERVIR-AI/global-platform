@@ -40,6 +40,20 @@ _BONE_DEFS = [
 ]
 
 
+# Compositions are REGISTRY ROWS invoked through the one `compose_run` tool — so a
+# new pack/composition adds zero tools (the count discipline, ARCHITECTURE §2).
+COMPOSITIONS = {
+    "foodsecurity.brief": {
+        "description": "Question -> governed 4-section cited brief: evidence assembled, "
+                       "drafted, groundedness-gated, receipt minted.",
+        "params": ["question", "override?", "override_country?", "override_crop?",
+                   "provider?", "model?"],
+        "runs_llm_server_side": True,
+        "for": "consumers with NO LLM of their own (dashboards, cron, REST)",
+    },
+}
+
+
 def _bones(available: set[str]) -> list[dict]:
     """Status derived from which tools are actually registered — never hand-set."""
     out = []
@@ -93,6 +107,8 @@ def capabilities(available_tools=None, available_prompts=None,
                   "modes": ["build-time: build a reusable app on the tools",
                             "run-time: answer one question now"]},
         "tools_available": tools,
+        # registry rows invoked via compose_run — not tools, so the count stays flat
+        "compositions": {k: v for k, v in COMPOSITIONS.items()},
         "bones": _bones(set(tools)),
         # NB two different things are called "pack": a DOMAIN PACK (below) is the
         # versioned bundle of sources/calendars/composition — there is one per
