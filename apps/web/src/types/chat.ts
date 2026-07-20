@@ -98,6 +98,50 @@ export interface HazardLayer {
   [key: string]: unknown;
 }
 
+/** One crop-season window (months 1-12; windows may wrap the year end). */
+export interface SeasonSpec {
+  season: string;
+  planting: number[];
+  harvest: number[];
+}
+
+/** One numbered evidence entry behind a food-security brief. */
+export interface Citation {
+  n: number;
+  kind: 'document' | 'conditions' | 'calendar';
+  /** For calendar entries: true when the requester adjusted the season windows. */
+  adjusted?: boolean;
+  source: string | null;
+  title?: string | null;
+  pub_date?: string | null;
+  validation?: string | null;
+  /** 'forecast' (a projection) or 'retrospective' (a record). */
+  temporal?: string | null;
+  /** The live online source. */
+  url?: string | null;
+  /** Our archived copy of the exact bytes read (relative API path). */
+  archived_copy?: string | null;
+  /** For the conditions feed: the replayable query. */
+  query?: string | null;
+  score?: number;
+  doc_id?: string;
+  /** The exact chunk within the document (doc_id:index). */
+  chunk_id?: string;
+  text?: string;
+}
+
+/** The blocking groundedness report attached to every brief. */
+export interface Grounded {
+  passed: boolean;
+  failures: string[];
+  cited: number[];
+  phantom_citations: number[];
+  missing_sections: string[];
+  uncited_paragraphs: string[];
+  numbers_unverified: string[];
+  attempts?: number;
+}
+
 export interface ChatResponse {
   id: string;
   thread_id: string;
@@ -132,6 +176,24 @@ export interface ChatResponse {
   /** Hazard raster: `{ raster_url, geojson, crs }`. */
   hazard_layer?: HazardLayer | null;
   created_at?: string;
+
+  // --- Food-security brief fields (present only on /api/food-security/chat turns) ---
+  /** The full brief markdown (including its Sources block, for faithful copies). */
+  brief?: string | null;
+  citations?: Citation[];
+  grounded?: Grounded | null;
+  declined?: boolean;
+  decline_reason?: string | null;
+  /** The model's parse of the question — the first pipeline step, exposed. */
+  parsed?: { crop?: string; country?: string; focus?: string } | null;
+  evidence?: {
+    forecast_hits?: number;
+    retrospective_hits?: number;
+    conditions?: boolean;
+    calendar?: string | false;
+    /** The literal retrieval queries — provenance for the retrieval step itself. */
+    queries?: { forecast?: string; retrospective?: string };
+  };
 }
 
 /**

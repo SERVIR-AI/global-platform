@@ -69,9 +69,8 @@ class StubClient:
                 tc = SimpleNamespace(id="c1", type="function",
                                      function=SimpleNamespace(name=name, arguments=json.dumps(args)))
                 msg = SimpleNamespace(content=None, tool_calls=[tc])
-        else:  # the finalize call
-            tool = next((m["content"] for m in messages if m.get("role") == "tool"), "")
-            msg = SimpleNamespace(content=f"Result: {tool}", tool_calls=None)
+        else:  # the finalize call — echo the handed-over result (now plain content, no tool role)
+            msg = SimpleNamespace(content=f"Result: {messages[-1]['content']}", tool_calls=None)
         return SimpleNamespace(choices=[SimpleNamespace(message=msg)], usage=usage)
 
 
