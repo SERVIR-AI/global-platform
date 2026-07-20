@@ -4,8 +4,8 @@ _The single build plan for `ARCHITECTURE.md` (v0.2). Working doc, roles-only (co
 _Companion: `BUILD-LOG.md` (what each landed step actually built + test commands)._
 _Updated as we build — check boxes, add discoveries, never let it drift from code._
 
-> **▶ Current step:** Phase 1 · **Step 2 — `assemble_pack`** (the `assemble` bone).
-> **Last landed:** Step 1 — server skeleton + `platform_capabilities` (2026-07-20), suite 138/18.
+> **▶ Current step:** Phase 1 · **`context_get`** (the `context` bone — calendar), then `assemble_pack`.
+> **Last landed:** fetch contract hardening (status/note, self-describing declines), 2026-07-20, 138/18.
 > **Providers (local `.env`):** embeddings `openai:text-embedding-3-small`; chat `claude:claude-opus-4-8`.
 > **Run server:** `cd apps/api && uv run python -m app.mcp.server` · **Test client:** `scripts/mcp_call.py`
 
@@ -18,6 +18,8 @@ _Updated as we build — check boxes, add discoveries, never let it drift from c
 - Every tool obeys the contract rules **available at its phase** (§1 target-state table below).
 - New datasets/analytics/widgets/compositions are **registry rows**, never new tools (§2 count discipline).
 - Manual testing only: every step ships a `scripts/mcp_call.py` command in BUILD-LOG.
+- Every milestone ships **two Claude queries: a build-time one** ("build me a tool that…", Claude
+  calls the tools to scaffold — the priority) **and a run-time one** (use the tool to answer now).
 
 ---
 
@@ -27,8 +29,8 @@ _Updated as we build — check boxes, add discoveries, never let it drift from c
 |---|------|------|-------|--------|--------------|
 | 1 | `platform_capabilities` | discover | 1 | [x] ✅ | `mcp/registry.py` |
 | 2 | `resolve_place_time` | resolve | 1(min)/2 | [ ] | risk-graph admin + `calendar._phase` |
-| 3 | `corpus_search` | fetch | 1 | [ ] | `rag/store.Corpus.search` |
-| 4 | `corpus_document` | fetch | 1 | [ ] | `Corpus.documents` + `raw_path` |
+| 3 | `corpus_search` | fetch | 1 | [x] ✅ | `mcp/fetch.py` (status/note contract) |
+| 4 | `corpus_document` | fetch | 1 | [x] ✅ | `Corpus.documents` + `raw_path` |
 | 5 | `feeds_query` | fetch | 2 | [ ] | `food_security/cropmonitor.py` |
 | 6 | `compute_run` | compute | 2 | [ ] | new registry; risk weights pattern |
 | 7 | `context_get` | context | 1 | [ ] | `food_security/calendar.citation` |
@@ -58,9 +60,8 @@ against real tools, no LLM of ours in the path. Deliver Food-Security **Pack v0*
       correction mode deferred to Phase 2. Wrap `check_grounded`; resolve pack from `pack_id`.
 - [ ] **Step 4 — `record_receipt`** — mint (side-effect of assemble/verify) + resolve by id.
       **record-minimal = persisted receipts with durable resolvable links** (contract floor, §1).
-- [ ] **Step 5 — `corpus_search`** — query + filters → passages w/ scores + passports; declines
-      below floor with named cause. Wrap `Corpus.search`.
-- [ ] **Step 6 — `corpus_document`** — list inventory + fetch archived original (trace terminus).
+- [x] ✅ **`corpus_search`** — passages w/ passports; below-floor = named decline. `mcp/fetch.py`.
+- [x] ✅ **`corpus_document`** — inventory + single-doc passport/trace terminus. `mcp/fetch.py`.
 - [ ] **Step 7 — `context_get`** — country/crop (+ override) → calendar phases; override cited
       ADJUSTED + target-pinned; mismatch dropped + declared. Wrap `calendar.citation`.
 - [ ] **Step 8 — `resolve_place_time` (minimal)** — country/region + "this season" → date window
@@ -78,7 +79,7 @@ against real tools, no LLM of ours in the path. Deliver Food-Security **Pack v0*
 
 ### Contract enforcement (Phase 1 floor: rules 1–5 + record-minimal)
 - [ ] Rule 1 evidence-attached — every pack/search payload carries passports. (assemble/search)
-- [ ] Rule 2 declines-say-why — structured declines from search/assemble/compose.
+- [~] Rule 2 declines-say-why — fetch tools ✅ (status/note, advertised in descriptions); assemble/compose pending.
 - [ ] Rule 3 replayable — receipts persist what was asked/fetched/verified (record-minimal).
 - [ ] Rule 4 human-input-declared — calendar override ADJUSTED + target-pinned (context_get).
 - [ ] Rule 5 verdicts server-bound — verify returns server verdict; no client verdict input.
@@ -149,4 +150,4 @@ verdict-as-prop UI · logo packs · suppressible declines/gaps/ADJUSTED.
 - 2nd recent transcript (platform-overview call) — awaited from user.
 
 ## Change log
-- **2026-07-20** — tracker created; Step 1 (`platform_capabilities`) landed ✅ (suite 138/18).
+- **2026-07-20** — `platform_capabilities` ✅; `corpus_search`+`corpus_document` ✅; fetch contract hardened (status/note) ✅ (138/18).
