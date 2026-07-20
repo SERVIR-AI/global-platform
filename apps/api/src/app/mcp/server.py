@@ -10,7 +10,7 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 
-from . import context, fetch, registry
+from . import assemble, context, fetch, registry
 
 # Host/port for the remote (streamable-http) transport. Remote is the faithful
 # build surface: consumers connect by URL, so no filesystem path leaks into a
@@ -68,6 +68,29 @@ def context_get(country: str, crop: str, asked_month: int | None = None,
     """
     return context.get(country, crop, asked_month=asked_month, override=override,
                        override_country=override_country, override_crop=override_crop)
+
+
+@mcp.tool()
+def assemble_pack(country: str, crop: str, focus: str | None = None,
+                  override: list[dict] | None = None,
+                  override_country: str | None = None,
+                  override_crop: str | None = None) -> dict:
+    """Assemble a deterministic, citable EVIDENCE PACK for a country/crop and mint
+    a `pack_id`. This is the hand-off seam of the platform: YOUR LLM writes the
+    brief from this pack (cite the numbered items as [n]), then calls
+    verify_groundedness(draft, pack_id) to gate it. No LLM runs inside this tool.
+
+    The pack gathers: corpus evidence (a forecast slice + a retrospective slice,
+    each item with source/date/validation/archived-copy), the live GEOGLAM
+    conditions feed, and the crop calendar. A calendar `override` is target-pinned
+    (mismatch dropped + declared). DECLARED GAPS are returned as content — surface
+    them; they are what's missing, said honestly.
+
+    Returns: {status, pack_id, country, crop, citations:[{n,...}], gaps, queries,
+    stats}. status "declined" -> `note` (missing key / torn corpus / bad override).
+    """
+    return assemble.assemble(country, crop, focus=focus, override=override,
+                             override_country=override_country, override_crop=override_crop)
 
 
 @mcp.tool()
