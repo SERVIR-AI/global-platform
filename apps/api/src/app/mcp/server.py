@@ -12,10 +12,29 @@ from mcp.server.fastmcp import FastMCP
 
 from . import assemble, context, fetch, registry, verify
 
+# Orientation shown to a connecting LLM at initialize — so it isn't a headless
+# chicken. DESCRIBE the two consumption patterns; don't enforce (no mode switch).
+# Kept terse: every connection pays its token cost.
+INSTRUCTIONS = """The Global Risk Platform — a GOVERNED TOOLKIT for food-security \
+decision support, not a chatbot. Every insight carries its evidence; declines say \
+why; answers are replayable; a groundedness gate blocks ungrounded briefs.
+
+Two ways to use it:
+- BUILD-TIME: the user asks you to BUILD a tool/app. Produce a REUSABLE artifact \
+(a script/app) that calls these tools — do NOT just run the pipeline once.
+- RUN-TIME: the user asks a question. Answer it now via the canonical loop.
+
+Canonical loop: platform_capabilities (scope honestly; surface declared gaps) -> \
+assemble_pack(country, crop) -> YOUR LLM drafts a brief from the pack, citing [n] \
+in the pack's required_sections -> verify_groundedness(draft, pack_id) -> publish \
+ONLY if it passes. Use corpus_search/corpus_document for evidence with provenance, \
+context_get for the (adjustable) crop calendar. Start with platform_capabilities."""
+
 # Host/port for the remote (streamable-http) transport. Remote is the faithful
 # build surface: consumers connect by URL, so no filesystem path leaks into a
 # client config for a coding agent to follow into our source (ARCHITECTURE §6).
 mcp = FastMCP("global-risk-platform",
+              instructions=INSTRUCTIONS,
               host=os.environ.get("GRP_MCP_HOST", "127.0.0.1"),
               port=int(os.environ.get("GRP_MCP_PORT", "8000")),
               stateless_http=True)  # each tool call is self-contained; no session to terminate
@@ -126,6 +145,37 @@ def corpus_document(doc_id: str | None = None) -> dict:
     Whenever status != "ok", render `note`.
     """
     return fetch.document(doc_id)
+
+
+@mcp.prompt()
+def build_a_tool(goal: str = "a food-security bulletin generator") -> str:
+    """BUILD-TIME: scaffold a reusable app/tool on the grp platform (not a one-off run)."""
+    return (f"Build a REUSABLE tool that: {goal}.\n\n"
+            "Use the grp MCP server. Produce a standalone artifact (a script/app) that "
+            "a user can re-run — do NOT just run the pipeline once in chat. Follow the "
+            "canonical loop: call platform_capabilities first (scope honestly, surface "
+            "declared gaps), assemble_pack(country, crop), have the tool's own LLM draft "
+            "a brief from the pack citing [n] in the pack's required_sections, then "
+            "verify_groundedness(draft, pack_id) and publish ONLY if it passes. Show me "
+            "the finished artifact and prove it runs.")
+
+
+@mcp.prompt()
+def run_analysis(country: str = "Kenya", crop: str = "maize") -> str:
+    """RUN-TIME: answer one food-security question now via the canonical loop."""
+    return (f"Using the grp MCP server, produce a grounded brief for {crop} in {country} "
+            "now: assemble_pack, draft from the pack citing [n] in the required_sections, "
+            "verify_groundedness, and give me the brief plus the report_id — or the "
+            "decline reason if it can't be grounded. Do not fabricate beyond the pack.")
+
+
+@mcp.prompt()
+def explain_platform() -> str:
+    """What the grp platform is and how to use it (build-time vs run-time)."""
+    return ("Call platform_capabilities, then explain in plain terms what the grp "
+            "platform is, what it can and can't do right now (its declared gaps), and "
+            "the two ways to use it: BUILD-TIME (build a reusable tool on its bones) vs "
+            "RUN-TIME (answer one question now).")
 
 
 def main() -> None:
