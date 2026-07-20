@@ -142,11 +142,19 @@ def _conditions_citation(crop, country, trace):
             f"drivers: {', '.join(drivers) if drivers else 'none stated'}.")
     trace.append(f"conditions -> {res['count']} rows as of {res['as_of']} "
                  f"(receipt: {res['query']['where']})")
+    # Staleness must travel with the evidence: served-from-cache data presented as
+    # live is exactly the dishonesty the wrapper exists to prevent (rule 1).
+    stale = res.get("stale_data")
+    if stale:
+        text += (f" NOTE: this feed was UNAVAILABLE and these values are served from "
+                 f"the last-good cache (last successful fetch {stale.get('last_good_fetch')}) "
+                 f"— treat as possibly out of date.")
+        trace.append(f"conditions -> STALE (last good {stale.get('last_good_fetch')})")
     return {"kind": "conditions", "source": "GEOGLAM Crop Monitor (CMET)",
             "title": f"{country or 'Global'} {crop or 'crop'} conditions".strip(),
             "pub_date": res["as_of"], "validation": "multi-agency-consensus",
             "url": res["query"]["url"], "query": res["query"]["where"],
-            "text": text}, None
+            "stale_data": stale, "text": text}, None
 
 
 def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None, None)):

@@ -79,13 +79,16 @@ def run(composition: str = "foodsecurity.brief", question: str = "",
     report_id = store.save_report({
         "pack_id": pack_id, "passed": grounded.get("passed"),
         "evidence_tier": "platform-registered", "checks": grounded,
-        "draft": brief, "draft_sha256": digest, "draft_excerpt": brief[:280]})
+        "draft": brief, "draft_sha256": digest, "draft_excerpt": brief[:280],
+        "usage": out.get("usage")})
     rec = record.record(pack_id=pack_id, report_id=report_id, question=question)
 
     return {"status": "ok", "composition": composition, "brief": brief,
             "citations": citations, "gaps": out.get("gaps") or [],
             "grounded": grounded, "pack_id": pack_id, "report_id": report_id,
             "receipt_id": rec.get("receipt_id"), "draft_sha256": digest,
+            # parity with /chat: the step trace and token usage must not be lost
+            "trace": out.get("trace"), "usage": out.get("usage"),
             "provider": out.get("provider"), "model": out.get("model"),
             "note": "this composition ran the PLATFORM's LLM server-side (metered); "
                     "the assemble -> your-LLM -> verify loop uses YOUR model instead"}

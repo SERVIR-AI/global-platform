@@ -39,6 +39,7 @@ def search(query: str, k: int = 5, country: str | None = None, crop: str | None 
     the three causes applies (empty library / filters exclude / below the floor);
     status='declined' with a `note` for a hard failure (missing key / torn corpus)."""
     floor = get_settings().rag_min_relevance
+    k = max(1, min(int(k), 50))          # bounded like the REST route (1..50)
     base = {"query": query, "corpus": _CORPUS, "min_relevance": floor, "hits": []}
     try:
         corpus = Corpus(_CORPUS)
@@ -84,6 +85,13 @@ def document(doc_id: str | None = None) -> dict:
     match = next((d for d in docs if d["doc_id"] == doc_id), None)
     if match is None:
         return {"status": "declined", "note": f"unknown doc_id {doc_id!r}"}
+    # The trace-back terminus over MCP: the EXTRACTED TEXT we actually chunked and
+    # cited. The archived original bytes need the REST mount (declared below).
+    text = "\n\n".join(c["text"] for c in corpus._chunks if c["doc_id"] == doc_id)
     return {"status": "ok", "doc_id": doc_id, "chunks": match["chunks"],
             "passport": _passport(match["metadata"], doc_id,
-                                  corpus.raw_path(doc_id) is not None)}
+                                  corpus.raw_path(doc_id) is not None),
+            "extracted_text": text,
+            "archived_original": ("the raw original bytes are served by the REST mount at "
+                                  "`archived_copy`; over MCP you get the extracted text "
+                                  "above (the exact text that was chunked and cited)")}
