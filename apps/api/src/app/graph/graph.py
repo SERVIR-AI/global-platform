@@ -32,6 +32,25 @@ def _add(left: list | None, right: list | None) -> list:
     return (left or []) + (right or [])
 
 
+# events must reset each turn instead of growing forever across a checkpointed thread.
+# A node can't reach into State and clear it directly - it can only return a delta for
+# the reducer to merge. A placeholder sentinel value like the below allows the custom
+# reducer to only return the events from this turn.
+_RESET = "__events_reset__"
+
+
+def _add_reset(left: list | None, right: list | None) -> list:
+    """
+    Return only the trace events from the current turn instead of the whole list so far.
+    left contains trace events so far, right contains things from the current turn.
+    This is only passed by the route() node, as it is always the first node.
+    """
+    left, right = left or [], right or []
+    if right and right[0] == _RESET:
+        return right[1:]            # discard everything accumulated so far, strip the marker
+    return left + right
+
+
 class InputState(TypedDict):
     """The only keys a caller must supply to graph.invoke() — everything else is internal."""
     messages: list[dict]
@@ -62,8 +81,10 @@ class State(TypedDict):  # total=True by default: keys are required unless NotRe
     req_geometry: NotRequired[dict | list | None]   # Mode 2: a drawn AOI from the request
     req_hazard: NotRequired[str | None]             # explicit hazard from the request (e.g. a UI button)
     trace: Annotated[list[str], _add]      # plain-text step narration (returned when verbose)
-    events: Annotated[list[dict], _add]    # structured per-step trace events (Commit 2 will add
-                                            # a per-turn reset; for now this grows across turns)
+    events: Annotated[list[dict], _add_reset]  # structured per-step trace events, reset each turn
+                                                # by route() via _RESET — only the turn's FIRST node
+                                                # may emit it; every later node uses plain _add-style
+                                                # appends (return [event], never [_RESET, event])
     awaiting_choice: dict | None           # set when the agent asked L1-vs-L2; resumes on the reply
     _resume: bool                          # transient: this turn applied a pending L1/L2 choice
 
@@ -144,7 +165,7 @@ def route(state: State, config) -> dict:
             resumed_delta=out,
             awaiting_choice=awaiting_choice,
         )
-        out["events"] = [trace_event]
+        out["events"] = [_RESET, trace_event]
         return out
 
     client = config["configurable"]["client"]
@@ -186,7 +207,7 @@ def route(state: State, config) -> dict:
             available_layers=layers,
             error=out["error"],
         )
-        out["events"] = [trace_event]
+        out["events"] = [_RESET, trace_event]
         return out
 
     call = msg.tool_calls[0]
@@ -214,7 +235,7 @@ def route(state: State, config) -> dict:
             available_layers=layers,
             error=out["error"],
         )
-        out["events"] = [trace_event]
+        out["events"] = [_RESET, trace_event]
         return out
 
     out.update(operation=call.function.name, place=place or "drawn area", op_args=args,
@@ -236,7 +257,7 @@ def route(state: State, config) -> dict:
         available_layers=layers,
         error=out["error"],
     )
-    out["events"] = [trace_event]
+    out["events"] = [_RESET, trace_event]
     return out
 
 
