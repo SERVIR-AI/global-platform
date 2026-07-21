@@ -1,0 +1,13 @@
+<!-- validation_badge — maps a source's validation level to its semantic role.
+     data: { validation: "multi-agency-consensus"|"peer-reviewed"|"single-agency"|"model-output" } -->
+<style>
+  .grp-vbadge{display:inline-flex;align-items:center;gap:.35em;font:500 11px/1.4 var(--grp-font-sans);
+    padding:.15em .55em;border-radius:999px;border:1px solid transparent;white-space:nowrap}
+  .grp-vbadge[data-role="verified"]{background:color-mix(in oklab,var(--grp-success) 12%,transparent);
+    color:var(--grp-success);border-color:color-mix(in oklab,var(--grp-success) 35%,transparent)}
+  .grp-vbadge[data-role="caution"]{background:color-mix(in oklab,var(--grp-warning) 14%,transparent);
+    color:var(--grp-warning);border-color:color-mix(in oklab,var(--grp-warning) 38%,transparent)}
+  .grp-vbadge[data-role="neutral"]{background:var(--grp-base-200);color:var(--grp-base-content);
+    border-color:var(--grp-base-300)}
+</style>
+<span class="grp-vbadge" data-role="{{role}}">{{validation}}</span>

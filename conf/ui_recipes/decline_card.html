@@ -1,0 +1,15 @@
+<!-- decline_card — a refusal, shown as content not an error.
+     data: { note }  — the platform's stated cause; render it VERBATIM, never a generic message. -->
+<style>
+  .grp-decline{border:1px solid color-mix(in oklab,var(--grp-warning) 40%,transparent);
+    background:color-mix(in oklab,var(--grp-warning) 10%,transparent);
+    border-radius:var(--grp-radius-box,.5rem);padding:.85rem 1rem;font:14px/1.55 var(--grp-font-sans);
+    color:var(--grp-base-content)}
+  .grp-decline__h{font-weight:600;color:var(--grp-warning);margin-bottom:.25rem}
+  .grp-decline__why{margin-top:.4rem;font-size:13px}
+</style>
+<div class="grp-decline" role="status">
+  <div class="grp-decline__h">The system declined to answer</div>
+  <div>Declining beats guessing.</div>
+  <div class="grp-decline__why">{{note}}</div>
+</div>

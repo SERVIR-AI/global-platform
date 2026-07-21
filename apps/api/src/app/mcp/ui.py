@@ -71,6 +71,129 @@ def app_ts(t: dict | None = None) -> str:
             "export const theme = " + json.dumps(body, indent=2) + " as const;\n")
 
 
+def design(fmt: str = "all") -> dict:
+    """The design language for a consumer: tokens to reason over, CSS custom
+    properties that work in any stack, a daisyUI theme for the common one — and the
+    honesty conventions (trust_rules + voice) that ride WITH the paint."""
+    t = tokens()
+    want = (fmt or "all").lower()
+    if want not in ("all", "tokens", "json", "css", "daisyui", "tailwind"):
+        return {"status": "declined",
+                "note": f"unknown format {fmt!r}",
+                "available": ["all", "tokens", "css", "daisyui"]}
+    out = {"status": "ok", "theme": {"id": t["id"], "version": t["version"]},
+           "brand": t.get("brand"),
+           # the conventions are NOT optional decoration — a UI built on these
+           # tokens inherits unverified-by-default even on screens we never shipped
+           "trust_rules": t["trust_rules"], "voice": t["voice"],
+           "semantic": t["semantic"], "validation_levels": t["validation_levels"]}
+    if want in ("all", "tokens", "json"):
+        out["tokens"] = {k: t[k] for k in
+                         ("palette", "typography", "radii", "provenance")}
+    if want in ("all", "css"):
+        out["css"] = css_vars(t)
+    if want in ("all", "daisyui", "tailwind"):
+        out["daisyui_theme"] = daisy_theme(t)
+    if want == "all":
+        out["how_to_use"] = [
+            "paste `css` once at the top of your stylesheet; every value is a --grp-* var",
+            "on Tailwind/daisyUI, paste `daisyui_theme` and set data-theme on <html>",
+            "map a source's validation level through `validation_levels` -> `semantic`",
+            "use `voice` verbatim for declines, ADJUSTED labels and claim scope",
+            "success/verified styling is RESERVED for server-verified state (trust_rules)",
+        ]
+    return out
+
+
+def catalog() -> dict:
+    """The component inventory — what exists, its trust class, and how it is
+    delivered. Derived from the theme config, so it cannot drift."""
+    t = tokens()
+    comps = dict(t.get("components") or {})
+    note = comps.pop("note", None)
+    return {"status": "ok", "note": note,
+            "components": [{"name": k, **v} for k, v in sorted(comps.items())],
+            "delivery_modes": {
+                "embed": "runs as OUR component bound to a server id — trust state "
+                         "resolves from the platform, not from a prop",
+                "recipe": "self-contained markup you copy into your app and own "
+                          "(versioned; no updates after copying)"}}
+
+
+def component(name: str) -> dict:
+    """A ready-built component: real markup you drop in, not a description to
+    reimplement. Recipes live in conf/ui_recipes/<name>.html — adding one is a file
+    plus a catalog entry, never a code change."""
+    t = tokens()
+    comps = {k: v for k, v in (t.get("components") or {}).items() if k != "note"}
+    spec = comps.get(name)
+    if spec is None:
+        return {"status": "declined", "note": f"unknown component {name!r}",
+                "available": sorted(comps)}
+    path = theme_path().parent / "ui_recipes" / f"{name}.html"
+    if not path.exists():
+        return {"status": "declined", "name": name,
+                "note": (f"`{name}` is catalogued (trust_class {spec.get('trust_class')}, "
+                         f"delivery {spec.get('delivery')}) but no recipe has been "
+                         "authored yet — not implemented"),
+                "available": sorted(p.stem for p in path.parent.glob("*.html"))}
+    out = {"status": "ok", "name": name, "version": f"{t['id']}-{t['version']}",
+           "trust_class": spec.get("trust_class"), "markup": path.read_text(),
+           "styling": ("uses --grp-* custom properties — paste ui_design's `css` once "
+                       "and this renders in your palette, in any framework"),
+           "notes": spec}
+    if spec.get("trust_class") == "receipt_bound":
+        out["guardrail"] = (
+            "RECEIPT-BOUND: render the unverified state unless you have a payload "
+            "resolved FROM the platform (verify_groundedness / record_receipt). Never "
+            "hardcode a passed verdict, and never suppress a decline or declared gap. "
+            "A verdict with no resolvable receipt id is not ours. NOTE (honest limit): "
+            "a copied component cannot cryptographically prove this — the authoritative "
+            "check is resolving the receipt against the server; signed receipts are a "
+            "later step.")
+    return out
+
+
+def describe_component() -> str:
+    t = tokens()
+    have = sorted(p.stem for p in (theme_path().parent / "ui_recipes").glob("*.html"))
+    return ("Get the READY-BUILT markup for a component instead of writing UI from "
+            "scratch. Returns self-contained HTML+CSS styled with the platform's "
+            "--grp-* custom properties, plus its data contract and guardrail.\n\n"
+            "Authored now: " + (", ".join(f"`{h}`" for h in have) or "(none)") +
+            ".\nSee ui_catalog for every catalogued component and its trust class; one "
+            "not yet authored declines as not-implemented rather than pretending.\n\n"
+            "receipt_bound components must render UNVERIFIED unless fed a payload "
+            "resolved from the platform — there is no 'passed' input.")
+
+
+def describe_design() -> str:
+    t = tokens()
+    return (f"Get the platform design language (theme `{t['id']}` {t['version']}, built on "
+            f"the {t['brand']['name']} identity) so you do NOT invent a colour scheme.\n\n"
+            "Returns tokens (palette/typography/radii/provenance colours), `css` "
+            "(--grp-* custom properties for any stack), `daisyui_theme` (Tailwind/daisyUI), "
+            "plus `trust_rules`, `semantic`, `validation_levels` and `voice` — the honesty "
+            "conventions that must travel with the styling.\n\n"
+            "`format`: all (default) | tokens | css | daisyui.\n"
+            f"RULE: {t['trust_rules']['success_reserved_for']} — success/verified styling is "
+            "reserved for server-verified state; default is "
+            f"'{t['trust_rules']['default_state']}'.")
+
+
+def describe_catalog() -> str:
+    t = tokens()
+    comps = {k: v for k, v in (t.get("components") or {}).items() if k != "note"}
+    lines = [f"  - `{k}` ({v.get('trust_class')}, delivery: {v.get('delivery')})"
+             for k, v in sorted(comps.items())]
+    return ("List the ready-built UI components you can use instead of writing them "
+            "from scratch. Each entry states its TRUST CLASS and how it is delivered.\n\n"
+            + "\n".join(lines) +
+            "\n\nreceipt_bound = the component shows a verdict, so it binds to a server "
+            "id and cannot be handed a 'passed' flag. input = it emits a human judgement "
+            "but never renders its own verdict. presentational = style freely.")
+
+
 def write_app_artifacts() -> list[str]:
     t = tokens()
     written = []

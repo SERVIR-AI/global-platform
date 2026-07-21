@@ -10,7 +10,7 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 
-from . import assemble, compose, context, feeds, fetch, record, registry, resolve, verify
+from . import assemble, compose, context, feeds, fetch, record, registry, resolve, ui, verify
 
 # Orientation shown to a connecting LLM at initialize — so it isn't a headless
 # chicken. DESCRIBE the two consumption patterns; don't enforce (no mode switch).
@@ -207,6 +207,21 @@ def record_receipt(pack_id: str | None = None, report_id: str | None = None,
 @mcp.tool(description=feeds.describe())
 def feeds_query(dataset: str, params: dict | None = None) -> dict:
     return feeds.query(dataset=dataset, params=params)
+
+
+@mcp.tool(description=ui.describe_design())
+def ui_design(format: str = "all") -> dict:
+    return ui.design(fmt=format)
+
+
+@mcp.tool(description=ui.describe_catalog())
+def ui_catalog() -> dict:
+    return ui.catalog()
+
+
+@mcp.tool(description=ui.describe_component())
+def ui_component(name: str) -> dict:
+    return ui.component(name)
 
 
 @mcp.tool()

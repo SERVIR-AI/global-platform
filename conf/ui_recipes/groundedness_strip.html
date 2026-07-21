@@ -1,0 +1,21 @@
+<!-- groundedness_strip — RECEIPT-BOUND. Feed it a report/receipt payload resolved
+     from the platform (verify_groundedness / record_receipt). There is NO "passed"
+     input: with no resolved payload it MUST render the unverified state below.
+     data: { passed, cited_count, source_count, report_id, receipt_id, evidence_tier } -->
+<style>
+  .grp-gate{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .9rem;padding:.5rem .8rem;
+    border:1px solid var(--grp-base-300);border-radius:var(--grp-radius-box,.5rem);
+    background:var(--grp-base-200);font:12px/1.5 var(--grp-font-sans);color:var(--grp-base-content)}
+  .grp-gate__chip{display:inline-flex;align-items:center;gap:.3em}
+  .grp-gate[data-state="pass"] .grp-gate__verdict{color:var(--grp-success);font-weight:600}
+  .grp-gate[data-state="fail"] .grp-gate__verdict{color:var(--grp-error);font-weight:600}
+  .grp-gate[data-state="unverified"] .grp-gate__verdict{color:color-mix(in oklab,var(--grp-base-content) 60%,transparent)}
+  .grp-gate__link{color:var(--grp-primary);text-decoration:none}
+</style>
+<!-- data-state MUST be "unverified" unless a server-resolved payload says otherwise -->
+<div class="grp-gate" data-state="{{state}}">
+  <span class="grp-gate__chip grp-gate__verdict">{{verdict_text}}</span>
+  <span class="grp-gate__chip">cites {{cited_count}} of {{source_count}} sources</span>
+  <span class="grp-gate__chip">evidence: {{evidence_tier}}</span>
+  <a class="grp-gate__link" href="#" data-receipt="{{receipt_id}}">receipt {{receipt_id}}</a>
+</div>
