@@ -326,3 +326,68 @@ def make_trace_event_finalize(
         "grounded": grounded,
     }
     return trace_event
+
+def make_trace_event_resolve(
+        start_time: float,
+        end_time: float,
+        started_at: str,
+        ended_at: str,
+        state: dict,
+        hazard: str | None,
+        options: list[dict] | None,
+        byod_passthrough: bool | None,
+        awaiting_choice_set: bool,
+        question_asked: str | None,
+        error: str | None,
+) -> dict:
+    """Build one resolveStep event.
+
+    hazard: logical hazard name, None only on passthrough (no hazard layer, or a BYOD one).
+    options: the [{key, layer, label}] choices offered; None on passthrough.
+    byod_passthrough: True/False on passthrough (was it a BYOD layer, or just no hazard at
+    all); None on every other branch, where it doesn't apply.
+    awaiting_choice_set: True only when the graph paused here for the user's reply.
+
+    decision is derived, not passed in:
+      hazard is None       -> "passthrough_no_hazard"
+      error is set         -> "no_data"
+      awaiting_choice_set  -> "asked"
+      else                 -> "auto_single"
+    """
+    state = state or {}
+
+    if hazard is None:
+        decision = "passthrough_no_hazard"
+        summary = "Using your uploaded layer directly" if byod_passthrough else "No hazard choice needed"
+        why = ("A user-uploaded layer has one meaning, so there's nothing to ask." if byod_passthrough
+               else "This question reads no hazard raster, so there's nothing to choose.")
+    elif error is not None:
+        decision = "no_data"
+        summary = f"No data to assess {hazard} — refusing"
+        why = "Neither an exposure nor a risk layer is available for this hazard."
+    elif awaiting_choice_set:
+        decision = "asked"
+        summary = f"Asked how to answer {hazard}"
+        why = "Exposure vs risk is never guessed — the agent pauses and asks."
+    else:
+        decision = "auto_single"
+        summary = f"Only one way to answer {hazard} — used it without asking"
+        why = "Just one data path exists, so there's nothing to choose."
+
+    trace_event = {
+        "node": "resolve",
+        "step": len(state.get("events", [])),
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "duration": (end_time - start_time)*1000,
+        "summary": summary,
+        "why": why,
+        "decision": decision,
+        "hazard": hazard,
+        "options": options,
+        "byod_passthrough": byod_passthrough,
+        "awaiting_choice_set": awaiting_choice_set,
+        "question_asked": question_asked,
+        "error": error,
+    }
+    return trace_event

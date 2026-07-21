@@ -265,11 +265,29 @@ def resolve(state: State) -> dict:
     """For any hazard question, ASK the user how to answer it — exposure vs precomputed risk
     (L1) vs recomputed risk (L2) — and pause (human-in-the-loop). With one path, use it; with
     none, refuse cleanly. The LLM only picks the hazard; the agent never guesses exposure vs risk."""
-    layer = next((l for l in (state.get("tiffs") or []) if l.startswith(("hazard_", "risk_"))), None)
-    if not layer:
-        return {}                                  # e.g. count_features (no hazard) -> fetch
+    t_start = time.perf_counter()
+    started_at = datetime.now(timezone.utc).isoformat()
+    tiff_layers = state.get("tiffs") or []
+    layer = next((l for l in tiff_layers if l.startswith(("hazard_", "risk_"))), None)
+
+    def _emit(**fields) -> dict:
+        "Build this step's trace event."
+        t_end = time.perf_counter()
+        ended_at = datetime.now(timezone.utc).isoformat()
+        return tracing.make_trace_event_resolve(
+            start_time=t_start, end_time=t_end, started_at=started_at, ended_at=ended_at,
+            state=state, **fields)
+
+    if not layer:                                  # e.g. count_features (no hazard) -> fetch
+        byod_passthrough = any(l.startswith("byod_") for l in tiff_layers)
+        trace_event = _emit(hazard=None, options=None, byod_passthrough=byod_passthrough,
+                            awaiting_choice_set=False, question_asked=None, error=None)
+        return {"events": [trace_event]}
+
     hz = resolver._logical(layer)
     options = resolver.options_for(layer)
+    options_view = [{"key": o[0], "layer": o[1], "label": o[2]} for o in options]
+
     if len(options) >= 2:                          # a real choice -> ask
         # Blank line between options so each renders on its own line (markdown collapses
         # single newlines into one paragraph); the UI also shows these as buttons.
@@ -280,13 +298,24 @@ def resolve(state: State) -> dict:
         awaiting = {"operation": state.get("operation"), "place": state.get("place"),
                     "op_args": state.get("op_args") or {}, "tool_call_id": state.get("tool_call_id"),
                     "req_geometry": state.get("req_geometry"), "options": options}
-        return {"messages": [{"role": "assistant", "content": q}], "awaiting_choice": awaiting,
-                "trace": [f"resolve → asking {hz}: {', '.join(o[0] for o in options)}; paused for the user"]}
+        delta = {"messages": [{"role": "assistant", "content": q}], "awaiting_choice": awaiting,
+                 "trace": [f"resolve → asking {hz}: {', '.join(o[0] for o in options)}; paused for the user"]}
+        trace_event = _emit(hazard=hz, options=options_view, byod_passthrough=None,
+                            awaiting_choice_set=True, question_asked=q, error=None)
+        return {**delta, "events": [trace_event]}
+
     if options:                                    # exactly one path -> use it, no question
-        return {"tiffs": [options[0][1]],
-                "trace": [f"resolve → only {options[0][0]} available for {hz}"]}
-    return {"error": f"I don't have the data to assess {hz} in {state.get('place') or 'that area'}.",
-            "trace": [f"resolve → no data for {hz}"]}
+        delta = {"tiffs": [options[0][1]],
+                 "trace": [f"resolve → only {options[0][0]} available for {hz}"]}
+        trace_event = _emit(hazard=hz, options=options_view, byod_passthrough=None,
+                            awaiting_choice_set=False, question_asked=None, error=None)
+        return {**delta, "events": [trace_event]}
+
+    error = f"I don't have the data to assess {hz} in {state.get('place') or 'that area'}."
+    delta = {"error": error, "trace": [f"resolve → no data for {hz}"]}
+    trace_event = _emit(hazard=hz, options=options_view, byod_passthrough=None,
+                        awaiting_choice_set=False, question_asked=None, error=error)
+    return {**delta, "events": [trace_event]}
 
 
 def _needed_layers(state: State):
