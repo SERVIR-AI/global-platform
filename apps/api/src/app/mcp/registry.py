@@ -152,7 +152,8 @@ def pack_manifest() -> dict:
         gaps.append(f"corpus unavailable: {corpus.get('reason')}")
     demo = store_latest_receipt()
     return {
-        "id": "food-security", "version": "v0",
+        "id": "food-security", "display_name": "Food Security Platform",
+        "version": "v0",
         "profile": "Phase-1 profile — what ships today, gaps declared",
         "built_for": ("early signs of maize failure in the current season "
                       "(Kenya Trans-Nzoia vs Zambia — the hub-locked PoC question)"),

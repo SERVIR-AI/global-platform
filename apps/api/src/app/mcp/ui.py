@@ -82,7 +82,7 @@ def design(fmt: str = "all") -> dict:
                 "note": f"unknown format {fmt!r}",
                 "available": ["all", "tokens", "css", "daisyui"]}
     out = {"status": "ok", "theme": {"id": t["id"], "version": t["version"]},
-           "brand": t.get("brand"),
+           "brand": t.get("brand"), "product": t.get("product"),
            # the conventions are NOT optional decoration — a UI built on these
            # tokens inherits unverified-by-default even on screens we never shipped
            "trust_rules": t["trust_rules"], "voice": t["voice"],
@@ -101,6 +101,8 @@ def design(fmt: str = "all") -> dict:
             "map a source's validation level through `validation_levels` -> `semantic`",
             "use `voice` verbatim for declines, ADJUSTED labels and claim scope",
             "success/verified styling is RESERVED for server-verified state (trust_rules)",
+            "REQUIRED: render ui_component('platform_header') on every page — the SERVIR "
+            "logo plus the domain name (display_name from the pack manifest)",
         ]
     return out
 
@@ -137,8 +139,15 @@ def component(name: str) -> dict:
                          f"delivery {spec.get('delivery')}) but no recipe has been "
                          "authored yet — not implemented"),
                 "available": sorted(p.stem for p in path.parent.glob("*.html"))}
+    markup = path.read_text()
+    # brand values are substituted here so the markup is paste-ready and the theme
+    # stays the single source of truth (no logo copy living in a recipe file)
+    for slot, val in (("{{logo_data_uri}}", t["brand"]["logo"]["data_uri"]),
+                      ("{{logo_alt}}", t["brand"]["logo"]["alt"]),
+                      ("{{platform_name}}", t["product"]["platform_name"])):
+        markup = markup.replace(slot, val)
     out = {"status": "ok", "name": name, "version": f"{t['id']}-{t['version']}",
-           "trust_class": spec.get("trust_class"), "markup": path.read_text(),
+           "trust_class": spec.get("trust_class"), "markup": markup,
            "styling": ("uses --grp-* custom properties — paste ui_design's `css` once "
                        "and this renders in your palette, in any framework"),
            "notes": spec}
@@ -178,7 +187,9 @@ def describe_design() -> str:
             "`format`: all (default) | tokens | css | daisyui.\n"
             f"RULE: {t['trust_rules']['success_reserved_for']} — success/verified styling is "
             "reserved for server-verified state; default is "
-            f"'{t['trust_rules']['default_state']}'.")
+            f"'{t['trust_rules']['default_state']}'.\n"
+            "REQUIRED: every page shows the platform header (logo + domain name) — get it "
+            "from ui_component('platform_header'); the logo ships embedded in the markup.")
 
 
 def describe_catalog() -> str:

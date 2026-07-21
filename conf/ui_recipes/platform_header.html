@@ -1,0 +1,25 @@
+<!-- platform_header — REQUIRED on every page built on this platform.
+     Shows the SERVIR logo and the DOMAIN name. The logo and platform name are
+     substituted for you; fill {{domain_name}} from the pack manifest's display_name
+     (e.g. "Food Security Platform"). A hub's own mark sits in the right-hand slot —
+     alongside the attribution, never replacing it.
+     data: { domain_name, hub_mark? } -->
+<style>
+  .grp-header{display:flex;align-items:center;gap:1rem;padding:.75rem 1.1rem;
+    background:var(--grp-neutral);color:var(--grp-neutral-content);
+    border-radius:var(--grp-radius-box,.5rem);font:14px/1.4 var(--grp-font-sans)}
+  .grp-header__logo{height:32px;width:auto;display:block;flex:0 0 auto}
+  .grp-header__rule{width:1px;align-self:stretch;background:color-mix(in oklab,var(--grp-neutral-content) 28%,transparent)}
+  .grp-header__domain{font-weight:600;letter-spacing:.01em}
+  .grp-header__platform{font-size:12px;opacity:.72}
+  .grp-header__spacer{margin-left:auto}
+</style>
+<header class="grp-header">
+  <img class="grp-header__logo" src="{{logo_data_uri}}" alt="{{logo_alt}}">
+  <div class="grp-header__rule" aria-hidden="true"></div>
+  <div>
+    <div class="grp-header__domain">{{domain_name}}</div>
+    <div class="grp-header__platform">{{platform_name}}</div>
+  </div>
+  <div class="grp-header__spacer">{{hub_mark}}</div>
+</header>
