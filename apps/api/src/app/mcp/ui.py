@@ -145,7 +145,14 @@ def component(name: str) -> dict:
     for slot, val in (("{{logo_data_uri}}", t["brand"]["logo"]["data_uri"]),
                       ("{{logo_alt}}", t["brand"]["logo"]["alt"]),
                       ("{{platform_name}}", t["product"]["platform_name"]),
-                      ("{{resolver_url}}", t["product"]["resolver"]["receipt"])):
+                      # absolute: a relative path resolves against the CONSUMER's
+                      # origin, 404s there, and fails closed to "unverified" silently
+                      # ...and its {receipt_id} is normalised to the {{slot}} style the
+                      # rest of the recipe uses, so one fill pass leaves nothing behind
+                      ("{{resolver_url}}",
+                       (t["product"]["resolver"]["base"]
+                        + t["product"]["resolver"]["receipt"]).replace("{receipt_id}",
+                                                                       "{{receipt_id}}"))):
         markup = markup.replace(slot, val)
     out = {"status": "ok", "name": name, "version": f"{t['id']}-{t['version']}",
            "trust_class": spec.get("trust_class"), "markup": markup,

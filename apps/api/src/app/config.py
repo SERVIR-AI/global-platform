@@ -32,8 +32,15 @@ class Settings(BaseSettings):
     app_name: str = "global-risk-platform-api"
     # Origins allowed to call the API from a browser. Override in prod with a
     # comma-separated env var, e.g. CORS_ORIGINS='["https://app.example.com"]'.
+    # localhost and 127.0.0.1 are DIFFERENT origins to a browser: omitting either
+    # blocks the trust chrome's resolver fetch, and it fails closed to "unverified".
     cors_origins: list[str] = Field(
-        default=["http://localhost:5173", "http://localhost:8080", "http://127.0.0.1:8080"]
+        default=[
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:8080",
+            "http://127.0.0.1:8080",
+        ]
     )
 
     # --- Workspace paths ---
