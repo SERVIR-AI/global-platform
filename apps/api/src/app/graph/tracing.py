@@ -11,6 +11,7 @@ def _usage(resp, price_in, price_out) -> dict:
     u = getattr(resp, "usage", None)
     if not u:
         return {"in": 0, "out": 0, "total": 0, "cost_in": 0, "cost_out": 0, "cost": 0}
+    price_in, price_out = price_in / 1_000_000, price_out / 1_000_000  # price is per million tokens
     tokens = {
         "in": getattr(u, "prompt_tokens", 0) or 0,
         "out": getattr(u, "completion_tokens", 0) or 0,
@@ -18,7 +19,7 @@ def _usage(resp, price_in, price_out) -> dict:
     tokens["total"] = tokens["in"] + tokens["out"]
     tokens["cost_in"] = tokens["in"]*price_in
     tokens["cost_out"] = tokens["out"]*price_out
-    tokens["cost"] = tokens["in"]*price_in + tokens["out"]*price_out
+    tokens["cost"] = tokens["cost_in"] + tokens["cost_out"]
     return tokens
 
 def get_tool_calls(tool_call_schema):
