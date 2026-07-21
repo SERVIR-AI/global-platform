@@ -63,8 +63,15 @@ class ChatResponse(BaseModel):
         description="Step-by-step narration of the run; present only when the request set verbose=true.")
     trace_events: list[dict] | None = Field(
         default=None,
-        description="Structured per-step trace events for this turn (currently only the "
-                    "router step is instrumented); present only when the request set verbose=true.")
+        description="Structured per-step trace events for this turn (all 5 graph nodes — "
+                    "route/resolve/fetch/operate/finalize — are instrumented); present "
+                    "unconditionally, not gated by verbose.")
+    trace_envelope: dict | None = Field(
+        default=None,
+        description="The per-turn trace envelope (trace_schema.json's top-level shape): "
+                    "thread_id, trace_id, created_at, total_duration, total_tokens, and steps "
+                    "(the same list as trace_events). Best-effort — absent if envelope assembly "
+                    "or persistence failed; does not affect the answer.")
     choices: list[dict] | None = Field(
         default=None,
         description="When the agent is asking the user to choose (exposure vs risk L1/L2): "

@@ -117,3 +117,32 @@ def test_drawn_area_followup_reuses_geometry(aoi, make_client, monkeypatch, log)
     log("TURN 2 content", content)
     assert r2.status_code == 200 and "count_features" in content  # reused the drawn area
     assert "could not find" not in content and "No data" not in content
+
+
+def test_trace_envelope_surfaced_and_persisted(aoi, make_client, monkeypatch, log):
+    """The trace_envelope field: top-level shape present + a matching *.envelope.json
+    file actually lands in the redirected traces_dir, alongside record()'s own file."""
+    from app.api.routes import chat as chat_route
+    from app.config import get_settings
+    monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda *a, **k: aoi)
+    monkeypatch.setattr(gm.ingest, "hazard_clip", lambda place, layer: aoi[layer])
+    stub = make_client(("tool", "count_features", {"layer": "schools"}))
+    monkeypatch.setattr(chat_route, "build_client", lambda provider: stub)
+
+    r = client.post("/api/chat", json={
+        "messages": [{"role": "user", "content": "schools in Testville?"}], "provider": "gemini"})
+    body = r.json()
+    log("TRACE_ENVELOPE", body.get("trace_envelope"))
+    assert r.status_code == 200
+    envelope = body["trace_envelope"]
+    assert envelope is not None
+    assert set(envelope) == {"thread_id", "trace_id", "created_at", "total_duration", "total_tokens", "steps"}
+    assert envelope["thread_id"] == body["thread_id"]
+    assert envelope["trace_id"] == body["id"]
+    assert envelope["total_duration"] > 0
+    assert set(envelope["total_tokens"]) == {"in", "out", "total", "cost"}
+    assert envelope["steps"] == body["trace_events"]
+
+    traces_dir = get_settings().traces_dir
+    written = list(traces_dir.glob(f"{envelope['trace_id']}.envelope.json"))
+    assert len(written) == 1

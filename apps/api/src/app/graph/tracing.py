@@ -1,5 +1,6 @@
 import json
 
+from datetime import datetime, timezone
 from langchain_core.runnables import RunnableConfig
 from ..config import get_settings
 from .geo import operations, registry
@@ -450,3 +451,36 @@ def make_trace_event_fetch(
         "error": error,
     }
     return trace_event
+
+def build_trace_envelope(events: list[dict], thread_id: str, trace_id: str) -> dict:
+    """Build the per-turn trace envelope (trace_schema.json's top-level shape) from this
+    turn's step events. total_duration sums every step's duration. total_tokens sums only
+    steps that carry a real tokens value (resolve/operate never produce one; finalize's
+    error_echo branch sets it to None) — skipped, not coerced to zero.
+    """
+    total_duration = sum(e["duration"] for e in events)
+    token_steps = [e["tokens"] for e in events if e.get("tokens")]
+    total_tokens = {
+        "in": sum(t["in"] for t in token_steps),
+        "out": sum(t["out"] for t in token_steps),
+        "total": sum(t["total"] for t in token_steps),
+        "cost": sum(t.get("cost") or 0 for t in token_steps),
+    }
+    return {
+        "thread_id": thread_id,
+        "trace_id": trace_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "total_duration": total_duration,
+        "total_tokens": total_tokens,
+        "steps": events,
+    }
+
+def write_trace_envelope(envelope: dict) -> None:
+    """Persist the per-turn trace envelope to disk — a second, richer file alongside
+    geo/trace.py's record() (the old per-query mechanism, kept deliberately — see
+    DECISIONS.md). Named by trace_id, not a timestamp, so two turns completing in the
+    same millisecond can't collide."""
+    settings = get_settings()
+    settings.traces_dir.mkdir(parents=True, exist_ok=True)
+    path = settings.traces_dir / f"{envelope['trace_id']}.envelope.json"
+    path.write_text(json.dumps(envelope, indent=2))

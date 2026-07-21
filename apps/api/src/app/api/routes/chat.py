@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from langchain_core.runnables import RunnableConfig
 
 from ...config import get_settings
-from ...graph import get_graph
+from ...graph import get_graph, tracing
 from ...graph.geo import viz
 from ...llm import MissingAPIKey, build_client, default_model
 from ...schemas import ChatMessage, ChatRequest, ChatResponse, Usage
@@ -92,8 +92,19 @@ def chat(request: ChatRequest) -> ChatResponse:
     # surface the options as buttons: the user clicks one and we send its `value` as the reply.
     choices = _choices(result.get("awaiting_choice"))
 
+    response_id = str(uuid.uuid4())
+
+    # Best-effort: a bug in envelope assembly/persistence must never break the actual answer.
+    trace_envelope = None
+    try:
+        trace_envelope = tracing.build_trace_envelope(
+            events=result.get("events") or [], thread_id=thread_id, trace_id=response_id)
+        tracing.write_trace_envelope(trace_envelope)
+    except Exception:  # noqa: BLE001 - envelope build/persist is best-effort; never break the answer
+        trace_envelope = None
+
     return ChatResponse(
-        id=str(uuid.uuid4()),
+        id=response_id,
         thread_id=thread_id,
         message=ChatMessage(role="assistant", content=answer),
         provider=provider,
@@ -101,6 +112,7 @@ def chat(request: ChatRequest) -> ChatResponse:
         usage=_usage(result.get("usage") or []),
         trace=result.get("trace") if request.verbose else None,
         trace_events=result.get("events"),
+        trace_envelope=trace_envelope,
         choices=choices,
         **geo,
     )

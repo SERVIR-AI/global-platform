@@ -4,6 +4,7 @@ make_trace_event_no_llm for the apply_choice resume) — each checked against th
 required-field set in trace_schema.json's baseStep + routeStep, not just spot-checked.
 """
 import json
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -610,3 +611,84 @@ def test_collectors_do_not_leak_across_installs(log):
 
     assert c1.drain() == [{"kind": "api", "api": "Nominatim"}]
     assert c2.drain() == [{"kind": "clip", "layer": "hazard_flood"}]
+
+
+# --- build_trace_envelope: the per-turn top-level envelope -------------------------------
+
+from app.config import get_settings
+
+_ROUTE_STEP = {"node": "router", "duration": 500, "tokens": {"in": 100, "out": 20, "total": 120, "cost": 0.01}}
+_RESOLVE_STEP = {"node": "resolve", "duration": 5}                    # no tokens key at all
+_OPERATE_STEP = {"node": "operate", "duration": 10}                   # no tokens key at all
+_FINALIZE_STEP_LLM = {"node": "finalize", "duration": 300, "tokens": {"in": 50, "out": 30, "total": 80, "cost": 0.005}}
+_FINALIZE_STEP_ERROR = {"node": "finalize", "duration": 1, "tokens": None}   # error_echo branch
+
+
+def test_build_trace_envelope_sums_duration_over_all_steps(log):
+    events = [_ROUTE_STEP, _RESOLVE_STEP, _OPERATE_STEP, _FINALIZE_STEP_LLM]
+    envelope = tracing.build_trace_envelope(events, thread_id="t1", trace_id="tr1")
+    log("TOTAL_DURATION", envelope["total_duration"])
+    assert envelope["total_duration"] == 500 + 5 + 10 + 300
+
+
+def test_build_trace_envelope_sums_tokens_only_where_present(log):
+    events = [_ROUTE_STEP, _RESOLVE_STEP, _OPERATE_STEP, _FINALIZE_STEP_LLM]
+    envelope = tracing.build_trace_envelope(events, thread_id="t1", trace_id="tr1")
+    assert envelope["total_tokens"]["in"] == 100 + 50
+    assert envelope["total_tokens"]["out"] == 20 + 30
+    assert envelope["total_tokens"]["total"] == 120 + 80
+
+
+def test_build_trace_envelope_skips_finalize_error_echo_tokens_none(log):
+    """A finalize error_echo step's tokens: None must not raise or get coerced into the sum."""
+    events = [_ROUTE_STEP, _FINALIZE_STEP_ERROR]
+    envelope = tracing.build_trace_envelope(events, thread_id="t1", trace_id="tr1")
+    assert envelope["total_tokens"]["in"] == 100                       # only the route step counted
+
+
+def test_build_trace_envelope_cost_summed_from_precomputed_values(log):
+    """No settings/config involved at all — cost is read straight from each step's own
+    already-computed tokens['cost'], never re-derived from price_in/price_out here."""
+    events = [_ROUTE_STEP, _FINALIZE_STEP_LLM]
+    envelope = tracing.build_trace_envelope(events, thread_id="t1", trace_id="tr1")
+    assert envelope["total_tokens"]["cost"] == 0.01 + 0.005
+
+
+def test_build_trace_envelope_empty_events(log):
+    envelope = tracing.build_trace_envelope([], thread_id="t1", trace_id="tr1")
+    assert envelope["total_duration"] == 0
+    assert envelope["total_tokens"] == {"in": 0, "out": 0, "total": 0, "cost": 0}
+    assert envelope["steps"] == []
+
+
+def test_build_trace_envelope_top_level_shape(log):
+    envelope = tracing.build_trace_envelope([_ROUTE_STEP], thread_id="t1", trace_id="tr1")
+    log("ENVELOPE_KEYS", set(envelope))
+    assert set(envelope) == {"thread_id", "trace_id", "created_at", "total_duration", "total_tokens", "steps"}
+    assert envelope["thread_id"] == "t1"
+    assert envelope["trace_id"] == "tr1"
+    datetime.fromisoformat(envelope["created_at"])                     # parses cleanly, doesn't raise
+
+
+# --- write_trace_envelope: persisted alongside record()'s own file ----------------------
+
+def test_write_trace_envelope_creates_file_named_by_trace_id(log):
+    envelope = tracing.build_trace_envelope([_ROUTE_STEP], thread_id="t1", trace_id="tr-abc")
+    tracing.write_trace_envelope(envelope)
+    written = list(get_settings().traces_dir.glob("tr-abc.envelope.json"))
+    log("WRITTEN", written)
+    assert len(written) == 1
+
+
+def test_write_trace_envelope_content_round_trips(log):
+    envelope = tracing.build_trace_envelope([_ROUTE_STEP], thread_id="t1", trace_id="tr-roundtrip")
+    tracing.write_trace_envelope(envelope)
+    path = get_settings().traces_dir / "tr-roundtrip.envelope.json"
+    assert json.loads(path.read_text()) == envelope
+
+
+def test_write_trace_envelope_creates_traces_dir_if_missing(log, tmp_path, monkeypatch):
+    monkeypatch.setattr(get_settings(), "traces_dir", tmp_path / "not-yet-created")
+    envelope = tracing.build_trace_envelope([], thread_id="t1", trace_id="tr-mkdir")
+    tracing.write_trace_envelope(envelope)                       # must not raise
+    assert (tmp_path / "not-yet-created" / "tr-mkdir.envelope.json").exists()
