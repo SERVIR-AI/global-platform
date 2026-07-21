@@ -279,3 +279,50 @@ def make_trace_event_operate(
         "error": error,
     }
     return trace_event
+
+def make_trace_event_finalize(
+        start_time: float,
+        end_time: float,
+        started_at: str,
+        ended_at: str,
+        state: dict,
+        config: RunnableConfig,
+        answer: str,
+        resp,
+        grounded: bool | None,
+        error: str | None,
+) -> dict:
+    """Build one finalizeStep event. kind is "error_echo" if error is set, else "llm_phrase"."""
+    state = state or {}
+    kind = "error_echo" if error is not None else "llm_phrase"
+
+    if kind == "error_echo":
+        llm_provider = model_used = tokens = None
+        summary = "Returned the refusal/failure message as-is"
+        why = "No model call - the message is already final."
+    else:
+        settings = get_settings()
+        configurable = config["configurable"]
+        llm_provider = configurable["provider"]
+        model_used = configurable["model"]
+        tokens = _usage(resp, price_in=settings.price_in, price_out=settings.price_out)
+        summary = "Phrased the final answer from the computed result"
+        why = "The model only phrases the result; it doesn't compute the number."
+
+    trace_event = {
+        "node": "finalize",
+        "step": len(state.get("events", [])),
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "duration": (end_time - start_time)*1000,
+        "summary": summary,
+        "why": why,
+        "kind": kind,
+        "error": error,
+        "llm_provider": llm_provider,
+        "model_used": model_used,
+        "tokens": tokens,
+        "llm_response": answer,
+        "grounded": grounded,
+    }
+    return trace_event

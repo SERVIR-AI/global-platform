@@ -368,12 +368,19 @@ def operate(state: State) -> dict:
 
 def finalize(state: State, config) -> dict:
     """Phrase the answer (quoting the number + source). On error, return it without an LLM call."""
+    t_start = time.perf_counter()
+    started_at = datetime.now(timezone.utc).isoformat()
     question = _last_user(state["messages"])
 
     if state.get("error"):
         answer = state["error"]
-        trace.record(question, answer, state.get("usage") or [], args=state.get("op_args"))
-        return {"messages": [{"role": "assistant", "content": answer}]}
+        rec = trace.record(question, answer, state.get("usage") or [], args=state.get("op_args"))
+        t_end = time.perf_counter()
+        ended_at = datetime.now(timezone.utc).isoformat()
+        trace_event = tracing.make_trace_event_finalize(
+            start_time=t_start, end_time=t_end, started_at=started_at, ended_at=ended_at,
+            state=state, config=config, answer=answer, resp=None, grounded=None, error=answer)
+        return {"messages": [{"role": "assistant", "content": answer}], "events": [trace_event]}
 
     client = config["configurable"]["client"]
     model = config["configurable"]["model"]
@@ -397,8 +404,14 @@ def finalize(state: State, config) -> dict:
     answer = resp.choices[0].message.content or ""
 
     usages = (state.get("usage") or []) + [_usage(resp)]
-    trace.record(question, answer, usages, result=result, args=state.get("op_args"))
-    return {"messages": [{"role": "assistant", "content": answer}], "usage": [_usage(resp)]}
+    rec = trace.record(question, answer, usages, result=result, args=state.get("op_args"))
+    t_end = time.perf_counter()
+    ended_at = datetime.now(timezone.utc).isoformat()
+    trace_event = tracing.make_trace_event_finalize(
+        start_time=t_start, end_time=t_end, started_at=started_at, ended_at=ended_at,
+        state=state, config=config, answer=answer, resp=resp, grounded=rec["grounded"], error=None)
+    return {"messages": [{"role": "assistant", "content": answer}], "usage": [_usage(resp)],
+            "events": [trace_event]}
 
 
 def _after_route(state: State) -> str:
