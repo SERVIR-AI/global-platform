@@ -391,3 +391,51 @@ def make_trace_event_resolve(
         "error": error,
     }
     return trace_event
+
+def make_trace_event_fetch(
+        start_time: float,
+        end_time: float,
+        started_at: str,
+        ended_at: str,
+        state: dict,
+        mode: str,
+        aoi: dict,
+        layers_fetched: list[str] | None,
+        rasters_clipped: list[str],
+        l2_computed: list[str],
+        drained_io_events: list[dict],
+        error: str | None,
+) -> dict:
+    """Build one fetchStep event. drained_io_events is the raw list from the IOCollector
+    installed around this turn's ingest calls; split here into api_calls (kind == "api")
+    and downloads (everything else), matching trace_schema.json's own description.
+    """
+    state = state or {}
+    api_calls = [e for e in drained_io_events if e.get("kind") == "api"]
+    downloads = [e for e in drained_io_events if e.get("kind") != "api"]
+
+    if error is not None:
+        summary = f"Couldn't fetch the data: {error}"
+        why = "The AOI/raster fetch failed, so nothing downstream can compute a number."
+    else:
+        summary = f"Fetched {aoi.get('name')} ({len(rasters_clipped) + len(l2_computed)} raster(s))"
+        why = "Acquires the OSM assets and clips the hazard/risk rasters this question needs; no LLM calls."
+
+    trace_event = {
+        "node": "fetch",
+        "step": len(state.get("events", [])),
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "duration": (end_time - start_time)*1000,
+        "summary": summary,
+        "why": why,
+        "mode": mode,
+        "aoi": aoi,
+        "layers_fetched": layers_fetched,
+        "rasters_clipped": rasters_clipped,
+        "l2_computed": l2_computed,
+        "api_calls": api_calls,
+        "downloads": downloads,
+        "error": error,
+    }
+    return trace_event

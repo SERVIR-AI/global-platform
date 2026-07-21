@@ -334,10 +334,27 @@ def fetch(state: State) -> dict:
     """Acquire the OSM data + clip the selected hazard rasters to the AOI (place or drawn geometry).
     A drawn AOI persists across turns via the req_geometry channel, so a 'same area' follow-up that
     re-sends no geometry still resolves — `place='drawn area'` is never geocoded as a literal string."""
+    t_start = time.perf_counter()
+    started_at = datetime.now(timezone.utc).isoformat()
+    geom = state.get("req_geometry")
+    place = state.get("place")
+    needed = _needed_layers(state)
+    mode = "drawn_area" if (geom is not None or place == "drawn area") else "place_lookup"
+    rasters_clipped, l2_computed = [], []
+
+    collector = ingest.IOCollector()
+    token = ingest.install(collector)
+
+    def _emit(**fields) -> dict:
+        "Build this step's trace event."
+        t_end = time.perf_counter()
+        ended_at = datetime.now(timezone.utc).isoformat()
+        return tracing.make_trace_event_fetch(
+            start_time=t_start, end_time=t_end, started_at=started_at, ended_at=ended_at,
+            state=state, mode=mode, layers_fetched=needed, rasters_clipped=rasters_clipped,
+            l2_computed=l2_computed, drained_io_events=collector.drain(), **fields)
+
     try:
-        geom = state.get("req_geometry")
-        place = state.get("place")
-        needed = _needed_layers(state)
         if geom is not None and place in (None, "drawn area"):
             aoi = ingest.ensure_aoi(geometry=geom, layers=needed)        # Mode 2: drawn / persisted AOI
         elif place == "drawn area":
@@ -348,8 +365,10 @@ def fetch(state: State) -> dict:
             if layer.startswith("risk_") and layer.endswith("_l2"):     # computed Layer-2 risk grid
                 hazard = "hazard_" + layer[len("risk_"):-len("_l2")]    # risk_flood_l2 -> hazard_flood
                 aoi = {**aoi, layer: combine.combine_l2(aoi, hazard)}
+                l2_computed.append(layer)
             else:
                 aoi = {**aoi, layer: ingest.hazard_clip(aoi, layer)}
+                rasters_clipped.append(layer)
         c = aoi.get("counts") or {}
         trace = [f"boundary → {aoi['name']}  [{aoi.get('how') or 'cached AOI'}]",
                  f"exposure (OSM) → roads {c.get('roads', '?')} · hospitals {c.get('hospitals', '?')} · "
@@ -358,9 +377,16 @@ def fetch(state: State) -> dict:
             bits = [f"{l} (computed: Hazard × Vulnerability)" if l.startswith("risk_") and l.endswith("_l2")
                     else f"{l} clipped" for l in state["tiffs"]]
             trace.append("hazard/risk raster → " + ", ".join(bits))
-        return {"aoi": aoi, "trace": trace}
+        aoi_view = {"name": aoi.get("name"), "area_km2": aoi.get("area_km2"), "how": aoi.get("how")}
+        trace_event = _emit(aoi=aoi_view, error=None)
+        return {"aoi": aoi, "trace": trace, "events": [trace_event]}
     except Exception as e:                        # unresolvable place, too large, Overpass down
-        return {"error": f"No data for that request: {e}", "trace": [f"fetch → failed: {e}"]}
+        error = f"No data for that request: {e}"
+        aoi_view = {"name": None, "area_km2": None, "how": None}
+        trace_event = _emit(aoi=aoi_view, error=error)
+        return {"error": error, "trace": [f"fetch → failed: {e}"], "events": [trace_event]}
+    finally:
+        ingest.uninstall(token)
 
 
 def operate(state: State) -> dict:

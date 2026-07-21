@@ -2,6 +2,7 @@
 flood-hazard raster clipped to it. Raises ValueError if the place can't be
 resolved or is too large — it never silently falls back to somewhere else.
 """
+import contextvars
 import hashlib
 import json
 import math
@@ -32,6 +33,41 @@ RADIUS_KM = 12.0          # fallback AOI: box of this radius around the centre p
 ASSET_LAYERS = ("roads", "hospitals", "schools", "buildings")
 OVERPASS_TIMEOUT = 60          # client HTTP timeout (was 180) — fail over a stalled mirror fast
 OVERPASS_SERVER_TIMEOUT = 55   # Overpass server-side [timeout:] budget per query
+
+_ACTIVE_COLLECTOR: contextvars.ContextVar = contextvars.ContextVar("io_events_collector", default=None)
+
+
+class IOCollector:
+    """Accumulates {kind, ...} io events for one fetch() call."""
+
+    def __init__(self):
+        self.events: list[dict] = []
+
+    def record(self, event: dict) -> None:
+        "Append one io event."
+        self.events.append(event)
+
+    def drain(self) -> list[dict]:
+        "Return the accumulated events and clear them."
+        events, self.events = self.events, []
+        return events
+
+
+def install(collector: IOCollector):
+    "Make `collector` active for this context; returns a token for uninstall()."
+    return _ACTIVE_COLLECTOR.set(collector)
+
+
+def uninstall(token) -> None:
+    "Undo install(), restoring whatever collector (if any) was active before."
+    _ACTIVE_COLLECTOR.reset(token)
+
+
+def emit(event: dict) -> None:
+    "Record one io event on the active collector, if any (else a no-op)."
+    collector = _ACTIVE_COLLECTOR.get()
+    if collector is not None:
+        collector.record(event)
 
 
 def _slug(place):
@@ -75,7 +111,10 @@ def _search(place):
     r = requests.get(f"{NOMINATIM}/search", headers=HEADERS, timeout=40, params={
         "q": place, "format": "json", "polygon_geojson": 1, "limit": 10, "accept-language": "en"})
     r.raise_for_status()
-    return r.json()
+    results = r.json()
+    emit({"kind": "api", "api": "Nominatim", "op": "geocode", "query": place,
+          "n_results": len(results)})
+    return results
 
 
 def _under_cap_admin(results):
@@ -111,7 +150,10 @@ def _overpass(query, attempts=3):
                     last = f"{r.status_code} from {url}"
                     continue
                 r.raise_for_status()
-                return r.json()["elements"]
+                elements = r.json()["elements"]
+                emit({"kind": "api", "api": "Overpass", "mirror_used": url,
+                      "attempts": attempt + 1, "n_elements": len(elements)})
+                return elements
             except requests.RequestException as e:
                 last = str(e)
         time.sleep(2 ** attempt)
@@ -143,13 +185,19 @@ def source_raster(layer="hazard_flood"):
         fname = layer if layer.endswith(".tif") else f"{layer}.tif"
         fallback_url = None
     path = os.path.join(settings.tiffs_dir, fname)
-    if not os.path.exists(path):
+    was_cached = os.path.exists(path)
+    if not was_cached:
         fid = drive_tifs.drive_id(fname) or (_drive_id(fallback_url) if fallback_url else None)
         if not fid:
             raise ValueError(f"no Drive id for '{layer}' (looked up '{fname}' in drive_tifs + tiffs.yml)")
         os.makedirs(settings.tiffs_dir, exist_ok=True)
         import gdown
         gdown.download(id=fid, output=path, quiet=True)
+        emit({"kind": "download", "api": "Google Drive", "layer": layer, "filename": fname,
+              "drive_id": fid, "dest": path, "was_cached": was_cached})
+    else:
+        emit({"kind": "download", "api": "Google Drive", "layer": layer, "filename": fname,
+              "dest": path, "was_cached": was_cached})
     return path
 
 
@@ -258,7 +306,9 @@ def hazard_clip(aoi, layer):
     """Clip `layer`'s severity raster to the AOI bundle; cache per (AOI, layer); return path."""
     adir = os.path.dirname(aoi["admin"])
     clip = os.path.join(adir, f"{layer}.tif")
-    if not os.path.exists(clip):
+    was_cached = os.path.exists(clip)
+    emit({"kind": "clip", "layer": layer, "dest": clip, "was_cached": was_cached})
+    if not was_cached:
         boundary = shape(json.load(open(aoi["admin"]))["features"][0]["geometry"])
         minx, miny, maxx, maxy = boundary.bounds
         with rasterio.open(source_raster(layer)) as src:
