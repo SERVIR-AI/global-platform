@@ -1,0 +1,54 @@
+/* GENERATED from conf/ui_theme.json (theme grp v0).
+   Do not hand-edit — run: uv run python -m app.mcp.ui --write-app */
+
+@plugin "daisyui/theme" {
+  name: "grp";
+  default: true;
+  color-scheme: light;
+  --color-base-100: #fbfcfd;
+  --color-base-200: #f1f4f7;
+  --color-base-300: #e0e6ec;
+  --color-base-content: #16202b;
+  --color-primary: #0f6a8b;
+  --color-primary-content: #f6fbfc;
+  --color-secondary: #4a5b6b;
+  --color-secondary-content: #f6f8fa;
+  --color-accent: #7c5cbf;
+  --color-accent-content: #f9f7fd;
+  --color-neutral: #2b3641;
+  --color-neutral-content: #eef2f5;
+  --color-info: #2a7ab0;
+  --color-success: #1f7a4d;
+  --color-warning: #a06a08;
+  --color-error: #9b2c2c;
+  --radius-box: 0.5rem;
+  --radius-field: 0.375rem;
+  --radius-selector: 0.5rem;
+}
+
+:root {
+  --grp-base-100: #fbfcfd;
+  --grp-base-200: #f1f4f7;
+  --grp-base-300: #e0e6ec;
+  --grp-base-content: #16202b;
+  --grp-primary: #0f6a8b;
+  --grp-primary-content: #f6fbfc;
+  --grp-secondary: #4a5b6b;
+  --grp-secondary-content: #f6f8fa;
+  --grp-accent: #7c5cbf;
+  --grp-accent-content: #f9f7fd;
+  --grp-neutral: #2b3641;
+  --grp-neutral-content: #eef2f5;
+  --grp-info: #2a7ab0;
+  --grp-success: #1f7a4d;
+  --grp-warning: #a06a08;
+  --grp-error: #9b2c2c;
+  --grp-section-1: #38bdf8;
+  --grp-section-2: #34d399;
+  --grp-section-3: #fbbf24;
+  --grp-section-4: #a78bfa;
+  --grp-parse-edge: #a78bfa;
+  --grp-cite-edge: #94a3b8;
+  --grp-font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --grp-font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}

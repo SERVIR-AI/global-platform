@@ -1,2 +1,5 @@
 @import 'tailwindcss';
 @plugin "daisyui";
+/* The platform design language — generated from conf/ui_theme.json.
+   Regenerate: uv run python -m app.mcp.ui --write-app (from apps/api) */
+@import './theme.css';

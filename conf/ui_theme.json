@@ -1,0 +1,91 @@
+{
+  "id": "grp",
+  "version": "v0",
+  "description": "The Global Risk Platform design language. Single source of truth: the web app imports generated artifacts from this file, and ui.design serves it. Edit here, regenerate — never hand-edit the generated files.",
+  "palette": {
+    "base-100": "#fbfcfd",
+    "base-200": "#f1f4f7",
+    "base-300": "#e0e6ec",
+    "base-content": "#16202b",
+    "primary": "#0f6a8b",
+    "primary-content": "#f6fbfc",
+    "secondary": "#4a5b6b",
+    "secondary-content": "#f6f8fa",
+    "accent": "#7c5cbf",
+    "accent-content": "#f9f7fd",
+    "neutral": "#2b3641",
+    "neutral-content": "#eef2f5",
+    "info": "#2a7ab0",
+    "success": "#1f7a4d",
+    "warning": "#a06a08",
+    "error": "#9b2c2c"
+  },
+  "trust_rules": {
+    "success_reserved_for": "server_verified",
+    "default_state": "unverified",
+    "chip_states": [
+      "pass",
+      "fail",
+      "not_run"
+    ],
+    "verified_requires_receipt_link": true,
+    "never": [
+      "a verdict may not be set by the host/client — it resolves from the server",
+      "declines, declared gaps, honest zeros and ADJUSTED labels may not be suppressed",
+      "no partner/agency logo packs; only a neutral built-with mark carrying a receipt link"
+    ]
+  },
+  "semantic": {
+    "verified": {
+      "role": "success",
+      "meaning": "server-verified against registered evidence"
+    },
+    "caution": {
+      "role": "warning",
+      "meaning": "adjusted by a human, model-output, or a declared gap"
+    },
+    "declined": {
+      "role": "error",
+      "meaning": "refused, with a stated cause"
+    },
+    "neutral": {
+      "role": "base-content",
+      "meaning": "unverified / informational — the default"
+    }
+  },
+  "validation_levels": {
+    "multi-agency-consensus": "verified",
+    "peer-reviewed": "verified",
+    "single-agency": "neutral",
+    "model-output": "caution"
+  },
+  "provenance": {
+    "section_edges": [
+      "#38bdf8",
+      "#34d399",
+      "#fbbf24",
+      "#a78bfa"
+    ],
+    "parse_edge": "#a78bfa",
+    "cite_edge": "#94a3b8"
+  },
+  "typography": {
+    "font_sans": "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
+    "font_mono": "ui-monospace, SFMono-Regular, Menlo, monospace",
+    "numeric": "tabular-nums for any aligned figures"
+  },
+  "radii": {
+    "box": "0.5rem",
+    "field": "0.375rem",
+    "selector": "0.5rem"
+  },
+  "voice": {
+    "decline": "The system declined to answer — declining beats guessing.",
+    "adjusted": "ADJUSTED by the requester (not the hub default)",
+    "hub_default": "hub default configuration",
+    "honest_zero": "0 matched — declared as a gap, not hidden",
+    "unverified": "unverified by this platform",
+    "claim_scope": "verified = every cited claim traces to the evidence pack; NOT the truth of the underlying sources",
+    "retrieved_uncited": "retrieved, not cited by any claim"
+  }
+}

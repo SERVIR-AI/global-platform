@@ -1,4 +1,5 @@
 import { resolveApiUrl } from '@/lib/api';
+import { theme } from '@/theme';
 import { latestBrief, parseProvenance, type ProvenanceData } from '@/lib/provenance';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/ChatStore';
@@ -23,7 +24,9 @@ import { FC, useLayoutEffect, useMemo, useRef, useState } from 'react';
  * solid — the distinction is the point. Hover any node to trace its full path.
  */
 
-const SECTION_EDGE = ['#38bdf8', '#34d399', '#fbbf24', '#a78bfa'];
+// Colours come from the generated design tokens (conf/ui_theme.json) — never
+// hardcoded here, so ui.design and this graph can't drift apart.
+const SECTION_EDGE = theme.provenance.section_edges;
 const SECTION_BORDER = [
   'border-sky-400',
   'border-emerald-400',
@@ -89,10 +92,12 @@ const Graph: FC<{ data: ProvenanceData }> = ({ data }) => {
   // Full edge list (including the pipeline lane, for hover traversal); only
   // cross-column edges get SVG paths — the lane is drawn as a vertical connector.
   const edges = useMemo<Edge[]>(() => {
-    const list: Edge[] = [{ from: 'question', to: 'parse', color: '#a78bfa' }];
-    for (const f of data.feeds) list.push({ from: 'parse', to: f.id, color: '#a78bfa' });
+    const list: Edge[] = [{ from: 'question', to: 'parse', color: theme.provenance.parse_edge }];
     for (const f of data.feeds)
-      for (const n of f.cites) list.push({ from: f.id, to: `cite-${n}`, color: '#94a3b8' });
+      list.push({ from: 'parse', to: f.id, color: theme.provenance.parse_edge });
+    for (const f of data.feeds)
+      for (const n of f.cites)
+        list.push({ from: f.id, to: `cite-${n}`, color: theme.provenance.cite_edge });
     for (const claim of data.claims)
       for (const n of claim.cites)
         list.push({
