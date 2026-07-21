@@ -41,6 +41,12 @@ def _drawn_area_type(geometry) -> str | None:
         return geometry.get("type")
     return None
 
+def _summarize_aoi(aoi: dict | None) -> dict:
+    """Compact aoi view for fetchStep — never the full path bundle. aoi is None on the
+    failure branch (ensure_aoi never returned one that turn)."""
+    aoi = aoi or {}
+    return {"name": aoi.get("name"), "area_km2": aoi.get("area_km2"), "how": aoi.get("how")}
+
 def _derive_countable_assets(call_args: dict, function_name: str | None) -> list[str]:
     """Guess which countable asset (roads/hospitals/schools/buildings) a tool call
     targets. count_features/count_in_hazard name it via `layer`; roads_in_hazard has
@@ -399,7 +405,7 @@ def make_trace_event_fetch(
         ended_at: str,
         state: dict,
         mode: str,
-        aoi: dict,
+        aoi: dict | None,
         layers_fetched: list[str] | None,
         rasters_clipped: list[str],
         l2_computed: list[str],
@@ -409,8 +415,13 @@ def make_trace_event_fetch(
     """Build one fetchStep event. drained_io_events is the raw list from the IOCollector
     installed around this turn's ingest calls; split here into api_calls (kind == "api")
     and downloads (everything else), matching trace_schema.json's own description.
+
+    aoi is the RAW ensure_aoi bundle (or None on failure) — this function derives the
+    compact {name, area_km2, how} view itself via _summarize_aoi, same as every other
+    builder derives its own summary fields internally.
     """
     state = state or {}
+    aoi_view = _summarize_aoi(aoi)
     api_calls = [e for e in drained_io_events if e.get("kind") == "api"]
     downloads = [e for e in drained_io_events if e.get("kind") != "api"]
 
@@ -418,7 +429,7 @@ def make_trace_event_fetch(
         summary = f"Couldn't fetch the data: {error}"
         why = "The AOI/raster fetch failed, so nothing downstream can compute a number."
     else:
-        summary = f"Fetched {aoi.get('name')} ({len(rasters_clipped) + len(l2_computed)} raster(s))"
+        summary = f"Fetched {aoi_view.get('name')} ({len(rasters_clipped) + len(l2_computed)} raster(s))"
         why = "Acquires the OSM assets and clips the hazard/risk rasters this question needs; no LLM calls."
 
     trace_event = {
@@ -430,7 +441,7 @@ def make_trace_event_fetch(
         "summary": summary,
         "why": why,
         "mode": mode,
-        "aoi": aoi,
+        "aoi": aoi_view,
         "layers_fetched": layers_fetched,
         "rasters_clipped": rasters_clipped,
         "l2_computed": l2_computed,

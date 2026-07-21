@@ -533,6 +533,48 @@ def test_fetch_event_step_counts_existing_events(log):
     assert event["step"] == 2
 
 
+# --- _summarize_aoi: never leak the raw path bundle into a trace event ------------------
+
+_RAW_AOI_BUNDLE = {"name": "Testville", "area_km2": 12, "how": "geocoded", "counts": {"roads": 4},
+                   "admin": "/cache/testville/admin.geojson", "roads": "/cache/testville/roads.geojson",
+                   "hazard_flood": "/cache/testville/hazard_flood.tif"}
+
+
+def test_summarize_aoi_full(log):
+    view = tracing._summarize_aoi(_RAW_AOI_BUNDLE)
+    log("VIEW", view)
+    assert view == {"name": "Testville", "area_km2": 12, "how": "geocoded"}
+    assert "admin" not in view and "hazard_flood" not in view          # no raw paths leak through
+
+
+def test_summarize_aoi_none(log):
+    assert tracing._summarize_aoi(None) == {"name": None, "area_km2": None, "how": None}
+
+
+def test_summarize_aoi_missing_keys(log):
+    assert tracing._summarize_aoi({"name": "X"}) == {"name": "X", "area_km2": None, "how": None}
+
+
+def test_fetch_event_aoi_is_summarized_from_raw_bundle(log):
+    """make_trace_event_fetch takes the RAW bundle now, not a pre-built view — raw paths
+    must never reach the returned event."""
+    event = tracing.make_trace_event_fetch(
+        start_time=0.0, end_time=0.1, started_at="t0", ended_at="t1", state={"events": []},
+        mode="place_lookup", aoi=_RAW_AOI_BUNDLE, layers_fetched=None, rasters_clipped=[],
+        l2_computed=[], drained_io_events=[], error=None)
+    assert event["aoi"] == {"name": "Testville", "area_km2": 12, "how": "geocoded"}
+
+
+def test_fetch_event_aoi_none_on_failure(log):
+    """Matches graph.py's except-branch call shape: aoi=None, since ensure_aoi() may never
+    have returned (or even been assigned) before raising."""
+    event = tracing.make_trace_event_fetch(
+        start_time=0.0, end_time=0.05, started_at="t0", ended_at="t1", state={"events": []},
+        mode="place_lookup", aoi=None, layers_fetched=None, rasters_clipped=[], l2_computed=[],
+        drained_io_events=[], error="No data for that request: could not find 'Atlantis'")
+    assert event["aoi"] == {"name": None, "area_km2": None, "how": None}
+
+
 # --- ingest's IOCollector / emit in isolation --------------------------------------------
 
 from app.graph.geo import ingest as ingest_mod

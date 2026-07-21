@@ -377,13 +377,11 @@ def fetch(state: State) -> dict:
             bits = [f"{l} (computed: Hazard × Vulnerability)" if l.startswith("risk_") and l.endswith("_l2")
                     else f"{l} clipped" for l in state["tiffs"]]
             trace.append("hazard/risk raster → " + ", ".join(bits))
-        aoi_view = {"name": aoi.get("name"), "area_km2": aoi.get("area_km2"), "how": aoi.get("how")}
-        trace_event = _emit(aoi=aoi_view, error=None)
+        trace_event = _emit(aoi=aoi, error=None)
         return {"aoi": aoi, "trace": trace, "events": [trace_event]}
     except Exception as e:                        # unresolvable place, too large, Overpass down
         error = f"No data for that request: {e}"
-        aoi_view = {"name": None, "area_km2": None, "how": None}
-        trace_event = _emit(aoi=aoi_view, error=error)
+        trace_event = _emit(aoi=None, error=error)  # aoi may never have been bound if ensure_aoi raised
         return {"error": error, "trace": [f"fetch → failed: {e}"], "events": [trace_event]}
     finally:
         ingest.uninstall(token)
