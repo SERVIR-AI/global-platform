@@ -30,7 +30,8 @@ CONTRACT = [
 _BONE_DEFS = [
     {"bone": "resolve", "tools": ["resolve_place_time"], "planned": "planned (phase2)"},
     {"bone": "fetch", "tools": ["corpus_search", "corpus_document", "feeds_query"],
-     "planned": "planned (phase2)", "note": "corpus tools built; live feeds (feeds_query) phase2"},
+     "planned": "planned (phase2)",
+     "note": "corpus + GEOGLAM conditions built; CHIRPS/CHIRTS/ERA5 are declared feed rows"},
     {"bone": "compute", "tools": ["compute_run"], "planned": "planned (phase2)"},
     {"bone": "context", "tools": ["context_get"], "planned": "planned (phase1)"},
     {"bone": "assemble", "tools": ["assemble_pack"], "planned": "planned (phase1)"},
@@ -38,6 +39,30 @@ _BONE_DEFS = [
     {"bone": "record", "tools": ["record_receipt"], "planned": "planned (phase1)"},
     {"bone": "contribute", "tools": ["contribute_submit"], "planned": "planned (phase2)"},
 ]
+
+
+# Live feeds are REGISTRY ROWS queried through the one `feeds_query` tool — dataset
+# is a parameter, so CHIRPS/CHIRTS/ERA5 land as entries here (zero new tools) when
+# the hub data lists arrive. Pending feeds are declared, not hidden.
+FEEDS = {
+    "geoglam_conditions": {
+        "status": "available",
+        "description": "GEOGLAM Crop Monitor per-region crop-condition assessments "
+                       "for a month (default: latest published).",
+        "params": ["crop?", "place?", "month? (YYYYMM; default latest)"],
+        "source": "GEOGLAM Crop Monitor (CMET)",
+        "validation": "multi-agency-consensus",
+    },
+    "chirps_rainfall": {"status": "declared_gap",
+                        "reason": "rainfall + ~15-day forecast — pending hub data lists"},
+    "chirts_temperature": {"status": "declared_gap",
+                           "reason": "daily max/min temperature (heat stress) — pending hub data lists"},
+    "era5_agromet": {"status": "declared_gap",
+                     "reason": "agro-met reanalysis — pending hub data lists"},
+    "hub_s2s_forecast": {"status": "declared_gap",
+                         "reason": "the East-Africa hub's seasonal-to-sub-seasonal pipeline "
+                                   "— pending hub contribution"},
+}
 
 
 # Compositions are REGISTRY ROWS invoked through the one `compose_run` tool — so a
@@ -129,8 +154,10 @@ def pack_manifest() -> dict:
             "conditions": {"status": "available", "source": "GEOGLAM Crop Monitor",
                            "note": "staleness is flagged in the evidence when served "
                                    "from last-good cache"},
-            "climate_feeds": {"status": "declared_gap",
-                              "reason": "CHIRPS/CHIRTS/ERA5 pending hub data lists"},
+            "feeds": {k: {"status": v["status"],
+                          **({"source": v["source"]} if v.get("source") else {}),
+                          **({"reason": v["reason"]} if v.get("reason") else {})}
+                      for k, v in FEEDS.items()},
         },
         "calendars": _calendars(),
         "calendar_provenance": ("hub defaults are hand-authored approximations of "
@@ -181,6 +208,8 @@ def capabilities(available_tools=None, available_prompts=None,
         "tools_available": tools,
         # registry rows invoked via compose_run — not tools, so the count stays flat
         "compositions": {k: v for k, v in COMPOSITIONS.items()},
+        # registry rows queried via feeds_query — dataset is a parameter
+        "feeds": {k: v for k, v in FEEDS.items()},
         "bones": _bones(set(tools)),
         # NB two different things are called "pack": a DOMAIN PACK (below) is the
         # versioned bundle of sources/calendars/composition — there is one per

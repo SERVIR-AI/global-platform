@@ -10,7 +10,7 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 
-from . import assemble, compose, context, fetch, record, registry, resolve, verify
+from . import assemble, compose, context, feeds, fetch, record, registry, resolve, verify
 
 # Orientation shown to a connecting LLM at initialize — so it isn't a headless
 # chicken. DESCRIBE the two consumption patterns; don't enforce (no mode switch).
@@ -202,6 +202,26 @@ def record_receipt(pack_id: str | None = None, report_id: str | None = None,
     """
     return record.record(pack_id=pack_id, report_id=report_id,
                          receipt_id=receipt_id, question=question)
+
+
+@mcp.tool()
+def feeds_query(dataset: str = "geoglam_conditions", crop: str | None = None,
+                place: str | None = None, month: str | None = None) -> dict:
+    """Query a registered LIVE FEED (dataset is a parameter — see `feeds` in
+    platform_capabilities for what is available vs a declared gap).
+
+    Today: `geoglam_conditions` — GEOGLAM Crop Monitor per-region crop-condition
+    assessments (month defaults to the latest published). CHIRPS/CHIRTS/ERA5 and the
+    hub S2S pipeline are registered but DECLARED GAPS; asking for one tells you why.
+
+    Returns: {status, dataset, as_of, count, summary, records, passport}. The
+    passport carries source, validation, the literal upstream query, and
+    `stale_data` when served from last-good cache (a `note` says so — never present
+    stale data as live). status "empty" -> the feed has no rows for this target;
+    "declined" -> `note` plus the upstream's own alternatives (`nearest_available`,
+    `available` months/crops) rather than a flattened shrug.
+    """
+    return feeds.query(dataset=dataset, crop=crop, place=place, month=month)
 
 
 @mcp.tool()
