@@ -8,7 +8,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from . import store
+from . import store, ui
+
+
+def _resolver_url(receipt_id: str) -> str:
+    """Absolute so trust chrome resolves against the PLATFORM, never the consuming
+    app's own origin. Config-driven: conf/ui_theme.json product.resolver."""
+    r = ui.tokens()["product"]["resolver"]
+    return r["base"] + r["receipt"].format(receipt_id=receipt_id)
 
 
 def record(pack_id: str | None = None, report_id: str | None = None,
@@ -50,6 +57,9 @@ def record(pack_id: str | None = None, report_id: str | None = None,
     rid = store.save_receipt(receipt)
     return {"status": "ok", "receipt_id": rid,
             "resolve_with": "record_receipt(receipt_id=...)",
-            # a hosted, shareable verifier page (a link that survives copy-paste) is Phase 2
-            "public_resolver": "declared gap: hosted shareable resolver is Phase 2",
+            # The HTTP resolver a browser can reach. Consumers MUST point trust chrome
+            # here: a verdict a consuming app serves about itself attests nothing.
+            # Still a declared gap: this is a local/deployed platform URL, not yet a
+            # public link that survives copy-paste outside the network.
+            "public_resolver": _resolver_url(rid),
             **receipt}
