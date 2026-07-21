@@ -77,7 +77,7 @@ const ChunkNode: FC<{ citation: Citation; lit: boolean; register: (el: HTMLEleme
   </div>
 );
 
-const Graph: FC<{ data: ProvenanceData }> = ({ data }) => {
+export const Graph: FC<{ data: ProvenanceData }> = ({ data }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const nodeRefs = useRef(new Map<string, HTMLElement>());
   const [paths, setPaths] = useState<Edge[]>([]);

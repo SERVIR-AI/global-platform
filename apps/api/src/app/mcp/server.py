@@ -227,6 +227,11 @@ def ui_component(name: str) -> dict:
     return ui.component(name)
 
 
+@mcp.tool(description=ui.describe_embed())
+def ui_embed(component: str, receipt_id: str | None = None) -> dict:
+    return ui.embed(component, receipt_id=receipt_id)
+
+
 @mcp.tool()
 def corpus_document(doc_id: str | None = None) -> dict:
     """Trace a passage back to its source document.

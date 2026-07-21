@@ -178,6 +178,52 @@ def describe_component() -> str:
             "resolved from the platform — there is no 'passed' input.")
 
 
+def embed(component: str, receipt_id: str | None = None) -> dict:
+    """A LIVE embed: a reference to our component, not a copy of it. It resolves its
+    own state from the platform at view time, so a verdict can never be frozen into
+    the host page — and there is no prop that could assert one."""
+    t = tokens()
+    comps = {k: v for k, v in (t.get("components") or {}).items() if k != "note"}
+    spec = comps.get(component)
+    if spec is None:
+        return {"status": "declined", "note": f"unknown component {component!r}",
+                "available": sorted(k for k, v in comps.items() if v.get("embeddable"))}
+    if not spec.get("embeddable"):
+        return {"status": "declined", "component": component,
+                "note": (f"`{component}` is not embeddable yet"
+                         + (f" — {spec['status']}" if spec.get("status") else "")),
+                "available": sorted(k for k, v in comps.items() if v.get("embeddable"))}
+    base = t["product"]["embed_base"]
+    src = base["url"] + base["path"].format(component=component,
+                                            receipt_id=receipt_id or "{receipt_id}")
+    return {"status": "ok", "component": component, "binds": spec.get("binds"),
+            "renders": spec.get("renders"), "src": src,
+            "html": (f'<iframe src="{src}" title="{component}" '
+                     'style="width:100%;height:520px;border:1px solid var(--grp-base-300);'
+                     'border-radius:var(--grp-radius-box,.5rem)" loading="lazy"></iframe>'),
+            "guarantee": ("the embed resolves from /api/resolve/* at VIEW time — no verdict "
+                          "prop exists, and with no reachable platform it renders unverified "
+                          "rather than anything else"),
+            "note": base["note"]}
+
+
+def describe_embed() -> str:
+    t = tokens()
+    comps = {k: v for k, v in (t.get("components") or {}).items() if k != "note"}
+    live = [f"  - `{k}` (binds {v.get('binds')})" for k, v in sorted(comps.items())
+            if v.get("embeddable")]
+    pending = [f"  - `{k}` — {v.get('status', 'not embeddable yet')}"
+               for k, v in sorted(comps.items())
+               if v.get("delivery") == "embed" and not v.get("embeddable")]
+    return ("Embed a LIVE platform component in your page — our component, running our "
+            "code, resolving its own state. Use this instead of a copied recipe whenever "
+            "a verdict is shown: an embed cannot be handed a 'passed' flag and cannot "
+            "freeze one into your markup.\n\nEmbeddable now:\n" + ("\n".join(live) or "  (none)")
+            + ("\n\nPlanned:\n" + "\n".join(pending) if pending else "")
+            + "\n\nReturns an iframe snippet bound to your id. Copy the recipe instead "
+              "(ui_component) only for inert chrome like source cards.")
+
+
 def describe_design() -> str:
     t = tokens()
     return (f"Get the platform design language (theme `{t['id']}` {t['version']}, built on "

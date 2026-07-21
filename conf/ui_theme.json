@@ -108,13 +108,17 @@
       "trust_class": "receipt_bound",
       "delivery": "embed",
       "source": "apps/web Provenance/",
-      "binds": "answer_id / receipt_id"
+      "binds": "receipt_id",
+      "embeddable": true,
+      "renders": "question -> parse -> retrieval feeds -> chunks in documents -> the gate -> claims, with hover tracing"
     },
     "crop_calendar_editor": {
       "trust_class": "input",
       "delivery": "embed",
       "source": "apps/web ChatArea/CalendarPanel",
-      "emits": "calendar override (ADJUSTED, target-pinned)"
+      "emits": "calendar override (ADJUSTED, target-pinned)",
+      "embeddable": false,
+      "status": "embed pending — emits an override via postMessage; not yet decoupled"
     },
     "groundedness_strip": {
       "trust_class": "receipt_bound",
@@ -185,6 +189,11 @@
       "report": "/api/resolve/report/{report_id}",
       "pack": "/api/resolve/pack/{pack_id}",
       "note": "Trust chrome resolves verdicts here at VIEW time (a browser cannot call an MCP tool). Prefix with your platform API base URL when the page is not same-origin; CORS is enabled."
+    },
+    "embed_base": {
+      "url": "http://127.0.0.1:5173",
+      "path": "/?embed={component}&receipt_id={receipt_id}",
+      "note": "The web app renders a single component standalone in embed mode. Point embed_base.url at wherever the platform UI is served; it resolves its data from /api/resolve/* at view time, so the verdict is never frozen."
     }
   }
 }
