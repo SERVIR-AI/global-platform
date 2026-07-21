@@ -47,21 +47,35 @@ _BONE_DEFS = [
 FEEDS = {
     "geoglam_conditions": {
         "status": "available",
-        "description": "GEOGLAM Crop Monitor per-region crop-condition assessments "
-                       "for a month (default: latest published).",
-        "params": ["crop?", "place?", "month? (YYYYMM; default latest)"],
+        "adapter": "cropmonitor_conditions",   # which code talks to this upstream
+        "description": "Per-region crop-condition assessments for a month.",
+        "params": {"crop": "optional crop name",
+                   "place": "optional country or region",
+                   "month": "optional YYYYMM (default: latest published)"},
         "source": "GEOGLAM Crop Monitor (CMET)",
         "validation": "multi-agency-consensus",
+        "residency": "external call-out",
     },
-    "chirps_rainfall": {"status": "declared_gap",
-                        "reason": "rainfall + ~15-day forecast — pending hub data lists"},
-    "chirts_temperature": {"status": "declared_gap",
-                           "reason": "daily max/min temperature (heat stress) — pending hub data lists"},
-    "era5_agromet": {"status": "declared_gap",
-                     "reason": "agro-met reanalysis — pending hub data lists"},
-    "hub_s2s_forecast": {"status": "declared_gap",
-                         "reason": "the East-Africa hub's seasonal-to-sub-seasonal pipeline "
-                                   "— pending hub contribution"},
+    "chirps_rainfall": {
+        "status": "declared_gap",
+        "reason": "rainfall + ~15-day forecast — pending hub data lists",
+        "params": {"place": "?", "date_range": "?"},
+    },
+    "chirts_temperature": {
+        "status": "declared_gap",
+        "reason": "daily max/min temperature (heat stress) — pending hub data lists",
+        "params": {"place": "?", "date_range": "?"},
+    },
+    "era5_agromet": {
+        "status": "declared_gap",
+        "reason": "agro-met reanalysis — pending hub data lists",
+        "params": {"place": "?", "date_range": "?", "variable": "?"},
+    },
+    "hub_s2s_forecast": {
+        "status": "declared_gap",
+        "reason": "the East-Africa hub's seasonal-to-sub-seasonal pipeline — pending hub contribution",
+        "params": {"place": "?", "lead_time": "?"},
+    },
 }
 
 
