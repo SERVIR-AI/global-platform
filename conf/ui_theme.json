@@ -1,21 +1,38 @@
 {
   "id": "grp",
   "version": "v0",
-  "description": "The Global Risk Platform design language. Single source of truth: the web app imports generated artifacts from this file, and ui.design serves it. Edit here, regenerate — never hand-edit the generated files.",
+  "description": "The Global Risk Platform design language, built on the official SERVIR identity (styleguide/). Single source of truth: the web app imports generated artifacts from this file, and ui.design serves it. Edit here, regenerate — never hand-edit the generated files.",
+
+  "brand": {
+    "name": "SERVIR",
+    "source": "styleguide/identity-guidelines.png + SERVIR_Style_guide/ (2026 identity)",
+    "blue": "#2380b0",
+    "green": "#91af3d",
+    "ink": "#1c212a",
+    "slate": "#485e88",
+    "logo_variants": ["colour on dark", "colour on light", "white/mono"],
+    "usage": [
+      "brand blue leads; brand green is the supporting accent",
+      "the identity's dark navy is for headers/hero surfaces, not body text backgrounds",
+      "brand green is NOT the verified colour — see trust_rules; a brand accent must never read as a verdict",
+      "hub apps replace the wordmark with their own; the platform mark stays a neutral built-with credit"
+    ]
+  },
+
   "palette": {
     "base-100": "#fbfcfd",
     "base-200": "#f1f4f7",
     "base-300": "#e0e6ec",
-    "base-content": "#16202b",
-    "primary": "#0f6a8b",
-    "primary-content": "#f6fbfc",
-    "secondary": "#4a5b6b",
-    "secondary-content": "#f6f8fa",
-    "accent": "#7c5cbf",
-    "accent-content": "#f9f7fd",
-    "neutral": "#2b3641",
+    "base-content": "#1c212a",
+    "primary": "#2380b0",
+    "primary-content": "#f7fbfd",
+    "secondary": "#91af3d",
+    "secondary-content": "#12180a",
+    "accent": "#485e88",
+    "accent-content": "#f6f8fc",
+    "neutral": "#1c212a",
     "neutral-content": "#eef2f5",
-    "info": "#2a7ab0",
+    "info": "#2380b0",
     "success": "#1f7a4d",
     "warning": "#a06a08",
     "error": "#9b2c2c"
@@ -61,13 +78,25 @@
   },
   "provenance": {
     "section_edges": [
-      "#38bdf8",
-      "#34d399",
-      "#fbbf24",
-      "#a78bfa"
+      "#2380b0",
+      "#91af3d",
+      "#c98a12",
+      "#7c5cbf"
     ],
-    "parse_edge": "#a78bfa",
-    "cite_edge": "#94a3b8"
+    "parse_edge": "#7c5cbf",
+    "cite_edge": "#8b98a8"
+  },
+
+  "components": {
+    "note": "The inventory ui.catalog exposes. Trust classes decide delivery: receipt_bound surfaces are EMBEDDED (verdict resolves server-side, never a prop); input surfaces emit a human judgement but never render their own verdict; presentational chrome may ship as copy-in recipes.",
+    "provenance_graph": {"trust_class": "receipt_bound", "delivery": "embed", "source": "apps/web Provenance/", "binds": "answer_id / receipt_id"},
+    "crop_calendar_editor": {"trust_class": "input", "delivery": "embed", "source": "apps/web ChatArea/CalendarPanel", "emits": "calendar override (ADJUSTED, target-pinned)"},
+    "groundedness_strip": {"trust_class": "receipt_bound", "delivery": "embed", "source": "apps/web ChatArea/Brief", "binds": "report_id"},
+    "source_card": {"trust_class": "receipt_bound", "delivery": "recipe", "source": "apps/web ChatArea/Brief", "requires": "doc_id + archived copy"},
+    "decline_card": {"trust_class": "receipt_bound", "delivery": "recipe", "source": "apps/web ChatArea/Brief"},
+    "validation_badge": {"trust_class": "presentational", "delivery": "recipe", "maps": "validation_levels"},
+    "hazard_map": {"trust_class": "presentational", "delivery": "embed", "source": "apps/web Maps/ (flood/risk)", "status": "generic — risk pack"},
+    "chat_shell": {"trust_class": "presentational", "delivery": "recipe", "source": "apps/web ChatArea/", "status": "generic scaffold"}
   },
   "typography": {
     "font_sans": "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",

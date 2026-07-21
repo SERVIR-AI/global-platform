@@ -7,29 +7,29 @@ export const theme = {
     "base-100": "#fbfcfd",
     "base-200": "#f1f4f7",
     "base-300": "#e0e6ec",
-    "base-content": "#16202b",
-    "primary": "#0f6a8b",
-    "primary-content": "#f6fbfc",
-    "secondary": "#4a5b6b",
-    "secondary-content": "#f6f8fa",
-    "accent": "#7c5cbf",
-    "accent-content": "#f9f7fd",
-    "neutral": "#2b3641",
+    "base-content": "#1c212a",
+    "primary": "#2380b0",
+    "primary-content": "#f7fbfd",
+    "secondary": "#91af3d",
+    "secondary-content": "#12180a",
+    "accent": "#485e88",
+    "accent-content": "#f6f8fc",
+    "neutral": "#1c212a",
     "neutral-content": "#eef2f5",
-    "info": "#2a7ab0",
+    "info": "#2380b0",
     "success": "#1f7a4d",
     "warning": "#a06a08",
     "error": "#9b2c2c"
   },
   "provenance": {
     "section_edges": [
-      "#38bdf8",
-      "#34d399",
-      "#fbbf24",
-      "#a78bfa"
+      "#2380b0",
+      "#91af3d",
+      "#c98a12",
+      "#7c5cbf"
     ],
-    "parse_edge": "#a78bfa",
-    "cite_edge": "#94a3b8"
+    "parse_edge": "#7c5cbf",
+    "cite_edge": "#8b98a8"
   },
   "validationLevels": {
     "multi-agency-consensus": "verified",
