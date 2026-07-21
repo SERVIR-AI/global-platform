@@ -179,6 +179,12 @@
   },
   "product": {
     "platform_name": "SERVIR Global Risk Platform",
-    "rule": "Every UI built on this platform MUST show the platform header: the SERVIR logo plus the DOMAIN name (e.g. 'Food Security Platform'). Get the domain's display_name from the pack manifest. A hub's own branding sits alongside, never replacing the attribution."
+    "rule": "Every UI built on this platform MUST show the platform header: the SERVIR logo plus the DOMAIN name (e.g. 'Food Security Platform'). Get the domain's display_name from the pack manifest. A hub's own branding sits alongside, never replacing the attribution.",
+    "resolver": {
+      "receipt": "/api/resolve/receipt/{receipt_id}",
+      "report": "/api/resolve/report/{report_id}",
+      "pack": "/api/resolve/pack/{pack_id}",
+      "note": "Trust chrome resolves verdicts here at VIEW time (a browser cannot call an MCP tool). Prefix with your platform API base URL when the page is not same-origin; CORS is enabled."
+    }
   }
 }

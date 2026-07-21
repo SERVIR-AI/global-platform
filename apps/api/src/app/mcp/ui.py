@@ -144,12 +144,14 @@ def component(name: str) -> dict:
     # stays the single source of truth (no logo copy living in a recipe file)
     for slot, val in (("{{logo_data_uri}}", t["brand"]["logo"]["data_uri"]),
                       ("{{logo_alt}}", t["brand"]["logo"]["alt"]),
-                      ("{{platform_name}}", t["product"]["platform_name"])):
+                      ("{{platform_name}}", t["product"]["platform_name"]),
+                      ("{{resolver_url}}", t["product"]["resolver"]["receipt"])):
         markup = markup.replace(slot, val)
     out = {"status": "ok", "name": name, "version": f"{t['id']}-{t['version']}",
            "trust_class": spec.get("trust_class"), "markup": markup,
            "styling": ("uses --grp-* custom properties — paste ui_design's `css` once "
                        "and this renders in your palette, in any framework"),
+           "resolver": t["product"]["resolver"],
            "notes": spec}
     if spec.get("trust_class") == "receipt_bound":
         out["guardrail"] = (
