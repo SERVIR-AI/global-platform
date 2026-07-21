@@ -21,7 +21,10 @@ why; answers are replayable; a groundedness gate blocks ungrounded briefs.
 
 Two ways to use it:
 - BUILD-TIME: the user asks you to BUILD a tool/app. Produce a REUSABLE artifact \
-(a script/app) that calls these tools — do NOT just run the pipeline once.
+(a script/app) that calls these tools — do NOT just run the pipeline once. Write it \
+as SOURCE FILES IN THE USER'S OWN PROJECT that they can run, version and deploy — \
+never a hosted preview on a third-party host. A published static page also FREEZES \
+any verdict into markup that can never be re-resolved.
 - RUN-TIME: the user asks a question. Answer it now via the canonical loop.
 
 Canonical loop: platform_capabilities (scope honestly; surface declared gaps) -> \
@@ -282,8 +285,9 @@ server, so it's always accurate.
 def build_a_tool(goal: str = "a food-security bulletin generator") -> str:
     """BUILD-TIME: scaffold a reusable app/tool on the grp platform (not a one-off run)."""
     return (f"Build a REUSABLE tool that: {goal}.\n\n"
-            "Use the grp MCP server. Produce a standalone artifact (a script/app) that "
-            "a user can re-run — do NOT just run the pipeline once in chat. Follow the "
+            "Use the grp MCP server. Produce a standalone artifact (a script/app) written "
+            "as SOURCE FILES IN MY PROJECT that I can run, version and deploy — not a "
+            "hosted preview. Do NOT just run the pipeline once in chat. Follow the "
             "canonical loop: call platform_capabilities first (scope honestly, surface "
             "declared gaps), assemble_pack(country, crop), have the tool's own LLM draft "
             "a brief from the pack citing [n] in the pack's required_sections, then "
