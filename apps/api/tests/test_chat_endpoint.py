@@ -59,6 +59,31 @@ def test_round_trip_with_stub(aoi, make_client, monkeypatch, log):
     assert body["thread_id"]
 
 
+def test_trace_events_surfaced_in_response(aoi, make_client, monkeypatch, log):
+    """Structured trace events reach the API response as trace_events — currently
+    unconditional (not gated by verbose, unlike the older plain-text `trace`). This
+    request needs a hazard choice, so the turn produces two steps: router, then resolve
+    pausing to ask exposure/L1/L2."""
+    from app.api.routes import chat as chat_route
+    monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda *a, **k: aoi)
+    monkeypatch.setattr(gm.ingest, "hazard_clip", lambda place, layer: aoi[layer])
+    stub = make_client(("tool", "roads_in_hazard", {"place": "Testville", "hazard_layers": ["hazard_flood"]}))
+    monkeypatch.setattr(chat_route, "build_client", lambda provider: stub)
+
+    r = client.post("/api/chat", json={
+        "messages": [{"role": "user", "content": "flooded roads in Testville?"}], "provider": "gemini"})
+    body = r.json()
+    log("TRACE_EVENTS", body.get("trace_events"))
+    assert r.status_code == 200
+    assert body["trace_events"] is not None
+    assert [e["node"] for e in body["trace_events"]] == ["router", "resolve"]
+    router_event = body["trace_events"][0]
+    assert router_event["kind"] == "routed"
+    assert router_event["llm_provider"] == "gemini"
+    assert router_event["derived_place"] == "Testville"
+    assert body["trace_events"][1]["decision"] == "asked"
+
+
 def test_drawn_area_followup_reuses_geometry(aoi, make_client, monkeypatch, log):
     """[endpoint] Mode 2 multi-turn: draw an area, then ask about 'the same area' with geometry=null
     (exactly what the UI sends after drawing once). The drawn AOI must persist — chat.py must not
