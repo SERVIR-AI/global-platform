@@ -53,7 +53,9 @@ export const useChat = () => {
       messages: [{ role: 'user', content }],
       provider,
       thread_id: threadId,
-      verbose: true, // return the step trace (route → resolve L1/L2 → compute → overlay)
+      // `verbose` is deliberately omitted: it only adds the legacy `trace: string[]`
+      // narration, which the structured `trace_envelope` (returned unconditionally) now
+      // supersedes in the UI. The server keeps `verbose` for CLI/curl use.
       geometry: toChatGeometry(geometry),
       created_at: new Date().toISOString(),
     });

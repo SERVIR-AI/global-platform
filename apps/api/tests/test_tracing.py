@@ -692,3 +692,65 @@ def test_write_trace_envelope_creates_traces_dir_if_missing(log, tmp_path, monke
     envelope = tracing.build_trace_envelope([], thread_id="t1", trace_id="tr-mkdir")
     tracing.write_trace_envelope(envelope)                       # must not raise
     assert (tmp_path / "not-yet-created" / "tr-mkdir.envelope.json").exists()
+
+
+# --- topology drift guard: the frontend hardcodes this graph's shape --------------------
+
+def _frontend_topology():
+    """Parse the node and edge tables the web app hardcodes in graphTopology.ts.
+
+    The frontend draws the execution-flow diagram from a hand-transcribed copy of
+    _build_graph()'s topology, so that it can lay nodes out and highlight the path a turn
+    actually took. Reading the real file here — rather than
+    restating the expected shape in this test — is what makes this a drift guard instead
+    of a second copy to keep in sync.
+    """
+    import re
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[3]
+    source = (repo_root / "apps/web/src/lib/trace/graphTopology.ts").read_text()
+
+    nodes = set(re.findall(r"^\s*\{ id: '(\w+)', kind: 'node'", source, re.MULTILINE))
+    edges = {
+        (match.group(1), match.group(2))
+        for match in re.finditer(r"from: '(\w+)',\s*\n\s*to: '(\w+)',", source)
+    }
+    return nodes, edges
+
+
+# The frontend gives the two LangGraph sentinels friendlier names, and splits __end__ in
+# two so the paused branch can be drawn as its own box. Everything else is 1:1.
+_TS_TO_LANGGRAPH = {"start": "__start__", "end": "__end__", "ask_end": "__end__"}
+
+
+def test_graph_topology_matches_frontend(log):
+    """graphTopology.ts must describe the same nodes and edges as _build_graph().
+
+    Fails the moment a node or an edge is added, removed, or rerouted in graph.py without
+    the diagram being updated — the price of hardcoding the topology in the frontend, paid
+    here rather than discovered as a wrong picture in the UI.
+    """
+    from app.graph import get_graph
+
+    drawable = get_graph().get_graph()
+    backend_nodes = {n for n in drawable.nodes if not n.startswith("__")}
+    backend_edges = {(e.source, e.target) for e in drawable.edges}
+
+    frontend_nodes, frontend_edges_raw = _frontend_topology()
+    frontend_edges = {
+        (_TS_TO_LANGGRAPH.get(source, source), _TS_TO_LANGGRAPH.get(target, target))
+        for source, target in frontend_edges_raw
+    }
+
+    log("BACKEND NODES", sorted(backend_nodes))
+    log("FRONTEND NODES", sorted(frontend_nodes))
+    assert frontend_nodes == backend_nodes, (
+        "apps/web/src/lib/trace/graphTopology.ts is out of date with graph.py's nodes"
+    )
+
+    log("BACKEND EDGES", sorted(backend_edges))
+    log("FRONTEND EDGES", sorted(frontend_edges))
+    assert frontend_edges == backend_edges, (
+        "apps/web/src/lib/trace/graphTopology.ts is out of date with graph.py's edges"
+    )
