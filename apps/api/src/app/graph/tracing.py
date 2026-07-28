@@ -287,6 +287,18 @@ def make_trace_event_operate(
     }
     return trace_event
 
+def _is_answer_grounded(result, answer):
+    """Check if the LLM answer is grounded in the calculated data
+
+    Returns:
+        bool: Whether the answer is grounded
+    """
+    grounded = True
+    if result is not None:
+        number = result.get("count", result.get("length_km", ""))
+        grounded = str(number) in answer.replace(",", "")
+    return grounded
+
 def make_trace_event_finalize(
         start_time: float,
         end_time: float,
@@ -330,7 +342,7 @@ def make_trace_event_finalize(
         "model_used": model_used,
         "tokens": tokens,
         "llm_response": answer,
-        "grounded": grounded,
+        "grounded": _is_answer_grounded(state["result"], answer=answer),
     }
     return trace_event
 
