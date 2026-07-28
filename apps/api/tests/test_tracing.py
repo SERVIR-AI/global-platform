@@ -1,7 +1,7 @@
 """tracing.py in isolation: the hazard/risk prefix split, the countable-asset guess, and
 the two trace-event builders (make_trace_event_router for the three LLM-calling outcomes,
 make_trace_event_no_llm for the apply_choice resume) — each checked against the actual
-required-field set in trace_schema.json's baseStep + routeStep, not just spot-checked.
+required-field set in the trace schema's baseStep + routeStep, not just spot-checked.
 """
 import json
 from datetime import datetime
@@ -11,7 +11,7 @@ import pytest
 
 from app.graph import tracing
 
-# Mirrors trace_schema.json's $defs.baseStep.required + $defs.routeStep's own required list.
+# Mirrors trace schema's $defs.baseStep.required + $defs.routeStep's own required list.
 # A change to either side (code or schema) that drops a key should break this test.
 _REQUIRED_FIELDS = {
     "step", "started_at", "ended_at", "duration", "summary",           # baseStep

@@ -427,7 +427,7 @@ def make_trace_event_fetch(
 ) -> dict:
     """Build one fetchStep event. drained_io_events is the raw list from the IOCollector
     installed around this turn's ingest calls; split here into api_calls (kind == "api")
-    and downloads (everything else), matching trace_schema.json's own description.
+    and downloads (everything else).
 
     aoi is the RAW ensure_aoi bundle (or None on failure) — this function derives the
     compact {name, area_km2, how} view itself via _summarize_aoi, same as every other
@@ -465,7 +465,7 @@ def make_trace_event_fetch(
     return trace_event
 
 def build_trace_envelope(events: list[dict], thread_id: str, trace_id: str) -> dict:
-    """Build the per-turn trace envelope (trace_schema.json's top-level shape) from this
+    """Build the per-turn trace envelope from this
     turn's step events. total_duration sums every step's duration. total_tokens sums only
     steps that carry a real tokens value (resolve/operate never produce one; finalize's
     error_echo branch sets it to None) — skipped, not coerced to zero.
@@ -489,8 +489,8 @@ def build_trace_envelope(events: list[dict], thread_id: str, trace_id: str) -> d
 
 def write_trace_envelope(envelope: dict) -> None:
     """Persist the per-turn trace envelope to disk — a second, richer file alongside
-    geo/trace.py's record() (the old per-query mechanism, kept deliberately — see
-    DECISIONS.md). Named by trace_id, not a timestamp, so two turns completing in the
+    geo/trace.py's record() (the old per-query mechanism). 
+    Named by trace_id, not a timestamp, so two turns completing in the
     same millisecond can't collide."""
     settings = get_settings()
     settings.traces_dir.mkdir(parents=True, exist_ok=True)

@@ -68,7 +68,7 @@ class ChatResponse(BaseModel):
                     "unconditionally, not gated by verbose.")
     trace_envelope: dict | None = Field(
         default=None,
-        description="The per-turn trace envelope (trace_schema.json's top-level shape): "
+        description="The per-turn trace envelope: "
                     "thread_id, trace_id, created_at, total_duration, total_tokens, and steps "
                     "(the same list as trace_events). Best-effort — absent if envelope assembly "
                     "or persistence failed; does not affect the answer.")
