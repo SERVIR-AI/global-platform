@@ -308,7 +308,6 @@ def make_trace_event_finalize(
         config: RunnableConfig,
         answer: str,
         resp,
-        grounded: bool | None,
         error: str | None,
 ) -> dict:
     """Build one finalizeStep event. kind is "error_echo" if error is set, else "llm_phrase"."""
