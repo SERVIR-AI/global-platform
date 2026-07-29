@@ -17,6 +17,8 @@ Monorepo, managed with [uv](https://docs.astral.sh/uv/) (backend) and npm (front
 └── pyproject.toml   # uv workspace root
 ```
 
+> Source code was migrated here separately
+
 ## How it answers a question
 
 ```
@@ -87,3 +89,7 @@ GRP_RUN_SLOW=1 uv run pytest                   # + slow real-data / Drive tests
 - [`apps/api/API_EXAMPLES.md`](apps/api/API_EXAMPLES.md) — the `/api/chat` request/response contract (frontend source of truth).
 - [`apps/api/DEMO.md`](apps/api/DEMO.md) — an exhaustive set of example queries.
 - [`SOURCE_DATA_APPROACH.md`](SOURCE_DATA_APPROACH.md) — the four-layer risk model and design rationale.
+
+## License
+
+Source-available, non-commercial — PolyForm Noncommercial 1.0.0. Free to use, modify, and share for non-commercial purposes (research, education, non-profit, and government use); commercial use is not permitted. This is a source-available license, not an OSI "open source" license.
