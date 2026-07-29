@@ -318,7 +318,7 @@ def test_usage_cost_uses_per_million_pricing(log):
 _REQUIRED_FIELDS_FINALIZE = {
     "step", "started_at", "ended_at", "duration", "summary",           # baseStep
     "node", "why", "kind", "error", "llm_provider", "model_used", "tokens",
-    "llm_response", "grounded",
+    "llm_response", "messages", "grounded",
 }
 
 
@@ -331,34 +331,39 @@ def assert_valid_finalize_step(event, log=None):
 
 
 def test_finalize_event_error_echo(log):
-    """No LLM call: tokens/provider/model/grounded are all None."""
+    """No LLM call: tokens/provider/model/messages/grounded are all None."""
     event = tracing.make_trace_event_finalize(
         start_time=0.0, end_time=0.01, started_at="t0", ended_at="t1", state={"events": []},
-        config=_config(), answer="No data for that request: unknown place",
-        resp=None, grounded=None, error="No data for that request: unknown place")
-    log("EVENT", {k: event[k] for k in ("kind", "tokens", "grounded")})
+        config=_config(), messages=None, answer="No data for that request: unknown place",
+        resp=None, error="No data for that request: unknown place")
+    log("EVENT", {k: event[k] for k in ("kind", "tokens", "messages", "grounded")})
     assert_valid_finalize_step(event, log)
     assert event["kind"] == "error_echo"
     assert event["llm_provider"] is None
     assert event["tokens"] is None
+    assert event["messages"] is None
     assert event["grounded"] is None
     assert event["llm_response"] == "No data for that request: unknown place"
 
 
 def test_finalize_event_llm_phrase(log):
-    """A real phrasing call: tokens/provider/model populated, grounded passed through from
-    the caller (trace.record()'s own check), not recomputed here."""
+    """A real phrasing call: tokens/provider/model populated, messages carries the
+    system+assistant transcript, grounded computed here from state['result'] (the number
+    appears verbatim in the answer)."""
     resp = _llm_response(content="12 hospitals are in Battambang.")
     event = tracing.make_trace_event_finalize(
-        start_time=0.0, end_time=0.3, started_at="t0", ended_at="t1", state={"events": []},
-        config=_config(), answer="12 hospitals are in Battambang.",
-        resp=resp, grounded=True, error=None)
-    log("EVENT", {k: event[k] for k in ("kind", "tokens", "grounded")})
+        start_time=0.0, end_time=0.3, started_at="t0", ended_at="t1",
+        state={"events": [], "result": {"count": 12}},
+        config=_config(), messages=_MESSAGES, answer="12 hospitals are in Battambang.",
+        resp=resp, error=None)
+    log("EVENT", {k: event[k] for k in ("kind", "tokens", "messages", "grounded")})
     assert_valid_finalize_step(event, log)
     assert event["kind"] == "llm_phrase"
     assert event["error"] is None
     assert event["llm_provider"] == "gemini"
     assert event["grounded"] is True
+    assert event["messages"][0] == {"role": "system", "type": "text", "content": "you are a routing agent"}
+    assert event["messages"][-1] == {"role": "assistant", "type": "text", "content": "12 hospitals are in Battambang."}
     assert event["llm_response"] == "12 hospitals are in Battambang."
 
 
@@ -366,7 +371,7 @@ def test_finalize_event_step_counts_existing_events(log):
     prior = [{"node": "router"}, {"node": "operate"}]
     event = tracing.make_trace_event_finalize(
         start_time=0.0, end_time=0.01, started_at="t0", ended_at="t1", state={"events": prior},
-        config=_config(), answer="ok", resp=None, grounded=None, error="ok")
+        config=_config(), messages=None, answer="ok", resp=None, error="ok")
     assert event["step"] == 2
 
 

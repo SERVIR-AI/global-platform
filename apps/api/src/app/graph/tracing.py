@@ -327,12 +327,13 @@ def make_trace_event_finalize(
         tokens = _usage(resp, price_in=settings.price_in, price_out=settings.price_out)
         summary = "Phrased the final answer from the computed result"
         why = "The model only phrases the result; it doesn't compute the number."
+    messages_out = None
     if messages:
         messages_out = [
             {"role": "system", "type": "text", "content": messages[0].get("content", "")},
             {"role": "assistant", "type": "text", "content": resp.choices[0].message.content}
         ]
-    
+
     trace_event = {
         "node": "finalize",
         "step": len(state.get("events", [])),
@@ -348,7 +349,7 @@ def make_trace_event_finalize(
         "tokens": tokens,
         "llm_response": answer,
         "messages": messages_out,
-        "grounded": _is_answer_grounded(state["result"], answer=answer) if not error else True,
+        "grounded": _is_answer_grounded(state.get("result"), answer=answer) if not error else None,
     }
     return trace_event
 
