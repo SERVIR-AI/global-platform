@@ -432,7 +432,7 @@ def finalize(state: State, config) -> dict:
         ended_at = datetime.now(timezone.utc).isoformat()
         trace_event = tracing.make_trace_event_finalize(
             start_time=t_start, end_time=t_end, started_at=started_at, ended_at=ended_at,
-            state=state, config=config, answer=answer, resp=None, error=answer)
+            state=state, config=config, answer=answer, messages=None, resp=None, error=answer)
         return {"messages": [{"role": "assistant", "content": answer}], "events": [trace_event]}
 
     client = config["configurable"]["client"]
@@ -462,7 +462,7 @@ def finalize(state: State, config) -> dict:
     ended_at = datetime.now(timezone.utc).isoformat()
     trace_event = tracing.make_trace_event_finalize(
         start_time=t_start, end_time=t_end, started_at=started_at, ended_at=ended_at,
-        state=state, config=config, answer=answer, resp=resp, error=None)
+        messages=messages, state=state, config=config, answer=answer, resp=resp, error=None)
     return {"messages": [{"role": "assistant", "content": answer}], "usage": [_usage(resp)],
             "events": [trace_event]}
 

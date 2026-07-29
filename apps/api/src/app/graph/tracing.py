@@ -287,7 +287,7 @@ def make_trace_event_operate(
     }
     return trace_event
 
-def _is_answer_grounded(result, answer):
+def _is_answer_grounded(result: dict, answer: str):
     """Check if the LLM answer is grounded in the calculated data
 
     Returns:
@@ -306,6 +306,7 @@ def make_trace_event_finalize(
         ended_at: str,
         state: dict,
         config: RunnableConfig,
+        messages: list[dict] | None,
         answer: str,
         resp,
         error: str | None,
@@ -313,7 +314,7 @@ def make_trace_event_finalize(
     """Build one finalizeStep event. kind is "error_echo" if error is set, else "llm_phrase"."""
     state = state or {}
     kind = "error_echo" if error is not None else "llm_phrase"
-
+    
     if kind == "error_echo":
         llm_provider = model_used = tokens = None
         summary = "Returned the refusal/failure message as-is"
@@ -326,7 +327,12 @@ def make_trace_event_finalize(
         tokens = _usage(resp, price_in=settings.price_in, price_out=settings.price_out)
         summary = "Phrased the final answer from the computed result"
         why = "The model only phrases the result; it doesn't compute the number."
-
+    if messages:
+        messages_out = [
+            {"role": "system", "type": "text", "content": messages[0].get("content", "")},
+            {"role": "assistant", "type": "text", "content": resp.choices[0].message.content}
+        ]
+    
     trace_event = {
         "node": "finalize",
         "step": len(state.get("events", [])),
@@ -341,7 +347,8 @@ def make_trace_event_finalize(
         "model_used": model_used,
         "tokens": tokens,
         "llm_response": answer,
-        "grounded": _is_answer_grounded(state["result"], answer=answer),
+        "messages": messages_out,
+        "grounded": _is_answer_grounded(state["result"], answer=answer) if not error else True,
     }
     return trace_event
 

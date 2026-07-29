@@ -443,6 +443,13 @@ const finalizeFields = (step: FinalizeStep): TraceFieldGroup[] => {
           'developer',
           maybeText(step.llm_response, MISSING.noneRecorded),
         ),
+        field(
+          'transcript',
+          'Transcript',
+          'developer',
+          step.messages && step.messages.length > 0 ? 
+          json(step.messages) : missing(MISSING.noneRecorded),
+        ),
       ],
     },
   ];

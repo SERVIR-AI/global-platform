@@ -216,6 +216,7 @@ export interface FinalizeStep extends TraceStepBase {
   /** Genuinely null on `error_echo` — unlike the router's zeroed object. */
   tokens: StepTokens | null;
   llm_response: string | null;
+  messages: TraceMessage[] | null;
   /** True if the computed number appears verbatim in the answer text. */
   grounded: boolean | null;
 }
