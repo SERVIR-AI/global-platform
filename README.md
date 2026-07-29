@@ -92,4 +92,4 @@ GRP_RUN_SLOW=1 uv run pytest                   # + slow real-data / Drive tests
 
 ## License
 
-Source-available, non-commercial — PolyForm Noncommercial 1.0.0. Free to use, modify, and share for non-commercial purposes (research, education, non-profit, and government use); commercial use is not permitted. This is a source-available license, not an OSI "open source" license.
+Licensed under the `Eclipse Public License 2.0 (EPL-2.0)` license. See [LICENSE](LICENSE.md) for the full text.
