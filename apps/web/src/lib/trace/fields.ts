@@ -19,6 +19,7 @@ import type {
   StepTokens,
   TraceApiCall,
   TraceDownload,
+  TraceMessage,
   TraceStep,
 } from '@/types/trace';
 import { API_LABEL, AOI_HOW_LABEL, MISSING } from './labels';
@@ -37,6 +38,7 @@ export type TraceFieldValue =
   | { kind: 'list'; items: string[] }
   | { kind: 'flag'; value: boolean; label: string }
   | { kind: 'missing'; reason: string }
+  | { kind: 'transcript'; messages: TraceMessage[] }
   | { kind: 'json'; value: unknown };
 
 export interface TraceField {
@@ -60,6 +62,13 @@ const code = (value: string): TraceFieldValue => ({ kind: 'code', text: value })
 const json = (value: unknown): TraceFieldValue => ({ kind: 'json', value });
 const missing = (reason: string): TraceFieldValue => ({ kind: 'missing', reason });
 const flag = (value: boolean, label: string): TraceFieldValue => ({ kind: 'flag', value, label });
+
+/** A message transcript, or an explained absence when there's nothing to show. */
+const transcript = (
+  messages: TraceMessage[] | null | undefined,
+  reason: string,
+): TraceFieldValue =>
+  messages && messages.length > 0 ? { kind: 'transcript', messages } : missing(reason);
 
 /** A list, or an explained absence — an empty array is an absence, not an empty list. */
 const list = (items: string[] | null | undefined, reason: string): TraceFieldValue =>
@@ -214,7 +223,7 @@ const routerFields = (step: RouterStep): TraceFieldGroup[] => {
           'transcript',
           'Transcript',
           'developer',
-          step.messages.length > 0 ? json(step.messages) : missing(MISSING.noneRecorded),
+          transcript(step.messages, MISSING.noneRecorded),
         ),
       ],
     },
@@ -447,8 +456,7 @@ const finalizeFields = (step: FinalizeStep): TraceFieldGroup[] => {
           'transcript',
           'Transcript',
           'developer',
-          step.messages && step.messages.length > 0 ? 
-          json(step.messages) : missing(MISSING.noneRecorded),
+          transcript(step.messages, MISSING.noModelCall),
         ),
       ],
     },

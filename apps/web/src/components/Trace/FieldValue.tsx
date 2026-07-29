@@ -54,6 +54,36 @@ const FieldValue: FC<FieldValueProps> = ({ value }) => {
         </span>
       );
 
+    case 'transcript':
+      // A fixed-height, vertically-scrolling box. Each message is its own collapsible
+      // block, collapsed by default, so a long system prompt doesn't wall off the panel —
+      // you see a stack of role headers with previews and open only what you want.
+      // `whitespace-pre-wrap` + `break-words` keep the expanded body wrapping instead of
+      // side-scrolling.
+      return (
+        <div className="max-h-72 overflow-y-auto rounded-lg border border-base-300 bg-base-200/40 p-1.5 flex flex-col gap-1">
+          {value.messages.map((message, index) => {
+            const body =
+              message.type === 'tool_call' ? '(tool call — no text)' : (message.content ?? '');
+            const oneLine = body.replace(/\s+/g, ' ').trim();
+            const preview = oneLine.length > 60 ? `${oneLine.slice(0, 60)}…` : oneLine;
+            return (
+              <details key={index} className="rounded bg-base-100/70 px-2 py-1">
+                <summary className="cursor-pointer select-none">
+                  <span className="text-[0.65rem] uppercase tracking-wide text-base-content/60">
+                    {message.role}
+                  </span>
+                  <span className="ml-2 text-base-content/40">{preview}</span>
+                </summary>
+                <div className="mt-1 whitespace-pre-wrap break-words font-mono text-[0.7rem] leading-relaxed">
+                  {body}
+                </div>
+              </details>
+            );
+          })}
+        </div>
+      );
+
     case 'json':
       return (
         <details>
