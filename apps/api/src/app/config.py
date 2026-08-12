@@ -6,14 +6,18 @@ locally and in production without code changes.
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Provider = Literal["claude", "openai", "gemini"]
+# Vertex is embeddings-only here: it serves them on its native endpoint and
+# authenticates with short-lived tokens, so it is not an OpenAI-compat chat provider.
+EmbeddingProvider = Literal["claude", "openai", "gemini", "vertex"]
 
 # Paths derived from this file's location (apps/api/src/app/config.py) so the app
 # resolves config/data no matter which directory uvicorn is launched from.
@@ -30,11 +34,16 @@ class Settings(BaseSettings):
 
     # --- Service ---
     app_name: str = "global-risk-platform-api"
-    # Origins allowed to call the API from a browser. Override in prod with a
-    # comma-separated env var, e.g. CORS_ORIGINS='["https://app.example.com"]'.
+    # Origins allowed to call the API from a browser. Accepts `*`, a
+    # comma-separated list, or a JSON array.
     # localhost and 127.0.0.1 are DIFFERENT origins to a browser: omitting either
     # blocks the trust chrome's resolver fetch, and it fails closed to "unverified".
-    cors_origins: list[str] = Field(
+    # Deployed, '*' is legitimate: a consuming app on ITS own origin has to be able
+    # to resolve our receipts.
+    # NoDecode: without it pydantic-settings JSON-decodes the env value before any
+    # validator runs, so CORS_ORIGINS=* crashes the app at import rather than
+    # reaching the parser below.
+    cors_origins: Annotated[list[str], NoDecode] = Field(
         default=[
             "http://localhost:5173",
             "http://127.0.0.1:5173",
@@ -42,6 +51,19 @@ class Settings(BaseSettings):
             "http://127.0.0.1:8080",
         ]
     )
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_origins(cls, v):
+        """Accept `*`, a comma-separated list, or a JSON array. Every one of these
+        is a plausible thing to type into a deploy config, and the wrong guess is a
+        crash at import rather than a bad value."""
+        if not isinstance(v, str):
+            return v
+        v = v.strip()
+        if v.startswith("["):
+            return json.loads(v)
+        return [o.strip() for o in v.split(",") if o.strip()]
 
     # --- Workspace paths ---
     # conf/ and cache/ live at the repo root. Defaults are absolute (resolved from
@@ -78,14 +100,30 @@ class Settings(BaseSettings):
     # Embeddings go through a provider's OpenAI-compat /embeddings endpoint.
     # Separate from default_provider because claude serves no embeddings; swap
     # the backend entirely by handing Corpus any object with .embed(texts).
-    embedding_provider: Provider = "gemini"
+    embedding_provider: EmbeddingProvider = "gemini"
     embedding_model: str = "gemini-embedding-001"
+    # Truncate the embedding to this width (Vertex `outputDimensionality`). Pinning
+    # 1536 keeps the stored matrix the same size as the previous corpus instead of
+    # doubling it; 0/None means "whatever the model returns".
+    embedding_dimensions: int | None = 1536
+
+    # --- Vertex AI (embeddings) ---
+    # Project defaults to whatever ADC resolves to (the runtime service account when
+    # deployed), so this only needs setting when they differ.
+    vertex_project: str | None = None
+    vertex_location: str = "us-central1"
     # Cosine floor below which retrieval returns nothing and the caller declines
     # ("no relevant document") — never a weak match dressed up as an answer.
-    # UNCALIBRATED default: score distributions are model-specific; calibrate
-    # against real bulletins once the corpus lands (A4) — the live test logs the
-    # related-vs-unrelated similarity spread to support that.
-    rag_min_relevance: float = 0.5
+    #
+    # THE FLOOR IS MODEL-SPECIFIC AND MUST BE RE-MEASURED WHEN THE EMBEDDER CHANGES.
+    # Measured 2026-07-28 against the food-security corpus on
+    # vertex:gemini-embedding-001 @1536d — in-corpus top-1 0.744-0.789, off-corpus
+    # 0.505-0.607, so 0.68 sits in the gap. The previous 0.5 was calibrated for
+    # openai:text-embedding-3-small, whose range runs lower; left at 0.5 under
+    # Gemini, 3 of 5 deliberately off-topic queries came back ABOVE the floor —
+    # i.e. the decline guarantee silently stops working.
+    # Still a small sample: widen it when the corpus grows (A4).
+    rag_min_relevance: float = 0.68
 
     # --- LLM defaults ---
     # Which provider to use when a request doesn't specify one.

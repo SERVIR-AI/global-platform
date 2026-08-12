@@ -77,15 +77,22 @@ def _matches(meta: dict, filters: dict) -> bool:
     return True
 
 
+# Loaded corpora, keyed by name. The embedding matrix is ~130MB and every call
+# site constructs a fresh Corpus, so re-reading it per request is both slow and a
+# memory-churn OOM risk on a small container. Keyed on the files' mtime+size, so
+# an ingest invalidates it with no explicit cache-busting.
+_LOADED: dict[str, tuple] = {}
+
+
 class Corpus:
     """A named, bounded document library."""
 
     _FILES = ("chunks.jsonl", "embeddings.npy", "meta.json")
 
     def __init__(self, name: str, embedder=None):
-        from .embed import ProviderEmbedder  # keeps store importable without llm deps
+        from .embed import get_embedder  # keeps store importable without llm deps
         self.name = name
-        self.embedder = embedder or ProviderEmbedder()
+        self.embedder = embedder or get_embedder()
         self.dir = Path(get_settings().cache_dir) / "rag" / name
         self._lock = _corpus_lock(name)
         self._chunks: list[dict] = []
@@ -101,8 +108,27 @@ class Corpus:
         return {"provider": getattr(self.embedder, "provider", "custom"),
                 "model": getattr(self.embedder, "model", "custom")}
 
+    def _signature(self) -> tuple:
+        """Identity of the on-disk corpus. Any ingest changes it, so a stale cache
+        entry can never be served."""
+        out = []
+        for f in self._FILES:
+            p = self.dir / f
+            st = p.stat() if p.exists() else None
+            out.append((f, st.st_mtime_ns, st.st_size) if st else (f, None, None))
+        return tuple(out)
+
     def _load(self) -> None:
         self._chunks, self._matrix, self._meta = [], None, {}
+        sig, embedder = self._signature(), self._embedder_id()
+        cached = _LOADED.get(self.name)
+        if cached and cached[0] == sig and cached[1] == embedder:
+            # The embedder is part of the key so a cache hit can never skip the
+            # model-mismatch guard below. chunks is COPIED because ingest extends
+            # it in place; the matrix is only rebound, never mutated, so it shares.
+            _, _, chunks, self._matrix, self._meta = cached
+            self._chunks = list(chunks)
+            return
         present = [f for f in self._FILES if (self.dir / f).exists()]
         if not present:
             return
@@ -130,6 +156,9 @@ class Corpus:
                 f"{self._meta.get('provider')}:{self._meta.get('model')} but the active "
                 f"embedder is {active['provider']}:{active['model']} — scores would be "
                 f"nonsense; switch the embedding settings back, or {self._fix()}")
+        # Cached only once every validation above has passed, so a torn or
+        # mismatched corpus is never served from memory.
+        _LOADED[self.name] = (sig, active, list(self._chunks), self._matrix, self._meta)
 
     def _save(self) -> None:
         """Atomic per file (tmp + os.replace), under the corpus lock. np.save gets
