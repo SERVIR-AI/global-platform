@@ -1,0 +1,21 @@
+# Continuous replication of the receipt institution to object storage.
+#
+# Receipts must outlive any single container (rule 7). Cloud Run's disk is
+# ephemeral, so this is the difference between "a receipt you can resolve next
+# month" and "a verdict that died on the last redeploy".
+#
+# Auth is the runtime service account's ambient credentials — no key material here.
+dbs:
+  - path: ${GRP_DB_PATH}
+    replicas:
+      - type: gcs
+        bucket: ${LITESTREAM_BUCKET}
+        path: mcp/grp.db
+        # Receipts are small and rare; sync often so the loss window on an abrupt
+        # instance kill is a second, not a minute.
+        sync-interval: 1s
+        # The 24h default would GC older generations — so one bad boot that
+        # started a fresh generation would permanently destroy the previous
+        # receipts. 90 days keeps a recoverable history of the institution.
+        retention: 2160h
+        snapshot-interval: 24h

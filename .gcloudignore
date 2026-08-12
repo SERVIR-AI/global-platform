@@ -1,0 +1,42 @@
+# What gcloud uploads as build context. Deliberately does NOT inherit .gitignore.
+#
+# The corpus (cache/rag) is gitignored but MUST ship — it is the evidence the
+# platform retrieves from. If .gitignore were inherited, `gcloud run deploy
+# --source .` would silently upload without it and corpus_search would return
+# nothing: a demo that looks broken rather than one that errors.
+
+.git
+.gitignore
+.venv
+**/.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+**/node_modules
+apps/web/dist
+
+# 1.8GB of flood/risk rasters this deployment does not serve.
+cache/tiffs
+cache/traces
+cache/siem-reap
+cache/phnom-penh
+cache/chiang-mai
+cache/cropmonitor
+cache/draw-*
+# Runtime record-state: a baked grp.db would shadow the replica restored at boot.
+cache/mcp
+
+**/.env
+**/.env.*
+docs/
+styleguide/
+grp_mvp/
+BUILD_PLAN.md
+gitleaks-report.json
+*.pdf
+*.xlsx
+e2e_*.json
+**/.DS_Store
+
+# local rollback copy of the pre-Vertex corpus — never ships
+cache/rag/*.openai-backup
