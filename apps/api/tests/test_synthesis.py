@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from app.config import get_settings
 from app.food_security import cropmonitor, synthesis
+from app.mcp import feeds, registry
 from app.main import app
 from app.rag.embed import ProviderEmbedder
 from app.rag.store import Corpus
@@ -86,12 +87,27 @@ def brief_env(monkeypatch, tmp_path):
     (one forecast, one retrospective). Returns a stub installer."""
     monkeypatch.setattr(get_settings(), "cache_dir", tmp_path)
     monkeypatch.setattr(get_settings(), "rag_min_relevance", 0.5)
+    # Pin the embedder: get_embedder() picks a BACKEND from settings, so without
+    # this the suite silently inherits the developer's .env — a vertex .env made
+    # production code build a real VertexEmbedder that the stub below never touched.
+    monkeypatch.setattr(get_settings(), "embedding_provider", "openai")
+    monkeypatch.setattr(get_settings(), "embedding_model", "text-embedding-3-small")
     monkeypatch.setattr(ProviderEmbedder, "embed",
                         lambda self, texts: HashEmbedder().embed(texts))
     monkeypatch.setattr(cropmonitor, "_fetch_json",
                         lambda url, params: LAYERS if url.endswith("FeatureServer")
                         else CROPS if params.get("returnDistinctValues") == "true"
                         else ROWS)
+    # Pillar-1 driver feeds. Stubbed at the feed seam, NOT at _driver_citations, so
+    # registry iteration / citation shape / staleness handling still run — while the
+    # suite stays offline. Without this the brief tests silently reached NOAA and IRI
+    # over the network, which is how an offline suite rots into a flaky one.
+    monkeypatch.setattr(feeds, "query", lambda dataset, params=None: {
+        "status": "ok", "dataset": dataset, "as_of": "MJJ 2026", "count": 1,
+        "summary": f"canned {dataset}",
+        "records": [{"season": "MJJ", "year": 2026, "value": 1.39}],
+        "passport": {"source": "stub", "url": f"https://example.invalid/{dataset}",
+                     "query": dataset, "stale_data": {"served_stale": False}}})
     # ProviderEmbedder (embed stubbed) so the corpus identity matches synthesize()'s.
     corpus = Corpus(synthesis.CORPUS, embedder=ProviderEmbedder())
     corpus.ingest("El Nino seasonal rainfall forecast outlook Kenya maize "
@@ -122,10 +138,15 @@ def test_grounded_brief_ships_with_sources_and_receipts(brief_env):
     for section in synthesis.SECTIONS + ("## Sources",):
         assert section in out["brief"]
     assert out["grounded"]["passed"] and out["grounded"]["attempts"] == 1
-    assert [c["n"] for c in out["citations"]] == [1, 2, 3, 4]
+    # Contiguous from 1, not a magic count: a new registry driver row must not
+    # break unrelated tests (it did, twice).
+    assert [c["n"] for c in out["citations"]] == list(range(1, len(out["citations"]) + 1))
     assert out["citations"][0]["temporal"] == "forecast"
-    assert out["citations"][2]["kind"] == "conditions"
-    assert out["citations"][3]["kind"] == "calendar"   # hub default rides along
+    kinds = [c["kind"] for c in out["citations"]]
+    assert kinds.count("conditions") == 1 and kinds.count("calendar") == 1
+    n_drivers = sum(1 for s in registry.FEEDS.values()
+                    if s.get("status") == "available" and s.get("brief_role") == "driver")
+    assert kinds.count("index") == n_drivers   # every registry-tagged driver rides along
     assert "source: https://icpac.net/g.pdf" in out["brief"]
     assert "archived: /api/food-security/rag/document/" in out["brief"]
     assert "query: Crop IN" in out["brief"]            # the conditions receipt
@@ -152,13 +173,13 @@ def test_render_pack_numbering_matches_citations(brief_env):
 def test_phantom_citation_fails_retries_then_declines(brief_env):
     """A citation number not in the pack can never ship — including inside a
     cluster marker like [1, 9]: one retry, then an honest decline."""
-    cluster = GOOD_BRIEF.replace("[2]", "[2, 9]")
+    cluster = GOOD_BRIEF.replace("[2]", "[2, 99]")
     stub = brief_env([cluster, cluster])
     out = synthesis.synthesize("maize in Kenya?")
     assert out["declined"] is True and stub.synth_calls == 2
-    assert out["grounded"]["phantom_citations"] == [9]
+    assert out["grounded"]["phantom_citations"] == [99]
     assert "refusing to ship" in out["decline_reason"]
-    assert "not in the evidence list: [9]" in stub.seen[-1][-1]["content"]  # retry feedback
+    assert "not in the evidence list: [99]" in stub.seen[-1][-1]["content"]  # retry feedback
 
 
 def test_cluster_and_range_citations_are_understood(brief_env):
@@ -300,7 +321,7 @@ def test_calendar_flows_into_the_evidence_pack_and_prompt(brief_env):
         calendar=[{"season": "Long rains", "planting": [4, 6], "harvest": [9, 11]}])
     assert out["declined"] is False
     cal_cite = next(c for c in out["citations"] if c["kind"] == "calendar")
-    assert cal_cite["adjusted"] is True and cal_cite["n"] == 4
+    assert cal_cite["adjusted"] is True and cal_cite["n"] == len(out["citations"])
     assert out["evidence"]["calendar"] == "adjusted"
     assert "ADJUSTED by the requester" in stub.seen[-1][-1]["content"]
 
@@ -348,3 +369,43 @@ def test_chat_endpoint_round_trip_and_trace(brief_env):
     r = client.post("/api/food-security/chat",   # null/block content -> 400, not 500
                     json={"messages": [{"role": "user", "content": None}]})
     assert r.status_code == 400
+
+
+def test_driver_feeds_reach_the_pack_and_are_marked_as_pulls(brief_env):
+    """A3.1: the Pillar-1 drivers must actually land in the evidence pack, carry
+    the no-local-inference constraint in their own text (so it survives into the
+    receipt, not just the prompt), and be typed as live pulls."""
+    from app.mcp import record
+    brief_env([GOOD_BRIEF])
+    citations, gaps, stats = synthesis.gather_evidence(PARSED, trace=[])
+    drivers = [c for c in citations if c["kind"] == "index"]
+    assert stats["drivers"] == len(drivers) > 0
+    for d in drivers:
+        assert "DRIVER SIGNAL ONLY" in d["text"]
+        assert record._is_pulled(d), f"{d['source']} would mint as an archived document"
+
+
+def test_drivers_alone_cannot_carry_a_brief(brief_env, monkeypatch, tmp_path):
+    """The drivers are GLOBAL. On a question about one country they establish the
+    ocean state and nothing about that place, so they must not clear the
+    evidence bar — that would be the local inference Phase 1 forbids."""
+    import shutil
+    shutil.rmtree(get_settings().cache_dir / "rag", ignore_errors=True)
+
+    def down(url, params):
+        raise cropmonitor.ServiceUnreachable("network down")
+    monkeypatch.setattr(cropmonitor, "_fetch_json", down)
+    stub = brief_env([])                       # no drafts: a synthesis call would raise
+    out = synthesis.synthesize("El Nino in Kenya?")
+    assert out["declined"] is True and stub.synth_calls == 0
+    assert "no forecast/outlook document" in out["decline_reason"]
+
+
+def test_a_healthy_feed_is_never_labelled_cache_served(brief_env):
+    """Crying wolf is its own dishonesty: the climate adapters always attach a
+    stale_data dict, so testing its PRESENCE flagged every healthy feed as
+    cache-served and put a false staleness warning into the evidence."""
+    brief_env([GOOD_BRIEF])
+    citations, _, _ = synthesis.gather_evidence(PARSED, trace=[])
+    for c in (c for c in citations if c["kind"] == "index"):
+        assert "LAST-GOOD CACHE" not in c["text"], c["source"]

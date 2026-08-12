@@ -53,7 +53,9 @@ Non-negotiable rules:
 - Never state a number, rating, or projection that does not appear in the evidence.
 - Attribute every claim to its authority by name ("The GEOGLAM Crop Monitor rates...", "FEWS NET reported...", "ICPAC's outlook projects..."). Never say "we computed" or "our model predicts"; never present a projection as fact.
 - Forecast/outlook statements may only cite evidence marked temporal=forecast, presented as dated projections of the issuing authority.
-- The Season timing caveat MUST be based on the crop-calendar evidence entry (when present) and the asked-in month; if that entry is marked ADJUSTED, the caveat must say the calendar was adjusted by the requester.
+- The Season timing caveat MUST be based on the crop-calendar evidence entry (when present) and the asked-in month; if that entry is marked ADJUSTED, the caveat must say the calendar was adjusted by the requester. If there is NO crop-calendar entry — for example the question names no crop — still write the section, and say plainly that no crop calendar applies so timing cannot be pinned to a season. Never omit a required section.
+- Evidence marked DRIVER SIGNAL ONLY (ENSO/ONI, IOD/DMI, the model plume, the IRI outlook) describes the ocean/atmosphere state. You may report its status, strength, timing and historical analogues, and you MUST attribute it. You may NOT use it on its own to claim any local rainfall, crop or food-security outcome — for a local claim, cite evidence that is itself about that place. If the only evidence for a local effect is a driver index, say the link is not established by this pack.
+- Model counts in the plume are COUNTS, not probabilities. Never convert "N of M models" into a percentage or a chance.
 - The "Known gaps" in the request MUST be reflected in the What's missing section.
 - If the evidence cannot support an answer, write no sections; reply with one paragraph starting "DECLINE:" naming exactly what is missing.
 
@@ -157,11 +159,87 @@ def _conditions_citation(crop, country, trace):
             "stale_data": stale, "text": text}, None
 
 
+def _driver_citations(trace):
+    """The Pillar-1 climate DRIVER signal (ENSO/IOD) as evidence entries.
+
+    Registry-driven, not hardcoded: any FEEDS row tagged `brief_role: driver` lands
+    here, so a sixth driver feed is a config row. Goes through `feeds.query` rather
+    than the fetchers so the passport, declines and staleness are the same ones the
+    tool surface reports — one contract, not two.
+
+    Each entry carries the use-case doc's hard constraint in its own text: Phase 1
+    describes the SIGNAL and must not infer local agricultural impact. Putting that
+    on the evidence itself (not only in the system prompt) means it survives into
+    the pack and the receipt, where a reader can check it.
+    """
+    from ..mcp import feeds, registry     # local: mirrors registry's own cycle guard
+
+    def render(records, budget=1800):
+        """Feed rows -> evidence prose, shape-driven rather than feed-name-driven.
+
+        A summary line alone is not evidence: `enso_outlook`'s whole purpose is the
+        official probability wording, and a citation that said "11 narrative
+        sections" carried none of it — the model could not quote what it could not
+        see. Budgeted, because an unbounded narrative would crowd the pack.
+        """
+        parts = []
+        for r in records or []:
+            if isinstance(r, dict) and "paragraphs" in r:          # narrative sections
+                parts.append(f"{r.get('heading')}: " + " ".join(r["paragraphs"]))
+            elif isinstance(r, dict) and "forecast" in r:          # per-model plume rows
+                continue                                           # summarised, not quoted
+            elif isinstance(r, dict):
+                parts.append("; ".join(f"{k}={v}" for k, v in r.items()))
+            else:
+                parts.append(str(r))
+            if sum(len(p) for p in parts) > budget:
+                parts.append(f"[... {len(records) - len(parts)} further rows not shown]")
+                break
+        return " | ".join(parts)[:budget]
+
+    out, gaps = [], []
+    rows = sorted((n, s) for n, s in registry.FEEDS.items()
+                  if s.get("status") == "available" and s.get("brief_role") == "driver")
+    for name, spec in rows:
+        res = feeds.query(name)
+        if res.get("status") != "ok":
+            trace.append(f"driver[{name}] -> {res.get('status')}: {res.get('note')}")
+            gaps.append(f"{name}: {res.get('note') or 'no data'}")
+            continue
+        p = res.get("passport") or {}
+        body = render(res.get("records"))
+        basis = (f" [SST basis: {p['sst_basis']}]" if p.get("sst_basis") else "")
+        text = (f"{spec.get('source')} {name} as of {res.get('as_of')}{basis}: "
+                f"{res.get('summary')}."
+                + (f" {body}" if body else "") +
+                " DRIVER SIGNAL ONLY — this describes the ocean/atmosphere state and says "
+                "nothing about rainfall, crops or food security at any particular place.")
+        if res.get("note"):
+            text += f" NOTE: {res['note']}"
+        stale = p.get("stale_data") or {}
+        if stale.get("served_stale"):
+            text += (f" NOTE: served from last-good cache, not a live read "
+                     f"({stale.get('reason')}) — treat as possibly out of date.")
+            trace.append(f"driver[{name}] -> STALE ({stale.get('reason')})")
+        else:
+            trace.append(f"driver[{name}] -> {res.get('count')} rows as of {res.get('as_of')}")
+        out.append({"kind": "index",          # `index` is in record._PULLED -> tagged as a live pull
+                    "source": spec.get("source"), "title": spec.get("title") or spec.get("description", name),
+                    "pub_date": res.get("as_of"), "validation": spec.get("validation"),
+                    "residency": spec.get("residency"), "url": p.get("url"),
+                    "query": p.get("query"), "stale_data": stale or None,
+                    "temporal": "forecast" if "forecast" in name or "plume" in name
+                                or "outlook" in name else "observation",
+                    "text": text})
+    return out, gaps
+
+
 def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None, None)):
     """Deterministic evidence assembly: two retrieval slices + the conditions feed
-    + the crop calendar. Returns (citations, gaps, stats), citations numbered.
-    A calendar override made for one country/crop is never silently applied to
-    another — a mismatch drops it and declares the drop as a gap."""
+    + the Pillar-1 climate drivers + the crop calendar. Returns (citations, gaps,
+    stats), citations numbered. A calendar override made for one country/crop is
+    never silently applied to another — a mismatch drops it and declares the drop
+    as a gap."""
     corpus = Corpus(CORPUS)
     crop, country, focus = parsed["crop"], parsed["country"], parsed["focus"]
     gaps = []
@@ -193,6 +271,9 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
         citations.append(cond)
     else:
         gaps.append(gap)
+    drivers, driver_gaps = _driver_citations(trace)
+    citations.extend(drivers)
+    gaps.extend(driver_gaps)
     asked_month = datetime.now(timezone.utc).month
     t_country, t_crop = calendar_target
     if calendar_override and (
@@ -214,7 +295,7 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
     for n, c in enumerate(citations, 1):
         c["n"] = n
     stats = {"forecast_hits": len(forecast_hits), "retrospective_hits": len(retro_hits),
-             "conditions": cond is not None,
+             "conditions": cond is not None, "drivers": len(drivers),
              "calendar": (cal or {}).get("adjusted") is not None and (
                  "adjusted" if (cal or {}).get("adjusted") else "default"),
              # the literal retrieval queries — provenance for the retrieval step itself
@@ -314,8 +395,13 @@ def synthesize(question, provider=None, model=None, calendar=None,
 
     citations, gaps, stats = gather_evidence(parsed, trace, calendar_override=calendar,
                                              calendar_target=calendar_target)
-    # A calendar is context, not evidence — it cannot carry a brief alone.
-    if not any(c["kind"] != "calendar" for c in citations):
+    # A calendar is context, not evidence — it cannot carry a brief alone. Neither
+    # can the driver indices: they are GLOBAL, so on a question about one country
+    # they establish the ocean state and nothing about that place. Letting them
+    # clear the bar would let the engine answer "maize in Kenya" out of an ENSO
+    # index alone, which is exactly the inference the use case forbids in Phase 1.
+    _CONTEXT_ONLY = ("calendar", "index")
+    if not any(c["kind"] not in _CONTEXT_ONLY for c in citations):
         trace.append("evidence -> empty; declining without a synthesis call")
         return _declined(
             "No evidence available: " + "; ".join(gaps), trace=trace, usage=usage,
@@ -335,10 +421,18 @@ def synthesize(question, provider=None, model=None, calendar=None,
                 {"role": "user", "content": user_msg}]
     check = None
     for attempt in (1, 2):
-        resp = client.chat.completions.create(model=model, max_tokens=1500,
+        # 1500 was set when a pack held ~4 citations. With the Pillar-1 drivers a
+        # brief runs longer, and a TRUNCATED draft fails the gate as "missing
+        # sections" — a length problem wearing a groundedness problem's clothes,
+        # which cost real debugging time. Headroom, plus an explicit truncation
+        # check below so the next occurrence names itself.
+        resp = client.chat.completions.create(model=model, max_tokens=3000,
                                               messages=messages)
         usage.append(_usage(resp))
         draft = (resp.choices[0].message.content or "").strip()
+        if getattr(resp.choices[0], "finish_reason", None) == "length":
+            trace.append(f"synthesis attempt {attempt} -> TRUNCATED at max_tokens; "
+                         "the draft is incomplete, not ungrounded")
         if draft.startswith("DECLINE:"):
             trace.append(f"synthesis attempt {attempt} -> model declined")
             return _declined(draft, trace=trace, usage=usage, citations=citations,

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from . import store, ui
+from . import feeds, store, ui
 
 
 def _resolver_url(receipt_id: str) -> str:
@@ -16,6 +16,76 @@ def _resolver_url(receipt_id: str) -> str:
     app's own origin. Config-driven: conf/ui_theme.json product.resolver."""
     r = ui.tokens()["product"]["resolver"]
     return r["base"] + r["receipt"].format(receipt_id=receipt_id)
+
+
+_PULLED = ("conditions", "feed", "index")   # citation kinds fetched at pack time
+
+
+def _is_pulled(c: dict) -> bool:
+    """A live PULL, not an archived document. The distinction is load-bearing: an
+    archived document can be re-read byte-for-byte forever, a pulled value cannot —
+    re-running the same query next month returns a different number."""
+    return c.get("kind") in _PULLED
+
+
+def _sources(pack: dict) -> list[dict]:
+    """The full passport per source. Previously this kept 5 fields and dropped
+    pub_date, url, the literal query and staleness — so a receipt resting on a
+    cache-served index was indistinguishable from one resting on fresh data.
+    Rule 7 makes the receipt the artifact that outlives everything; it cannot be
+    the lossiest one."""
+    out = []
+    for c in pack.get("citations", []):
+        entry = {"n": c.get("n"), "source": c.get("source"), "title": c.get("title"),
+                 "validation": c.get("validation"),
+                 "archived_copy": c.get("archived_copy"),
+                 "pub_date": c.get("pub_date"), "url": c.get("url"),
+                 "temporal": c.get("temporal"), "score": c.get("score"),
+                 "residency": c.get("residency"), "authority": c.get("authority"),
+                 # how this evidence was obtained, and whether it can be re-read
+                 "retrieval": "pulled-at-pack-time" if _is_pulled(c) else "archived-document",
+                 "query_receipt": c.get("query")}
+        stale = c.get("stale_data")
+        if stale:
+            # Carried either way: cadence/retrieved_at are real provenance. But only a
+            # genuine fallback earns the caveat — see feeds.is_stale for why presence
+            # is not the signal.
+            entry["stale_data"] = stale
+            if feeds.is_stale(stale):
+                entry["caveat"] = ("served from last-good cache, not a live read — this "
+                                   "value may pre-date the question")
+        out.append({k: v for k, v in entry.items() if v is not None})
+    return out
+
+
+def _freshness(pack: dict) -> dict:
+    """One place a reader can see, without parsing every source, whether this answer
+    rested on live pulls and whether any of them were stale."""
+    cites = pack.get("citations", [])
+    pulled = [c for c in cites if _is_pulled(c)]
+    stale = [c.get("n") for c in pulled if feeds.is_stale(c.get("stale_data"))]
+    return {
+        "pulled_sources": [c.get("n") for c in pulled],
+        "archived_sources": [c.get("n") for c in cites if not _is_pulled(c)],
+        "stale_sources": stale,
+        "as_of": {c.get("n"): c.get("pub_date") for c in pulled if c.get("pub_date")},
+        "note": ("Pulled sources were read at pack time and are a SNAPSHOT: re-running "
+                 "the same query later can legitimately return different values, so this "
+                 "receipt is not reproducible from the upstream — only from the stored pack."
+                 + (f" Sources {stale} were served from cache, not a live read."
+                    if stale else "")) if pulled else
+                "All sources are archived documents and can be re-read unchanged.",
+    }
+
+
+def _claim_scope(pack: dict) -> str:
+    """Scope wording that tells the truth about HOW the evidence was obtained."""
+    base = ("verified = every cited claim is traceable to this evidence pack at mint "
+            "time; NOT verified = the truth of the underlying sources")
+    if any(_is_pulled(c) for c in pack.get("citations", [])):
+        base += ("; live-feed values are a snapshot taken at pack time and are attested "
+                 "as WHAT THE FEED SAID THEN, not as current")
+    return base
 
 
 def record(pack_id: str | None = None, report_id: str | None = None,
@@ -45,13 +115,10 @@ def record(pack_id: str | None = None, report_id: str | None = None,
         # and compare to prove it IS the verified one (full text lives in the report)
         "draft_sha256": (report or {}).get("draft_sha256"),
         "verified_text": "full text stored in the linked report_id",
-        "sources": [{"n": c.get("n"), "source": c.get("source"), "title": c.get("title"),
-                     "validation": c.get("validation"),
-                     "archived_copy": c.get("archived_copy")}
-                    for c in pack.get("citations", [])],
+        "sources": _sources(pack),
+        "evidence_freshness": _freshness(pack),
         "queries": pack.get("queries"), "gaps": pack.get("gaps"),
-        "claim_scope": ("verified = every cited claim is traceable to this evidence pack "
-                        "at mint time; NOT verified = the truth of the underlying sources"),
+        "claim_scope": _claim_scope(pack),
         "minted_at": datetime.now(timezone.utc).isoformat(),
     }
     rid = store.save_receipt(receipt)

@@ -56,9 +56,169 @@ FEEDS = {
         "validation": "multi-agency-consensus",
         "residency": "external call-out",
     },
+    # --- Phase 1 of the food-security use case: the ENSO / driver signal. The four
+    # rows below are the doc's Data Inventory, 1:1. Three share ONE adapter because
+    # they are the same shape (a monthly index series) — that is the entry+adapter
+    # rule paying off: three feeds, no new dispatch code.
+    "enso_oni": {
+        "status": "available",
+        "title": "Oceanic Nino Index (ONI)",
+        "brief_role": "driver",
+        "adapter": "climate_index",
+        "index": "oni",
+        "description": "Oceanic Nino Index — 3-month running Nino-3.4 SST anomaly; "
+                       "detects and classifies ENSO onset and strength.",
+        "params": {"limit": "optional number of recent seasons (default 12)"},
+        "source": "NOAA CPC",
+        "sst_basis": "ERSSTv5, 1991-2020 base",   # IRI restates OISST — see below
+        "validation": "single-agency",
+        "residency": "external call-out",
+        "cadence": "monthly, ~5-day availability",
+    },
+    "iod_dmi": {
+        "status": "available",
+        "title": "Dipole Mode Index (IOD)",
+        "brief_role": "driver",
+        "adapter": "climate_index",
+        "index": "dmi",
+        "description": "Dipole Mode Index — the Indian Ocean Dipole, a co-driver that "
+                       "can amplify or offset the ENSO signal.",
+        "params": {"limit": "optional number of recent months (default 12)"},
+        "source": "NOAA PSL (HadISST)",
+        "validation": "single-agency",
+        "residency": "external call-out",
+        "cadence": "monthly",
+    },
+    "enso_event_history": {
+        "status": "available",
+        "title": "Historical ENSO event catalogue (1950-present)",
+        "brief_role": "driver",
+        "adapter": "climate_index",
+        "index": "enso_events",
+        "description": "Historical ENSO event catalogue (1950-present) for analogue "
+                       "years and back-testing. DERIVED from the ONI series using CPC's "
+                       "own definition, not a separately published product.",
+        "params": {"min_seasons": "optional run length threshold (default 5)"},
+        "source": "derived from NOAA CPC ONI",
+        "validation": "single-agency",
+        "residency": "external call-out",
+        "cadence": "monthly (follows ONI)",
+    },
+    "enso_plume": {
+        "status": "available",
+        "title": "CCSR/IRI ENSO model prediction plume",
+        "brief_role": "driver",
+        "adapter": "enso_forecast",
+        "product": "enso_plume",
+        "source": "IRI / Columbia Climate School",
+        "sst_basis": "OISST, 1991-2020 base (IRI restates CPC sstoi.indices)",
+        "validation": "multi-model-ensemble",
+        "residency": "external call-out",
+        "cadence": "monthly (issued mid-month)",
+        "description": "CCSR/IRI Nino-3.4 model prediction plume — every contributing "
+                       "model's forecast anomaly by lead season, plus how many models sit "
+                       "in each ENSO band. Counts are NOT probabilities.",
+        "params": {"year": "int, optional — defaults to the latest issued",
+                   "month": "int 1-12, optional — defaults to the latest issued"},
+    },
+    "enso_outlook": {
+        "status": "available",
+        "title": "IRI monthly ENSO/IOD quick look",
+        "brief_role": "driver",
+        "adapter": "enso_forecast",
+        "product": "enso_outlook",
+        "source": "IRI / Columbia Climate School",
+        "sst_basis": "OISST, 1991-2020 base",
+        "validation": "single-agency",
+        "residency": "external call-out",
+        "cadence": "monthly (issued mid-month)",
+        "description": "IRI monthly ENSO/IOD quick look — the official forecast "
+                       "narrative served VERBATIM by section. This is where the official "
+                       "probability percentages live, as prose: quote and attribute them, "
+                       "never re-type them as structured numbers.",
+        "params": {"year": "int, optional — defaults to the latest published",
+                   "month": "int 1-12, optional — defaults to the latest published"},
+    },
+    "enso_discussion": {
+        "status": "available",
+        "title": "CPC ENSO Diagnostic Discussion",
+        "brief_role": "driver",
+        "adapter": "enso_forecast",
+        "product": "enso_discussion",
+        "source": "NOAA CPC",
+        "validation": "multi-agency-consensus",
+        "residency": "external call-out",
+        "cadence": "monthly (2nd Thursday)",
+        "description": "NOAA CPC monthly ENSO Diagnostic Discussion, served VERBATIM. "
+                       "The ONLY source for the formal ENSO Alert System Status "
+                       "(Watch / Advisory / Final Advisory) — a status is a declaration, "
+                       "not a measurement, so no index can supply it. Usually fresher "
+                       "than the IRI quick look.",
+        "params": {},
+    },
+    "enso_probabilities": {
+        "status": "declared_gap",
+        "reason": "A STRUCTURED probabilistic ENSO forecast (El Nino / neutral / La Nina "
+                  "by lead season, as numbers). No machine-readable table is published: "
+                  "IRI carries the percentages only in prose, CPC publishes them as a PNG, "
+                  "and the IRI Data Library path is not public. Regex-ing prose for "
+                  "probabilities would put a silently-wrong number in a governed brief. "
+                  "Use `enso_outlook` and quote the narrative, or `enso_plume` for model "
+                  "counts — counts are not probabilities and must not be presented as such. "
+                  "Closing this needs a structured feed or an authenticated dataset path.",
+        "params": {"lead": "?"},
+    },
+    "iod_dmi_bom": {
+        "status": "declared_gap",
+        "reason": "The Australian BoM's own IOD index. The use-case doc names BoM FIRST "
+                  "for the DMI and we serve NOAA PSL instead, so the substitution is "
+                  "declared rather than left implicit. BoM publishes no machine-readable "
+                  "series — bom.gov.au/climate/enso/indices.shtml is ~58 KB of HTML with "
+                  "the value in prose and charts (iod_1.txt: HTTP 404). Regex-ing a number "
+                  "out of that page is the same antipattern refused for enso_probabilities, "
+                  "so it is NOT done. Live consequence to be aware of: PSL lags materially "
+                  "(2026-05 while ONI is at MJJ 2026), so the co-driver reads older than the "
+                  "driver. Closing this needs a BoM data path, not a scraper.",
+        "params": {},
+    },
+    # --- Phase 2 of the use case, declared now rather than left silent. These are
+    # named in the hub's Data Inventory but had NO row at all, which is precisely the
+    # hiding this registry exists to prevent: a reader saw no gap because nothing
+    # said one existed.
+    "icpac_ghacof": {
+        "status": "declared_gap",
+        "reason": "ICPAC GHACOF regional seasonal consensus outlook for the Greater Horn "
+                  "of Africa — the regionally-authoritative downscaling of the ENSO signal, "
+                  "and the source a Kenya-specific claim should rest on rather than a global "
+                  "index. Published as PDF statements; needs a machine-readable path or "
+                  "ingestion into the corpus.",
+        "params": {"place": "?", "season": "?"},
+    },
+    "nmme_seasonal": {
+        "status": "declared_gap",
+        "reason": "North American Multi-Model Ensemble seasonal forecast (precip/temp). "
+                  "Grids are public at ftp.cpc.ncep.noaa.gov/NMME/realtime_anom/ but carry "
+                  "no SST, so nothing here substitutes for the ENSO plume; needs an "
+                  "extraction step to reach a place-level number.",
+        "params": {"place": "?", "variable": "?", "lead": "?"},
+    },
+    "ecmwf_seas5": {
+        "status": "declared_gap",
+        "reason": "ECMWF SEAS5 seasonal forecast. Public products are charts (opencharts "
+                  "serves a CC-BY-4.0 PNG), not per-place numbers; the data path is the "
+                  "Climate Data Store, which needs an account and licence acceptance.",
+        "params": {"place": "?", "variable": "?", "lead": "?"},
+    },
+    "tamsat_rainfall": {
+        "status": "declared_gap",
+        "reason": "TAMSAT satellite rainfall estimates + soil moisture for Africa — the "
+                  "Africa-specific complement to CHIRPS. Pending hub data lists.",
+        "params": {"place": "?", "date_range": "?"},
+    },
     "chirps_rainfall": {
         "status": "declared_gap",
-        "reason": "rainfall + ~15-day forecast — pending hub data lists",
+        "reason": "rainfall + ~15-day forecast — pending hub data lists. NOTE: Phase 2 of "
+                  "the use case, not Phase 1.",
         "params": {"place": "?", "date_range": "?"},
     },
     "chirts_temperature": {
