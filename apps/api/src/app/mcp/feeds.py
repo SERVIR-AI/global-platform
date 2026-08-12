@@ -126,6 +126,14 @@ def _adapt_enso_forecast(params: dict, spec: dict) -> dict:
                 raise FeedDecline(f"{k!r} must be a whole number") from exc
     try:
         res = enso_forecast.fetch(product, **kwargs)
+    except TypeError as exc:
+        # A param this product does not take. `enso_discussion` accepts none, so
+        # {"year": 2026} reached discussion() and raised — escaping as a transport
+        # error rather than a governed decline, which breaks rule 2. The sibling
+        # climate-index adapter has always caught this; this one did not.
+        raise FeedDecline(
+            f"{product} does not accept those params ({exc}). Accepted: "
+            + (", ".join(spec.get("params") or {}) or "none")) from exc
     except climate_indices.IndexUnavailable as exc:
         raise FeedDecline(f"feed unavailable: {exc}") from exc
 

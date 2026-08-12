@@ -240,3 +240,26 @@ def test_a_healthy_pull_mints_a_receipt_with_no_stale_flag(log):
     assert f["pulled_sources"] == [1, 2] and f["stale_sources"] == [2]
     assert "caveat" not in srcs[0] and "caveat" in srcs[1]
     assert srcs[0]["stale_data"]["cadence"] == "monthly"   # provenance still carried
+
+
+def test_a_param_a_feed_does_not_take_declines_rather_than_raising(log):
+    """`enso_discussion` accepts no params, so {"year": ...} reached discussion()
+    and raised an uncaught TypeError — escaping as a transport error instead of a
+    governed decline, which breaks rule 2 (declines say why). The sibling
+    climate-index adapter always caught this; this one did not."""
+    res = feeds.query("enso_discussion", {"year": 2026})
+    log("OUTPUT", res.get("note", "")[:110])
+    assert res["status"] == "declined"
+    assert "does not accept those params" in res["note"]
+
+
+def test_every_available_feed_survives_a_junk_param(log):
+    """Generic: no registered feed may raise on an unexpected param. One adapter
+    catching TypeError and another not is exactly how this slipped through."""
+    from app.mcp import registry
+    for name, spec in registry.FEEDS.items():
+        if spec.get("status") != "available":
+            continue
+        res = feeds.query(name, {"definitely_not_a_param": 1})
+        assert res["status"] in ("ok", "empty", "declined"), f"{name} -> {res}"
+    log("CHECK", "all available feeds returned a governed status")
