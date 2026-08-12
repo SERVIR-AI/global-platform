@@ -47,3 +47,10 @@ docs/
 # reference PDFs (not part of the build)
 SERVIR Global Platform PoC.pdf
 screencapture-localhost-5173-2026-06-29-19_41_17.pdf
+# env backups (live keys)
+*.env.bak*
+.env.*
+!.env.example
+
+# secret-scan output — quotes real matches back at you, never commit it
+gitleaks-report.json
