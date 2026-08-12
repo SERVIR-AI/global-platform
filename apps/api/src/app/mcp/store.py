@@ -41,6 +41,12 @@ def _connect() -> sqlite3.Connection:
     return con
 
 
+def init() -> None:
+    """Create the file + schema before serving, so a replicator has a WAL to
+    follow from boot rather than from the first receipt."""
+    _connect().close()
+
+
 def _save(table: str, obj: dict, id_field: str) -> str:
     assert table in _TABLES
     body = json.dumps(obj, sort_keys=True, default=str)

@@ -9,8 +9,23 @@ from __future__ import annotations
 import os
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from . import assemble, compose, context, feeds, fetch, record, registry, resolve, ui, verify
+
+
+def _transport_security() -> TransportSecuritySettings | None:
+    """DNS-rebinding protection defends a LOCALHOST server from a browser being
+    tricked into reaching it; behind a hosted proxy the Host is the public domain
+    and the default rejects every request (421). `*` disables it for that case."""
+    hosts = os.environ.get("GRP_MCP_ALLOWED_HOSTS", "").strip()
+    if not hosts:
+        return None
+    if hosts == "*":
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    allowed = [h.strip() for h in hosts.split(",") if h.strip()]
+    return TransportSecuritySettings(
+        allowed_hosts=allowed, allowed_origins=[f"https://{h}" for h in allowed])
 
 # Orientation shown to a connecting LLM at initialize — so it isn't a headless
 # chicken. DESCRIBE the two consumption patterns; don't enforce (no mode switch).
@@ -44,6 +59,7 @@ mcp = FastMCP("global-risk-platform",
               instructions=INSTRUCTIONS,
               host=os.environ.get("GRP_MCP_HOST", "127.0.0.1"),
               port=int(os.environ.get("GRP_MCP_PORT", "8000")),
+              transport_security=_transport_security(),
               stateless_http=True)  # each tool call is self-contained; no session to terminate
 
 
