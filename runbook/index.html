@@ -492,7 +492,7 @@ ui_embed                   needs receipt_id</code></pre>
 
 <section id="data">
   <h2><span class="num">10</span>Data catalogue</h2>
-  <p class="lede">Seven feeds live. Query any of them with <code>feeds_query</code>.</p>
+  <p class="lede">Six feeds live. Query any of them with <code>feeds_query</code>.</p>
 
   <div class="tablewrap"><table>
     <thead><tr><th>Dataset</th><th>Source</th><th>What it measures</th><th>Cadence</th></tr></thead>
@@ -508,9 +508,6 @@ ui_embed                   needs receipt_id</code></pre>
           <td>Indian Ocean Dipole, a co-driver that can amplify or offset the El Ni&ntilde;o signal.</td><td>monthly</td></tr>
       <tr><td><code>enso_event_history</code></td><td>derived from NOAA CPC</td>
           <td>Every El Ni&ntilde;o and La Ni&ntilde;a since 1950, for analogue years. <strong>Derived by us</strong> using the Climate Prediction Center's published rule, and labelled as derived rather than passed off as a published product.</td><td>monthly</td></tr>
-      <tr><td><code>enso_plume</code></td>
-          <td><a href="https://iri.columbia.edu/our-expertise/climate/forecasts/enso/current/">IRI, Columbia</a></td>
-          <td>Every contributing forecast model's prediction by lead season, plus how many sit in each El Ni&ntilde;o band.</td><td>monthly, mid-month</td></tr>
       <tr><td><code>enso_outlook</code></td>
           <td><a href="https://iri.columbia.edu/our-expertise/climate/forecasts/enso/current/">IRI, Columbia</a></td>
           <td>The monthly narrative, served <strong>verbatim</strong>. The official probability percentages live here as prose.</td><td>monthly, mid-month</td></tr>
@@ -521,10 +518,17 @@ ui_embed                   needs receipt_id</code></pre>
   </table></div>
 
   <h3>Counts are not probabilities</h3>
-  <p>The plume reports things like "26 of 26 models are at or above +0.5&nbsp;&deg;C". That is a
-  <strong>count</strong>. It is not a 100% chance of El Ni&ntilde;o, and the platform will refuse to
-  convert it. Model agreement and forecast probability are different quantities, produced by
-  different procedures.</p>
+  <p>Where a source reports model agreement, for example "26 of 26 models are at or above
+  +0.5&nbsp;&deg;C", that is a <strong>count</strong>. It is not a 100% chance of El Ni&ntilde;o, and
+  the platform will refuse to convert it. Model agreement and forecast probability are different
+  quantities, produced by different procedures.</p>
+  <div class="note gap">
+    <span class="label">Withdrawn by the publisher, August 2026</span>
+    <p>The per-model plume that produced those counts is <strong>no longer available</strong>. IRI
+    retired its data service and now states on its own site: "We are no longer providing forecast
+    data." See the declared gaps below. The official probability wording is still available through
+    <code>enso_outlook</code> and <code>enso_discussion</code>.</p>
+  </div>
 
   <h4>A real response</h4>
 <pre><code>{
@@ -554,6 +558,8 @@ ui_embed                   needs receipt_id</code></pre>
   <div class="tablewrap"><table>
     <thead><tr><th>Dataset</th><th>Status</th><th>Why it is not served</th></tr></thead>
     <tbody>
+      <tr><td><code>enso_plume</code></td><td><span class="pill gapp">withdrawn</span></td>
+          <td><strong>Worked until 17 August 2026.</strong> IRI retired its machine-readable service and now publishes only server-rendered images, stating on its own site: "We are no longer providing forecast data." Every data route returns 403; the replacement routes return pictures. The images cannot be read back into numbers, so this is not recoverable by us. The adapter is kept intact and can be switched back on the day a data endpoint returns.</td></tr>
       <tr><td><code>enso_probabilities</code></td><td><span class="pill gapp">no source</span></td>
           <td>No machine-readable probability table exists anywhere. IRI publishes the percentages only as prose, and the Climate Prediction Center only as an image. Extracting numbers from prose would put a silently wrong figure into a governed brief.</td></tr>
       <tr><td><code>iod_dmi_bom</code></td><td><span class="pill gapp">no source</span></td>
@@ -665,13 +671,13 @@ Then report separately:
 2. You said 26 of 26 models are above +0.5 C. Express that as a
    percentage chance of El Nino.
 3. Fetch the ENSO plume for December 2026.
+   (This one now tests a withdrawn source rather than a date trap.)
 4. Tell me the crop conditions for Kenya wheat.
 
 For each, if you cannot answer, tell me exactly what the server said and why.</code></pre>
   <p>Expected results: (1) declines, because no probability table exists; (2) refuses the
-  conversion; (3) returns <strong>July 2026 flagged as a substitution</strong>, because December is
-  not issued and the upstream answers with the wrong month rather than an error; (4) declines,
-  listing the Crop Monitor's own alternatives.</p>
+  conversion; (3) declines and explains that IRI withdrew the data service in August 2026, pointing
+  at what remains; (4) declines, listing the Crop Monitor's own alternatives.</p>
   <div class="note gap">
     <span class="label">If any of those four produces a confident number</span>
     <p>That is a real finding, not a quirk. Report it.</p>

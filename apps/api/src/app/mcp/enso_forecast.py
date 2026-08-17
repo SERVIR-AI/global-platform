@@ -40,6 +40,8 @@ _WALK_BACK = 6                   # months to search backwards for a published is
 _PLUME_URL = "https://ensoforecast.iri.columbia.edu/plumes_json/{year}/{month0}"
 _OUTLOOK_URL = ("https://iri.columbia.edu/our-expertise/climate/forecasts/enso/"
                 "{year}-{month}-quick-look/")
+# The newest issue lives here and ONLY here; dated slugs are the archive.
+_CURRENT_URL = "https://iri.columbia.edu/our-expertise/climate/forecasts/enso/current/"
 
 _MONTHS = ["January", "February", "March", "April", "May", "June",
            "July", "August", "September", "October", "November", "December"]
@@ -203,6 +205,18 @@ def _latest_at_or_before(what: str, once, year: int | None, month: int | None) -
             errs.append(str(exc))
             year, month = _prev_month(year, month)
     else:
+        # "Not issued yet" and "the upstream is refusing us" are different facts, and
+        # only one of them is IRI's publishing schedule. Reporting a run of HTTP
+        # errors as "no plume issued" blames the publisher for our own outage and
+        # sends the reader looking in the wrong place. Rule 2: declines say WHY.
+        codes = {m.group(1) for e in errs
+                 if (m := re.search(r"returned HTTP (\d{3})", e))}
+        if codes and len(errs) == _WALK_BACK:
+            raise IndexUnavailable(
+                f"{what}: the upstream refused every request "
+                f"(HTTP {', '.join(sorted(codes))}) across the {_WALK_BACK} months to "
+                f"{requested}. This is an upstream availability problem, NOT evidence "
+                f"that nothing was published. First error: {errs[0]}")
         raise IndexUnavailable(
             f"no {what} issued in the {_WALK_BACK} months to {requested}: {errs[0]}")
 
@@ -255,8 +269,9 @@ class _Narrative(HTMLParser):
             self._buf.append(data)
 
 
-def _outlook_once(year: int, month: int) -> dict:
-    url = _OUTLOOK_URL.format(year=year, month=_MONTHS[month - 1])
+def _parse_outlook(url: str, issued_for: str | None = None) -> dict:
+    """Parse one quick-look page. `issued_for` is derived from the page itself when
+    not supplied, which is how the undated /current/ page is handled."""
     r = _get(url)
     if r.status_code != 200:
         raise IndexUnavailable(f"{url} returned HTTP {r.status_code}")
@@ -279,12 +294,22 @@ def _outlook_once(year: int, month: int) -> dict:
             current["paragraphs"].append(b["text"])
     sections = [s for s in sections if s["paragraphs"]]
 
+    if issued_for is None:
+        # The /current/ page carries no month in its URL; its own heading is the
+        # only statement of which issue this is.
+        m = next((re.match(r"([A-Z][a-z]+ \d{4}) Quick Look", s["heading"])
+                  for s in sections if re.match(r"[A-Z][a-z]+ \d{4} Quick Look", s["heading"])),
+                 None)
+        if not m:
+            raise IndexUnavailable(f"{url} does not state which month it is")
+        issued_for = m.group(1)
+
     return {
         "product": "ENSO quick look",
         "long_name": "IRI monthly ENSO/IOD forecast narrative",
         "source": "IRI / Columbia Climate School",
         "url": url,
-        "issued_for": f"{_MONTHS[month - 1]} {year}",
+        "issued_for": issued_for,
         "published": published,
         "sections": sections,
         "verbatim": True,
@@ -297,8 +322,27 @@ def _outlook_once(year: int, month: int) -> dict:
     }
 
 
+def _outlook_once(year: int, month: int) -> dict:
+    """One dated archive page."""
+    return _parse_outlook(_OUTLOOK_URL.format(year=year, month=_MONTHS[month - 1]),
+                          issued_for=f"{_MONTHS[month - 1]} {year}")
+
+
 def outlook(year: int | None = None, month: int | None = None) -> dict:
-    """The most recent published quick look at or before (year, month)."""
+    """The most recent published quick look at or before (year, month).
+
+    IRI publishes the NEWEST issue at /current/ and only archives older ones at
+    dated slugs, so a dated-URL walk-back can never see the latest month. This cost
+    us a month of freshness silently: the July issue existed at /current/ while we
+    served June, because 2026-July-quick-look/ 404s. Try /current/ first whenever
+    the caller wants "latest"; dated URLs remain the path for history.
+    """
+    if year is None and month is None:
+        try:
+            return {**_parse_outlook(_CURRENT_URL), "requested": "latest available",
+                    "substituted": False, "substitution_note": None}
+        except IndexUnavailable:
+            pass                        # fall through to the dated archive walk-back
     return _latest_at_or_before("quick look", _outlook_once, year, month)
 
 

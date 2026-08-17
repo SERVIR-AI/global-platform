@@ -188,10 +188,16 @@ def test_layout_change_declines_rather_than_returning_empty_prose(monkeypatch, l
 
 def test_feed_surfaces_substitution_as_staleness(monkeypatch, log):
     """A month we did not ask for is staleness by another name, so it rides the
-    same passport field a cache-serve does and reaches the receipt."""
+    same passport field a cache-serve does and reaches the receipt. Exercised on
+    enso_outlook since IRI retired the plume JSON API (see registry)."""
+    html = ('<div class="page-content"><h2>June 2026 Quick Look</h2>'
+            '<h4>Published: June 22, 2026</h4><p>El Nino conditions continue.</p></div>')
+    # Only June exists, so asking for August forces the walk-back that substitutes.
+    # A stub answering every month would never trip it, which is the real-world
+    # shape too: IRI has published nothing since June.
     monkeypatch.setattr(enso_forecast, "_get",
-                        lambda url: _Resp(payload=_plume_payload(month0=6)))
-    res = feeds.query("enso_plume", {"year": 2026, "month": 8})
+                        lambda url: _Resp(text=html) if "June" in url else _Resp(status=404))
+    res = feeds.query("enso_outlook", {"year": 2026, "month": 8})
     stale = res["passport"]["stale_data"]
     log("OUTPUT", json.dumps(stale))
     assert res["status"] == "ok"
@@ -206,7 +212,11 @@ def test_structured_probabilities_stay_a_declared_gap(log):
     log("OUTPUT", res["note"][:120])
     assert res["status"] == "declined"
     assert "enso_outlook" in res["note"]
-    assert "enso_plume" in res["available"] and "enso_outlook" in res["available"]
+    # Derived from the registry, not hardcoded: enso_plume left this list when IRI
+    # retired its JSON API, and a hardcoded name would have silently gone stale.
+    from app.mcp import registry
+    live = {k for k, v in registry.FEEDS.items() if v.get("status") == "available"}
+    assert set(res["available"]) == live and "enso_outlook" in live
 
 
 def test_presence_of_stale_data_is_not_staleness(log):
@@ -263,3 +273,61 @@ def test_every_available_feed_survives_a_junk_param(log):
         res = feeds.query(name, {"definitely_not_a_param": 1})
         assert res["status"] in ("ok", "empty", "declined"), f"{name} -> {res}"
     log("CHECK", "all available feeds returned a governed status")
+
+
+def test_upstream_refusal_is_not_reported_as_nothing_published(monkeypatch, log):
+    """IRI moved hosts and the replacement 403s everything. Reporting that as
+    "no plume issued in the last 6 months" blames the publisher for our outage
+    and points the reader at the wrong problem."""
+    monkeypatch.setattr(enso_forecast, "_get", lambda url: _Resp(status=403))
+    with pytest.raises(climate_indices.IndexUnavailable) as exc:
+        enso_forecast.plume()
+    msg = str(exc.value)
+    log("OUTPUT", msg[:150])
+    assert "upstream refused" in msg and "403" in msg
+    assert "NOT evidence that nothing was published" in msg
+
+
+def test_a_genuine_publishing_gap_still_reads_as_one(monkeypatch, log):
+    """The opposite case must keep its own wording: a 404 walk-back that finds
+    nothing is a real publishing gap, not an outage."""
+    monkeypatch.setattr(enso_forecast, "_get",
+                        lambda url: _Resp(text="<html>redesigned</html>"))
+    with pytest.raises(climate_indices.IndexUnavailable) as exc:
+        enso_forecast.outlook()
+    log("OUTPUT", str(exc.value)[:120])
+    assert "no quick look issued" in str(exc.value)
+
+
+def test_latest_outlook_reads_the_current_page_not_a_dated_slug(monkeypatch, log):
+    """IRI publishes the NEWEST issue only at /current/ and archives older ones at
+    dated URLs. A dated walk-back can therefore never see the latest month, which
+    silently cost us a month of freshness: July existed while we served June."""
+    seen = []
+    cur = ('<div class="page-content"><h2>July 2026 Quick Look</h2>'
+           '<h4>Published: July 20, 2026</h4><p>El Nino continues.</p></div>')
+
+    def fake(url):
+        seen.append(url)
+        return _Resp(text=cur) if url.endswith("/current/") else _Resp(status=404)
+
+    monkeypatch.setattr(enso_forecast, "_get", fake)
+    out = enso_forecast.outlook()
+    log("OUTPUT", f"{out['issued_for']} from {seen[0].rsplit('/', 2)[-2]}")
+    assert seen[0].endswith("/current/"), "must try /current/ first"
+    assert out["issued_for"] == "July 2026"      # derived from the page's own heading
+    assert out["published"] == "July 20, 2026"
+
+
+def test_an_explicit_month_still_uses_the_dated_archive(monkeypatch, log):
+    """/current/ is only right for "latest". Asking for a specific month must go to
+    the archive, or history would silently return today's issue."""
+    seen = []
+    html = ('<div class="page-content"><h2>June 2026 Quick Look</h2>'
+            '<h4>Published: June 22, 2026</h4><p>text</p></div>')
+    monkeypatch.setattr(enso_forecast, "_get",
+                        lambda u: (seen.append(u), _Resp(text=html))[1])
+    out = enso_forecast.outlook(year=2026, month=6)
+    log("OUTPUT", seen[0])
+    assert "/current/" not in seen[0] and "2026-June-quick-look" in seen[0]
+    assert out["issued_for"] == "June 2026"

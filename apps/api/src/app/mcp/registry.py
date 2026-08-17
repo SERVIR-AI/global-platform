@@ -104,22 +104,33 @@ FEEDS = {
         "residency": "external call-out",
         "cadence": "monthly (follows ONI)",
     },
+    # WAS available and working until 2026-08-17, when IRI retired its JSON API.
+    # The adapter and parser are kept intact (mcp/enso_forecast.py) because nothing
+    # is wrong with them: flip `status` back to "available" the day a data endpoint
+    # returns. Reproduce the break in three commands, see the reason below.
     "enso_plume": {
-        "status": "available",
+        "status": "declared_gap",
         "title": "CCSR/IRI ENSO model prediction plume",
-        "brief_role": "driver",
         "adapter": "enso_forecast",
         "product": "enso_plume",
         "source": "IRI / Columbia Climate School",
-        "sst_basis": "OISST, 1991-2020 base (IRI restates CPC sstoi.indices)",
-        "validation": "multi-model-ensemble",
-        "residency": "external call-out",
-        "cadence": "monthly (issued mid-month)",
-        "description": "CCSR/IRI Nino-3.4 model prediction plume — every contributing "
-                       "model's forecast anomaly by lead season, plus how many models sit "
-                       "in each ENSO band. Counts are NOT probabilities.",
-        "params": {"year": "int, optional — defaults to the latest issued",
-                   "month": "int 1-12, optional — defaults to the latest issued"},
+        "reason": "RETIRED UPSTREAM, 2026-08-17. IRI moved this service from "
+                  "ensoforecast.iri.columbia.edu to ensoforecast2 (the old host 301s to "
+                  "the new one) and, in the move, replaced the machine-readable JSON API "
+                  "with server-rendered images. Every data route now returns HTTP 403 "
+                  "(plumes_json, plume_models, select_plumes, figure4_options), while the "
+                  "new figure4_plot / figure7_plot / figure9_plot routes return 200 "
+                  "image/svg+xml. Confirmed not an IP or user-agent block: 403 from two "
+                  "separate networks, with and without a browser UA, Referer and Origin. "
+                  "The SVG is NOT parseable back into data — it carries 211 <path> "
+                  "elements, ZERO <text> elements and no data attributes, because the "
+                  "labels are rendered as glyph outlines. Recovering per-model values "
+                  "would mean OCR-ing vector outlines and reverse-engineering the axis "
+                  "transform, which is the same fabrication risk we refuse for "
+                  "enso_probabilities. Closing this needs IRI to restore a data endpoint. "
+                  "Use enso_discussion for official status and probability wording, and "
+                  "enso_oni for the observed index.",
+        "params": {"year": "int, optional", "month": "int 1-12, optional"},
     },
     "enso_outlook": {
         "status": "available",
