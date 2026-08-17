@@ -1,0 +1,131 @@
+{
+  "thread_id": "a4f54f6e-4d92-4b94-97ef-c82d47bcf61a",
+  "trace_id": "a046258b-3454-45bb-b741-7b5d19dd71da",
+  "created_at": "2026-08-06T02:05:17.700707+00:00",
+  "total_duration": 1621.0592889983673,
+  "total_tokens": {
+    "in": 1350,
+    "out": 39,
+    "total": 1389,
+    "cost": 0
+  },
+  "steps": [
+    {
+      "node": "router",
+      "step": 0,
+      "started_at": "2026-08-06T02:05:16.077202+00:00",
+      "ended_at": "2026-08-06T02:05:17.685647+00:00",
+      "duration": 1608.4417820093222,
+      "summary": "Router matched the question to `count_in_hazard` for 'drawn area'",
+      "why": "This step only extracts the tool call and its arguments from the model; no computation happens here.",
+      "kind": "routed",
+      "llm_provider": "gemini",
+      "model_used": "gemini-2.5-flash",
+      "user_drawn_area": true,
+      "drawn_area_type": "Polygon",
+      "tokens": {
+        "in": 1350,
+        "out": 39,
+        "total": 1389,
+        "cost_in": 0.0,
+        "cost_out": 0.0,
+        "cost": 0.0
+      },
+      "messages": [
+        {
+          "role": "system",
+          "type": "text",
+          "content": "You route disaster-risk questions to tools and phrase the result. You never compute, estimate, or invent numbers or data paths. Extract the place (city or district) the user names and pass it as `place`. Hazard severity is a class 1 (low) to 5 (extreme). Pick the hazard layer that matches the hazard the user mentions (e.g. hazard_flood for any flood/flooding/flood-risk question) \u2014 the agent then asks the user whether they want exposure or risk, so you do not choose that. For layers we do not have (homeless, population, evacuation_plan, ews) or if no place is given, do not call a tool \u2014 say so plainly.\nWrite the final answer for a non-expert who has never seen this data. Use 2-4 short sentences, plain language, no jargon. (1) Lead with what we found in everyday terms \u2014 e.g. \"About 241 km of roads in Battambang fall inside the flood zone.\" (2) Say in one line what the number means: \"exposure\" = assets physically sitting in the hazard area; \"risk\" = how hazard combines with vulnerability (people, buildings, roads) to estimate potential impact. (3) If the result has a `by_severity` breakdown, give the per-class figures in words using the `legend` labels and note that higher classes are more severe. Always state the exact number(s) the tool returned and, on a final line, cite the data `source` verbatim (e.g. \"Source: risk_flood_l2.tif\"). Never round away the real number, invent figures, or add caveats the tool did not provide.\n\nHazard layers available \u2014 pick the one(s) a question needs by matching these descriptions, and pass them as `hazard_layers`. If none fit, do not call a tool:\n- hazard_flood: Single-band flood-hazard raster for Southeast Asia. Each pixel holds a flood severity class for the 100-year (1% annual probability) flood event: 0 = dry / no hazard, 1 = low, up to 5 = extreme. Values are a hazard class, NOT water depth in metres. The geospatial operations sample this raster per location (point) or per road segment to decide what is \"in the flood\".\n- hazard_flashflood: Flash-flood hazard severity class (0 none .. 5 extreme) for Southeast Asia: sudden, localized flooding from intense rainfall, distinct from the riverine 100-year flood layer. Sampled per location/road segment.\n- hazard_drought: Drought hazard severity class (0 none .. 5 extreme) for Southeast Asia (rainfall-deficit / dryness). Coarse resolution; a class, not a rainfall value.\n- hazard_fire: Wildfire hazard severity class (0 none .. 5 extreme) for Southeast Asia.\n- hazard_landslides: Landslide hazard severity class (0 none .. 5 extreme) for Southeast Asia (slope-failure susceptibility). Choose for \"landslide\" / \"slope\" questions.\n- hazard_cyclone: Tropical-cyclone wind hazard class (0 none .. 5 extreme) for Southeast Asia, by sustained wind-speed band. Choose for \"cyclone\" / \"typhoon\" / \"wind\" questions.\n- hazard_storm: Convective-storm hazard severity class (0 none .. 5 extreme) for Southeast Asia.\n- hazard_tsunami: Tsunami hazard severity class (0 none .. 5 extreme) for Southeast Asia coasts (inundation potential). Choose for \"tsunami\" questions; coastal places only.\n- hazard_earthquake: Earthquake hazard class (0 none .. 5 extreme) for Southeast Asia by peak ground acceleration (PGA, 250-year return). Choose for \"earthquake\" / \"seismic\" questions.\n\nThe user has drawn an area on the map, so the area is already given \u2014 call the tool for the hazard/asset they ask about and pass place='drawn area'; you do not need to name a place."
+        },
+        {
+          "role": "user",
+          "type": "text",
+          "content": "Show me schools at high risk of flooding in the selected area"
+        },
+        {
+          "role": "assistant",
+          "type": "tool_call"
+        }
+      ],
+      "derived_tool_calls": [
+        {
+          "id": "function-call-8891341963067785365",
+          "function_name": "count_in_hazard",
+          "function_args": {
+            "min_severity": 4,
+            "hazard_layers": [
+              "hazard_flood"
+            ],
+            "place": "drawn area",
+            "layer": "schools"
+          }
+        }
+      ],
+      "available_assets": {
+        "available_tools": [
+          "count_features",
+          "count_in_hazard",
+          "roads_in_hazard"
+        ],
+        "countable": [
+          "hospitals",
+          "schools",
+          "buildings"
+        ],
+        "hazard_layers": [
+          "hazard_flood",
+          "hazard_flashflood",
+          "hazard_drought",
+          "hazard_fire",
+          "hazard_landslides",
+          "hazard_cyclone",
+          "hazard_storm",
+          "hazard_tsunami",
+          "hazard_earthquake"
+        ],
+        "risk_layers": []
+      },
+      "derived_place": "drawn area",
+      "derived_countable_assets": [
+        "schools"
+      ],
+      "derived_hazard_layers_used": [
+        "hazard_flood"
+      ],
+      "derived_risk_layers_used": [],
+      "error": null
+    },
+    {
+      "node": "resolve",
+      "step": 1,
+      "started_at": "2026-08-06T02:05:17.686475+00:00",
+      "ended_at": "2026-08-06T02:05:17.699093+00:00",
+      "duration": 12.617506989045069,
+      "summary": "Asked how to answer flood",
+      "why": "Exposure vs risk is never guessed \u2014 the agent pauses and asks.",
+      "decision": "asked",
+      "hazard": "flood",
+      "options": [
+        {
+          "key": "exposure",
+          "layer": "hazard_flood",
+          "label": "**Exposure** \u2014 which of your assets (roads, schools, hospitals, buildings) physically sit inside the flood zone, ranked from low to extreme severity. This is the simplest and fastest answer, and just shows the raw hazard footprint \u2014 no modelling of how vulnerable each place is."
+        },
+        {
+          "key": "risk-L1",
+          "layer": "risk_flood",
+          "label": "**Risk, official precomputed** \u2014 the ready-made flood risk layer from the regional agency, which blends how severe it is with how vulnerable the people and buildings in each place are. Pick this when you want a fast, authoritative answer you can quote as-is."
+        },
+        {
+          "key": "risk-L2",
+          "layer": "risk_flood_l2",
+          "label": "**Risk, recomputed from layers** \u2014 the same kind of flood risk, but rebuilt here from the underlying data so you can adjust how much weight hazard versus each vulnerability factor carries. It takes a little longer to compute on the fly, and it has been checked to closely match the official layer \u2014 almost every place lands in the same severity class, and none differ by more than one."
+        }
+      ],
+      "byod_passthrough": null,
+      "awaiting_choice_set": true,
+      "question_asked": "For **flood** in drawn area, how would you like me to answer?\n\n**1)** **Exposure** \u2014 which of your assets (roads, schools, hospitals, buildings) physically sit inside the flood zone, ranked from low to extreme severity. This is the simplest and fastest answer, and just shows the raw hazard footprint \u2014 no modelling of how vulnerable each place is.\n\n**2)** **Risk, official precomputed** \u2014 the ready-made flood risk layer from the regional agency, which blends how severe it is with how vulnerable the people and buildings in each place are. Pick this when you want a fast, authoritative answer you can quote as-is.\n\n**3)** **Risk, recomputed from layers** \u2014 the same kind of flood risk, but rebuilt here from the underlying data so you can adjust how much weight hazard versus each vulnerability factor carries. It takes a little longer to compute on the fly, and it has been checked to closely match the official layer \u2014 almost every place lands in the same severity class, and none differ by more than one.\n\nReply with the number (1\u20133) \u2014 or tap an option below.",
+      "error": null
+    }
+  ]
+}
