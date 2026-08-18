@@ -71,11 +71,27 @@ def app_ts(t: dict | None = None) -> str:
             "export const theme = " + json.dumps(body, indent=2) + " as const;\n")
 
 
+def _live_design() -> dict | None:
+    """Colour tokens as the Figma file defines them RIGHT NOW, or None.
+
+    Config is the safety net by design: `ui_design` must never fail, and a consumer
+    mid-build must never get an empty palette because a third party was down. So a
+    Figma outage degrades to the committed theme silently in behaviour but LOUDLY in
+    the payload — `design_source` always says which one you got.
+    """
+    try:
+        from . import figma
+        return figma.read_tokens()
+    except Exception:                      # any upstream trouble: fall back, never fail
+        return None
+
+
 def design(fmt: str = "all") -> dict:
     """The design language for a consumer: tokens to reason over, CSS custom
     properties that work in any stack, a daisyUI theme for the common one — and the
     honesty conventions (trust_rules + voice) that ride WITH the paint."""
     t = tokens()
+    live = _live_design()
     want = (fmt or "all").lower()
     if want not in ("all", "tokens", "json", "css", "daisyui", "tailwind"):
         return {"status": "declined",
@@ -87,9 +103,27 @@ def design(fmt: str = "all") -> dict:
            # tokens inherits unverified-by-default even on screens we never shipped
            "trust_rules": t["trust_rules"], "voice": t["voice"],
            "semantic": t["semantic"], "validation_levels": t["validation_levels"]}
+    # Which source you are actually looking at. Never inferred, never absent.
+    out["design_source"] = ({"source": "figma-live", **live["provenance"],
+                             "conflicts": live["conflicts"]} if live else
+                            {"source": "config", "file": str(theme_path().name),
+                             "note": ("Figma was unreachable or unconfigured, so this is the "
+                                      "committed theme. It is a maintained copy, not the "
+                                      "live design file.")})
     if want in ("all", "tokens", "json"):
         out["tokens"] = {k: t[k] for k in
                          ("palette", "typography", "radii", "provenance")}
+        if live:
+            # The named brand colours as the designers currently have them. Kept
+            # SEPARATE from `palette`: palette is the semantic role map the UI is
+            # built on, and silently overwriting roles from a colour page would
+            # change every component the moment a designer renames a swatch.
+            out["tokens"]["brand_colors"] = live["colors"]
+            out["tokens"]["declared_styles"] = live["declared_styles"]
+            # Same separation as colour: `typography` is the config's semantic scale
+            # (body/heading roles). This is what the design file actually SETS on
+            # text, observed not declared, so it informs rather than replaces.
+            out["tokens"]["design_file_type_scale"] = live.get("typography", [])
     if want in ("all", "css"):
         out["css"] = css_vars(t)
     if want in ("all", "daisyui", "tailwind"):
@@ -107,14 +141,75 @@ def design(fmt: str = "all") -> dict:
     return out
 
 
+def _live_components() -> dict:
+    """Component sets from the design file, or an honest note. Never raises: the
+    catalogue must still list our own recipes when Figma is unreachable."""
+    try:
+        from . import figma
+        c = figma.read_components()
+        return {"source": "figma-live", "file": c["provenance"]["file"],
+                "last_modified": c["provenance"]["last_modified"],
+                "cache": c.get("cache"),
+                "sets": [{"name": s["name"], "node_id": s["node_id"],
+                          "variants": [{k: v for k, v in var.items() if k != "label"}
+                                       for var in s["variants"]]}
+                         for s in c["sets"]],
+                "how": ("Ask ui_component(name=<set name>, treatment=..., layout=...) "
+                        "for a rendered asset.")}
+    except Exception as exc:
+        return {"source": "unavailable", "sets": [],
+                "note": f"design file not reachable ({exc}); our own recipes are unaffected"}
+
+
+def _design_file_component(name: str, **want) -> dict | None:
+    """One variant of a design-file component set, rendered. None if the name is not
+    a set there, so the caller can fall through to its own decline."""
+    try:
+        from . import figma
+        sets = {s["name"]: s for s in figma.read_components()["sets"]}
+    except Exception:
+        return None
+    s = sets.get(name)
+    if s is None:
+        return None
+    wanted = {k: str(v).lower() for k, v in want.items() if v is not None}
+    matches = [v for v in s["variants"]
+               if all(str(v.get(k, "")).lower() == val for k, val in wanted.items())]
+    if not matches:
+        return {"status": "declined", "name": name,
+                "note": (f"no variant of {name!r} matches {wanted or '{}'}"
+                         if wanted else f"{name!r} has no variants"),
+                "available_variants": [{k: x for k, x in v.items() if k != "node_id"}
+                                       for v in s["variants"]]}
+    if len(matches) > 1 and wanted:
+        return {"status": "declined", "name": name,
+                "note": f"{wanted} matches {len(matches)} variants; narrow it",
+                "available_variants": [{k: x for k, x in v.items() if k != "node_id"}
+                                       for v in matches]}
+    chosen = matches[0]
+    img = figma.render([chosen["node_id"]], "svg")
+    return {"status": "ok", "name": name, "source": "figma-live",
+            "variant": {k: v for k, v in chosen.items() if k != "node_id"},
+            "svg_url": img["images"].get(chosen["node_id"]),
+            "caveat": img["caveat"],
+            "trust_class": "presentational",
+            "note": ("Brand asset from the design file. Presentational only: it carries "
+                     "no verdict and needs no receipt.")}
+
+
 def catalog() -> dict:
     """The component inventory — what exists, its trust class, and how it is
     delivered. Derived from the theme config, so it cannot drift."""
     t = tokens()
     comps = dict(t.get("components") or {})
     note = comps.pop("note", None)
+    # The design file's own published UI, alongside our recipes. Kept in a SEPARATE
+    # key: these are brand assets rendered by Figma, not trust-bound components with
+    # a delivery mode, and conflating them would imply a guarantee they do not carry.
+    live = _live_components()
     return {"status": "ok", "note": note,
             "components": [{"name": k, **v} for k, v in sorted(comps.items())],
+            "design_file_components": live,
             "delivery_modes": {
                 "embed": "runs as OUR component bound to a server id — trust state "
                          "resolves from the platform, not from a prop",
@@ -122,7 +217,7 @@ def catalog() -> dict:
                           "(versioned; no updates after copying)"}}
 
 
-def component(name: str) -> dict:
+def component(name: str, **variants) -> dict:
     """A ready-built component: real markup you drop in, not a description to
     reimplement. Recipes live in conf/ui_recipes/<name>.html — adding one is a file
     plus a catalog entry, never a code change."""
@@ -130,8 +225,16 @@ def component(name: str) -> dict:
     comps = {k: v for k, v in (t.get("components") or {}).items() if k != "note"}
     spec = comps.get(name)
     if spec is None:
+        # Not one of ours — it may be a set in the design file. The platform REQUIRES
+        # every UI to carry the SERVIR identity, so a builder asking for the logo must
+        # get the real asset with the right treatment, not a config URL.
+        live = _design_file_component(name, **variants)
+        if live is not None:
+            return live
         return {"status": "declined", "note": f"unknown component {name!r}",
-                "available": sorted(comps)}
+                "available": sorted(comps),
+                "design_file": [s["name"] for s in
+                                _live_components().get("sets", [])]}
     path = theme_path().parent / "ui_recipes" / f"{name}.html"
     if not path.exists():
         return {"status": "declined", "name": name,

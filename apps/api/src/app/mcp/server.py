@@ -239,8 +239,9 @@ def ui_catalog() -> dict:
 
 
 @mcp.tool(description=ui.describe_component())
-def ui_component(name: str) -> dict:
-    return ui.component(name)
+def ui_component(name: str, treatment: str | None = None,
+                 layout: str | None = None) -> dict:
+    return ui.component(name, treatment=treatment, layout=layout)
 
 
 @mcp.tool(description=ui.describe_embed())
