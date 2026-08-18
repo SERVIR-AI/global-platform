@@ -123,6 +123,10 @@ Capture prompt and completion tokens from the SDK response, and compute cost **w
 model and provider are known** rather than at assembly time. Prices are usually quoted per
 million tokens - divide before multiplying, and unit-test that.
 
+**Look up how the provider reports usage - do not assume field names.** They differ by
+provider, by SDK version, and between streamed and non-streamed calls. Implement against the
+current docs and the current price list.
+
 **Capture the whole usage breakdown the SDK gives you, not just two numbers.** Providers bill cache reads and cache writes at different rates from ordinary input, and reasoning tokens are billed as output while never appearing in the completion. A trace recording only prompt and completion counts will misreport cost on any model doing either.
 
 **Record the rate you priced at, alongside the computed cost.**

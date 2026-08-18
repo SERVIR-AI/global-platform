@@ -20,14 +20,15 @@ follows.
 | **Layered service** (controller → service → repo) | Each service method; repos usually too fine | Request-scoped DI container, or an explicit context argument | Controller, before serialising |
 | **Queue worker** (Celery, Sidekiq, SQS) | Each stage of the task | Task-local storage, or a dict on the job payload | Task completion - persist rather than return; there is no response |
 | **Agent loop** (tool-calling while-loop) | One iteration: the model call plus the tool it ran | A list on the loop's own scope | After the loop exits |
-| **Streaming / SSE** | Same as the non-streaming case | Same | Trailing event after the content stream - see below |
+| **Streaming** (SSE, WebSocket, chunked) | Same as the non-streaming case | Same | Persist at stream end; deliver as a trailing event - see below |
 | **Batch / ETL** | Each transform stage | The pipeline context object | End of run - write beside the output artifact |
+| **CLI tool / one-shot script** | Each phase of the command | A module-level list, or an object the command threads through | Before exit - print it, write it, or both.|
 
 ---
 
 ## Choosing the unit of work
 
-Apply the test from `design-principles.md` §1: *a step is something a user would name.*
+Apply the test from `design-principles.md` §1: *a step is something a user would name.* Keep in mind that an application may have multiple architectures within the same service.
 
 Practical heuristics:
 
@@ -40,7 +41,7 @@ Practical heuristics:
 - **If you cannot write a one-line `summary` for it, it is not a step.** That is the test,
   not a formality.
 
-Five to eight step types is typical. If you have thirty, you have chosen too fine a layer.
+Five to eight step types is typical. If you have thirty, you have chosen too fine a layer, unless the service is huge and complex.
 
 ---
 
@@ -69,7 +70,7 @@ The right tool when a value must reach code you cannot change the signature of -
 LangGraph-style: declare a channel with an append reducer, have each node return its event
 in a delta.
 
-The trap: on a checkpointed thread the channel **persists across turns**, so it grows forever and every turn reports its predecessors. Reset it per turn. The reference does this with a sentinel value its custom reducer strips:
+The trap: on a checkpointed thread the channel **persists across turns**, so it grows forever and every turn reports its predecessors. Reset it per turn - one way is a sentinel value that a custom reducer strips:
 
 ```python
 def _add_reset(left, right):
@@ -89,16 +90,21 @@ Only the turn's first node may emit the sentinel. Assign indices at assembly.
 by the job id and expose it through whatever already surfaces job status. The trace becomes
 more valuable here, not less - there is no user watching.
 
-**Streaming responses** cannot attach a trace to a header that has already been sent. Options,
-in order of preference:
+**Streaming responses** cannot attach a trace to a header already sent.
 
-1. A final SSE event (`event: trace`) after the content stream completes. The client already
-   has a message loop; this is one more case.
-2. Persist it and return its id in an early metadata frame; the client fetches it if the user
-   asks.
-3. A trailing chunk in the response body, if the protocol allows.
+**Persist first, then deliver.** If the connection drops, anything sent at the end never
+arrives - and that is the turn you most want traced. Write the envelope at turn end regardless,
+then deliver by whatever channel exists: a final SSE `event: trace` or WebSocket message, an id
+in an early frame that the client fetches later, or HTTP trailers if both ends are yours
+(browsers do not expose them to `fetch()`).
 
 Do not buffer the whole stream just to attach a trace.
+
+**Streaming also changes how the LLM SDK reports usage** - often omitted unless you opt in, or
+split across separate events. Instrumented the obvious way, the step silently records no tokens
+and zero cost. Fetch the provider's current streaming docs, implement against those, and verify
+on a real streamed call that the numbers are non-null. Record time to first token separately
+from total duration.
 
 **Multiple backend services.** If a turn spans services, either propagate a turn id and have
 each service persist its own envelope under it (assemble on read), or have the edge service
@@ -121,8 +127,9 @@ these solve overlapping problems for different audiences:
 | Reaches the client? | No | Yes |
 
 They compose well: emit spans as you already do, and build the envelope alongside from the
-same captured values. What this skill adds to a span is principles 4 (`summary`/`why`), 5
-(inputs as received), and 6 (`null` ≠ `0`) - none of which a generic span carries by default.
+same captured values. What this skill adds to a span is the plain-language `summary`/`why`,
+inputs as actually received, and the `null` ≠ `0` discipline - none of which a generic span
+carries by default.
 
 If the user only needs operator-side visibility, **spans alone are the better answer** and
 this skill should say so rather than adding a parallel system.
@@ -146,5 +153,4 @@ zero values will not.
 thread-locals across reactive schedulers; use the reactive context instead.
 
 Whatever the language: **an absent value must serialise as `null`, not as a type's zero
-value.** Languages without nullable primitives need boxed or pointer types for this. It is
-the most common way principle 6 gets silently lost at the serialisation boundary.
+value.** Languages without nullable primitives need boxed or pointer types for this.

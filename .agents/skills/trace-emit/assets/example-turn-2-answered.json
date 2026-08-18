@@ -147,17 +147,17 @@
         "cost_out": 0.0,
         "cost": 0.0
       },
-      "llm_response": "There are 0 schools at high risk of flooding in the selected area. This means no schools fall into the hazard zone of 1.5-2 meters or higher.\n\nExposure refers to assets physically sitting in the hazard area.\n\nBreaking this down by severity: 2 schools are in the 'Very Low (0-0.5 m)' flood zone, 1 school is in the 'Low (0.5-1 m)' zone, and 4 schools are in the 'Moderate (1-1.5 m)' zone. Higher classes indicate more severe flooding.\n\nSource: hazard_flood.tif \u00d7 schools",
+      "llm_response": "<response>",
       "messages": [
         {
           "role": "system",
           "type": "text",
-          "content": "You route disaster-risk questions to tools and phrase the result. You never compute, estimate, or invent numbers or data paths. Extract the place (city or district) the user names and pass it as `place`. Hazard severity is a class 1 (low) to 5 (extreme). Pick the hazard layer that matches the hazard the user mentions (e.g. hazard_flood for any flood/flooding/flood-risk question) \u2014 the agent then asks the user whether they want exposure or risk, so you do not choose that. For layers we do not have (homeless, population, evacuation_plan, ews) or if no place is given, do not call a tool \u2014 say so plainly.\nWrite the final answer for a non-expert who has never seen this data. Use 2-4 short sentences, plain language, no jargon. (1) Lead with what we found in everyday terms \u2014 e.g. \"About 241 km of roads in Battambang fall inside the flood zone.\" (2) Say in one line what the number means: \"exposure\" = assets physically sitting in the hazard area; \"risk\" = how hazard combines with vulnerability (people, buildings, roads) to estimate potential impact. (3) If the result has a `by_severity` breakdown, give the per-class figures in words using the `legend` labels and note that higher classes are more severe. Always state the exact number(s) the tool returned and, on a final line, cite the data `source` verbatim (e.g. \"Source: risk_flood_l2.tif\"). Never round away the real number, invent figures, or add caveats the tool did not provide.\n\nThe user drew the area on the map; the result is for that drawn area. Phrase it naturally (e.g. 'in the selected area') and do not ask for or mention a missing place name."
+          "content": "<prompt>"
         },
         {
           "role": "assistant",
           "type": "text",
-          "content": "There are 0 schools at high risk of flooding in the selected area. This means no schools fall into the hazard zone of 1.5-2 meters or higher.\n\nExposure refers to assets physically sitting in the hazard area.\n\nBreaking this down by severity: 2 schools are in the 'Very Low (0-0.5 m)' flood zone, 1 school is in the 'Low (0.5-1 m)' zone, and 4 schools are in the 'Moderate (1-1.5 m)' zone. Higher classes indicate more severe flooding.\n\nSource: hazard_flood.tif \u00d7 schools"
+          "content": "<response>"
         }
       ],
       "grounded": true

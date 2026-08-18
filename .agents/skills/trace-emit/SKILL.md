@@ -52,8 +52,6 @@ Never widen scope silently between checkpoints.
 2. **Make minimal changes to code while implementing tracing.** Implement traceability using the least amount of changes in general for readability and user awareness. If user code from elsewhere is imported, there are API calls, or collecting traces requires changing several method signatures, consider wrapping it or collecting around it using ContextVars - see `references/io-capture.md`. If instrumenting something would require editing a dependency, stop and say so. Implementing tracing and observability will require changes to their code.
 3. **Tracing is never load-bearing.** Assembly and persistence go inside a `try`/`except` that swallows everything. A tracing bug must never change or break a response. Build this in from the first commit, not at the end.
 4. **Backend and frontend are separate changes**, separately proposed and separately approved.
-5. **Build it up incrementally.** Do not one shot all the changes, lay a roadmap for what needs to be changed, propose this to the user, and then implement it based on their feedback.
-6. **User feedback is central.** At every step, ask a user for feedback before doing something major, and to understand what their needs are. Do not one-shot the whole feature unless they ask for it.
 
 ---
 
@@ -184,7 +182,7 @@ Load these as needed; **do not** read them all up front.
 | `references/design-principles.md` | Before writing any builder. The rules and the reasoning. |
 | `references/architecture-mapping.md` | The host project is not a graph-based agent, or you are unsure what a "step" is there. |
 | `references/io-capture.md` | External calls or cache hits happen inside functions whose return values cannot report them. |
-| `references/worked-example.md` | You want to see the whole pattern in working code before adapting it. |
+| `references/worked-example.md` | Before step 3, and any time you want the whole pattern in one piece. A walkthrough of the two real envelopes in `assets/`, including the traps they contain. |
 
 ## Assets
 
@@ -197,4 +195,4 @@ Two **real captured envelopes**, shipped with this skill - a genuine consecutive
 
 They share a `thread_id` and are two separate envelopes, which is the point: **one envelope is one turn.** A paused question and its answer are never merged.
 
-Both are unedited except for the absolute local path being replaced with `<cache>`. Read them for the architecture - what a step records, how a turn is bounded, where the header comes from. The field names and step kinds are one project's domain and do not transfer.
+Both are unedited except for three redactions: absolute cache paths read `<cache>`, prompt text reads `<prompt>`, and model output reads `<response>`. Read them for an example of one possible architecture - what a step records, how a turn is bounded, where the header comes from. The field names and step kinds are one project's domain and do not transfer.

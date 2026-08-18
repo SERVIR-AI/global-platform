@@ -2,41 +2,61 @@
 
 ## The problem
 
-A step calls a helper that does several things worth recording:
+As an example, the below is a step calls one helper that does several things worth recording:
 
 ```python
-aoi = ingest.ensure_aoi(place, layers=["schools"])
+data = load_dataset(name, layers=["schools"])
 ```
 
-Behind that one call: a geocoder was queried, an OSM mirror failed over twice, one raster
+Behind that one call: a lookup service was queried, one endpoint failed over twice, one file
 came from cache and another was downloaded. The step needs all of it. The return value is
-`aoi` - a bundle of file paths. None of that information is in it.
+`data`. None of that information is in it.
 
 Three bad answers:
 
 1. **Change every return type** to `(value, events)`. Viral: it propagates up through every
    caller and every test, and it puts observability into the domain signature.
-2. **Log it and scrape the logs.** Fragile, unordered, and unavailable in the response.
+2. **Log it and scrape the logs.** Fragile, unordered, and unavailable to the trace.
 3. **Edit the dependency.** Not an option - you do not own it, and you must not edit
    `.venv/`, `node_modules/`, or vendored code.
 
+---
+
 ## The pattern: an ambient collector, installed for the duration of the step
 
-A context variable holds an optional collector. Code deep in the stack calls a module-level
-`emit()`, which appends to whatever collector is currently installed, or does **nothing** if
-there is none. The step installs one around its work and drains it when building its event.
+Every runtime has a **request-scoped ambient store**: a place a value can live for the duration
+of one logical operation, readable by code deep in the stack without anyone passing it down.
 
-Three properties make this work:
+Put an optional collector there. Code deep in the stack calls a module-level `emit()`, which
+appends to whatever collector is currently installed, or does nothing if there is none. The
+step installs one around its work and drains it when building its event.
 
-- **`emit()` is a no-op when nothing is installed.** Instrumented modules stay usable -
-  and testable - outside a traced request, with no setup and no import cycle.
-- **The collector is per-context**, so concurrent requests never mix. `ContextVar` and
-  `AsyncLocalStorage` both copy correctly into async tasks.
-- **The domain signature is untouched.** `ensure_aoi` still returns `aoi`.
+Four properties make this work. Keep all four whatever the language:
+
+1. **`emit()` is a no-op when nothing is installed.** Instrumented modules stay usable - and
+   testable - outside a traced request, with no setup and no import cycle.
+2. **The collector is scoped to one logical operation**, so concurrent requests never mix.
+3. **Domain signatures are untouched.** `load_dataset` still returns `data`.
+4. **Installation is always undone**, on the error path too. A leaked collector attributes the
+   next turn's I/O to this one.
+
+### The mechanism, by language
+
+| Runtime | Ambient store | Notes |
+| --- | --- | --- |
+| Python | `contextvars.ContextVar` | Copies correctly into `asyncio` tasks. Not a plain thread-local. |
+| Node / TypeScript | `AsyncLocalStorage` (`node:async_hooks`) | `storage.run(store, fn)` scopes it to a callback - nothing to uninstall. |
+| Go | A value on `context.Context` | Explicit, since `context` is already threaded. Guard the slice with a mutex if the step fans out. |
+| JVM | A request-scoped bean, or the reactive context | **Not** a plain `ThreadLocal` if anything is reactive - it will not follow the scheduler. |
+| Ruby / Rails | `ActiveSupport::CurrentAttributes`, or a fiber-local | Reset per request; the framework does not always do it for you. |
+| .NET | `AsyncLocal<T>` | Flows across `await` the same way `ContextVar` does. |
+
+The rest of this file is one implementation in full. Python, because it is the fiddliest - it
+has an explicit install and uninstall to get wrong. Adapt the shape, not the API.
 
 ---
 
-## Python
+## Reference implementation
 
 ```python
 import contextvars
@@ -75,22 +95,22 @@ def emit(event: dict) -> None:
 At the emission sites, deep in the module:
 
 ```python
-def _overpass(query, attempts=3):
+def _query(payload, attempts=3):
     for attempt in range(attempts):
-        for url in MIRRORS:
+        for url in ENDPOINTS:
             try:
-                r = requests.post(url, data={"data": query}, timeout=TIMEOUT)
+                r = requests.post(url, data=payload, timeout=TIMEOUT)
                 if r.status_code in (429, 504):
                     continue
                 r.raise_for_status()
-                elements = r.json()["elements"]
-                emit({"kind": "api", "api": "Overpass", "mirror_used": url,
-                      "attempts": attempt + 1, "n_elements": len(elements)})
-                return elements
+                results = r.json()["results"]
+                emit({"kind": "api", "api": "Overpass", "endpoint_used": url,
+                      "attempts": attempt + 1, "n_results": len(results)})
+                return results
             except requests.RequestException:
                 pass
         time.sleep(2 ** attempt)
-    raise RuntimeError("Overpass unavailable")
+    raise RuntimeError("all endpoints unavailable")
 ```
 
 At the step:
@@ -100,11 +120,11 @@ def fetch(state):
     collector = IOCollector()
     token = install(collector)
     try:
-        aoi = ingest.ensure_aoi(place, layers=needed)
-        event = make_trace_event_fetch(..., drained_io_events=collector.drain(), error=None)
-        return {"aoi": aoi, "events": [event]}
+        data = load_dataset(name, layers=needed)
+        event = make_fetch_event(..., drained_io_events=collector.drain(), error=None)
+        return {"data": data, "events": [event]}
     except Exception as e:
-        event = make_trace_event_fetch(..., drained_io_events=collector.drain(), error=str(e))
+        event = make_fetch_event(..., drained_io_events=collector.drain(), error=str(e))
         return {"error": ..., "events": [event]}
     finally:
         uninstall(token)                  # ALWAYS. A leak misattributes the next turn.
@@ -113,7 +133,7 @@ def fetch(state):
 `uninstall` belongs in `finally`, and `drain()` must run on the error path too - the I/O that
 happened before the failure is usually the most interesting part of it.
 
-## TypeScript / Node
+The Node version needs no `finally`, because the store is scoped to a callback:
 
 ```ts
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -130,21 +150,15 @@ export const collectIO = async <T>(fn: () => Promise<T>): Promise<[T, IOEvent[]]
 };
 ```
 
-`storage.run` scopes the store to the callback, so there is no uninstall to forget. When the
-callback may throw and you still want the events, capture `events` outside and read it in a
-`finally` - the array is the same reference either way.
-
-**Go:** put the collector on the `context.Context` and pass it down; a mutex-guarded slice or
-a buffered channel both work. **JVM:** a request-scoped bean, or the reactive context - not a
-plain `ThreadLocal` if anything is reactive.
+When the callback may throw and you still want the events, capture `events` outside and read it
+in a `finally` - the array is the same reference either way.
 
 ---
 
 ## What to put in an I/O event
 
-Keep it flat and uniform enough to group after the fact. The reference splits one drained
-list into `api_calls` and `downloads` at build time on `kind`, which means emitters never
-have to know which bucket they land in:
+Keep it flat and uniform enough to group after the fact. Splitting one drained list into
+buckets at build time on `kind` means emitters never have to know which bucket they land in:
 
 ```python
 api_calls = [e for e in drained if e.get("kind") == "api"]
@@ -155,41 +169,49 @@ Useful fields:
 
 | Field | For |
 | --- | --- |
-| `kind` | `api` / `download` / `clip` / `cache` - how it gets grouped |
+| `kind` | `api` / `download` / `cache` - how it gets grouped |
 | `api` | Which third party |
 | `op`, `query` | What was asked |
-| `mirror_used`, `attempts` | Which endpoint answered, after how many tries |
-| `n_results`, `n_elements` | Size of the response |
+| `endpoint_used`, `attempts` | Which endpoint answered, after how many tries |
+| `n_results`, `bytes`, `status` | Size and outcome of the response |
 | `was_cached` | Reused or fetched - **emit on both branches** |
 | `dest`, `layer`, `filename` | What was produced, and where |
+
+### Reduce before you emit
+
+This is where request and response bodies get captured, so this is where the capture scope
+agreed in `SKILL.md` step 1a is enforced. Truncate, hash, redact by key name, or summarise
+**at the `emit()` call** - not later. Once a full body is in the collector it will reach the
+envelope, and the assembler has no idea what any of it is.
+
+Headers are the usual leak: `Authorization`, `Cookie`, and API keys in query strings.
 
 ---
 
 ## Known limits of this pattern
 
-Write these down wherever the events are documented; consumers will otherwise assume
-otherwise.
+Surface the limitations when implementing this pattern, so users can have a better idea of what to include within the io capture.
 
-- **No timestamps unless you add them.** The reference records none, so the list is *ordered*
-  but is not a timeline. Anything rendering it as a waterfall is inventing precision. If you
-  want sub-step timing, put a monotonic offset in the event at emission - retrofitting it
-  later is a schema change.
+- **No timestamps unless you add them.** The list is *ordered*, but it is not a timeline.
+  Anything rendering it as a waterfall is inventing precision. If you want sub-step timing, put
+  a monotonic offset in the event at emission - retrofitting it later is a schema change.
 - **Emission order, not causal order.** A cache-check event emitted before the download it
   triggers appears first. Fine, as long as it is expected.
-- **Only what you emit exists.** In the reference, `emit` sits on the success path of the
-  retry loop, so failed mirrors leave no record and `attempts > 1` is the only evidence of a
-  failover. Defensible; just not obvious to a reader.
+- **Only what you emit exists.** If `emit` sits on the success path of a retry loop, failed
+  attempts leave no record and the attempt count is the only evidence of a failover.
 - **Anything not instrumented is invisible.** A library making its own HTTP calls will not
   appear. If completeness matters more than selectivity, instrument at the HTTP-client layer
-  (a `requests` adapter, an axios interceptor, an `httpx` event hook) so *every* call is
-  captured - then filter, rather than relying on remembering to call `emit`.
+  instead - a `requests` adapter, an axios interceptor, an `httpx` event hook - so *every* call
+  is captured, then filter. That is more robust than relying on remembering to call `emit`.
 - **Concurrency.** If a step fans out with `asyncio.gather` or `Promise.all`, each task
-  inherits a copy of the context and appends to the same collector. Ordering is then
-  completion order, not start order - record a sequence number at emission if that matters.
+  inherits a copy of the context and appends to the same collector. Ordering is then completion
+  order, not start order - record a sequence number at emission if that matters.
+
+---
 
 ## Testing it
 
-The pattern is worth three small tests, and they catch the failure modes that actually occur:
+Three small tests, and they catch the failure modes that actually occur:
 
 ```python
 def test_emit_is_a_noop_when_nothing_is_installed():
