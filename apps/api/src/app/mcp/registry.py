@@ -374,6 +374,26 @@ def store_latest_receipt():
         return None
 
 
+def _design_language() -> dict:
+    """So a builder learns from platform_capabilities that the design language is
+    live, rather than only discovering it if they happen to call ui_catalog."""
+    try:
+        from . import figma
+        c = figma.read_components()
+        return {"source": "figma-live", "file": c["provenance"]["file"],
+                "last_modified": c["provenance"]["last_modified"],
+                "brand_component_sets": [s["name"] for s in c["sets"]],
+                "tools": ["ui_design", "ui_catalog", "ui_component", "ui_embed"],
+                "note": ("Colour, type and brand assets are read from the design file at "
+                         "call time. ui_design falls back to the committed theme if it is "
+                         "unreachable and always states which source you got.")}
+    except Exception:
+        return {"source": "config",
+                "tools": ["ui_design", "ui_catalog", "ui_component", "ui_embed"],
+                "note": ("The design file is not reachable, so the committed theme is "
+                         "served. It is a maintained copy, not the live design file.")}
+
+
 def capabilities(available_tools=None, available_prompts=None,
                  available_resources=None) -> dict:
     """The honest platform map. Bone status + the tool/prompt/resource lists are
@@ -401,5 +421,6 @@ def capabilities(available_tools=None, available_prompts=None,
         # versioned bundle of sources/calendars/composition — there is one per
         # domain. An EVIDENCE PACK (pack_id, from assemble_pack) is a per-question
         # snapshot of gathered evidence — a new one is minted on every call.
+        "design_language": _design_language(),
         "domain_packs": [pack_manifest()],
     }

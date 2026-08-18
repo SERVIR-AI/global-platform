@@ -284,6 +284,16 @@ def describe_component() -> str:
             "Authored now: " + (", ".join(f"`{h}`" for h in have) or "(none)") +
             ".\nSee ui_catalog for every catalogued component and its trust class; one "
             "not yet authored declines as not-implemented rather than pretending.\n\n"
+            "ALSO SERVES BRAND ASSETS from the live design file, which is how you get the "
+            "SERVIR identity every UI on this platform must carry. Pass a set name from "
+            "`ui_catalog.design_file_components` and narrow it with `treatment` and "
+            "`layout`, and you get a rendered SVG url.\n"
+            "  treatment: Primary | Black | Grayscale | Reversed Color | Reversed Mono\n"
+            "             (use a Reversed treatment on a dark ground)\n"
+            "  layout:    Horizontal | Stacked   (Lockup only)\n"
+            "e.g. ui_component(name=\"SERVIR/Logo/Lockup\", treatment=\"Reversed Mono\", "
+            "layout=\"Horizontal\"). An ambiguous or unknown value DECLINES and lists the "
+            "real variants. Rendered urls EXPIRE (~30 days): download, do not hotlink.\n\n"
             "receipt_bound components must render UNVERIFIED unless fed a payload "
             "resolved from the platform — there is no 'passed' input.")
 
@@ -338,6 +348,14 @@ def describe_design() -> str:
     t = tokens()
     return (f"Get the platform design language (theme `{t['id']}` {t['version']}, built on "
             f"the {t['brand']['name']} identity) so you do NOT invent a colour scheme.\n\n"
+            "Colour and type are read LIVE from the SERVIR Design System in Figma when it is "
+            "reachable, so you get what the designers currently ship. `design_source` always "
+            "states which you got: `figma-live` (with file, version and last_modified) or "
+            "`config` (the committed copy, used when Figma is unreachable). Live values arrive "
+            "as `tokens.brand_colors` and `tokens.design_file_type_scale`, SEPARATE from "
+            "`palette`/`typography`, which stay the semantic role map your components bind to. "
+            "`design_source.conflicts` lists anything ambiguous in the design file (duplicate "
+            "hexes, malformed labels) rather than resolving it silently.\n\n"
             "Returns tokens (palette/typography/radii/provenance colours), `css` "
             "(--grp-* custom properties for any stack), `daisyui_theme` (Tailwind/daisyUI), "
             "plus `trust_rules`, `semantic`, `validation_levels` and `voice` — the honesty "
