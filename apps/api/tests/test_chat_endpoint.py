@@ -57,6 +57,10 @@ def test_round_trip_with_stub(aoi, make_client, monkeypatch, log):
     assert str(expected) in body["message"]["content"]
     assert body["usage"]["total_tokens"] > 0
     assert body["thread_id"]
+    # A RESUMED turn: route() reads the pre-reset state, so without build_trace_envelope's
+    # renumbering the first step would be indexed 2 (last turn's leftovers) — the [2,1,2,3]
+    # signature in every envelope under cache/traces/.
+    assert [s["step"] for s in body["trace_envelope"]["steps"]] == [0, 1, 2, 3]
 
 
 def test_trace_events_surfaced_in_response(aoi, make_client, monkeypatch, log):

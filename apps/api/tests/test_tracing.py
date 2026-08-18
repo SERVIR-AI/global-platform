@@ -659,6 +659,19 @@ def test_build_trace_envelope_cost_summed_from_precomputed_values(log):
     assert envelope["total_tokens"]["cost"] == 0.01 + 0.005
 
 
+def test_build_trace_envelope_renumbers_steps_by_position(log):
+    """`step` is renumbered from the event's position, overriding whatever each builder
+    derived. The turn's first node reads the PRE-reset state (route()'s _RESET sentinel is
+    applied by the reducer only after it returns), so on every turn but a thread's first it
+    counts the previous turn's leftovers — every persisted envelope in cache/traces/ shows
+    the resumed-turn signature [2, 1, 2, 3]."""
+    events = [dict(_ROUTE_STEP, step=2), dict(_RESOLVE_STEP, step=1),
+              dict(_OPERATE_STEP, step=2), dict(_FINALIZE_STEP_LLM, step=3)]
+    envelope = tracing.build_trace_envelope(events, thread_id="t1", trace_id="tr1")
+    log("STEPS", [e["step"] for e in envelope["steps"]])
+    assert [e["step"] for e in envelope["steps"]] == [0, 1, 2, 3]
+
+
 def test_build_trace_envelope_empty_events(log):
     envelope = tracing.build_trace_envelope([], thread_id="t1", trace_id="tr1")
     assert envelope["total_duration"] == 0
