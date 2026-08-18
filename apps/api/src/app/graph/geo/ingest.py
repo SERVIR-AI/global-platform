@@ -112,7 +112,13 @@ def _search(place):
         "q": place, "format": "json", "polygon_geojson": 1, "limit": 10, "accept-language": "en"})
     r.raise_for_status()
     results = r.json()
-    emit({"kind": "api", "api": "Nominatim", "op": "geocode", "query": place,
+    emit({"kind": "api", 
+          "api": "Nominatim", 
+          "op": "geocode", 
+          "query": place,
+          "place_id": results[0]["place_id"],
+          "retrieved_name": results[0]["display_name"],
+          "type": results[0]["type"],
           "n_results": len(results)})
     return results
 
@@ -152,7 +158,7 @@ def _overpass(query, attempts=3):
                 r.raise_for_status()
                 elements = r.json()["elements"]
                 emit({"kind": "api", "api": "Overpass", "mirror_used": url,
-                      "attempts": attempt + 1, "n_elements": len(elements)})
+                      "attempts": attempt + 1, "n_elements": len(elements), "api_query": query})
                 return elements
             except requests.RequestException as e:
                 last = str(e)
