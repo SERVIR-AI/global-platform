@@ -409,3 +409,20 @@ def test_a_healthy_feed_is_never_labelled_cache_served(brief_env):
     citations, _, _ = synthesis.gather_evidence(PARSED, trace=[])
     for c in (c for c in citations if c["kind"] == "index"):
         assert "LAST-GOOD CACHE" not in c["text"], c["source"]
+
+
+def test_absent_calendar_is_citable_evidence(brief_env):
+    """The brief must always carry a Season timing caveat, and every paragraph must
+    carry a citation. With no calendar there was nothing to cite, so the model wrote
+    an uncited paragraph and the gate killed the whole brief. An absent calendar is
+    now a real entry saying so."""
+    from app.food_security import calendar as cal
+    c = cal.citation(country="kenya", crop="", asked_month=8)
+    assert c is not None and c["kind"] == "calendar"
+    assert "NO CROP CALENDAR APPLIES" in c["text"]
+    assert c["adjusted"] is None            # neither hub-default nor requester-adjusted
+    # and it reaches the pack, so the model has a number to cite
+    brief_env([GOOD_BRIEF])
+    citations, _, _ = synthesis.gather_evidence(
+        {"crop": "", "country": "Kenya", "focus": "El Nino"}, trace=[])
+    assert any(x["kind"] == "calendar" for x in citations)

@@ -17,7 +17,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 Provider = Literal["claude", "openai", "gemini"]
 # Vertex is embeddings-only here: it serves them on its native endpoint and
 # authenticates with short-lived tokens, so it is not an OpenAI-compat chat provider.
-EmbeddingProvider = Literal["claude", "openai", "gemini", "vertex"]
+EmbeddingProvider = Literal["claude", "openai", "gemini", "vertex", "onprem"]
 
 # Paths derived from this file's location (apps/api/src/app/config.py) so the app
 # resolves config/data no matter which directory uvicorn is launched from.
@@ -139,6 +139,16 @@ class Settings(BaseSettings):
     claude_base_url: str = "https://api.anthropic.com/v1/"
     openai_base_url: str = "https://api.openai.com/v1"
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    # A locally hosted OpenAI-compatible server. Nothing leaves the network when this
+    # is the configured embedding provider.
+    onprem_base_url: str = "http://127.0.0.1:8081/v1"
+    onprem_model: str = "BAAI/bge-small-en-v1.5"
+
+    # --- Figma (live design tokens) ---
+    # Read-only. Variables API needs Enterprise; on this plan we read the document
+    # tree instead, so mcp/figma.py reports what it cannot resolve.
+    figma_token: str | None = None
+    figma_file_key: str = "Fq6ffqege1xqUeCDyLYTfK"
 
     # --- Provider credentials ---
     # Only the provider actually requested needs its key set.
