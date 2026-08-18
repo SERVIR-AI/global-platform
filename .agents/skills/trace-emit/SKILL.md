@@ -183,6 +183,7 @@ Load these as needed; **do not** read them all up front.
 | `references/architecture-mapping.md` | The host project is not a graph-based agent, or you are unsure what a "step" is there. |
 | `references/io-capture.md` | External calls or cache hits happen inside functions whose return values cannot report them. |
 | `references/worked-example.md` | Before step 3, and any time you want the whole pattern in one piece. A walkthrough of the two real envelopes in `assets/`, including the traps they contain. |
+| `references/relevant-codebase-files.md` | **Only if the user asks to see the originating implementation** and has it checked out. A file map of it - nothing else here depends on it. |
 
 ## Assets
 

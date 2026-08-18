@@ -7,7 +7,7 @@ implementation. Adapt the pattern, only look at the code if the user has specifi
 
 ## 1. One event per unit of work
 
-A step should be **something a user would name when describing what happened** - "it wrote the tool calls for your query", "it fetched the map data", "it calculated the hazard layer for your area". Not every function call, and not one giant blob per request.
+A step should be **something a user would name when describing what happened** - "it worked out what you were asking for", "it fetched the data", "it computed the number". Not every function call, and not one giant blob per request.
 
 Too fine and you have a profiler nobody reads. Too coarse and the trace explains nothing, example: "handled request, 4.2s" answers no question.
 
@@ -52,7 +52,7 @@ Record the start *before* the work, including any setup, so the number reflects 
 Two authored strings per event:
 
 - **`summary`** - what this step did, this time, with the specifics filled in.
-  `"Router matched the question to 'count_in_hazard' for 'Bangkok'"`, as opposed to `"routing"`.
+  `"Matched the request to 'count_matching', filtering on status='open'"`, as opposed to `"routing"`.
 - **`why`** - a high level description of the purpose of this step. For example:
   `"This step extracts the tool call from the model; no computation happens here."`
 
@@ -72,8 +72,8 @@ The most common way a trace lies.
 | --- | --- |
 | No model was called | `provider: null`, `tokens: null` |
 | A model was called and used no tokens | `provider: "x"`, `tokens: {in: 0, ...}` |
-| No threshold was supplied | `min_severity: null` |
-| A threshold of zero was supplied | `min_severity: 0` |
+| No threshold was supplied | `threshold: null` |
+| A threshold of zero was supplied | `threshold: 0` |
 | The calculation failed or didn't return | `result: null` |
 | The calculation returned a zero | `result: {value: 0}` |
 
@@ -103,7 +103,7 @@ size it (`n_results`, status, bytes). Where there is failover or retry, record
 **which endpoint actually answered and on which attempt**:
 
 ```python
-emit({"kind": "api", "api": "Overpass", "endpoint_used": url,
+emit({"kind": "api", "api": "GeoLookup", "endpoint_used": url,
       "attempts": attempt + 1, "n_results": len(elements)})
 ```
 
