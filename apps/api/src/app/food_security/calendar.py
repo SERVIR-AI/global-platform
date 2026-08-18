@@ -46,7 +46,22 @@ def citation(country: str, crop: str, asked_month: int,
     month's phase computed deterministically per season."""
     seasons = override or load().get((country or "").lower(), {}).get((crop or "").lower())
     if not seasons:
-        return None
+        # An ABSENT calendar is still evidence, and it has to be citable. The brief
+        # must always carry a Season timing caveat, but every paragraph must carry a
+        # citation — so with nothing to cite the model either invents a number or
+        # writes an uncited paragraph and the gate kills the whole brief. Returning
+        # the absence as a real entry lets it say "no calendar applies" and cite the
+        # statement that says so.
+        why = ("no crop was named in the question" if not crop
+               else f"the calendar has no entry for {country or 'that country'} {crop}")
+        return {"kind": "calendar",
+                "source": "Crop calendar (hub default, GEOGLAM/FAO-derived)",
+                "title": f"No crop calendar for {country or 'unspecified'} "
+                         f"{crop or 'unspecified crop'}",
+                "validation": None, "url": _BASELINE_URL, "adjusted": None,
+                "text": (f"NO CROP CALENDAR APPLIES: {why}, so season timing cannot be "
+                         "pinned to a planting or harvest window. Any timing statement "
+                         "must be attributed to a dated source, not to a crop season.")}
     adjusted = override is not None
     month_name = _cal.month_name[asked_month]
     lines = [f"{s['season']}: planting {_window(s['planting'])}, harvest "
