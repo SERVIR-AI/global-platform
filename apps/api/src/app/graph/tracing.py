@@ -476,7 +476,15 @@ def build_trace_envelope(events: list[dict], thread_id: str, trace_id: str) -> d
     turn's step events. total_duration sums every step's duration. total_tokens sums only
     steps that carry a real tokens value (resolve/operate never produce one; finalize's
     error_echo branch sets it to None) — skipped, not coerced to zero.
+
+    `step` is renumbered here, and this is the authoritative value. Each builder derives it
+    from len(state["events"]), but the turn's FIRST node is handed the pre-reset state — the
+    _RESET sentinel route() returns is only applied by the _add_reset reducer afterwards — so
+    it counts the previous turn's leftover events. Renumbering by position fixes that for
+    every node at once, and stays correct whichever node runs first.
     """
+    for index, event in enumerate(events):
+        event["step"] = index
     total_duration = sum(e["duration"] for e in events)
     token_steps = [e["tokens"] for e in events if e.get("tokens")]
     total_tokens = {
