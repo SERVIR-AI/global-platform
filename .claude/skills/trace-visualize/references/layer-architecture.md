@@ -49,7 +49,7 @@ const adaptStep = (raw: RawStep): TraceStep => ({
 ```
 
 Write this against the **real trace** captured in SKILL.md step 0. An adapter written against
-an imagined shape is the exact failure this skill's precondition exists to prevent.
+an imagined shape is a failure.
 
 ### Parsing must never throw
 
@@ -70,8 +70,8 @@ Two details worth getting right:
   non-numeric but the steps are fine, sum them yourself. A missing header is a cosmetic
   defect, not a reason to drop the trace. **Match the backend's own summing rules** when you
   do - if the backend skips steps with no token data rather than counting them as zero, so
-  must you, or the two disagree.
-- **Distinguish "no steps" from "all steps malformed".** Genuinely zero steps is an empty
+  must you, or the two disagree. For any additional derivation done in the frontend, notify the user.
+- **Distinguish "no steps" from "all steps malformed".** A trace returning zero steps is an empty
   state; a list that parsed to nothing is a broken trace. They deserve different treatment.
 
 ### Type the step union on its discriminant
@@ -103,7 +103,7 @@ A surface that works, as a shape to copy:
 | `toStepFields` | field groups, each field tagged `user` or `developer` | "what is worth showing about this step, to this audience?" |
 | `toGraphPath` | `{nodeStates, edgesTaken, paused}` | "which parts of the graph did this turn touch?" |
 | `stepUsedModel` | boolean | "did a model actually run here?" - the authoritative test |
-| formatters | strings | duration, tokens, cost |
+| formatters | strings | duration, tokens, cost, text |
 
 Three things to steal:
 
@@ -196,4 +196,4 @@ reason shown for each kind of absent value. Renaming anything is then one file, 
 obvious which wording is yours and which is the backend's.
 
 The line to hold: **strings the backend authored are not labels.** They are content, rendered
-verbatim (`invariants.md` §3). Never move one into `labels` "to keep strings together".
+verbatim (`invariants.md` §2). Never move one into `labels` "to keep strings together".

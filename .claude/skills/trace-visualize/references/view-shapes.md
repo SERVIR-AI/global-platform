@@ -1,6 +1,6 @@
 # Choosing and building a shape
 
-Seven answers, including "none". Present them; do not assume the first one.
+Six answers. Suggest one and present appropriate ones; do not assume the first one.
 
 ---
 
@@ -30,12 +30,12 @@ not a sub-timeline. Rendering it as one invents precision that is not in the dat
 
 ## C. Flow diagram
 
-The backend's nodes as boxes, with the path this turn took highlighted and the branches it
+If the backend's sequential steps can be modeled as a graph of sequential and branching nodes, with nodes, external calls and methods represented as boxes, with the path this turn took highlighted and the branches it
 did not take drawn dimmed or dashed.
 
 **Needs:** step kinds, plus the graph topology from somewhere. **Good when** the *shape* of
 what happened is the story - especially when a skipped branch is meaningful ("it never had to
-ask you anything", "it stopped before it computed anything").
+ask you anything", "it stopped before it computed anything"). Also good when the backend takes different branches or 'decisions'.
 
 **Draw skipped nodes.** Hiding them removes the most informative part.
 
@@ -83,12 +83,6 @@ positives (a count of `3` "confirmed" by an answer mentioning `13`). Label it fo
 performs. A badge overstating a heuristic is worse than no badge, because it manufactures
 confidence.
 
-## G. Nothing
-
-Legitimate and often correct. The trace costs nothing to ignore, the backend keeps recording
-it, and it can be added later. If nobody will act on it, a panel is maintenance without
-payoff.
-
 ## Composition
 
 These are not exclusive. Badge → opens panel → panel contains list + diagram, with a report
@@ -132,7 +126,7 @@ to be read as markdown. Render them.
 - Render **safely** - sanitise, or use a renderer that does not emit raw HTML. Backend-authored
   text can still contain user-supplied fragments (a place name, a question, a filename).
 - Keep code spans monospace. Field values and layer names are unreadable in prose type.
-- Render the markdown; do not rewrite the text (`invariants.md` §3).
+- Render the markdown; do not rewrite the text (`invariants.md` §2).
 
 ## Long values
 
@@ -143,6 +137,7 @@ Collapse, never silently truncate:
   one force horizontal scrolling on the page.
 - **Long lists** - show the first few and "+N more".
 - **Absolute paths and ids** - middle-truncate with the full value available on hover or copy.
+- For long pieces of text, they must be wrapped and scrollable.
 
 Anything cut must be recoverable. A truncation with no way to see the rest is a lie about the
 data.

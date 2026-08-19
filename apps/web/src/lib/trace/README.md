@@ -31,6 +31,12 @@ Backend origin:
 There is **no trace endpoint**. The envelope arrives inline and `ChatStore` already keeps
 the whole response per turn, so the panel needs no fetch.
 
+> **Building a frontend that isn't this one?** This document describes *this* app's
+> consumption of the trace. The portable version — how to derive the shape from a real
+> trace, which view to build, and the invariants any trace UI must keep — is the
+> `trace-visualize` Skill at [`.claude/skills/`](../../../../../.claude/skills/), alongside
+> `trace-emit` for rebuilding the backend half.
+
 ---
 
 ## 2. The layer contract
