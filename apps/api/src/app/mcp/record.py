@@ -6,9 +6,10 @@ underlying sources. Thin over mcp.store.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
-from . import feeds, store, ui
+from . import feeds, loop, store, ui
 
 
 def _resolver_url(receipt_id: str) -> str:
@@ -123,10 +124,28 @@ def record(pack_id: str | None = None, report_id: str | None = None,
     }
     rid = store.save_receipt(receipt)
     return {"status": "ok", "receipt_id": rid,
+            "answer_status": loop.RECEIPT_NEEDS_SHOWING,
+            "next_step": loop.after_record(rid),
             "resolve_with": "record_receipt(receipt_id=...)",
             # The HTTP resolver a browser can reach. Consumers MUST point trust chrome
             # here: a verdict a consuming app serves about itself attests nothing.
             # Still a declared gap: this is a local/deployed platform URL, not yet a
             # public link that survives copy-paste outside the network.
             "public_resolver": _resolver_url(rid),
+            # HOW TO SHOW THIS, using the platform's own UI capability rather than
+            # a visualisation the caller invents. `provenance_graph` is
+            # receipt_bound and delivered as an EMBED, so it re-resolves its state
+            # here at view time — which is the only way a verdict can be displayed
+            # without being frozen into the page (rule 5).
+            "render_with": {
+                "provenance": {"tool": "ui_embed", "component": "provenance_graph",
+                               "receipt_id": rid},
+                "verdict": {"tool": "ui_embed", "component": "groundedness_strip",
+                            "receipt_id": rid},
+                "sources": {"tool": "ui_component", "component": "source_card",
+                            "note": "one card per numbered source; copy-owned recipe"},
+                "note": ("Do not hand-roll a chart or graph for this. Call ui_catalog to "
+                         "see every component, then ui_embed for anything showing a "
+                         "verdict and ui_component for anything you own outright."),
+            },
             **receipt}

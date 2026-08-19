@@ -331,3 +331,30 @@ def test_an_explicit_month_still_uses_the_dated_archive(monkeypatch, log):
     log("OUTPUT", seen[0])
     assert "/current/" not in seen[0] and "2026-June-quick-look" in seen[0]
     assert out["issued_for"] == "June 2026"
+
+
+def test_receipt_points_at_platform_components_not_a_hand_rolled_visual(log):
+    """We briefly generated our own mermaid graph. Wrong: the platform already ships
+    `provenance_graph`, receipt_bound and delivered as an EMBED so it re-resolves
+    live. A receipt should name the component, not invent a picture."""
+    from app.mcp import assemble, record
+    p = assemble.assemble(country="kenya", crop="maize")
+    r = record.record(pack_id=p["pack_id"], question="El Nino in Kenya")
+    rw = r["render_with"]
+    log("OUTPUT", str(rw["provenance"]))
+    assert rw["provenance"] == {"tool": "ui_embed", "component": "provenance_graph",
+                                "receipt_id": r["receipt_id"]}
+    assert rw["verdict"]["tool"] == "ui_embed"      # a verdict can ONLY be embedded
+    assert "hand-roll" in rw["note"]
+    assert not any(k.endswith("_mermaid") for k in r)   # we do not draw it ourselves
+
+
+def test_anything_showing_a_verdict_routes_through_embed(log):
+    """ui_embed re-resolves at view time, so the verdict cannot be frozen into a
+    page. Any other delivery for a verdict would break rule 5."""
+    from app.mcp import assemble, record
+    p = assemble.assemble(country="kenya", crop="maize")
+    rw = record.record(pack_id=p["pack_id"], question="q")["render_with"]
+    verdict_bearing = [rw["provenance"], rw["verdict"]]
+    log("CHECK", "both verdict-bearing components use ui_embed")
+    assert all(x["tool"] == "ui_embed" for x in verdict_bearing)

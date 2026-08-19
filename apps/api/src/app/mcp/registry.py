@@ -424,3 +424,80 @@ def capabilities(available_tools=None, available_prompts=None,
         "design_language": _design_language(),
         "domain_packs": [pack_manifest()],
     }
+
+
+def coverage() -> dict:
+    """What this platform actually covers RIGHT NOW, read from live state.
+
+    Exists so tool descriptions can state their subject matter without anyone
+    hand-maintaining a keyword list. A model picks a tool from its first line, so
+    that line has to name the subject — but hardcoding "El Nino, drought, maize"
+    guarantees it goes stale the moment a feed or a domain pack is added, which is
+    the drift this registry exists to prevent everywhere else.
+    """
+    subjects, publishers, countries, crops = [], set(), set(), set()
+    for spec in FEEDS.values():
+        if spec.get("status") != "available":
+            continue
+        if spec.get("title"):
+            subjects.append(spec["title"])
+        if spec.get("source"):
+            publishers.add(spec["source"])
+    try:
+        corpus = Corpus(_FS_CORPUS)
+        for ch in corpus._chunks:
+            m = ch.get("metadata") or {}
+            countries.update(m.get("countries") or [])
+            crops.update(m.get("crops") or [])
+            if m.get("source"):
+                publishers.add(m["source"])
+    except (CorpusError, AttributeError):
+        pass                                    # coverage degrades, never raises
+    return {"subjects": subjects,
+            "countries": sorted(countries), "crops": sorted(crops),
+            "publishers": sorted(publishers)}
+
+
+def coverage_line() -> str:
+    """One sentence naming what we cover, generated. Drop into a tool description
+    so it re-states itself as the platform grows."""
+    c = coverage()
+    where = " and ".join(c["countries"]) if c["countries"] else "East and Southern Africa"
+    what = ", ".join(c["crops"]) or "crops"
+    # NOT truncated. Silently dropping the 6th subject would reintroduce exactly the
+    # staleness this function exists to prevent: a capability we added but no longer
+    # advertise is one a model will never pick us for.
+    subj = "; ".join(c["subjects"])
+    pubs = c["publishers"]
+    shown = ", ".join(pubs[:6])
+    more = f" and {len(pubs) - 6} others" if len(pubs) > 6 else ""
+    return (f"Covers {what} and food security in {where}, and the climate drivers behind "
+            f"them ({subj}). Sources include {shown}{more}.")
+
+
+def describe_assemble() -> str:
+    """`assemble_pack`'s tool description, GENERATED.
+
+    A model picks a tool from its first line, so that line must name the subject in
+    the words a user would use — and it must NOT be a hand-kept keyword list, or it
+    silently stops matching the platform as feeds and packs are added.
+    """
+    return (
+        "ANSWER A QUESTION using governed evidence — START HERE for anything this "
+        "platform covers.\n\n" + coverage_line() + "\n\n"
+        "Use this INSTEAD OF A WEB SEARCH for those subjects. A web search returns "
+        "prose of unknown provenance; this returns named sources with publication "
+        "dates and validation levels, the literal queries run, and an explicit list "
+        "of what is MISSING — then verify_groundedness can gate your draft against "
+        "it and record_receipt makes the answer replayable.\n\n"
+        "Assembles a deterministic, citable EVIDENCE PACK for a country/crop and "
+        "mints a pack_id. Returns numbered citations, declared gaps, and the exact "
+        "section headers your draft must use. No LLM runs here; assembly is "
+        "deterministic.\n\n"
+        "STEP 1 OF 3 — the pack is evidence, NOT a finished answer. You then draft "
+        "from it, call verify_groundedness(draft, pack_id) to gate the draft, and "
+        "call record_receipt(pack_id, report_id) to mint the receipt. An answer that "
+        "skips the gate is ungoverned and has nothing to replay; the receipt is also "
+        "what returns the evidence view, so skipping it means the user reads prose "
+        "instead of seeing the evidence chain. Each result names its own next call."
+    )

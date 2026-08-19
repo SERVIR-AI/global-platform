@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 
 from ..food_security import synthesis
-from . import store
+from . import loop, store
 
 
 def groundedness(draft: str, pack_id: str) -> dict:
@@ -36,6 +36,11 @@ def groundedness(draft: str, pack_id: str) -> dict:
               "draft_excerpt": draft[:280]}
     report_id = store.save_report(report)
     return {"status": "ok", "report_id": report_id, "passed": r["passed"],
+            # A verdict is a waypoint, not a destination — say which way is on.
+            "answer_status": (loop.VERDICT_IS_NOT_A_RECEIPT if r["passed"]
+                              else loop.BLOCKED),
+            "next_step": loop.after_verify(pack_id, report_id, r["passed"],
+                                           r["failures"]),
             "evidence_tier": "platform-registered", "draft_sha256": digest,
             "required_sections": list(sections),
             "failures": r["failures"], "cited": r["cited"],

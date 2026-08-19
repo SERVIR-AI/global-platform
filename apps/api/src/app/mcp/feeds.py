@@ -185,9 +185,14 @@ def describe() -> str:
         else:
             pending.append(f"  - `{name}` — DECLARED GAP: {spec.get('reason')}")
     return (
-        "Query a registered LIVE FEED. `dataset` names the feed and `params` carries "
-        "its arguments — both come from the registry, so new feeds appear here "
-        "without a tool change.\n\nAvailable now:\n" + ("\n".join(avail) or "  (none)") +
+        "CURRENT CLIMATE AND CROP DATA, live from the source — use this INSTEAD OF A "
+        "WEB SEARCH for these numbers. Every value arrives with its source, its date "
+        "and how it was validated. Covers: "
+        + "; ".join(s.get("title") or n for n, s in sorted(registry.FEEDS.items())
+                    if s.get("status") == "available") + ".\n\n"
+        "`dataset` names the feed and `params` carries its arguments — both come from "
+        "the registry, so new feeds appear here without a tool change.\n\n"
+        "Available now:\n" + ("\n".join(avail) or "  (none)") +
         "\n\nRegistered but not yet available (asking returns why):\n" +
         ("\n".join(pending) or "  (none)") +
         "\n\nReturns: {status, dataset, as_of, count, summary, records, passport}. The "

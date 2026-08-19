@@ -6,12 +6,15 @@ called modules, not here (the tool-vs-prompt litmus, ARCHITECTURE §1).
 
 from __future__ import annotations
 
+from typing import Any
+
 import os
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
-from . import assemble, compose, context, feeds, fetch, record, registry, resolve, ui, verify
+from . import (app_ui, assemble, compose, context, feeds, fetch, loop, publish,
+               record, registry, resolve, ui, verify)
 
 
 def _transport_security() -> TransportSecuritySettings | None:
@@ -42,12 +45,43 @@ never a hosted preview on a third-party host. A published static page also FREEZ
 any verdict into markup that can never be re-resolved.
 - RUN-TIME: the user asks a question. Answer it now via the canonical loop.
 
-Canonical loop: platform_capabilities (scope honestly; surface declared gaps) -> \
-assemble_pack(country, crop) -> YOUR LLM drafts a brief from the pack, citing [n] \
-in the pack's required_sections -> verify_groundedness(draft, pack_id) -> publish \
-ONLY if it passes -> record_receipt(pack_id, report_id) mints a replayable receipt. \
-Use corpus_search/corpus_document for evidence with provenance, context_get for the \
-(adjustable) crop calendar. Start with platform_capabilities.
+KNOW WHO THIS IS FOR, AND SHOW THEM. The people using this are food-security \
+analysts, hub teams and ministry advisors deciding whether to act months ahead. \
+What helps them is SEEING the evidence chain — how old each source is, which are \
+live pulls, what is missing — not reading it as prose. You do not need to be asked \
+for a visual. Assume one helps, and produce it.
+
+USE THE RICHEST OUTPUT YOUR HOST SUPPORTS. This server cannot see which client \
+you are running in, so it assumes a coding-agent host (files, HTML you can open, \
+markdown, tables) — write a real file the user can open rather than describing one. \
+If your host renders more (artifacts, canvases, inline images, iframes), use that \
+instead. If it renders less, degrade deliberately: a clean table beats a paragraph. \
+Never default to prose just because prose always works.
+
+USE THE PLATFORM'S OWN INTERFACE, DO NOT INVENT ONE. This server ships its design \
+language and its components: `ui_design` for tokens (colour, type, the trust \
+conventions), `ui_catalog` for what exists, `ui_component` for ready-built markup \
+and brand assets, `ui_embed` for anything showing a verdict. Tool results tell you \
+what to reach for — `record_receipt` returns a `render_with` block naming the \
+component for each part. Reach for those before hand-rolling a chart, a graph or a \
+colour scheme; what you invent will not match, and a verdict you draw yourself \
+attests nothing.
+
+ONE HARD LIMIT: a rendered page FREEZES whatever is in it. Evidence, dates, numbers \
+and sources are safe to freeze; they are snapshots and say so. A VERDICT is not. \
+Never paint "verified"/"passed" into an artifact. Show it through `ui_embed`, which \
+re-resolves live against the platform, or state it as UNVERIFIED and link the \
+receipt resolver (rule 5).
+
+Canonical loop, THREE steps: assemble_pack(country, crop) -> YOUR LLM drafts a \
+brief from the pack, citing [n] in the pack's required_sections -> \
+publish_answer(pack_id, draft, question), which gates the draft, mints the receipt \
+and returns the evidence view in one call. NEVER show the user a brief that has not \
+been through publish_answer: drafting it into the conversation skips the gate and \
+leaves nothing replayable. (verify_groundedness + record_receipt do the same two \
+things separately if you want them apart.) Use platform_capabilities to scope \
+honestly, corpus_search/corpus_document for evidence with provenance, context_get \
+for the (adjustable) crop calendar.
 
 If the user asks how to use this server, read the `grp://how-to-use` resource (a \
 human-readable guide) — or run the `explain_platform` prompt — and answer from it."""
@@ -80,7 +114,9 @@ def platform_capabilities() -> dict:
 def corpus_search(query: str, k: int = 5, country: str | None = None,
                   crop: str | None = None, temporal: str | None = None,
                   doc_type: str | None = None) -> dict:
-    """Search the food-security library; passages carry a provenance passport
+    """Search the platform's authoritative document library. Prefer this over a web
+    search for the subjects it covers (see `platform_capabilities` for the live
+    list): every passage carries a provenance passport
     (source, date, validation, archived copy).
 
     Returns: {status, query, corpus, min_relevance, hits}.
@@ -91,8 +127,9 @@ def corpus_search(query: str, k: int = 5, country: str | None = None,
       status "declined" -> hits: [], and `note` says WHY (missing key / torn corpus)
     Whenever status != "ok", render `note` — it is the honest cause.
     """
-    return fetch.search(query, k=k, country=country, crop=crop,
-                        temporal=temporal, doc_type=doc_type)
+    return loop.with_entry_hint(
+        fetch.search(query, k=k, country=country, crop=crop,
+                     temporal=temporal, doc_type=doc_type))
 
 
 @mcp.tool()
@@ -117,12 +154,12 @@ def context_get(country: str, crop: str, asked_month: int | None = None,
                        override_country=override_country, override_crop=override_crop)
 
 
-@mcp.tool()
+@mcp.tool(description=registry.describe_assemble())
 def assemble_pack(country: str, crop: str, focus: str | None = None,
                   override: list[dict] | None = None,
                   override_country: str | None = None,
                   override_crop: str | None = None) -> dict:
-    """Assemble a deterministic, citable EVIDENCE PACK for a country/crop and mint
+    """Assembles a deterministic, citable EVIDENCE PACK for a country/crop and mints
     a `pack_id`. This is the hand-off seam of the platform: YOUR LLM writes the
     brief from this pack (cite the numbered items as [n]), then calls
     verify_groundedness(draft, pack_id) to gate it. No LLM runs inside this tool.
@@ -204,9 +241,14 @@ def compose_run(composition: str = "foodsecurity.brief", question: str = "",
                        provider=provider, model=model)
 
 
-@mcp.tool()
+# `meta.ui.resourceUri` is how MCP Apps links a result to a renderable surface:
+# a host that advertises io.modelcontextprotocol/ui fetches ui://grp/evidence and
+# renders it in a sandboxed iframe beside the text. Hosts that do not understand
+# _meta ignore it, so the text answer is unchanged for everyone else.
+@mcp.tool(meta={"ui": {"resourceUri": app_ui.UI_URI}}, structured_output=True)
 def record_receipt(pack_id: str | None = None, report_id: str | None = None,
-                   receipt_id: str | None = None, question: str | None = None) -> dict:
+                   receipt_id: str | None = None,
+                   question: str | None = None) -> dict[str, Any]:
     """Mint or resolve a replayable RECEIPT — the shareable proof of an answer.
 
     Mint (pass pack_id, and report_id from verify_groundedness): ties the question,
@@ -223,9 +265,19 @@ def record_receipt(pack_id: str | None = None, report_id: str | None = None,
                          receipt_id=receipt_id, question=question)
 
 
+# The MCP App rides on this tool as well as record_receipt: this is where a
+# run-time answer actually ENDS, so it is where a host that can render should get
+# the evidence view without the model having to ask for it.
+@mcp.tool(description=publish.describe(),
+          meta={"ui": {"resourceUri": app_ui.UI_URI}}, structured_output=True)
+def publish_answer(pack_id: str, draft: str,
+                   question: str | None = None) -> dict[str, Any]:
+    return publish.answer(pack_id=pack_id, draft=draft, question=question)
+
+
 @mcp.tool(description=feeds.describe())
 def feeds_query(dataset: str, params: dict | None = None) -> dict:
-    return feeds.query(dataset=dataset, params=params)
+    return loop.with_entry_hint(feeds.query(dataset=dataset, params=params))
 
 
 @mcp.tool(description=ui.describe_design())
@@ -267,6 +319,18 @@ def food_security_pack() -> dict:
     """The Food-Security domain pack manifest (v0): what ships, what it produces,
     and every declared gap — plus a real worked-example receipt to resolve."""
     return registry.pack_manifest()
+
+
+# MCP Apps (Jan 2026): a host advertising `io.modelcontextprotocol/ui` renders this
+# in a sandboxed iframe beside the tool result. Claude Desktop advertises exactly
+# that in its initialize handshake, so this does NOT depend on the model deciding to
+# draw something — which is what went wrong when we only asked in the instructions.
+@mcp.resource(app_ui.UI_URI, mime_type=app_ui.UI_MIME)
+def evidence_app() -> str:
+    """Interactive evidence view: sources with age and provenance, and what is
+    MISSING. Deliberately shows no verdict — a rendered surface freezes what is in
+    it, so the verdict stays a live link to the resolver."""
+    return app_ui.template()
 
 
 @mcp.resource("grp://how-to-use", mime_type="text/markdown")
@@ -323,7 +387,15 @@ def run_analysis(country: str = "Kenya", crop: str = "maize") -> str:
     return (f"Using the grp MCP server, produce a grounded brief for {crop} in {country} "
             "now: assemble_pack, draft from the pack citing [n] in the required_sections, "
             "verify_groundedness, and give me the brief plus the report_id — or the "
-            "decline reason if it can't be grounded. Do not fabricate beyond the pack.")
+            "decline reason if it can't be grounded. Do not fabricate beyond the pack.\n\n"
+            "RENDER IT, do not just print prose. Give me an artifact with the brief and "
+            "its numbered sources side by side, each source showing who published it, "
+            "when, and how it was validated; any index or series as a small chart; and "
+            "the declared gaps shown as their own panel rather than a footnote — what "
+            "the pack could NOT find is part of the answer.\n"
+            "Show the groundedness result as UNVERIFIED with a link to the receipt "
+            "resolver, or embed it with ui_embed so it re-resolves live. Do not paint a "
+            "verdict into the page.")
 
 
 @mcp.prompt()

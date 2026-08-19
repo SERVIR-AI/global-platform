@@ -9,7 +9,7 @@ from __future__ import annotations
 from ..food_security import synthesis
 from ..llm import MissingAPIKey
 from ..rag.store import CorpusError
-from . import context, store
+from . import context, loop, store
 
 
 def assemble(country: str, crop: str, focus: str | None = None,
@@ -40,4 +40,13 @@ def assemble(country: str, crop: str, focus: str | None = None,
             "required_sections": list(synthesis.SECTIONS),
             "stats": {k: v for k, v in stats.items() if k != "queries"}, "trace": trace}
     pack_id = store.save_pack(pack)
-    return {"status": "ok", "pack_id": pack_id, **pack}
+    # The forward edge rides ABOVE the citations, not below them: a model that has
+    # what it needs to write stops reading, and everything after a 17-item array is
+    # effectively unread. `next_step` is not persisted into the pack — it is
+    # guidance for this call, not evidence (see loop.py for why it exists at all).
+    return {"status": "ok", "pack_id": pack_id,
+            "answer_status": loop.PACK_IS_NOT_AN_ANSWER,
+            "next_step": loop.after_assemble(pack_id, pack["required_sections"]),
+            **pack,
+            # Repeated at the TAIL deliberately — see loop.YOUR_NEXT_OUTPUT.
+            "your_next_output": loop.YOUR_NEXT_OUTPUT.format(pack_id=pack_id)}
