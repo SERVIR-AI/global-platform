@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maize Situation Desk</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="msd-shell">
+    <div id="platform-header" class="msd-header-slot">Loading platform header…</div>
+
+    <main class="msd-main">
+      <section class="msd-panel msd-ask">
+        <h1>Maize Situation Desk</h1>
+        <p class="msd-sub">Ask about the current maize season. Every answer runs the platform's full governed workflow: evidence pack &rarr; drafted brief &rarr; groundedness gate &rarr; receipt.</p>
+
+        <form id="ask-form">
+          <label class="msd-field">
+            <span>Country</span>
+            <select id="country" name="country">
+              <option value="kenya">Kenya</option>
+              <option value="zambia">Zambia</option>
+            </select>
+          </label>
+
+          <label class="msd-field">
+            <span>Question</span>
+            <textarea id="question" name="question" rows="3"
+              placeholder="e.g. Are there early signs of maize failure this season?"></textarea>
+          </label>
+
+          <button type="submit" id="ask-btn">Ask</button>
+        </form>
+      </section>
+
+      <section id="result" class="msd-panel msd-result" hidden></section>
+    </main>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
