@@ -31,14 +31,19 @@ The **host project** is the thing to survey. Assume it looks nothing like the re
 
 This is a design task with real tradeoffs, done *with* someone. Two habits carry the whole skill.
 
-**Start high level, then offer more.** Lead with a short, plain-language version: what you propose to record, roughly what it costs, and what it will not tell them. Then offer detail explicitly - *"say **more detail** for the field-by-field breakdown, or **show me the code** for the shape I'd write."* Do not bury someone in mechanism if they asked for a summary, and do not withhold it from someone who wants it. Anything you are deciding is an option the user gets to see: **show the choices and your recommendation, not a settled answer.**
+**Start high level, then offer more.** Lead with a short, plain-language version: what you propose to record, roughly what it costs, and what it will not tell them.
+
+Then ask them the following details explicitly: 
+- Ask them in the beginning how technical they are, how familiar they are with the codebase, and then how involved they want to be in the design process. Accordingly change how frequently you go back to the user for input and how much of the process you show them. Also modulate how high or low level your explanations are accordingly.
+- *"say **more detail** for the field-by-field breakdown, or **show me the code** for the shape I'd write."* 
+  - Do not bury someone in mechanism if they asked for a summary, and do not withhold it from someone who wants it. Anything you are deciding is an option the user gets to see: **show the choices and your recommendation, not a settled answer.**
 
 **Stop at four checkpoints.** These are the four decisions that are expensive to reverse, so at each one, present the options with a recommendation and a reason, then **wait for a reply** before continuing:
 
 | # | When | What to ask |
 | --- | --- | --- |
 | 1 | After the Step 0 survey | "Here is what I found - is my reading of your system right?" |
-| 2 | Step 1a, capture scope | "Here is what I would record and what I would leave out - approve?" |
+| 2 | Step 1a, capture scope | "Here is what I would record and what I would leave out - approve? **Always** include a table of which parameters will be included, could be included, and your recommendation." |
 | 3 | Step 1b, delivery surface | "Here is where it would surface and who reads it - right?" |
 | 4 | After the first instrumented step works | "Here is one real step, end to end - do the rest the same way?" |
 
@@ -52,6 +57,7 @@ Never widen scope silently between checkpoints.
 2. **Make minimal changes to code while implementing tracing.** Implement traceability using the least amount of changes in general for readability and user awareness. If user code from elsewhere is imported, there are API calls, or collecting traces requires changing several method signatures, consider wrapping it or collecting around it using ContextVars - see `references/io-capture.md`. If instrumenting something would require editing a dependency, stop and say so. Implementing tracing and observability will require changes to their code.
 3. **Tracing is never load-bearing.** Assembly and persistence go inside a `try`/`except` that swallows everything. A tracing bug must never change or break a response. Build this in from the first commit, not at the end.
 4. **Backend and frontend are separate changes**, separately proposed and separately approved.
+5. **Ensure that any tracing code cannot run executable code based on the end-user's output in the application**. Implementing this should not compromise the security of the application.
 
 ---
 
@@ -70,6 +76,7 @@ Before proposing anything, find out what is actually there. Look for:
 | What does the response model look like? | Where would a trace attach, and does the schema need a new field? |
 | Are there LLM calls? | Which SDK, and does its response object expose token usage? If so, is there a way to calculate cost? |
 | Are there external calls or caches? | HTTP clients, object storage, downloads, memoization, on-disk caches. |
+| Could this application benefit from provenance and sourcing? | RAG systems, deriving answers from data sources, referencing real data, systems where source data is extensively used. |
 | What is the response boundary? | The single place every response is assembled - where the envelope gets attached. |
 | Where will the trace be exposed? | Look for details on how the user views data, whether it is visually using a GUI, using a CLI, a raw JSON response, etc. |
 | Who will read the trace, and where? | End users in a product, developers debugging, an operator reading logs, or someone opening a JSON file after the fact. Different answers lead to different capture scope and a different surface - this feeds Step 1a and 1b. |
@@ -97,6 +104,7 @@ Do not decide this alone, and do not present it as already settled. Show the men
 | External call: service, operation, outcome size, which endpoint answered, attempt count | **Yes** | Turns "why was that slow" from a guess into a fact. |
 | **Full external request and response bodies** | **Ask** | Often the most useful thing to have when debugging, and the heaviest: size, and credentials in headers. |
 | **Full LLM prompts and completions** | **Ask** | Same tradeoff, plus it exposes system prompts. Frequently worth it on a developer-only surface. |
+| **Sources and Provenance** | **Ask** | For systems dealing with real data, sourcing and provenance is critical to verify where the answer came from. If sources used to derive answers are not forwarded from the backend, do so. |
 | Database queries, with or without bound parameters | **Ask** | Statements are usually safe to show; parameters carry the actual data. |
 | File paths, buckets, hostnames | **Ask** | Absolute paths leak infrastructure layout. Summarise rather than pass through. |
 | Full message transcripts per turn | **Ask** | Large, but excellent for debugging conversational systems. |
@@ -105,7 +113,7 @@ For everything recorded, agree at the same time **who may see it**: tag each fie
 
 **Ask once about personal data.** If any captured value could contain it - user text, transcripts, request bodies, query parameters - raise it here, once: what would be reduced, and how (truncate, hash, redact by key name, or summarise). If the user says it does not matter for their case, drop it and do not raise it again. If they do want it handled, **reduce in the builder**, not at the serialiser - the builder is the only place that knows what a value is.
 
-Close this checkpoint by stating plainly **what will be captured, what will not, and what will be reduced.** Repeat that summary at the end of the task, once it is actually true.
+Close this checkpoint by stating plainly **what will be captured, what will not, and what will be reduced.** Display the things that will be captured in a table format for readability, including your recommendation of whether to capture it or not. Repeat that summary at the end of the task, once it is actually true.
 
 ### 1b. Where the trace surfaces - checkpoint 3
 

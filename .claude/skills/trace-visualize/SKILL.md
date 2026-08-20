@@ -160,6 +160,8 @@ informative as "it did", and only visible if the unused branches are on screen. 
 against the real backend, or derive it from the steps actually received. Without one of those,
 the picture goes quietly wrong the first time the backend gains a node (`invariants.md` §7).
 
+**Provenance and showing sources.** For RAG systems or systems where verifying the original source of data is important. Look at how the backend forwards sources used to cite data, and collaborate with the user on how they can display this in a digestible way. Are the sources grouped by category? Are they easily differentiable? Is it too cluttered to be useful? All of this requires user feedback.
+
 ---
 
 ## Reference files and assets
