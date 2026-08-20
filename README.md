@@ -81,6 +81,19 @@ uv run pytest                                  # fast suite (stubs, no network)
 GRP_RUN_SLOW=1 uv run pytest                   # + slow real-data / Drive tests
 ```
 
+## Tracing skills
+
+Two paired Claude Code skills live in [`.claude/skills/`](.claude/skills/) for adding and viewing execution traces — a step-by-step record of what the agent actually did to produce an answer, not just the final result. To load these skills in, either restart your Claude Code session or run the `/reload-skills` command
+
+| Skill | What it does |
+| --- | --- |
+| [`trace-emit`](.claude/skills/trace-emit/SKILL.md) | Instruments a backend so every response can carry a structured trace: which steps ran, how long each took, which external services/caches were hit, and what each step decided (including LLM token/cost detail). |
+| [`trace-visualize`](.claude/skills/trace-visualize/SKILL.md) | Turns a trace a backend already emits into something readable — a step list, timeline, flow diagram, CLI output, or printable report. |
+
+`trace-visualize` depends on `trace-emit` — you can't render a trace that isn't being produced yet, so the two are always run in that order, never in the same pass.
+
+Both follow the same working style: survey the codebase first, then propose options (capture scope, delivery surface, view shape) with a recommendation and pause for approval at a few key checkpoints, then build one real, working slice before instrumenting or rendering the rest.
+
 ## More
 
 - [`apps/api/README.md`](apps/api/README.md) — backend architecture, the graph, the module map.
