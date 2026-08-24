@@ -27,7 +27,7 @@ const TraceStepDetail: FC<TraceStepDetailProps> = ({ step, title, detail }) => {
         <div className="font-medium">{title}</div>
         {/* Backend-authored copy (`tracing.py` writes `why` per node) — rendered verbatim. */}
         <p className="text-base-content/70">{step.why}</p>
-        <p className="text-base-content/50">Took {formatDuration(step.duration)}</p>
+        <p className="text-base-content/50">Took {formatDuration(step.duration_ms)}</p>
       </div>
 
       {groups.map((group) => (

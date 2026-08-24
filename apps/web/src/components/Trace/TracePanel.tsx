@@ -2,7 +2,7 @@ import type { FieldAudience } from '@/lib/trace/fields';
 import { NODE_ID_BY_STEP, toGraphPath } from '@/lib/trace/graphPath';
 import type { GraphNodeId } from '@/lib/trace/graphTopology';
 import { stepTitle } from '@/lib/trace/labels';
-import { envelopeFromSteps, parseEnvelope } from '@/lib/trace/parse';
+import { parseEnvelope } from '@/lib/trace/parse';
 import { summarizeEnvelope, toStepRows } from '@/lib/trace/selectors';
 import { cn } from '@/lib/utils';
 import type { ChatItem } from '@/types/chat';
@@ -20,22 +20,15 @@ type TracePanelProps = {
 };
 
 /**
- * Resolve a turn's trace, preferring the server-assembled envelope.
+ * Resolve a turn's trace from the server-assembled envelope.
  *
- * `ChatResponse` carries `trace_envelope` AND `trace_events` — the same steps with and
- * without the computed header. That is deliberate, and it means
- * a turn whose envelope assembly failed server-side can still be rendered from the bare
- * event list with the header recomputed client-side.
+ * `trace_envelope` is the only trace on the wire. It is best-effort server-side, so a
+ * turn whose assembly failed has no panel at all — `parseEnvelope` returns null and the
+ * panel renders nothing, which is the same outcome as a turn that was never traced.
  */
 const resolveEnvelope = (item: ChatItem) => {
   if (!('id' in item)) return null; // a request turn has no trace of its own
-  const fromEnvelope = parseEnvelope(item.trace_envelope);
-  if (fromEnvelope) return fromEnvelope;
-  return envelopeFromSteps(item.trace_events, {
-    thread_id: item.thread_id,
-    trace_id: item.id,
-    created_at: item.created_at,
-  });
+  return parseEnvelope(item.trace_envelope);
 };
 
 const TracePanelInner: FC<TracePanelProps> = ({ item }) => {

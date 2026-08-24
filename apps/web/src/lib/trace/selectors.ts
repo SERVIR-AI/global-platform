@@ -51,11 +51,11 @@ const stepError = (step: TraceStep): string | null =>
 /**
  * Did this step actually call a model?
  *
- * Read `llm_provider`, never the token counts. The router's `apply_choice` branch emits
- * a fully ZEROED tokens object rather than null (`tracing.py:193` calls `_usage(None,...)`),
- * so `tokens.total === 0` is ambiguous — it means either "no call" or "a call that
- * somehow used nothing". `llm_provider === null` is set explicitly and only on the
- * branches with no call, which makes it the one unambiguous signal.
+ * Read `llm_provider`, never the token counts. `tokens.total === 0` is ambiguous — it
+ * means either "no call" or "a call that somehow used nothing" — whereas `llm_provider`
+ * is set explicitly, and only on the branches that made a call. `tokens` is now null on
+ * the no-call branches too, but this stays the authoritative signal: it is the one field
+ * whose whole job is to answer this question.
  */
 export const stepUsedModel = (step: TraceStep): boolean =>
   'llm_provider' in step && typeof step.llm_provider === 'string';
@@ -99,8 +99,8 @@ export const toStepRows = (envelope: TraceEnvelope): TraceStepRow[] => {
     title: stepTitle(step),
     summary: step.summary,
     why: step.why,
-    durationMs: step.duration,
-    durationFraction: total > 0 ? Math.min(1, step.duration / total) : 0,
+    durationMs: step.duration_ms,
+    durationFraction: total > 0 ? Math.min(1, step.duration_ms / total) : 0,
     status: stepStatus(step),
     error: stepError(step),
     step,

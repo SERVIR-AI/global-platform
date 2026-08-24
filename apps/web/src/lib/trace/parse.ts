@@ -22,30 +22,32 @@ const isTraceStep = (value: unknown): value is TraceStep =>
   isRecord(value) &&
   typeof value.node === 'string' &&
   typeof value.summary === 'string' &&
-  typeof value.duration === 'number' &&
-  Number.isFinite(value.duration);
+  typeof value.duration_ms === 'number' &&
+  Number.isFinite(value.duration_ms);
 
 /**
  * Sum token counts the way `tracing.py:build_trace_envelope` does: include every step
- * that carries a tokens object at all, skip the ones that carry none. A step with a
- * zeroed tokens object (the router's `apply_choice` branch) is included and contributes
- * zeros — matching the backend exactly, so the client-side fallback total can never
- * disagree with the server-side one.
+ * that carries a tokens object, skip the ones whose `tokens` is null because no model
+ * ran. Cost skips rather than coerces — if no step was priced the total is null, not a
+ * $0.00 that reads like a measurement.
  */
 const sumTokens = (steps: TraceStep[]): EnvelopeTokens => {
   const carried = steps
     .map((step) => ('tokens' in step ? step.tokens : null))
     .filter((tokens): tokens is NonNullable<typeof tokens> => isRecord(tokens));
+  const priced = carried
+    .map((t) => t.cost)
+    .filter((cost): cost is number => typeof cost === 'number');
   return {
     in: carried.reduce((sum, t) => sum + (t.in || 0), 0),
     out: carried.reduce((sum, t) => sum + (t.out || 0), 0),
     total: carried.reduce((sum, t) => sum + (t.total || 0), 0),
-    cost: carried.reduce((sum, t) => sum + (t.cost || 0), 0),
+    cost: priced.length > 0 ? priced.reduce((sum, cost) => sum + cost, 0) : null,
   };
 };
 
 const sumDuration = (steps: TraceStep[]): number =>
-  steps.reduce((sum, step) => sum + (step.duration || 0), 0);
+  steps.reduce((sum, step) => sum + (step.duration_ms || 0), 0);
 
 /**
  * Validate a raw `trace_envelope` and return it typed, or `null` if it isn't one.
@@ -79,31 +81,6 @@ export const parseEnvelope = (raw: unknown): TraceEnvelope | null => {
           cost: typeof totals.cost === 'number' ? totals.cost : null,
         }
       : sumTokens(steps),
-    steps,
-  };
-};
-
-/**
- * Build an envelope from a bare `trace_events` list.
- *
- * `ChatResponse` carries both `trace_envelope` and `trace_events` — the same steps, with
- * and without the header (a deliberate Commit 8 decision, not redundancy). If envelope
- * assembly failed server-side but the events survived, the panel still has everything it
- * needs; the header is just recomputed here instead of read.
- */
-export const envelopeFromSteps = (
-  raw: unknown,
-  meta: { thread_id?: string; trace_id?: string; created_at?: string },
-): TraceEnvelope | null => {
-  if (!Array.isArray(raw)) return null;
-  const steps = raw.filter(isTraceStep);
-  if (steps.length === 0) return null;
-  return {
-    thread_id: meta.thread_id ?? '',
-    trace_id: meta.trace_id ?? '',
-    created_at: meta.created_at ?? '',
-    total_duration: sumDuration(steps),
-    total_tokens: sumTokens(steps),
     steps,
   };
 };

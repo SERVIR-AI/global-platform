@@ -23,6 +23,10 @@ export type TraceNode = 'router' | 'resolve' | 'fetch' | 'operate' | 'finalize';
  * `stepUsedModel()` in `lib/trace/selectors.ts` to tell the two apart — never infer it
  * from the token counts.
  */
+/**
+ * One model call's usage. Costs are null when the backend has no prices configured —
+ * "we don't know what this cost", not "it was free".
+ */
 export interface StepTokens {
   in: number;
   out: number;
@@ -30,6 +34,8 @@ export interface StepTokens {
   cost: number | null;
   cost_in?: number | null;
   cost_out?: number | null;
+  /** The prices the cost was computed at, per million tokens. Null when unpriced. */
+  rate_usd_per_mtok?: { in: number; out: number } | null;
 }
 
 /** Envelope-level token totals. Summed in `tracing.py:build_trace_envelope`. */
@@ -46,8 +52,8 @@ export interface TraceStepBase {
   step: number;
   started_at: string;
   ended_at: string;
-  /** Milliseconds. A float — `tracing.py` multiplies a `perf_counter` delta by 1000. */
-  duration: number;
+  /** Milliseconds, rounded to one decimal place by `tracing.py`. */
+  duration_ms: number;
   /** Authored, user-facing one-liner. Presentation copy — render it, don't rewrite it. */
   summary: string;
   /** Authored explanation of why this node exists in the run. Same rule as `summary`. */
@@ -55,8 +61,14 @@ export interface TraceStepBase {
 }
 
 /** One entry in a router step's transcript. `tool_call` entries carry no `content`. */
+/**
+ * One message from the prompt actually sent to the model — never its reply. `content` is
+ * null on a `tool_call` message (the call itself is in `derived_tool_calls`) and on every
+ * message when the backend has `TRACE_PROMPTS` off, which keeps the roles and the count
+ * but drops the bodies.
+ */
 export interface TraceMessage {
-  role: 'system' | 'user' | 'assistant';
+  role: 'system' | 'user' | 'assistant' | 'tool';
   type: 'text' | 'tool_call';
   content?: string | null;
 }
@@ -88,11 +100,14 @@ export interface RouterStep extends TraceStepBase {
   /** null on `apply_choice` — the authoritative "no model ran this turn" signal. */
   llm_provider: string | null;
   model_used: string | null;
-  /** Always present. All zeros on `apply_choice` — see StepTokens. */
-  tokens: StepTokens;
+  /** Null on `apply_choice` — that branch runs no model at all. */
+  tokens: StepTokens | null;
   user_drawn_area: boolean;
   drawn_area_type: string | null;
-  messages: TraceMessage[];
+  /** The prompt sent to the model. Null on the `apply_choice` branch — no model ran. */
+  messages: TraceMessage[] | null;
+  /** The model's text reply. Null when it selected a tool instead — see `derived_tool_calls`. */
+  llm_response: string | null;
   available_assets: TraceAvailableAssets;
   /** null when the model replied with text instead of selecting a tool. */
   derived_tool_calls: TraceToolCall[] | null;
@@ -157,13 +172,34 @@ export interface TraceApiCall {
  * The `downloads` field name is a slight misnomer — it is everything that isn't an
  * `api` event.
  */
+/** Bytes pulled from a remote store. The only true download; clips are cache events. */
 export interface TraceDownload {
-  kind: 'download' | 'clip';
-  /** 'Google Drive' — download only. */
+  kind: 'download';
+  what: 'source_raster';
+  /** 'Google Drive'. */
   api?: string | null;
   layer: string;
   filename?: string | null;
   drive_id?: string | null;
+  /** Cache-relative, e.g. `tiffs/hazard_flood.tif` — never the server's absolute path. */
+  dest: string;
+  was_cached: boolean;
+}
+
+/**
+ * A local artifact reused or built. Emitted on hit AND miss, so `was_cached` answers "was
+ * this fresh?" and an absent event means the check never ran — not that it missed.
+ *
+ * `was_cached: true` says the value was reused. It says nothing about how old it is.
+ */
+export interface TraceCacheCheck {
+  kind: 'cache';
+  what: 'aoi_boundary' | 'osm_layer' | 'hazard_clip';
+  /** The AOI slug, on `aoi_boundary` only. */
+  key?: string | null;
+  /** Absent on `aoi_boundary`, which is not layer-scoped. */
+  layer?: string | null;
+  /** Cache-relative, e.g. `bangkok/roads.geojson`. */
   dest: string;
   was_cached: boolean;
 }
@@ -178,6 +214,8 @@ export interface FetchStep extends TraceStepBase {
   /** risk_<hazard>_l2 layers recomputed fresh this turn. */
   l2_computed: string[];
   api_calls: TraceApiCall[] | null;
+  /** Local artifacts reused or built this turn. */
+  cache: TraceCacheCheck[] | null;
   downloads: TraceDownload[] | null;
   error: string | null;
 }

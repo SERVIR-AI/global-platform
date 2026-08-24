@@ -18,6 +18,7 @@ import type {
   RouterStep,
   StepTokens,
   TraceApiCall,
+  TraceCacheCheck,
   TraceDownload,
   TraceMessage,
   TraceStep,
@@ -100,9 +101,9 @@ const filterGroups = (groups: TraceFieldGroup[], detail: FieldAudience): TraceFi
 /**
  * Token counts, but only when a model actually ran.
  *
- * `usedModel` is passed in rather than read from the token object because the router's
- * `apply_choice` branch emits all-zero tokens instead of null. Showing "0 in / 0 out"
- * there would claim a model was called and returned nothing.
+ * `usedModel` is passed in rather than inferred from the token counts: a real call that
+ * returned nothing and a branch that made no call would both read as zero. `llm_provider`
+ * is the authoritative "did a model run" signal.
  */
 const tokenFields = (tokens: StepTokens | null, usedModel: boolean): TraceField[] => {
   if (!usedModel || !tokens) {
@@ -135,10 +136,20 @@ const describeApiCall = (call: TraceApiCall): string => {
  * Cached-vs-fetched is the provenance question an analyst actually asks, so it leads the
  * sentence; the local path it landed at is a developer concern and is dropped here.
  */
-const describeDownload = (event: TraceDownload): string => {
-  const how = event.was_cached ? 'already had it' : 'fetched fresh';
-  const what = event.kind === 'clip' ? 'cropped to your area' : 'downloaded';
-  return `${event.layer} — ${what}, ${how}`;
+const describeDownload = (event: TraceDownload): string =>
+  `${event.layer} — downloaded, ${event.was_cached ? 'already had it' : 'fetched fresh'}`;
+
+const CACHE_LABEL: Record<TraceCacheCheck['what'], string> = {
+  aoi_boundary: 'area boundary',
+  osm_layer: 'map features',
+  hazard_clip: 'hazard layer cropped to your area',
+};
+
+/** Same question as a download, for artifacts built locally rather than pulled down. */
+const describeCacheCheck = (event: TraceCacheCheck): string => {
+  const what = CACHE_LABEL[event.what] ?? event.what;
+  const subject = event.layer ? `${event.layer} — ${what}` : what;
+  return `${subject}, ${event.was_cached ? 'reused' : 'built fresh'}`;
 };
 
 const describeBySeverity = (bySeverity: Record<string, number> | null): TraceFieldValue =>
@@ -220,8 +231,14 @@ const routerFields = (step: RouterStep): TraceFieldGroup[] => {
           list(step.available_assets.available_tools, MISSING.noModelCall),
         ),
         field(
+          'llm_response',
+          'Text reply',
+          'developer',
+          maybeText(step.llm_response, MISSING.noToolSelected),
+        ),
+        field(
           'transcript',
-          'Transcript',
+          'Prompt sent',
           'developer',
           transcript(step.messages, MISSING.noneRecorded),
         ),
@@ -315,16 +332,17 @@ const fetchFields = (step: FetchStep): TraceFieldGroup[] => [
       ),
       field(
         'downloads',
-        'Files used',
+        'Files downloaded',
         'user',
-        list(step.downloads?.map(describeDownload), 'No files were needed.'),
+        list(step.downloads?.map(describeDownload), 'Nothing had to be downloaded.'),
         '"Already had it" means the file was reused from the local cache rather than re-downloaded.',
       ),
       field(
-        'io_raw',
-        'Raw I/O events',
-        'developer',
-        json({ api_calls: step.api_calls, downloads: step.downloads }),
+        'cache',
+        'Prepared locally',
+        'user',
+        list(step.cache?.map(describeCacheCheck), 'Nothing was prepared locally.'),
+        'Artifacts built on this machine rather than downloaded. "Reused" means a previous run had already built it.',
       ),
     ],
   },
@@ -454,7 +472,7 @@ const finalizeFields = (step: FinalizeStep): TraceFieldGroup[] => {
         ),
         field(
           'transcript',
-          'Transcript',
+          'Prompt sent',
           'developer',
           transcript(step.messages, MISSING.noModelCall),
         ),
