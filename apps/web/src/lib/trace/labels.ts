@@ -46,6 +46,15 @@ export const NODE_LABEL: Record<TraceNode, string> = {
   finalize: 'Answer',
 };
 
+/**
+ * Name a failing step for the collapsed header, e.g. "Hit a problem at Gather".
+ *
+ * Falls back to the raw node name so a step from a newer backend still says where it
+ * broke, rather than silently losing the one fact this line exists to carry.
+ */
+export const failedAt = (node: TraceNode | string): string =>
+  `at ${NODE_LABEL[node as TraceNode] ?? node}`;
+
 /** Longer label for the same node in the execution-flow graph. */
 export const GRAPH_NODE_LABEL: Record<string, string> = {
   start: 'Question',

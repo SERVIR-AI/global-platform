@@ -22,6 +22,12 @@ export interface TraceSummaryView {
   tokensTotal: number;
   costUsd: number | null;
   outcome: TurnOutcome;
+  /**
+   * Which node failed, when `outcome` is `failed`. Null otherwise. Failing at the router
+   * and failing at fetch are different situations, so the header names the step rather
+   * than making you expand the list to find the red row.
+   */
+  failedNode: TraceNode | string | null;
   /** True if any model was called this turn — drives whether cost is worth showing. */
   usedModel: boolean;
   /** finalize's groundedness, or null when the turn never reached a phrased answer. */
@@ -70,12 +76,12 @@ export const summarizeEnvelope = (envelope: TraceEnvelope): TraceSummaryView => 
   const { steps } = envelope;
   const finalize = steps.find((step) => step.node === 'finalize');
   const paused = steps.some((step) => step.node === 'resolve' && step.awaiting_choice_set);
-  const failed = steps.some((step) => stepError(step) !== null);
+  const failedStep = steps.find((step) => stepError(step) !== null) ?? null;
 
   // Order matters: a paused turn is a deliberate stop and reads as neither answered nor
   // failed, so it wins over the error check — resolve()'s `no_data` branch sets both an
   // error and no pause, so the two never actually collide.
-  const outcome: TurnOutcome = paused ? 'paused' : failed ? 'failed' : 'answered';
+  const outcome: TurnOutcome = paused ? 'paused' : failedStep ? 'failed' : 'answered';
 
   return {
     stepCount: steps.length,
@@ -83,6 +89,9 @@ export const summarizeEnvelope = (envelope: TraceEnvelope): TraceSummaryView => 
     tokensTotal: envelope.total_tokens.total,
     costUsd: envelope.total_tokens.cost,
     outcome,
+    // Only meaningful on a failed turn: a paused turn can carry an error too (resolve's
+    // `no_data` branch), and naming a step there would contradict the outcome beside it.
+    failedNode: outcome === 'failed' && failedStep ? failedStep.node : null,
     usedModel: steps.some(stepUsedModel),
     grounded: finalize && finalize.node === 'finalize' ? finalize.grounded : null,
   };

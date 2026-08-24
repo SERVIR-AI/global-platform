@@ -6,6 +6,7 @@ import {
   type TurnOutcome,
 } from '@/lib/trace/selectors';
 import type { FieldAudience } from '@/lib/trace/fields';
+import { failedAt } from '@/lib/trace/labels';
 import { BadgeCheck, CircleAlert, PauseCircle } from 'lucide-react';
 import { FC } from 'react';
 
@@ -47,6 +48,7 @@ const TraceSummary: FC<TraceSummaryProps> = ({ summary, detail }) => {
           <CircleAlert className="inline w-3.5 h-3.5 mr-1 align-[-2px]" />
         )}
         {outcome.label}
+        {summary.failedNode !== null && ` ${failedAt(summary.failedNode)}`}
       </span>
 
       {summary.grounded === true && (
