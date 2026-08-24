@@ -9,7 +9,30 @@
  *     translating it, is then a change to this file alone.
  */
 
+import type { GraphNodeState } from './graphPath';
 import type { FinalizeStep, ResolveStep, RouterStep, TraceNode, TraceStep } from '@/types/trace';
+
+/** What a node's state means, for the tooltip on the node itself. */
+export const NODE_STATE_LABEL: Record<GraphNodeState, string> = {
+  visited: 'ran',
+  skipped: 'not needed for this question',
+  errored: 'ran and hit a problem',
+  paused: 'stopped here, waiting on your reply',
+};
+
+/** The same states, shortened for the key printed under the diagram. */
+export const GRAPH_KEY_LABEL: Record<GraphNodeState, string> = {
+  visited: 'ran',
+  skipped: 'not needed',
+  errored: 'hit a problem',
+  paused: 'waiting on you',
+};
+
+/** What a line in the diagram means. */
+export const GRAPH_EDGE_KEY = {
+  taken: 'path this answer took',
+  idle: 'branch not taken',
+} as const;
 
 /** Heading for the backend-authored `why` text in a step's detail panel. */
 export const WHY_HEADING = 'Why this step exists';
