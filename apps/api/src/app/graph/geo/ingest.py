@@ -127,13 +127,14 @@ def _search(place):
         "q": place, "format": "json", "polygon_geojson": 1, "limit": 10, "accept-language": "en"})
     r.raise_for_status()
     results = r.json()
-    emit({"kind": "api", 
-          "api": "Nominatim", 
-          "op": "geocode", 
+    first = results[0] if results else {}
+    emit({"kind": "api",
+          "api": "Nominatim",
+          "op": "geocode",
           "query": place,
-          "place_id": results[0]["place_id"],
-          "retrieved_name": results[0]["display_name"],
-          "type": results[0]["type"],
+          "place_id": first.get("place_id"),
+          "retrieved_name": first.get("display_name"),
+          "type": first.get("type"),
           "n_results": len(results)})
     return results
 
