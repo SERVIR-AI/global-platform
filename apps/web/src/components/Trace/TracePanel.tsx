@@ -104,6 +104,7 @@ const TracePanelInner: FC<TracePanelProps> = ({ item }) => {
                   step={selected.step}
                   title={stepTitle(selected.step)}
                   detail={detail}
+                  legend={envelope.legend}
                 />
               )}
             </>

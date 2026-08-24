@@ -6,6 +6,8 @@
  * for what each field means.
  */
 
+import type { Legend } from './chat';
+
 /** The graph nodes, as tagged in the trace. `'router'` is the route() node — see NODE_ID_BY_STEP. */
 export type TraceNode = 'router' | 'resolve' | 'fetch' | 'operate' | 'finalize';
 
@@ -272,8 +274,14 @@ export interface TraceEnvelope {
   /** Per turn. Equals the `ChatResponse.id`, and names the file in `cache/traces/`. */
   trace_id: string;
   created_at: string;
-  /** Milliseconds; the sum of every step's `duration`. */
+  /** Milliseconds; the sum of every step's `duration_ms`. */
   total_duration: number;
   total_tokens: EnvelopeTokens;
+  /**
+   * The severity scale the operate step's `by_severity` counts are keyed by. Carried on
+   * the envelope so a saved trace reads on its own: class `3` means nothing without it.
+   * Null when the turn read no hazard layer.
+   */
+  legend: Legend | null;
   steps: TraceStep[];
 }

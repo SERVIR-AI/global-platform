@@ -142,7 +142,8 @@ def test_trace_envelope_surfaced_and_persisted(aoi, make_client, monkeypatch, lo
     assert r.status_code == 200
     envelope = body["trace_envelope"]
     assert envelope is not None
-    assert set(envelope) == {"thread_id", "trace_id", "created_at", "total_duration", "total_tokens", "steps"}
+    assert set(envelope) == {"thread_id", "trace_id", "created_at", "total_duration",
+                             "total_tokens", "legend", "steps"}
     assert envelope["thread_id"] == body["thread_id"]
     assert envelope["trace_id"] == body["id"]
     assert envelope["total_duration"] > 0

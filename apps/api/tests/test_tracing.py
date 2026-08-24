@@ -724,10 +724,28 @@ def test_build_trace_envelope_empty_events(log):
 def test_build_trace_envelope_top_level_shape(log):
     envelope = tracing.build_trace_envelope([_ROUTE_STEP], thread_id="t1", trace_id="tr1")
     log("ENVELOPE_KEYS", set(envelope))
-    assert set(envelope) == {"thread_id", "trace_id", "created_at", "total_duration", "total_tokens", "steps"}
+    assert set(envelope) == {"thread_id", "trace_id", "created_at", "total_duration",
+                             "total_tokens", "legend", "steps"}
     assert envelope["thread_id"] == "t1"
     assert envelope["trace_id"] == "tr1"
     datetime.fromisoformat(envelope["created_at"])                     # parses cleanly, doesn't raise
+
+
+def test_build_trace_envelope_carries_the_legend(log):
+    """The severity scale travels with the steps, so a saved envelope can be read on its
+    own: by_severity's class keys mean nothing without labels."""
+    legend = {1: {"label": "Very Low (0-0.5 m)", "color": "#ffffb2"}}
+    envelope = tracing.build_trace_envelope([_ROUTE_STEP], thread_id="t1", trace_id="tr1",
+                                            legend=legend)
+    log("LEGEND", envelope["legend"])
+    assert envelope["legend"] == legend
+
+
+def test_build_trace_envelope_legend_is_none_when_no_hazard(log):
+    """A turn that reads no hazard raster has no severity scale — null, not an empty dict,
+    which would read as a scale with no classes in it."""
+    envelope = tracing.build_trace_envelope([_ROUTE_STEP], thread_id="t1", trace_id="tr1")
+    assert envelope["legend"] is None
 
 
 # --- write_trace_envelope: persisted alongside record()'s own file ----------------------

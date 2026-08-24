@@ -8,6 +8,7 @@
  * a blank chat.
  */
 
+import type { Legend, LegendEntry } from '@/types/chat';
 import type { EnvelopeTokens, TraceEnvelope, TraceStep } from '@/types/trace';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -46,6 +47,19 @@ const sumTokens = (steps: TraceStep[]): EnvelopeTokens => {
   };
 };
 
+const isLegendEntry = (value: unknown): value is LegendEntry =>
+  isRecord(value) && typeof value.label === 'string' && typeof value.color === 'string';
+
+/**
+ * A legend with no usable entries is `null`, not `{}`: an empty scale would render as a
+ * breakdown with no labels, which is worse than falling back to bare class numbers.
+ */
+const parseLegend = (raw: unknown): Legend | null => {
+  if (!isRecord(raw)) return null;
+  const entries = Object.entries(raw).filter(([, entry]) => isLegendEntry(entry));
+  return entries.length > 0 ? (Object.fromEntries(entries) as Legend) : null;
+};
+
 const sumDuration = (steps: TraceStep[]): number =>
   steps.reduce((sum, step) => sum + (step.duration_ms || 0), 0);
 
@@ -81,6 +95,7 @@ export const parseEnvelope = (raw: unknown): TraceEnvelope | null => {
           cost: typeof totals.cost === 'number' ? totals.cost : null,
         }
       : sumTokens(steps),
+    legend: parseLegend(raw.legend),
     steps,
   };
 };

@@ -507,7 +507,8 @@ def make_trace_event_fetch(
     }
     return trace_event
 
-def build_trace_envelope(events: list[dict], thread_id: str, trace_id: str) -> dict:
+def build_trace_envelope(events: list[dict], thread_id: str, trace_id: str,
+                         legend: dict | None = None) -> dict:
     """Build the per-turn trace envelope from this
     turn's step events. total_duration sums every step's duration. total_tokens sums only
     steps that carry a real tokens value (resolve/operate never produce one; finalize's
@@ -535,6 +536,7 @@ def build_trace_envelope(events: list[dict], thread_id: str, trace_id: str) -> d
         "created_at": datetime.now(timezone.utc).isoformat(),
         "total_duration": total_duration,
         "total_tokens": total_tokens,
+        "legend": legend,
         "steps": events,
     }
 

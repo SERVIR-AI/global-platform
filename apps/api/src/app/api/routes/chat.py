@@ -98,7 +98,8 @@ def chat(request: ChatRequest) -> ChatResponse:
     trace_envelope = None
     try:
         trace_envelope = tracing.build_trace_envelope(
-            events=result.get("events") or [], thread_id=thread_id, trace_id=response_id)
+            events=result.get("events") or [], thread_id=thread_id, trace_id=response_id,
+            legend=geo.get("legend"))
         tracing.write_trace_envelope(trace_envelope)
     except Exception:  # noqa: BLE001 - envelope build/persist is best-effort; never break the answer
         trace_envelope = None

@@ -47,6 +47,26 @@ const FieldValue: FC<FieldValueProps> = ({ value }) => {
         </span>
       );
 
+    // Colour is never the only carrier: the class label is always spelled out beside
+    // the swatch, so this reads the same without colour vision or without a legend.
+    case 'severity':
+      return (
+        <ul className="flex flex-col gap-0.5">
+          {value.entries.map((entry) => (
+            <li key={entry.klass} className="flex items-baseline gap-1.5 break-words">
+              <span
+                aria-hidden
+                className="inline-block w-2.5 h-2.5 rounded-sm shrink-0 translate-y-[1px] border border-base-content/20"
+                style={entry.color ? { backgroundColor: entry.color } : undefined}
+              />
+              <span>
+                {entry.label}: {entry.count.toLocaleString()}
+              </span>
+            </li>
+          ))}
+        </ul>
+      );
+
     case 'missing':
       return (
         <span className="text-base-content/40 cursor-help" title={value.reason}>

@@ -23,6 +23,7 @@ import type {
   TraceMessage,
   TraceStep,
 } from '@/types/trace';
+import type { Legend } from '@/types/chat';
 import { API_LABEL, AOI_HOW_LABEL, MISSING } from './labels';
 import { formatArea, formatCost, stepUsedModel } from './selectors';
 
@@ -40,7 +41,17 @@ export type TraceFieldValue =
   | { kind: 'flag'; value: boolean; label: string }
   | { kind: 'missing'; reason: string }
   | { kind: 'transcript'; messages: TraceMessage[] }
+  | { kind: 'severity'; entries: SeverityEntry[] }
   | { kind: 'json'; value: unknown };
+
+/** One severity class in a breakdown, named and coloured by the envelope's legend. */
+export interface SeverityEntry {
+  klass: string;
+  label: string;
+  /** Server-owned hex from the legend; the client invents no colours. */
+  color: string | null;
+  count: number;
+}
 
 export interface TraceField {
   key: string;
@@ -152,15 +163,29 @@ const describeCacheCheck = (event: TraceCacheCheck): string => {
   return `${subject}, ${event.was_cached ? 'reused' : 'built fresh'}`;
 };
 
-const describeBySeverity = (bySeverity: Record<string, number> | null): TraceFieldValue =>
-  bySeverity && Object.keys(bySeverity).length > 0
-    ? {
-        kind: 'list',
-        items: Object.entries(bySeverity).map(
-          ([klass, value]) => `Severity ${klass}: ${Number(value).toLocaleString()}`,
-        ),
-      }
-    : missing(MISSING.notApplicable);
+/**
+ * The by-class breakdown, named from the envelope's legend.
+ *
+ * Without a legend a class number is unreadable: "Severity 3: 120" says nothing about
+ * what 3 means. With one it reads "Moderate (1-1.5 m): 120". The legend can legitimately
+ * be absent (a turn that read no hazard layer), so the class number is the fallback
+ * label rather than a reason to hide the row.
+ */
+const describeBySeverity = (
+  bySeverity: Record<string, number> | null,
+  legend: Legend | null,
+): TraceFieldValue => {
+  if (!bySeverity || Object.keys(bySeverity).length === 0) return missing(MISSING.notApplicable);
+  return {
+    kind: 'severity',
+    entries: Object.entries(bySeverity).map(([klass, count]) => ({
+      klass,
+      label: legend?.[klass]?.label ?? `Severity ${klass}`,
+      color: legend?.[klass]?.color ?? null,
+      count: Number(count),
+    })),
+  };
+};
 
 // --- per-node descriptors ---
 
@@ -372,7 +397,7 @@ const fetchFields = (step: FetchStep): TraceFieldGroup[] => [
   },
 ];
 
-const operateFields = (step: OperateStep): TraceFieldGroup[] => [
+const operateFields = (step: OperateStep, legend: Legend | null): TraceFieldGroup[] => [
   {
     group: 'The number',
     fields: [
@@ -403,7 +428,9 @@ const operateFields = (step: OperateStep): TraceFieldGroup[] => [
         'by_severity',
         'Broken down by severity',
         'user',
-        step.result ? describeBySeverity(step.result.by_severity) : missing(MISSING.computeFailed),
+        step.result
+          ? describeBySeverity(step.result.by_severity, legend)
+          : missing(MISSING.computeFailed),
       ),
       field(
         'min_severity',
@@ -489,7 +516,11 @@ const finalizeFields = (step: FinalizeStep): TraceFieldGroup[] => {
  * heard of. The union catches that at compile time for code we control; this catches it
  * at runtime for data we don't.
  */
-export const toStepFields = (step: TraceStep, detail: FieldAudience): TraceFieldGroup[] => {
+export const toStepFields = (
+  step: TraceStep,
+  detail: FieldAudience,
+  legend: Legend | null = null,
+): TraceFieldGroup[] => {
   switch (step.node) {
     case 'router':
       return filterGroups(routerFields(step), detail);
@@ -498,7 +529,7 @@ export const toStepFields = (step: TraceStep, detail: FieldAudience): TraceField
     case 'fetch':
       return filterGroups(fetchFields(step), detail);
     case 'operate':
-      return filterGroups(operateFields(step), detail);
+      return filterGroups(operateFields(step, legend), detail);
     case 'finalize':
       return filterGroups(finalizeFields(step), detail);
     default: {

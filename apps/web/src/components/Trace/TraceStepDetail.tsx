@@ -2,6 +2,7 @@ import type { FieldAudience } from '@/lib/trace/fields';
 import { toStepFields } from '@/lib/trace/fields';
 import { WHY_HEADING } from '@/lib/trace/labels';
 import { formatDuration } from '@/lib/trace/selectors';
+import type { Legend } from '@/types/chat';
 import type { TraceStep } from '@/types/trace';
 import { FC } from 'react';
 import FieldValue from './FieldValue';
@@ -10,6 +11,8 @@ type TraceStepDetailProps = {
   step: TraceStep;
   title: string;
   detail: FieldAudience;
+  /** The turn's severity scale, used to name the by-class breakdown. */
+  legend: Legend | null;
 };
 
 /** Section heading, shared by the `why` block and every field group. */
@@ -26,8 +29,8 @@ const SectionHeading: FC<{ children: string }> = ({ children }) => (
  * audience each belongs to, and what a missing one means. Swapping this component for a
  * different presentation (a table, a printable block) needs no change to `fields.ts`.
  */
-const TraceStepDetail: FC<TraceStepDetailProps> = ({ step, title, detail }) => {
-  const groups = toStepFields(step, detail);
+const TraceStepDetail: FC<TraceStepDetailProps> = ({ step, title, detail, legend }) => {
+  const groups = toStepFields(step, detail, legend);
 
   return (
     <div className="rounded-lg bg-base-200/60 p-3 flex flex-col gap-3">
