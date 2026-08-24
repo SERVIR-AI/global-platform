@@ -423,7 +423,7 @@ def _patch_fetch_emitting(monkeypatch, aoi):
 
 
 def test_fetch_attaches_one_event_success(aoi, monkeypatch, log):
-    """fetch()'s events channel gets one real fetchStep event with the io events drained
+    """fetch()'s events channel gets one real fetch step event with the io events drained
     from ensure_aoi/hazard_clip folded into api_calls/cache — plain [event], no _RESET."""
     _patch_fetch_emitting(monkeypatch, aoi)
     state = {"place": "Testville", "tiffs": ["hazard_flood"], "events": []}

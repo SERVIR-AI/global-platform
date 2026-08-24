@@ -78,7 +78,7 @@ def _drawn_area_type(geometry) -> str | None:
     return None
 
 def _summarize_aoi(aoi: dict | None) -> dict:
-    """Compact aoi view for fetchStep — never the full path bundle. aoi is None on the
+    """Compact aoi view for the fetch step, never the full path bundle. aoi is None on the
     failure branch (ensure_aoi never returned one that turn)."""
     aoi = aoi or {}
     return {"name": aoi.get("name"), "area_km2": aoi.get("area_km2"), "how": aoi.get("how")}
@@ -106,7 +106,7 @@ def make_trace_event_router(
         available_layers: dict,
         error: str | None,
 ) -> dict:
-    """Build one routeStep trace event for route()'s LLM-calling branches (declined /
+    """Build one route step trace event for route()'s LLM-calling branches (declined /
     missing_place / routed — NOT apply_choice, which has no LLM call and uses
     make_trace_event_no_llm instead).
 
@@ -211,7 +211,7 @@ def make_trace_event_no_llm(
         resumed_delta: dict,
         awaiting_choice: dict,
 ) -> dict:
-    """Build one routeStep trace event for route()'s apply_choice branch — resuming a
+    """Build one route step trace event for route()'s apply_choice branch: resuming a
     paused exposure/risk choice with no LLM call this turn.
 
     resumed_delta is exactly what _apply_choice(state) returned. awaiting_choice is
@@ -282,7 +282,7 @@ def make_trace_event_operate(
         num: int | float | None,
         error: str | None,
 ) -> dict:
-    """Build one operateStep trace event. operate() never calls an LLM.
+    """Build one operate step trace event. operate() never calls an LLM.
 
     `result` is the raw store.py dict (None on failure); 
     `num` is operate()'s own already-computed result.get("length_km", result.get("count")).
@@ -342,7 +342,7 @@ def make_trace_event_finalize(
         resp,
         error: str | None,
 ) -> dict:
-    """Build one finalizeStep event. kind is "error_echo" if error is set, else "llm_phrase"."""
+    """Build one finalize step event. kind is "error_echo" if error is set, else "llm_phrase"."""
     state = state or {}
     kind = "error_echo" if error is not None else "llm_phrase"
     
@@ -392,7 +392,7 @@ def make_trace_event_resolve(
         question_asked: str | None,
         error: str | None,
 ) -> dict:
-    """Build one resolveStep event.
+    """Build one resolve step event.
 
     hazard: logical hazard name, None only on passthrough (no hazard layer, or a BYOD one).
     options: the [{key, layer, label}] choices offered; None on passthrough.
@@ -458,7 +458,7 @@ def make_trace_event_fetch(
         drained_io_events: list[dict],
         error: str | None,
 ) -> dict:
-    """Build one fetchStep event. drained_io_events is the raw list from the IOCollector
+    """Build one fetch step event. drained_io_events is the raw list from the IOCollector
     installed around this turn's ingest calls, split here by `kind` into three buckets:
 
       api_calls - a third party was contacted (Nominatim, Overpass).

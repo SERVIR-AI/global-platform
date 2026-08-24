@@ -12,11 +12,8 @@ import { GRAPH_EDGES, type GraphNodeId } from './graphTopology';
 /**
  * The one place the `router` / `route` mismatch is reconciled.
  *
- * The trace tags route()'s step `node: "router"` (`tracing.py:144,212`, and
- *  `routeStep`), but the LangGraph node is registered as `"route"`
- * (`graph.py:488`). Every other node matches 1:1. Renaming either side is expensive and
- * cosmetic — envelopes already written to `cache/traces/` say `"router"`, and `"route"` is
- * what `_after_route`'s edge maps key off — so the two names stand and meet here.
+ * The trace tags route()'s step `node: "router"`; the LangGraph node is registered as
+ * `"route"`. Every other node matches 1:1.
  */
 export const NODE_ID_BY_STEP: Record<TraceNode, GraphNodeId> = {
   router: 'route',

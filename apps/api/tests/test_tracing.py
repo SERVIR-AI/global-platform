@@ -1,7 +1,7 @@
 """tracing.py in isolation: the hazard/risk prefix split, the countable-asset guess, and
 the two trace-event builders (make_trace_event_router for the three LLM-calling outcomes,
-make_trace_event_no_llm for the apply_choice resume) — each checked against the actual
-required-field set in the trace schema's baseStep + routeStep, not just spot-checked.
+make_trace_event_no_llm for the apply_choice resume), each checked against the full
+required-field set for a route step rather than spot-checked.
 """
 import json
 import os
@@ -13,10 +13,9 @@ import pytest
 from app.config import get_settings
 from app.graph import tracing
 
-# Mirrors trace schema's $defs.baseStep.required + $defs.routeStep's own required list.
-# A change to either side (code or schema) that drops a key should break this test.
+# Every key a route step must carry. Dropping one in tracing.py breaks this test.
 _REQUIRED_FIELDS = {
-    "step", "started_at", "ended_at", "duration_ms", "summary",        # baseStep
+    "step", "started_at", "ended_at", "duration_ms", "summary",        # every step
     "node", "llm_provider", "model_used", "tokens", "user_drawn_area", "drawn_area_type",
     "llm_response", "messages", "available_assets", "error", "derived_tool_calls", "derived_place",
     "derived_countable_assets", "derived_hazard_layers_used", "derived_risk_layers_used",
@@ -41,11 +40,11 @@ def _config():
 
 
 def assert_valid_route_step(event, log=None):
-    """Every field baseStep/routeStep requires is present (schema `required` only checks
-    presence, not non-null — several are legitimately null on some kinds)."""
+    """Every required field is present. This checks presence, not non-null: several are
+    legitimately null on some kinds."""
     missing = _REQUIRED_FIELDS - event.keys()
     if log:
-        log("SCHEMA CHECK", f"missing={missing or 'none'}")
+        log("REQUIRED FIELDS", f"missing={missing or 'none'}")
     assert not missing, f"trace event missing required field(s): {missing}"
     assert event["node"] == "router"
     assert event["kind"] in {"apply_choice", "declined", "missing_place", "routed"}
@@ -247,7 +246,7 @@ def test_no_llm_event_apply_choice(log):
 # --- make_trace_event_operate: success / failure ----------------------------------------
 
 _REQUIRED_FIELDS_OPERATE = {
-    "step", "started_at", "ended_at", "duration_ms", "summary",        # baseStep
+    "step", "started_at", "ended_at", "duration_ms", "summary",        # every step
     "node", "why", "operation", "min_severity", "result", "error",
 }
 
@@ -255,7 +254,7 @@ _REQUIRED_FIELDS_OPERATE = {
 def assert_valid_operate_step(event, log=None):
     missing = _REQUIRED_FIELDS_OPERATE - event.keys()
     if log:
-        log("SCHEMA CHECK", f"missing={missing or 'none'}")
+        log("REQUIRED FIELDS", f"missing={missing or 'none'}")
     assert not missing, f"trace event missing required field(s): {missing}"
     assert event["node"] == "operate"
 
@@ -292,8 +291,8 @@ def test_operate_event_success_no_severity_concept(log):
 
 
 def test_operate_event_failure(log):
-    """On failure, result is None (per the schema's own "null if the op failed") and
-    min_severity is passed through verbatim — this function doesn't re-derive it."""
+    """On failure, result is None and min_severity is passed through verbatim. This
+    function does not re-derive it."""
     event = tracing.make_trace_event_operate(
         start_time=0.0, end_time=0.01, started_at="t0", ended_at="t1", state={"events": []},
         operation="roads_in_hazard", min_severity=None, result=None, num=None,
@@ -330,7 +329,7 @@ def test_usage_cost_uses_per_million_pricing(log):
 # --- make_trace_event_finalize: error_echo / llm_phrase -----------------------------------
 
 _REQUIRED_FIELDS_FINALIZE = {
-    "step", "started_at", "ended_at", "duration_ms", "summary",        # baseStep
+    "step", "started_at", "ended_at", "duration_ms", "summary",        # every step
     "node", "why", "kind", "error", "llm_provider", "model_used", "tokens",
     "llm_response", "messages", "grounded",
 }
@@ -339,7 +338,7 @@ _REQUIRED_FIELDS_FINALIZE = {
 def assert_valid_finalize_step(event, log=None):
     missing = _REQUIRED_FIELDS_FINALIZE - event.keys()
     if log:
-        log("SCHEMA CHECK", f"missing={missing or 'none'}")
+        log("REQUIRED FIELDS", f"missing={missing or 'none'}")
     assert not missing, f"trace event missing required field(s): {missing}"
     assert event["node"] == "finalize"
 
@@ -395,7 +394,7 @@ def test_finalize_event_step_counts_existing_events(log):
 # --- make_trace_event_resolve: passthrough / asked / auto_single / no_data ---------------
 
 _REQUIRED_FIELDS_RESOLVE = {
-    "step", "started_at", "ended_at", "duration_ms", "summary",        # baseStep
+    "step", "started_at", "ended_at", "duration_ms", "summary",        # every step
     "node", "why", "decision", "hazard", "options", "byod_passthrough",
     "awaiting_choice_set", "question_asked", "error",
 }
@@ -406,7 +405,7 @@ _OPTIONS = [{"key": "exposure", "layer": "hazard_flood", "label": "Exposure"},
 def assert_valid_resolve_step(event, log=None):
     missing = _REQUIRED_FIELDS_RESOLVE - event.keys()
     if log:
-        log("SCHEMA CHECK", f"missing={missing or 'none'}")
+        log("REQUIRED FIELDS", f"missing={missing or 'none'}")
     assert not missing, f"trace event missing required field(s): {missing}"
     assert event["node"] == "resolve"
 
@@ -481,7 +480,7 @@ def test_resolve_event_step_counts_existing_events(log):
 # --- make_trace_event_fetch: success / failure, api_calls vs downloads split ------------
 
 _REQUIRED_FIELDS_FETCH = {
-    "step", "started_at", "ended_at", "duration_ms", "summary",        # baseStep
+    "step", "started_at", "ended_at", "duration_ms", "summary",        # every step
     "node", "why", "mode", "aoi", "layers_fetched", "rasters_clipped",
     "l2_computed", "api_calls", "cache", "downloads", "error",
 }
@@ -490,7 +489,7 @@ _REQUIRED_FIELDS_FETCH = {
 def assert_valid_fetch_step(event, log=None):
     missing = _REQUIRED_FIELDS_FETCH - event.keys()
     if log:
-        log("SCHEMA CHECK", f"missing={missing or 'none'}")
+        log("REQUIRED FIELDS", f"missing={missing or 'none'}")
     assert not missing, f"trace event missing required field(s): {missing}"
     assert event["node"] == "fetch"
 

@@ -1,11 +1,9 @@
 /**
  * Wire types for the per-turn trace envelope.
  *
- * These mirror the trace schema and, where the two disagree, the
- * builders in `apps/api/src/app/graph/tracing.py` that actually emit the JSON.
- * Hand-written on purpose, matching the convention `types/chat.ts` already follows
- * — see `lib/trace/README.md` for the reasoning and for what each field means to a
- * user.
+ * The contract is the `make_trace_event_*` builders in
+ * `apps/api/src/app/graph/tracing.py`, which emit the JSON. See `lib/trace/README.md`
+ * for what each field means.
  */
 
 /** The graph nodes, as tagged in the trace. `'router'` is the route() node — see NODE_ID_BY_STEP. */
