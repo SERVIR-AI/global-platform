@@ -70,6 +70,21 @@ def emit(event: dict) -> None:
         collector.record(event)
 
 
+def short_path(path: str) -> str:
+    """A cache-relative path for the trace - 'battambang/roads.geojson', not the machine
+    layout it happens to sit in.
+
+    Falls back to the basename if the path is outside cache_dir, which relpath would 
+    otherwise render as a chain of '..'.
+    """
+    cache_dir = get_settings().cache_dir
+    try:
+        relative = os.path.relpath(path, cache_dir)
+    except ValueError:                       # different drive on Windows
+        return os.path.basename(path)
+    return os.path.basename(path) if relative.startswith("..") else relative
+
+
 def _slug(place):
     return re.sub(r"[^a-z0-9]+", "-", place.lower()).strip("-")
 
@@ -199,11 +214,11 @@ def source_raster(layer="hazard_flood"):
         os.makedirs(settings.tiffs_dir, exist_ok=True)
         import gdown
         gdown.download(id=fid, output=path, quiet=True)
-        emit({"kind": "download", "api": "Google Drive", "layer": layer, "filename": fname,
-              "drive_id": fid, "dest": path, "was_cached": was_cached})
+        emit({"kind": "download", "what": "source_raster", "api": "Google Drive", "layer": layer,
+              "filename": fname, "drive_id": fid, "dest": short_path(path), "was_cached": was_cached})
     else:
-        emit({"kind": "download", "api": "Google Drive", "layer": layer, "filename": fname,
-              "dest": path, "was_cached": was_cached})
+        emit({"kind": "download", "what": "source_raster", "api": "Google Drive", "layer": layer,
+              "filename": fname, "dest": short_path(path), "was_cached": was_cached})
     return path
 
 
@@ -229,6 +244,8 @@ def ensure_aoi(place=None, geometry=None, layers=None):
     meta = os.path.join(adir, "meta.json")
 
     # Resolve the AOI boundary once (or reload it from a prior fetch of this AOI).
+    emit({"kind": "cache", "what": "aoi_boundary", "key": slug,
+          "dest": short_path(meta), "was_cached": os.path.exists(meta)})
     if os.path.exists(meta):
         info = json.load(open(meta))
         boundary = shape(json.load(open(os.path.join(adir, "admin.geojson")))["features"][0]["geometry"])
@@ -251,7 +268,13 @@ def ensure_aoi(place=None, geometry=None, layers=None):
     bbox = f"{miny - BUFFER_DEG},{minx - BUFFER_DEG},{maxy + BUFFER_DEG},{maxx + BUFFER_DEG}"
     fetched = False
     for layer in needed:
-        if layer not in ASSET_LAYERS or os.path.exists(os.path.join(adir, f"{layer}.geojson")):
+        if layer not in ASSET_LAYERS:
+            continue
+        dest = os.path.join(adir, f"{layer}.geojson")
+        was_cached = os.path.exists(dest)
+        emit({"kind": "cache", "what": "osm_layer", "layer": layer,
+              "dest": short_path(dest), "was_cached": was_cached})
+        if was_cached:
             continue
         features = _fetch_layer(layer, bbox, boundary)
         _write(adir, layer, features)
@@ -260,7 +283,6 @@ def ensure_aoi(place=None, geometry=None, layers=None):
     if fetched:
         json.dump(info, open(meta, "w"), indent=2)
     return _bundle(adir, info)
-
 
 def _fetch_layer(layer, bbox, boundary):
     """Fetch one OSM asset layer within `bbox`, clipped/filtered to `boundary`."""
@@ -313,7 +335,8 @@ def hazard_clip(aoi, layer):
     adir = os.path.dirname(aoi["admin"])
     clip = os.path.join(adir, f"{layer}.tif")
     was_cached = os.path.exists(clip)
-    emit({"kind": "clip", "layer": layer, "dest": clip, "was_cached": was_cached})
+    emit({"kind": "cache", "what": "hazard_clip", "layer": layer,
+          "dest": short_path(clip), "was_cached": was_cached})
     if not was_cached:
         boundary = shape(json.load(open(aoi["admin"]))["features"][0]["geometry"])
         minx, miny, maxx, maxy = boundary.bounds

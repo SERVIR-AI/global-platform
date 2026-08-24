@@ -2,7 +2,6 @@
 no-place / fetch-failure short-circuit to a direct answer with no second LLM call,
 and the checkpointer keeps multi-turn memory.
 """
-import json
 
 from app.graph import graph as gm
 from app.graph.geo import store
@@ -36,7 +35,7 @@ def test_add_reset_wipes_left_and_strips_the_marker(log):
     assert gm._RESET not in result
 
 
-def test_success_path_grounded_and_traced(aoi, make_client, monkeypatch, tmp_path, log):
+def test_success_path_grounded_and_traced(aoi, make_client, monkeypatch, log):
     """route picks the op, operate computes the number, finalize quotes it, and the trace marks it grounded."""
     _patch_fetch(monkeypatch, aoi)
     expected = store.roads_in_hazard(aoi, "hazard_flood")["length_km"]
@@ -52,14 +51,18 @@ def test_success_path_grounded_and_traced(aoi, make_client, monkeypatch, tmp_pat
     log("ANSWER", answer)
     log("CALLS", f"{client.calls} (route + finalize)")
 
-    rec = json.loads(next((tmp_path / "traces").glob("*.json")).read_text())
-    log("TRACE", f"grounded={rec['grounded']} tokens={rec['tokens']}")
+    # Groundedness and the computed number are read off the trace events themselves. This
+    # invokes the graph directly, so chat.py's envelope assembly never runs — the events
+    # channel is the record.
+    operate_event = next(e for e in out["events"] if e["node"] == "operate")
+    finalize_event = next(e for e in out["events"] if e["node"] == "finalize")
+    log("TRACE", f"grounded={finalize_event['grounded']} tokens={finalize_event['tokens']}")
     log("CHECK", f"answer quotes {expected}; 2 LLM calls; trace grounded")
     assert str(expected) in answer
     assert client.calls == 2
     assert len(out["usage"]) == 2
-    assert rec["grounded"] is True
-    assert rec["tool_result"]["length_km"] == expected
+    assert finalize_event["grounded"] is True
+    assert operate_event["result"]["value"] == expected
 
 
 def test_decline_returns_text_without_compute(make_client, log):
@@ -412,7 +415,8 @@ def _patch_fetch_emitting(monkeypatch, aoi):
                         "query": "Testville", "n_results": 1})
         return aoi
     def fake_hazard_clip(place, layer):
-        gm.ingest.emit({"kind": "clip", "layer": layer, "dest": aoi[layer], "was_cached": False})
+        gm.ingest.emit({"kind": "cache", "what": "hazard_clip", "layer": layer,
+                        "dest": gm.ingest.short_path(aoi[layer]), "was_cached": False})
         return aoi[layer]
     monkeypatch.setattr(gm.ingest, "ensure_aoi", fake_ensure_aoi)
     monkeypatch.setattr(gm.ingest, "hazard_clip", fake_hazard_clip)
@@ -420,7 +424,7 @@ def _patch_fetch_emitting(monkeypatch, aoi):
 
 def test_fetch_attaches_one_event_success(aoi, monkeypatch, log):
     """fetch()'s events channel gets one real fetchStep event with the io events drained
-    from ensure_aoi/hazard_clip folded into api_calls/downloads — plain [event], no _RESET."""
+    from ensure_aoi/hazard_clip folded into api_calls/cache — plain [event], no _RESET."""
     _patch_fetch_emitting(monkeypatch, aoi)
     state = {"place": "Testville", "tiffs": ["hazard_flood"], "events": []}
     out = gm.fetch(state)
@@ -432,7 +436,8 @@ def test_fetch_attaches_one_event_success(aoi, monkeypatch, log):
     assert event["error"] is None
     assert event["rasters_clipped"] == ["hazard_flood"]
     assert any(c["api"] == "Nominatim" for c in event["api_calls"])
-    assert any(d["kind"] == "clip" for d in event["downloads"])
+    assert any(c["what"] == "hazard_clip" for c in event["cache"])
+    assert event["downloads"] == []               # a clip is derived locally, not downloaded
     assert out["aoi"] == aoi                                      # business logic untouched
 
 

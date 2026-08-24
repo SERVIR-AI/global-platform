@@ -111,7 +111,6 @@ def chat(request: ChatRequest) -> ChatResponse:
         model=model,
         usage=_usage(result.get("usage") or []),
         trace=result.get("trace") if request.verbose else None,
-        trace_events=result.get("events"),
         trace_envelope=trace_envelope,
         choices=choices,
         **geo,

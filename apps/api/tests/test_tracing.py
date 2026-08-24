@@ -4,19 +4,21 @@ make_trace_event_no_llm for the apply_choice resume) — each checked against th
 required-field set in the trace schema's baseStep + routeStep, not just spot-checked.
 """
 import json
+import os
 from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
 
+from app.config import get_settings
 from app.graph import tracing
 
 # Mirrors trace schema's $defs.baseStep.required + $defs.routeStep's own required list.
 # A change to either side (code or schema) that drops a key should break this test.
 _REQUIRED_FIELDS = {
-    "step", "started_at", "ended_at", "duration", "summary",           # baseStep
+    "step", "started_at", "ended_at", "duration_ms", "summary",        # baseStep
     "node", "llm_provider", "model_used", "tokens", "user_drawn_area", "drawn_area_type",
-    "messages", "available_assets", "error", "derived_tool_calls", "derived_place",
+    "llm_response", "messages", "available_assets", "error", "derived_tool_calls", "derived_place",
     "derived_countable_assets", "derived_hazard_layers_used", "derived_risk_layers_used",
 }
 
@@ -48,7 +50,11 @@ def assert_valid_route_step(event, log=None):
     assert event["node"] == "router"
     assert event["kind"] in {"apply_choice", "declined", "missing_place", "routed"}
     assert set(event["available_assets"]) == {"available_tools", "countable", "hazard_layers", "risk_layers"}
-    assert {"in", "out", "total", "cost"} <= set(event["tokens"])
+    # tokens is None exactly on the branch that ran no model; otherwise it carries counts.
+    if event["kind"] == "apply_choice":
+        assert event["tokens"] is None
+    else:
+        assert {"in", "out", "total", "cost"} <= set(event["tokens"])
 
 
 # --- pure helpers -----------------------------------------------------------------------
@@ -89,7 +95,8 @@ _MESSAGES = [{"role": "system", "content": "you are a routing agent"},
 
 
 def test_router_event_declined(log):
-    """No tool call at all -> kind=declined, error carried through, assistant message is text."""
+    """No tool call at all -> kind=declined, error carried through, the text reply recorded
+    as llm_response (messages holds only the prompt that was sent)."""
     resp = _llm_response(content="I can't answer that with the data I have.", tool_calls=None)
     event = tracing.make_trace_event_router(
         start_time=100.0, end_time=100.6, started_at="2026-01-01T00:00:00+00:00",
@@ -103,10 +110,12 @@ def test_router_event_declined(log):
     assert event["derived_tool_calls"] is None
     assert event["derived_place"] is None
     assert event["derived_hazard_layers_used"] == []
-    assert event["messages"][0] == {"role": "system", "type": "text", "content": "you are a routing agent"}
-    assert event["messages"][-1] == {"role": "assistant", "type": "text",
-                                     "content": "I can't answer that with the data I have."}
-    assert event["duration"] == pytest.approx(600)  # (100.6 - 100.0) * 1000, modulo float error
+    assert event["messages"] == [
+        {"role": "system", "type": "text", "content": "you are a routing agent"},
+        {"role": "user", "type": "text", "content": "how many schools flood in Battambang?"},
+    ]
+    assert event["llm_response"] == "I can't answer that with the data I have."
+    assert event["duration_ms"] == pytest.approx(600)  # (100.6 - 100.0) * 1000, rounded to 0.1ms
 
 
 def test_router_event_missing_place(log):
@@ -123,7 +132,9 @@ def test_router_event_missing_place(log):
     assert event["derived_place"] is None                          # no place in the args
     assert event["derived_tool_calls"] == [
         {"id": "c1", "function_name": "roads_in_hazard", "function_args": {"hazard_layers": ["hazard_flood"]}}]
-    assert event["messages"][-1] == {"role": "assistant", "type": "tool_call"}  # no payload here
+    # The prompt only — the selected call is in derived_tool_calls, not echoed here.
+    assert [m["role"] for m in event["messages"]] == ["system", "user"]
+    assert event["llm_response"] is None  # it chose a tool instead of replying in text
 
 
 def test_router_event_routed(log):
@@ -218,13 +229,16 @@ def test_no_llm_event_apply_choice(log):
     assert event["kind"] == "apply_choice"
     assert event["llm_provider"] is None
     assert event["model_used"] is None
-    assert event["tokens"] == {"in": 0, "out": 0, "total": 0, "cost_in": 0, "cost_out": 0, "cost": 0}
+    # No model ran, so there is no usage to report — null, never a zeroed dict that
+    # would read as a call that consumed nothing.
+    assert event["tokens"] is None
     assert event["derived_tool_calls"] is None
     assert event["derived_place"] == "Siem Reap"
     assert event["derived_risk_layers_used"] == ["risk_flood"]
     assert event["derived_hazard_layers_used"] == []
     assert event["derived_countable_assets"] == ["schools"]
     assert event["messages"] == [{"role": "user", "type": "text", "content": "2"}]
+    assert event["llm_response"] is None  # no model ran on this branch
     assert "risk-L1" in event["summary"]                            # the picked option's label surfaced
     assert event["error"] is None
     assert all(v is None for v in event["available_assets"].values())  # nothing was offered this turn
@@ -233,7 +247,7 @@ def test_no_llm_event_apply_choice(log):
 # --- make_trace_event_operate: success / failure ----------------------------------------
 
 _REQUIRED_FIELDS_OPERATE = {
-    "step", "started_at", "ended_at", "duration", "summary",           # baseStep
+    "step", "started_at", "ended_at", "duration_ms", "summary",        # baseStep
     "node", "why", "operation", "min_severity", "result", "error",
 }
 
@@ -316,7 +330,7 @@ def test_usage_cost_uses_per_million_pricing(log):
 # --- make_trace_event_finalize: error_echo / llm_phrase -----------------------------------
 
 _REQUIRED_FIELDS_FINALIZE = {
-    "step", "started_at", "ended_at", "duration", "summary",           # baseStep
+    "step", "started_at", "ended_at", "duration_ms", "summary",        # baseStep
     "node", "why", "kind", "error", "llm_provider", "model_used", "tokens",
     "llm_response", "messages", "grounded",
 }
@@ -348,7 +362,7 @@ def test_finalize_event_error_echo(log):
 
 def test_finalize_event_llm_phrase(log):
     """A real phrasing call: tokens/provider/model populated, messages carries the
-    system+assistant transcript, grounded computed here from state['result'] (the number
+    prompt that was sent, grounded computed here from state['result'] (the number
     appears verbatim in the answer)."""
     resp = _llm_response(content="12 hospitals are in Battambang.")
     event = tracing.make_trace_event_finalize(
@@ -362,8 +376,11 @@ def test_finalize_event_llm_phrase(log):
     assert event["error"] is None
     assert event["llm_provider"] == "gemini"
     assert event["grounded"] is True
-    assert event["messages"][0] == {"role": "system", "type": "text", "content": "you are a routing agent"}
-    assert event["messages"][-1] == {"role": "assistant", "type": "text", "content": "12 hospitals are in Battambang."}
+    assert event["messages"] == [
+        {"role": "system", "type": "text", "content": "you are a routing agent"},
+        {"role": "user", "type": "text", "content": "how many schools flood in Battambang?"},
+    ]
+    assert event["llm_response"] == "12 hospitals are in Battambang."
     assert event["llm_response"] == "12 hospitals are in Battambang."
 
 
@@ -378,7 +395,7 @@ def test_finalize_event_step_counts_existing_events(log):
 # --- make_trace_event_resolve: passthrough / asked / auto_single / no_data ---------------
 
 _REQUIRED_FIELDS_RESOLVE = {
-    "step", "started_at", "ended_at", "duration", "summary",           # baseStep
+    "step", "started_at", "ended_at", "duration_ms", "summary",        # baseStep
     "node", "why", "decision", "hazard", "options", "byod_passthrough",
     "awaiting_choice_set", "question_asked", "error",
 }
@@ -464,9 +481,9 @@ def test_resolve_event_step_counts_existing_events(log):
 # --- make_trace_event_fetch: success / failure, api_calls vs downloads split ------------
 
 _REQUIRED_FIELDS_FETCH = {
-    "step", "started_at", "ended_at", "duration", "summary",           # baseStep
+    "step", "started_at", "ended_at", "duration_ms", "summary",        # baseStep
     "node", "why", "mode", "aoi", "layers_fetched", "rasters_clipped",
-    "l2_computed", "api_calls", "downloads", "error",
+    "l2_computed", "api_calls", "cache", "downloads", "error",
 }
 
 
@@ -480,7 +497,8 @@ def assert_valid_fetch_step(event, log=None):
 
 def test_fetch_event_success_place_lookup(log):
     io = [{"kind": "api", "api": "Nominatim", "op": "geocode", "query": "Testville", "n_results": 1},
-          {"kind": "clip", "layer": "hazard_flood", "dest": "/x/hazard_flood.tif", "was_cached": False}]
+          {"kind": "cache", "what": "hazard_clip", "layer": "hazard_flood",
+           "dest": "testville/hazard_flood.tif", "was_cached": False}]
     event = tracing.make_trace_event_fetch(
         start_time=0.0, end_time=0.5, started_at="t0", ended_at="t1", state={"events": []},
         mode="place_lookup", aoi={"name": "Testville", "area_km2": 12, "how": "geocoded"},
@@ -490,7 +508,8 @@ def test_fetch_event_success_place_lookup(log):
     assert event["mode"] == "place_lookup"
     assert event["error"] is None
     assert len(event["api_calls"]) == 1 and event["api_calls"][0]["api"] == "Nominatim"
-    assert len(event["downloads"]) == 1 and event["downloads"][0]["kind"] == "clip"
+    assert len(event["cache"]) == 1 and event["cache"][0]["what"] == "hazard_clip"
+    assert event["downloads"] == []  # nothing was pulled from a remote store
 
 
 def test_fetch_event_success_drawn_area_with_l2(log):
@@ -516,18 +535,25 @@ def test_fetch_event_failure(log):
     assert event["aoi"] == {"name": None, "area_km2": None, "how": None}
 
 
-def test_fetch_event_splits_api_vs_downloads(log):
-    """A mixed drain: Nominatim + Overpass go to api_calls, download/clip go to downloads."""
+def test_fetch_event_splits_io_three_ways(log):
+    """A mixed drain splits by kind: outside services to api_calls, locally built artifacts
+    to cache, remote bytes to downloads. A clip is a local derivation, not a download."""
     io = [{"kind": "api", "api": "Nominatim"}, {"kind": "api", "api": "Overpass"},
-          {"kind": "download", "api": "Google Drive", "layer": "hazard_flood", "was_cached": True},
-          {"kind": "clip", "layer": "hazard_flood", "was_cached": False}]
+          {"kind": "download", "what": "source_raster", "api": "Google Drive",
+           "layer": "hazard_flood", "was_cached": True},
+          {"kind": "cache", "what": "aoi_boundary", "key": "x", "was_cached": True},
+          {"kind": "cache", "what": "osm_layer", "layer": "roads", "was_cached": False},
+          {"kind": "cache", "what": "hazard_clip", "layer": "hazard_flood", "was_cached": False}]
     event = tracing.make_trace_event_fetch(
         start_time=0.0, end_time=0.1, started_at="t0", ended_at="t1", state={"events": []},
         mode="place_lookup", aoi={"name": "X", "area_km2": 1, "how": "geocoded"},
         layers_fetched=None, rasters_clipped=["hazard_flood"], l2_computed=[],
         drained_io_events=io, error=None)
-    assert len(event["api_calls"]) == 2
-    assert len(event["downloads"]) == 2
+    log("SPLIT", f"api={len(event['api_calls'])} cache={len(event['cache'])} "
+                 f"downloads={len(event['downloads'])}")
+    assert [c["api"] for c in event["api_calls"]] == ["Nominatim", "Overpass"]
+    assert [c["what"] for c in event["cache"]] == ["aoi_boundary", "osm_layer", "hazard_clip"]
+    assert [d["what"] for d in event["downloads"]] == ["source_raster"]
 
 
 def test_fetch_event_step_counts_existing_events(log):
@@ -618,15 +644,32 @@ def test_collectors_do_not_leak_across_installs(log):
     assert c2.drain() == [{"kind": "clip", "layer": "hazard_flood"}]
 
 
+def test_short_path_hides_the_machine_layout(log):
+    """Every io event ships to the browser and onto disk, so dest names the cached artifact
+    rather than the server's directory structure."""
+    cache_dir = get_settings().cache_dir
+    inside = str(cache_dir / "bangkok" / "roads.geojson")
+    log("SHORT PATH", f"{inside} -> {ingest_mod.short_path(inside)}")
+    assert ingest_mod.short_path(inside) == os.path.join("bangkok", "roads.geojson")
+
+
+def test_short_path_falls_back_to_basename_outside_the_cache(log):
+    """A path outside cache_dir would relpath into a chain of '..' that leaks the layout it
+    was meant to hide, so it degrades to the bare filename instead."""
+    outside = os.path.join(os.sep, "srv", "elsewhere", "hazard_flood.tif")
+    log("SHORT PATH", f"{outside} -> {ingest_mod.short_path(outside)}")
+    assert ingest_mod.short_path(outside) == "hazard_flood.tif"
+
+
 # --- build_trace_envelope: the per-turn top-level envelope -------------------------------
 
 from app.config import get_settings
 
-_ROUTE_STEP = {"node": "router", "duration": 500, "tokens": {"in": 100, "out": 20, "total": 120, "cost": 0.01}}
-_RESOLVE_STEP = {"node": "resolve", "duration": 5}                    # no tokens key at all
-_OPERATE_STEP = {"node": "operate", "duration": 10}                   # no tokens key at all
-_FINALIZE_STEP_LLM = {"node": "finalize", "duration": 300, "tokens": {"in": 50, "out": 30, "total": 80, "cost": 0.005}}
-_FINALIZE_STEP_ERROR = {"node": "finalize", "duration": 1, "tokens": None}   # error_echo branch
+_ROUTE_STEP = {"node": "router", "duration_ms": 500, "tokens": {"in": 100, "out": 20, "total": 120, "cost": 0.01}}
+_RESOLVE_STEP = {"node": "resolve", "duration_ms": 5}                 # no tokens key at all
+_OPERATE_STEP = {"node": "operate", "duration_ms": 10}                # no tokens key at all
+_FINALIZE_STEP_LLM = {"node": "finalize", "duration_ms": 300, "tokens": {"in": 50, "out": 30, "total": 80, "cost": 0.005}}
+_FINALIZE_STEP_ERROR = {"node": "finalize", "duration_ms": 1, "tokens": None}   # error_echo branch
 
 
 def test_build_trace_envelope_sums_duration_over_all_steps(log):
@@ -675,7 +718,7 @@ def test_build_trace_envelope_renumbers_steps_by_position(log):
 def test_build_trace_envelope_empty_events(log):
     envelope = tracing.build_trace_envelope([], thread_id="t1", trace_id="tr1")
     assert envelope["total_duration"] == 0
-    assert envelope["total_tokens"] == {"in": 0, "out": 0, "total": 0, "cost": 0}
+    assert envelope["total_tokens"] == {"in": 0, "out": 0, "total": 0, "cost": None}
     assert envelope["steps"] == []
 
 

@@ -63,11 +63,11 @@ def test_round_trip_with_stub(aoi, make_client, monkeypatch, log):
     assert [s["step"] for s in body["trace_envelope"]["steps"]] == [0, 1, 2, 3]
 
 
-def test_trace_events_surfaced_in_response(aoi, make_client, monkeypatch, log):
-    """Structured trace events reach the API response as trace_events — currently
-    unconditional (not gated by verbose, unlike the older plain-text `trace`). This
-    request needs a hazard choice, so the turn produces two steps: router, then resolve
-    pausing to ask exposure/L1/L2."""
+def test_trace_steps_surfaced_in_response(aoi, make_client, monkeypatch, log):
+    """Structured trace steps reach the API response inside trace_envelope — unconditional
+    (not gated by verbose, unlike the older plain-text `trace`). This request needs a
+    hazard choice, so the turn produces two steps: router, then resolve pausing to ask
+    exposure/L1/L2."""
     from app.api.routes import chat as chat_route
     monkeypatch.setattr(gm.ingest, "ensure_aoi", lambda *a, **k: aoi)
     monkeypatch.setattr(gm.ingest, "hazard_clip", lambda place, layer: aoi[layer])
@@ -77,15 +77,17 @@ def test_trace_events_surfaced_in_response(aoi, make_client, monkeypatch, log):
     r = client.post("/api/chat", json={
         "messages": [{"role": "user", "content": "flooded roads in Testville?"}], "provider": "gemini"})
     body = r.json()
-    log("TRACE_EVENTS", body.get("trace_events"))
+    log("TRACE_STEPS", (body.get("trace_envelope") or {}).get("steps"))
     assert r.status_code == 200
-    assert body["trace_events"] is not None
-    assert [e["node"] for e in body["trace_events"]] == ["router", "resolve"]
-    router_event = body["trace_events"][0]
+    assert "trace_events" not in body
+    assert body["trace_envelope"] is not None
+    steps = body["trace_envelope"]["steps"]
+    assert [e["node"] for e in steps] == ["router", "resolve"]
+    router_event = steps[0]
     assert router_event["kind"] == "routed"
     assert router_event["llm_provider"] == "gemini"
     assert router_event["derived_place"] == "Testville"
-    assert body["trace_events"][1]["decision"] == "asked"
+    assert steps[1]["decision"] == "asked"
 
 
 def test_drawn_area_followup_reuses_geometry(aoi, make_client, monkeypatch, log):
@@ -145,7 +147,8 @@ def test_trace_envelope_surfaced_and_persisted(aoi, make_client, monkeypatch, lo
     assert envelope["trace_id"] == body["id"]
     assert envelope["total_duration"] > 0
     assert set(envelope["total_tokens"]) == {"in", "out", "total", "cost"}
-    assert envelope["steps"] == body["trace_events"]
+    # No place was named, so the turn short-circuits: router refuses, finalize echoes it.
+    assert [s["node"] for s in envelope["steps"]] == ["router", "finalize"]
 
     traces_dir = get_settings().traces_dir
     written = list(traces_dir.glob(f"{envelope['trace_id']}.envelope.json"))

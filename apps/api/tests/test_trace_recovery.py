@@ -129,8 +129,9 @@ def test_overpass_mirror_failover_visible_in_trace(aoi, make_client, monkeypatch
 
 def test_cache_reuse_visible_as_was_cached(aoi, make_client, monkeypatch, tmp_path, log):
     """The source raster is already in the tiff cache (no Drive download) and, on a repeat
-    of the same question, the AOI clip is already on disk too — both recorded as
-    was_cached on the fetch step's downloads[]."""
+    of the same question, the AOI clip is already on disk too. The raster is a real remote
+    fetch and lands in downloads[]; the clip is derived locally and lands in cache[] —
+    both carrying was_cached on the hit and the miss path alike."""
     monkeypatch.setattr(get_settings(), "tiffs_dir", tmp_path / "tiffs")
     (tmp_path / "tiffs").mkdir()
     shutil.copy(aoi["hazard_flood"], tmp_path / "tiffs" / "hazard_flood.tif")
@@ -141,11 +142,12 @@ def test_cache_reuse_visible_as_was_cached(aoi, make_client, monkeypatch, tmp_pa
     # Turn 1 asks exposure/L1/L2; turn 2 answers "1" (exposure) and does the real clip.
     tid = _ask("flooded roads in Testville?").json()["thread_id"]
     first = _ask("1", thread_id=tid).json()["trace_envelope"]
-    downloads_first = _step(first, "fetch")["downloads"]
-    log("FIRST TURN", downloads_first)
+    fetch_first = _step(first, "fetch")
+    downloads_first, cache_first = fetch_first["downloads"], fetch_first["cache"]
+    log("FIRST TURN", {"downloads": downloads_first, "cache": cache_first})
 
-    download = next(d for d in downloads_first if d["kind"] == "download")
-    clip = next(d for d in downloads_first if d["kind"] == "clip")
+    download = next(d for d in downloads_first if d["what"] == "source_raster")
+    clip = next(c for c in cache_first if c["what"] == "hazard_clip")
     assert download["was_cached"] is True          # source raster served from the tiff cache
     assert clip["was_cached"] is False             # this AOI had never been clipped
 
@@ -153,13 +155,16 @@ def test_cache_reuse_visible_as_was_cached(aoi, make_client, monkeypatch, tmp_pa
     # source_raster is never even reached.
     tid2 = _ask("flooded roads in Testville?").json()["thread_id"]
     second = _ask("1", thread_id=tid2).json()["trace_envelope"]
-    downloads_second = _step(second, "fetch")["downloads"]
-    log("SECOND TURN", downloads_second)
+    fetch_second = _step(second, "fetch")
+    downloads_second, cache_second = fetch_second["downloads"], fetch_second["cache"]
+    log("SECOND TURN", {"downloads": downloads_second, "cache": cache_second})
 
-    assert [d["kind"] for d in downloads_second] == ["clip"]
-    assert downloads_second[0]["was_cached"] is True
-    _capture("02_cache_reuse", {"first_turn_downloads": downloads_first,
-                                "second_turn_downloads": downloads_second})
+    # The clip is on disk, so source_raster is never reached at all.
+    assert downloads_second == []
+    assert [c["what"] for c in cache_second] == ["hazard_clip"]
+    assert cache_second[0]["was_cached"] is True
+    _capture("02_cache_reuse", {"first_turn": {"downloads": downloads_first, "cache": cache_first},
+                                "second_turn": {"downloads": downloads_second, "cache": cache_second}})
 
 
 # --- 3. Error-branch rerouting: the run stops cleanly at the node that failed --------------
