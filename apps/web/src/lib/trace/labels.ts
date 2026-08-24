@@ -11,6 +11,9 @@
 
 import type { FinalizeStep, ResolveStep, RouterStep, TraceNode, TraceStep } from '@/types/trace';
 
+/** Heading for the backend-authored `why` text in a step's detail panel. */
+export const WHY_HEADING = 'Why this step exists';
+
 /** Short label for the node badge on a step row. */
 export const NODE_LABEL: Record<TraceNode, string> = {
   router: 'Understand',

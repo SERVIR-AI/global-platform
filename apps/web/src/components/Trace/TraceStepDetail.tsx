@@ -1,5 +1,6 @@
 import type { FieldAudience } from '@/lib/trace/fields';
 import { toStepFields } from '@/lib/trace/fields';
+import { WHY_HEADING } from '@/lib/trace/labels';
 import { formatDuration } from '@/lib/trace/selectors';
 import type { TraceStep } from '@/types/trace';
 import { FC } from 'react';
@@ -10,6 +11,13 @@ type TraceStepDetailProps = {
   title: string;
   detail: FieldAudience;
 };
+
+/** Section heading, shared by the `why` block and every field group. */
+const SectionHeading: FC<{ children: string }> = ({ children }) => (
+  <div className="font-medium text-base-content/60 uppercase tracking-wide text-[0.65rem]">
+    {children}
+  </div>
+);
 
 /**
  * Tier 3 — everything worth knowing about one step.
@@ -25,16 +33,18 @@ const TraceStepDetail: FC<TraceStepDetailProps> = ({ step, title, detail }) => {
     <div className="rounded-lg bg-base-200/60 p-3 flex flex-col gap-3">
       <div>
         <div className="font-medium">{title}</div>
-        {/* Backend-authored copy (`tracing.py` writes `why` per node) — rendered verbatim. */}
-        <p className="text-base-content/70">{step.why}</p>
         <p className="text-base-content/50">Took {formatDuration(step.duration_ms)}</p>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <SectionHeading>{WHY_HEADING}</SectionHeading>
+        {/* Backend-authored copy. `tracing.py` writes `why` per node; render it verbatim. */}
+        <p className="text-base-content/70">{step.why}</p>
       </div>
 
       {groups.map((group) => (
         <div key={group.group} className="flex flex-col gap-1">
-          <div className="font-medium text-base-content/60 uppercase tracking-wide text-[0.65rem]">
-            {group.group}
-          </div>
+          <SectionHeading>{group.group}</SectionHeading>
           <dl className="grid grid-cols-[minmax(7rem,auto)_1fr] gap-x-3 gap-y-1">
             {group.fields.map((field) => (
               <div key={field.key} className="contents">
