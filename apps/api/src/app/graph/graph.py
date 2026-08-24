@@ -25,7 +25,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from . import prompts, tracing
-from .geo import byod_registry, combine, ingest, operations, resolver, tiffs, trace
+from .geo import byod_registry, combine, ingest, operations, resolver, tiffs
 
 
 def _add(left: list | None, right: list | None) -> list:
@@ -423,11 +423,9 @@ def finalize(state: State, config) -> dict:
     """Phrase the answer (quoting the number + source). On error, return it without an LLM call."""
     t_start = time.perf_counter()
     started_at = datetime.now(timezone.utc).isoformat()
-    question = _last_user(state["messages"])
 
     if state.get("error"):
         answer = state["error"]
-        rec = trace.record(question, answer, state.get("usage") or [], args=state.get("op_args"))
         t_end = time.perf_counter()
         ended_at = datetime.now(timezone.utc).isoformat()
         trace_event = tracing.make_trace_event_finalize(
@@ -456,8 +454,6 @@ def finalize(state: State, config) -> dict:
     resp = client.chat.completions.create(model=model, messages=messages, max_tokens=400)
     answer = resp.choices[0].message.content or ""
 
-    usages = (state.get("usage") or []) + [_usage(resp)]
-    rec = trace.record(question, answer, usages, result=result, args=state.get("op_args"))
     t_end = time.perf_counter()
     ended_at = datetime.now(timezone.utc).isoformat()
     trace_event = tracing.make_trace_event_finalize(
