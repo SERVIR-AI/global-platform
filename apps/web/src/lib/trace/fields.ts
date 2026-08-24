@@ -440,12 +440,6 @@ const operateFields = (step: OperateStep, legend: Legend | null): TraceFieldGrou
       ),
       field('error', 'Problem', 'user', maybeText(step.error, MISSING.noneRecorded)),
       field('operation', 'Operation', 'developer', maybeText(step.operation, MISSING.noneRecorded)),
-      field(
-        'result_raw',
-        'Raw result',
-        'developer',
-        step.result ? json(step.result) : missing(MISSING.computeFailed),
-      ),
     ],
   },
 ];
