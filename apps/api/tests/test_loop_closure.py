@@ -240,3 +240,38 @@ def test_localhost_stays_the_default_for_development(log):
     from app.mcp import ui
     log("CHECK", "no GRP_PUBLIC_BASE -> committed theme values")
     assert ui.tokens()["product"]["resolver"]["base"].startswith("http://localhost")
+
+
+def test_series_id_is_the_feeds_query_dataset_key(log):
+    """CROSS-BOUNDARY CONTRACT the analytics panel depends on: `insight.series[].id`
+    must be usable verbatim as feeds_query's `dataset` argument — the app's
+    "full history" chip calls feeds_query(series.id). Rename a feed key without
+    this test and the button breaks silently, only at click time, only in a host
+    that proxies tool calls."""
+    from app.food_security import synthesis
+    from app.mcp import registry
+    sr = synthesis._series("enso_oni", [
+        {"season": "MJJ", "year": 2026, "value": 1.39, "classification": "moderate El Nino"},
+        {"season": "AMJ", "year": 2026, "value": 0.95, "classification": "weak El Nino"}])
+    log("OUTPUT", f"series.id = {sr['id']}")
+    assert sr["id"] == "enso_oni"
+    assert sr["id"] in registry.FEEDS and registry.FEEDS[sr["id"]]["status"] == "available"
+    assert "limit" in (registry.FEEDS[sr["id"]].get("params") or {})
+
+
+def test_the_panel_is_capability_gated_analytics(log):
+    """User: a proper analytics tool. The unlock is tools/call through the host —
+    and it must be GATED on hostCapabilities.serverTools, with the pack snapshot
+    still fully usable when the host does not proxy."""
+    from app.mcp import app_ui
+    html = app_ui.template()
+    log("CHECK", "bridge, gating, live-vs-pack honesty, analogues, overlay, stats")
+    assert 'method: "tools/call"' in html
+    assert "serverToolsOK" in html and "_caps && _caps.serverTools" in html
+    # live pulls are labelled as OUTSIDE the receipt — the trust distinction
+    assert "not attested by it" in html
+    assert "enso_event_history" in html          # analogue events
+    assert "overlayCard" in html and "read co-movement" in html
+    assert "mean" in html and "vs prev" in html  # stats strip
+    # degradation is stated, not silent
+    assert "host does not proxy tool calls" in html

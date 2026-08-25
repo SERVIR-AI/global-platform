@@ -110,6 +110,20 @@ a{color:var(--color-text-info,var(--grp-primary,#2380b0))}
     var(--color-border-primary,var(--grp-base-300,#e0e6ec))}
 .chip.on{color:var(--color-text-primary,var(--grp-base-content,#1c212a));
   border-color:currentColor}
+.livewarn{margin:.25rem 0;padding:.3rem .55rem;font-size:var(--font-text-xs-size,.7rem);
+  border-radius:var(--border-radius-sm,6px);
+  background:var(--color-background-warning,var(--grp-base-200,#f1f4f7));
+  color:var(--color-text-warning,var(--grp-base-content,#1c212a))}
+.stats{font-size:var(--font-text-xs-size,.7rem);
+  color:var(--color-text-tertiary,var(--grp-neutral,#5a6472));margin-top:.1rem}
+.tblwrap{overflow-x:auto;margin-top:.4rem}
+.tbl{border-collapse:collapse;font-size:var(--font-text-xs-size,.72rem);width:100%}
+.tbl th{text-align:left;font-weight:var(--font-weight-semibold,600);
+  color:var(--color-text-secondary,var(--grp-neutral,#5a6472))}
+.tbl th,.tbl td{padding:.15rem .5rem .15rem 0;border-bottom:var(--border-width-regular,1px)
+  solid var(--color-border-primary,var(--grp-base-300,#e0e6ec))}
+.s0{color:var(--color-text-info,var(--grp-info,#2380b0))}
+.s1{color:var(--color-text-warning,var(--grp-warning,#a06a08))}
 .readout{font-size:var(--font-text-xs-size,.72rem);
   color:var(--color-text-secondary,var(--grp-neutral,#5a6472));margin-top:.1rem}
 .readout b{color:var(--color-text-primary,var(--grp-base-content,#1c212a))}
@@ -130,26 +144,91 @@ const VERDICT_FIELDS = __VERDICT_FIELDS__;
 // without taking it away from the caller.
 const strip = o => { const c = {...o}; for (const k of VERDICT_FIELDS) delete c[k]; return c; };
 const esc = s => String(s ?? "").replace(/[<>&]/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));
-// An interactive chart, not a picture. Inline SVG and hand-wired events because the
-// sandbox CSP forbids loading a charting library from anywhere.
+// ---- ANALYTICS -------------------------------------------------------------
+// The panel is an analytics surface, not a picture. Inline SVG and hand-wired
+// listeners because the sandbox CSP forbids loading any charting library; every
+// affordance is CLICK-driven because hover is useless on touch and invisible in
+// a screenshot.
 //
-// Three affordances, all click-driven (hover alone is useless on touch and invisible
-// in a screenshot): a RANGE picker to narrow the window, a POINT picker so any month
-// can be read exactly rather than estimated off an axis, and a BANDS toggle for the
-// El Nino / La Nina thresholds.
-const _cs = {};                       // per-chart UI state, keyed by index
-function chartState(i, n) {
-  if (!_cs[i]) _cs[i] = { range: 0, sel: n - 1, bands: true };
+// Data comes in two grades and the panel never blurs them:
+//   pack — points sealed in this receipt's evidence pack (the default view);
+//   live — pulled on demand THROUGH THE HOST via tools/call (spec: a View may
+//          call server tools when hostCapabilities.serverTools is set). Live
+//          points are NOT attested by the receipt, and every live view says so.
+const _cs = {};
+function chartState(i) {
+  if (!_cs[i]) _cs[i] = { src: "pack", range: 0, sel: -1, bands: true,
+                          table: false, hist: null, loading: false };
   return _cs[i];
 }
+let _ov = false;                        // overlay: both indices on one axis
+let _ana = null;                        // analogue events cache
+let _anaOpen = false;
+const seriesList = () => (_data && _data.insight && _data.insight.series) || [];
+const serverToolsOK = () => !!(_caps && _caps.serverTools);
+
+const _calls = new Map();               // JSON-RPC id -> promise handlers
+function callTool(name, args) {
+  return new Promise((resolve, reject) => {
+    if (!serverToolsOK()) { reject(new Error("host does not proxy tool calls")); return; }
+    const id = ++_id;
+    _calls.set(id, { resolve: resolve, reject: reject });
+    post({ jsonrpc: "2.0", id: id, method: "tools/call",
+           params: { name: name, arguments: args } });
+  });
+}
+function toolJSON(res) {                // CallToolResult -> the tool's JSON payload
+  for (const b of (res && res.content) || [])
+    if (b.type === "text") { try { return JSON.parse(b.text); } catch (e) { return null; } }
+  return null;
+}
+function toPoints(records) {            // client-side mirror of synthesis._series
+  const out = [];
+  for (const r of records || []) {
+    if (!r || r.value === undefined || r.value === null) continue;
+    const t = r.season ? (r.season + " " + r.year)
+            : r.month ? (r.year + "-" + String(r.month).padStart(2, "0"))
+            : String(r.year || "");
+    out.push({ t: t, v: r.value, c: r.classification });
+  }
+  return out;
+}
+function loadHistory(i) {
+  const sr = seriesList()[i], st = chartState(i);
+  if (!sr || st.loading) return;
+  st.loading = true; redrawChart(i);
+  callTool("feeds_query", { dataset: sr.id, params: { limit: 1200 } }).then(res => {
+    const d = toolJSON(res) || {};
+    st.loading = false;
+    if (d.status !== "ok") st.hist = { err: d.note || "feed declined" };
+    else st.hist = { points: toPoints(d.records), as_of: d.as_of,
+                     stale: !!(((d.passport || {}).stale_data || {}).served_stale) };
+    redrawChart(i);
+  }).catch(e => {
+    st.loading = false; st.hist = { err: String(e && e.message || e) }; redrawChart(i);
+  });
+}
+function activePoints(sr, st) {
+  const base = (st.src === "live" && st.hist && st.hist.points) ? st.hist.points
+                                                                : (sr.points || []);
+  return st.range ? base.slice(-st.range) : base;
+}
+const f2 = v => (Math.round(v * 100) / 100).toFixed(2);
+function stats(pts) {
+  if (!pts.length) return null;
+  let lo = pts[0].v, hi = pts[0].v, sum = 0;
+  for (const p of pts) { if (p.v < lo) lo = p.v; if (p.v > hi) hi = p.v; sum += p.v; }
+  const last = pts[pts.length - 1], prev = pts[pts.length - 2];
+  return { n: pts.length, min: lo, max: hi, mean: sum / pts.length,
+           last: last, d: prev ? last.v - prev.v : null };
+}
 function chartSVG(sr, i, st) {
-  const all = sr.points || [];
-  const pts = st.range ? all.slice(-st.range) : all;
+  const pts = activePoints(sr, st);
+  if (pts.length < 2) return '<div class="meta">not enough data in this window</div>';
   const W = 560, H = 116, PAD = 24;
   const vs = pts.map(p => p.v);
   const lo = Math.min(-0.8, ...vs), hi = Math.max(0.8, ...vs);
-  const x = k => PAD + (pts.length === 1 ? (W - PAD * 2) / 2
-                                         : k * (W - PAD * 2) / (pts.length - 1));
+  const x = k => PAD + k * (W - PAD * 2) / (pts.length - 1);
   const y = v => H - PAD - (v - lo) * (H - PAD * 2) / (hi - lo);
   const line = pts.map((p, k) => (k ? "L" : "M") + x(k).toFixed(1) + "," + y(p.v).toFixed(1)).join("");
   const band = (v, label) => !st.bands ? "" : `
@@ -157,73 +236,188 @@ function chartSVG(sr, i, st) {
       stroke="currentColor" stroke-dasharray="3 3" opacity=".35"/>
     <text x="${W - PAD + 2}" y="${(y(v) + 3).toFixed(1)}" font-size="8"
       fill="currentColor" opacity=".55">${label}</text>`;
-  const sel = Math.min(Math.max(st.sel, 0), pts.length - 1);
+  const sel = st.sel < 0 ? pts.length - 1 : Math.min(st.sel, pts.length - 1);
   const sp = pts[sel];
-  const dots = pts.map((p, k) => `
-    <circle class="pt" data-chart="${i}" data-pt="${k}" cx="${x(k).toFixed(1)}"
-      cy="${y(p.v).toFixed(1)}" r="7" fill="transparent" style="cursor:pointer"/>
+  const dots = pts.length > 60 ? "" : pts.map((p, k) => `
     <circle cx="${x(k).toFixed(1)}" cy="${y(p.v).toFixed(1)}"
       r="${k === sel ? 3.5 : 1.8}" fill="currentColor"
       opacity="${k === sel ? 1 : .45}" pointer-events="none"/>`).join("");
+  const s = stats(pts);
+  const dtxt = s.d === null ? "" : (s.d >= 0 ? " · +" : " · ") + f2(s.d) + " vs prev";
   return `
-    <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img"
-         aria-label="${esc(sr.title || sr.id)}">
+    <svg class="cv" data-chart="${i}" viewBox="0 0 ${W} ${H}" width="100%" height="${H}"
+         role="img" aria-label="${esc(sr.title || sr.id)}" style="cursor:crosshair">
       ${band(0.5, "+0.5 El Nino")}${band(-0.5, "-0.5 La Nina")}
       <line x1="${x(sel).toFixed(1)}" x2="${x(sel).toFixed(1)}" y1="${PAD - 8}"
         y2="${H - PAD}" stroke="currentColor" opacity=".28"/>
-      <path d="${line}" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".85"/>
+      <path d="${line}" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".85"/>
       ${dots}
+      <circle cx="${x(sel).toFixed(1)}" cy="${y(sp.v).toFixed(1)}" r="3.5" fill="currentColor"/>
       <text x="${PAD}" y="${H - 6}" font-size="8" fill="currentColor"
-        opacity=".55">${esc(pts[0] ? pts[0].t : "")}</text>
+        opacity=".55">${esc(pts[0].t)}</text>
       <text x="${W - PAD}" y="${H - 6}" font-size="8" text-anchor="end"
-        fill="currentColor" opacity=".55">${esc(pts[pts.length - 1] ? pts[pts.length - 1].t : "")}</text>
+        fill="currentColor" opacity=".55">${esc(pts[pts.length - 1].t)}</text>
     </svg>
-    <div class="readout"><b>${esc(sp ? sp.t : "")}</b> &nbsp;${esc(sp ? sp.v : "")}
-      ${esc(sp && sp.c ? sp.c : "")}</div>`;
+    <div class="readout"><b>${esc(sp.t)}</b> &nbsp;${esc(sp.v)} ${esc(sp.c || "")}${dtxt}
+      <span class="meta">— click anywhere on the chart to read a month</span></div>
+    <div class="stats">${s.n} pts · min ${f2(s.min)} · max ${f2(s.max)} · mean ${f2(s.mean)}</div>`;
+}
+function tableHTML(pts) {
+  const rows = pts.slice(-60);
+  const trimmed = pts.length - rows.length;
+  return `<div class="tblwrap"><table class="tbl">
+    <tr><th>period</th><th>value</th><th>classification</th></tr>
+    ${rows.map(p => `<tr><td>${esc(p.t)}</td><td>${esc(p.v)}</td><td>${esc(p.c || "")}</td></tr>`).join("")}
+    </table>${trimmed > 0 ? `<div class="meta">${trimmed} earlier rows in the chart only — narrow the window to see them here</div>` : ""}</div>`;
+}
+function chip(i, act, label, on) {
+  return `<button class="chip${on ? " on" : ""}" data-chart="${i}" data-act="${act}">${label}</button>`;
 }
 function chartInner(sr, i) {
-  const n = (sr.points || []).length, st = chartState(i, n);
-  const ranges = [6, 12, 24].filter(r => r < n).concat([0]);
-  const label = r => r ? "last " + r : "all " + n;
+  const st = chartState(i);
+  const live = st.src === "live" && st.hist && st.hist.points;
+  const histErr = st.hist && st.hist.err;
+  const chips = [
+    chip(i, "src-pack", "pack (" + (sr.points || []).length + ")", st.src === "pack"),
+    serverToolsOK() ? chip(i, "src-live", st.loading ? "loading…" : "full history",
+                           st.src === "live") : "",
+    chip(i, "range-12", "1y", st.range === 12),
+    chip(i, "range-60", "5y", st.range === 60),
+    chip(i, "range-0", "all", st.range === 0),
+    chip(i, "table", "table", st.table),
+    chip(i, "bands", "thresholds", st.bands),
+  ];
   return `
     <div class="meta"><b>${esc(sr.title || sr.id)}</b> · ${esc(sr.source || "")} ·
       as of ${esc(sr.as_of || "")}${sr.n ? " · [" + esc(sr.n) + "]" : ""}</div>
-    <div class="ctl">
-      ${ranges.map(r => `<button class="chip${st.range === r ? " on" : ""}"
-         data-chart="${i}" data-range="${r}">${label(r)}</button>`).join("")}
-      <button class="chip${st.bands ? " on" : ""}" data-chart="${i}"
-        data-bands="1">thresholds</button>
-    </div>
-    ${chartSVG(sr, i, st)}`;
+    <div class="ctl">${chips.join("")}</div>
+    ${live ? `<div class="livewarn">live pull to ${esc(st.hist.as_of || "")} — beyond this
+      receipt's evidence pack, not attested by it${st.hist.stale ? " · SERVED FROM CACHE" : ""}</div>` : ""}
+    ${histErr ? `<div class="livewarn">history unavailable: ${esc(histErr)}</div>` : ""}
+    ${chartSVG(sr, i, st)}
+    ${st.table ? tableHTML(activePoints(sr, st)) : ""}`;
 }
 function chart(sr, i) {
   return `<div class="card chart" id="ch${i}">${chartInner(sr, i)}</div>`;
 }
 function redrawChart(i) {
-  const sr = ((_data && _data.insight && _data.insight.series) || [])[i];
+  const sr = seriesList()[i];
   const el = document.getElementById("ch" + i);
   if (!sr || !el) return;
   el.innerHTML = chartInner(sr, i);
   wireCharts();
   reportSize();
 }
+function overlayCard(series) {
+  const a = series[0], b = series[1];
+  const pa = a.points || [], pb = b.points || [];
+  const K = Math.min(pa.length, pb.length);
+  if (K < 2) return "";
+  const A = pa.slice(-K), Bp = pb.slice(-K);
+  const W = 560, H = 130, PAD = 24;
+  const vs = A.concat(Bp).map(p => p.v);
+  const lo = Math.min(-0.8, ...vs), hi = Math.max(0.8, ...vs);
+  const x = k => PAD + k * (W - PAD * 2) / (K - 1);
+  const y = v => H - PAD - (v - lo) * (H - PAD * 2) / (hi - lo);
+  const path = P => P.map((p, k) => (k ? "L" : "M") + x(k).toFixed(1) + "," + y(p.v).toFixed(1)).join("");
+  return `<div class="card chart">
+    <div class="meta"><b>Overlay</b> · <span class="s0">■ ${esc(a.title || a.id)}</span>
+      · <span class="s1">■ ${esc(b.title || b.id)}</span></div>
+    <div class="stats">both in °C anomaly · aligned by recency, last ${K} points — the
+      cadences differ, so read co-movement, not exact dates</div>
+    <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img" aria-label="overlay">
+      <line x1="${PAD}" x2="${W - PAD}" y1="${y(0).toFixed(1)}" y2="${y(0).toFixed(1)}"
+        stroke="currentColor" stroke-dasharray="3 3" opacity=".3"/>
+      <g class="s0"><path d="${path(A)}" fill="none" stroke="currentColor"
+        stroke-width="1.5" opacity=".9"/></g>
+      <g class="s1"><path d="${path(Bp)}" fill="none" stroke="currentColor"
+        stroke-width="1.5" opacity=".9"/></g>
+      <text x="${PAD}" y="${H - 6}" font-size="8" fill="currentColor"
+        opacity=".55">${esc(A[0].t)} / ${esc(Bp[0].t)}</text>
+      <text x="${W - PAD}" y="${H - 6}" font-size="8" text-anchor="end"
+        fill="currentColor" opacity=".55">${esc(A[K - 1].t)} / ${esc(Bp[K - 1].t)}</text>
+    </svg></div>`;
+}
+function globalBar(series) {
+  const items = [];
+  if (series.length > 1)
+    items.push(`<button class="chip${_ov ? " on" : ""}" data-act="overlay">overlay indices</button>`);
+  if (serverToolsOK())
+    items.push(`<button class="chip${_anaOpen ? " on" : ""}" data-act="ana">El Niño analogues</button>`);
+  return items.length ? `<div class="ctl">${items.join("")}</div>` : "";
+}
+function anaHTML() {
+  if (!_anaOpen) return "";
+  if (_ana === "loading")
+    return '<div class="card"><div class="meta">loading analogue events…</div></div>';
+  if (_ana && _ana.err)
+    return `<div class="card"><div class="livewarn">analogues unavailable: ${esc(_ana.err)}</div></div>`;
+  const rows = (_ana && _ana.rows) || [];
+  return `<div class="card">
+    <div class="meta"><b>El Niño analogue events</b> · derived from NOAA CPC ONI ·
+      through ${esc((_ana && _ana.asof) || "")}</div>
+    <div class="livewarn">live pull — beyond this receipt's evidence pack, not attested by it</div>
+    <div class="tblwrap"><table class="tbl">
+      <tr><th>start</th><th>end</th><th>seasons</th><th>peak ONI</th><th>at</th><th>strength</th></tr>
+      ${rows.map(r => `<tr><td>${esc(r.start)}</td><td>${esc(r.end)}</td>
+        <td>${esc(r.seasons)}</td><td>${esc(r.peak_oni)}</td>
+        <td>${esc(r.peak_season)}</td><td>${esc(r.strength)}</td></tr>`).join("")}
+    </table></div></div>`;
+}
+function toggleAnalogues() {
+  _anaOpen = !_anaOpen;
+  if (_anaOpen && !_ana) {
+    _ana = "loading"; paintAna();
+    callTool("feeds_query", { dataset: "enso_event_history", params: {} }).then(res => {
+      const d = toolJSON(res) || {};
+      if (d.status !== "ok") _ana = { err: d.note || "feed declined" };
+      else _ana = { rows: (d.records || []).filter(r => r.phase === "El Nino").reverse(),
+                    asof: d.as_of };
+      paintAna();
+    }).catch(e => { _ana = { err: String(e && e.message || e) }; paintAna(); });
+  } else paintAna();
+}
+function paintAna() {
+  const el = document.getElementById("ana");
+  if (el) { el.innerHTML = anaHTML(); reportSize(); }
+  const b = document.querySelector('[data-act="ana"]');
+  if (b) b.classList.toggle("on", _anaOpen);
+}
+function rerender() { if (_data) { render(_data); reportSize(); } }
 function wireCharts() {
-  document.querySelectorAll("[data-range]").forEach(b => {
-    b.onclick = () => { const i = +b.getAttribute("data-chart");
-      const st = chartState(i, 0); st.range = +b.getAttribute("data-range");
-      st.sel = 1e9; redrawChart(i); };          // clamped to the last point on redraw
+  document.querySelectorAll("[data-act]").forEach(b => {
+    b.onclick = () => {
+      const act = b.getAttribute("data-act");
+      if (act === "overlay") { _ov = !_ov; rerender(); return; }
+      if (act === "ana") { toggleAnalogues(); return; }
+      const i = +b.getAttribute("data-chart");
+      const st = chartState(i);
+      if (act === "src-pack") { st.src = "pack"; st.sel = -1; }
+      else if (act === "src-live") {
+        st.src = "live"; st.sel = -1;
+        if (!st.hist || st.hist.err) { st.hist = null; loadHistory(i); }
+      }
+      else if (act === "table") st.table = !st.table;
+      else if (act === "bands") st.bands = !st.bands;
+      else if (act.indexOf("range-") === 0) { st.range = +act.slice(6); st.sel = -1; }
+      redrawChart(i);
+    };
   });
-  document.querySelectorAll("[data-bands]").forEach(b => {
-    b.onclick = () => { const i = +b.getAttribute("data-chart");
-      const st = chartState(i, 0); st.bands = !st.bands; redrawChart(i); };
-  });
-  document.querySelectorAll("[data-pt]").forEach(c => {
-    c.onclick = () => { const i = +c.getAttribute("data-chart");
-      chartState(i, 0).sel = +c.getAttribute("data-pt"); redrawChart(i); };
+  document.querySelectorAll("svg.cv").forEach(sv => {
+    sv.onclick = e => {
+      const i = +sv.getAttribute("data-chart");
+      const sr = seriesList()[i]; if (!sr) return;
+      const st = chartState(i), pts = activePoints(sr, st);
+      if (pts.length < 2) return;
+      const r = sv.getBoundingClientRect();
+      const W = 560, PAD = 24;
+      const xv = (e.clientX - r.left) / r.width * W;
+      let k = Math.round((xv - PAD) / (W - 2 * PAD) * (pts.length - 1));
+      st.sel = Math.max(0, Math.min(pts.length - 1, k));
+      redrawChart(i);
+    };
   });
 }
-// The brief arrives as the markdown the model wrote and the gate checked. Headings
-// and paragraphs only — it renders the gated text as written, never reformatting it.
 function brief(text){
   if (!text) return "";
   // Line-aware, not block-aware: the gate does not require a blank line after
@@ -279,7 +473,10 @@ function render(d){
   document.getElementById("root").innerHTML = `
     <h2>${esc(d.question || "Evidence")}</h2>
     <div class="sub">${srcs.length} sources · ${pulled.size} pulled live · ${gaps.length} declared gap(s)</div>
+    ${globalBar(series)}
+    ${_ov && series.length > 1 ? overlayCard(series) : ""}
     ${shown.map((sr, i) => chart(sr, i)).join("")}
+    <div id="ana">${anaHTML()}</div>
     ${hidden.map(sr => `<div class="meta oneline"><b>${esc(sr.title||sr.id)}</b> ·
         ${esc((sr.points[sr.points.length-1]||{}).v)}
         ${esc((sr.points[sr.points.length-1]||{}).c||"")} ·
@@ -311,7 +508,9 @@ function render(d){
       ${d.public_resolver?`Resolve it live: <a class="lnk" data-url="${esc(d.public_resolver)}" href="${esc(d.public_resolver)}">${esc(d.receipt_id||"receipt")}</a>`:""}
       <div class="meta">${esc((_ctx.hostInfo||{}).name||"host")} ·
         ${esc(_ctx.displayMode||"inline")} ·
-        box ${esc(JSON.stringify(_ctx.containerDimensions||"unspecified"))}</div>
+        box ${esc(JSON.stringify(_ctx.containerDimensions||"unspecified"))} ·
+        ${serverToolsOK() ? "tool calls proxied — live history available"
+                          : "host does not proxy tool calls — pack snapshot only"}</div>
     </div>`;
   const more = document.getElementById("more");
   if (more) more.onclick = expand;
@@ -426,6 +625,12 @@ function reportSize(){
 try { new ResizeObserver(reportSize).observe(document.documentElement); } catch (_) {}
 window.addEventListener("message", e => {
   const m = e.data || {};
+  if (m.id && _calls.has(m.id)) {         // a server tool answered
+    const h = _calls.get(m.id); _calls.delete(m.id);
+    if (m.error) h.reject(new Error((m.error && m.error.message) || "tool call failed"));
+    else h.resolve(m.result);
+    return;
+  }
   if (m.id && _pending.has(m.id)) {
     const method = _pending.get(m.id);
     _pending.delete(m.id);

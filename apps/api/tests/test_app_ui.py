@@ -238,9 +238,11 @@ def test_the_charts_are_interactive(log):
     """User: the graphs should be apps with clickers and pickers, not pictures."""
     html = app_ui.template()
     log("CHECK", "range picker, point picker, threshold toggle, live readout")
-    assert "data-range" in html and "data-pt" in html and "data-bands" in html
+    # chips are BUILT by chip(i, act, ...) at runtime; the source carries the acts
+    for act in ('"range-12"', '"range-60"', '"table"', '"bands"', '"src-live"'):
+        assert f"chip(i, {act}" in html, act
+    assert "data-act=" in html and "svg.cv" in html   # unified dispatch + svg click-to-read
     assert "redrawChart" in html and "wireCharts()" in html
     assert 'class="readout"' in html
     # a redraw must re-report height or the host keeps the old box
-    assert html.split("function redrawChart")[1].split("}")[0].count("reportSize") \
-        or "reportSize();" in html.split("function redrawChart")[1][:400]
+    assert "reportSize();" in html.split("function redrawChart")[1][:400]
