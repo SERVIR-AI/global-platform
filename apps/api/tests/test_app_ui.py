@@ -158,3 +158,42 @@ def test_it_reads_the_tool_result_where_the_spec_puts_it(log):
     log("CHECK", "params.structuredContent read from the notification")
     assert 'm.method === "ui/notifications/tool-result"' in html
     assert "m.params?.structuredContent" in html
+
+
+def test_sources_carry_a_platform_absolute_archived_link(log):
+    """A relative archived path resolves against whatever origin is RENDERING —
+    an MCP App iframe or a consumer's page, neither of which is us. So it 404s
+    exactly where the trace-back matters most."""
+    import os
+    from app.mcp import assemble, record, ui
+    os.environ["GRP_PUBLIC_BASE"] = "http://10.1.30.110:8080"
+    try:
+        p = assemble.assemble(country="Kenya", crop="maize")
+        r = record.record(pack_id=p["pack_id"], question="q")
+        docs = [s for s in r["sources"] if s.get("archived_copy")]
+        log("OUTPUT", docs[0]["archived_url"])
+        assert docs, "expected at least one archived document source"
+        assert all(s["archived_url"].startswith("http://10.1.30.110:8080/api/")
+                   for s in docs)
+    finally:
+        os.environ.pop("GRP_PUBLIC_BASE", None)
+
+
+def test_links_go_through_the_host_not_the_iframe(log):
+    """A sandboxed iframe cannot navigate the parent, so `<a target="_blank">` does
+    nothing — the receipt link and every source were dead on Desktop. The spec's
+    `ui/open-link` is the only route, gated by hostCapabilities.openLinks."""
+    html = app_ui.template()
+    log("CHECK", "ui/open-link used, capability-gated, with a standalone fallback")
+    assert 'request("ui/open-link", { url: url })' in html
+    assert "_caps.openLinks" in html
+    assert "window.open(url" in html          # standalone browser view still works
+    assert "wireLinks()" in html
+
+
+def test_every_source_card_offers_its_document(log):
+    """Provenance you cannot open is a claim, not a trace."""
+    html = app_ui.template()
+    log("CHECK", "archived copy + upstream source on each card")
+    assert "archived copy" in html and ">source</a>" in html
+    assert 'data-url="${esc(s.archived_url)}"' in html

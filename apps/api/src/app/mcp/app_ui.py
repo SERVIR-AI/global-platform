@@ -87,6 +87,9 @@ a{color:var(--color-text-info,var(--grp-primary,#2380b0))}
   background:var(--color-background-secondary,var(--grp-base-200,#f1f4f7))}
 .sec{margin-top:1rem}
 .oneline{padding:.3rem .1rem}
+.links{margin-top:.35rem;font-size:var(--font-text-xs-size,.72rem)}
+.lnk{cursor:pointer;text-decoration:underline;
+  color:var(--color-text-info,var(--grp-primary,#2380b0))}
 .more{margin-top:.5rem;font:inherit;font-size:var(--font-text-xs-size,.75rem);
   cursor:pointer;padding:.3rem .7rem;
   color:var(--color-text-primary,var(--grp-base-content,#1c212a));
@@ -181,6 +184,15 @@ function chartBudget(){
   if (!h || _expanded || _ctx.displayMode === "fullscreen") return Infinity;
   return Math.max(1, Math.floor((h - 110) / 190));   // header + one chart card each
 }
+// Evidence inline when the box can hold it, behind a control when it cannot.
+// Desktop reports maxHeight 5000 — hiding seventeen cards behind a click there is
+// as wrong as cramming them into 320px was.
+function roomForEvidence(){
+  if (_expanded || _ctx.displayMode === "fullscreen") return true;
+  const cd = _ctx.containerDimensions || {};
+  const h = ("height" in cd) ? cd.height : (cd.maxHeight || 0);
+  return !h || h >= 1200;
+}
 function expand(){
   _expanded = true;
   request("ui/request-display-mode", { mode: "fullscreen" });
@@ -202,10 +214,10 @@ function render(d){
         ${esc((sr.points[sr.points.length-1]||{}).v)}
         ${esc((sr.points[sr.points.length-1]||{}).c||"")} ·
         as of ${esc(sr.as_of||"")}</div>`).join("")}
-    ${srcs.length ? (_expanded
+    ${srcs.length ? (roomForEvidence()
       ? `<h2 class="sec">Evidence</h2>`
       : `<button class="more" id="more">Show ${hidden.length?`${hidden.length} more chart(s) and `:""}all ${srcs.length} sources</button>`) : ""}
-    <div class="grid" style="display:${_expanded?"grid":"none"}">${srcs.map(s => `
+    <div class="grid" style="display:${roomForEvidence()?"grid":"none"}">${srcs.map(s => `
       <div class="card">
         <b>[${esc(s.n)}] ${esc(s.source)}</b>
         <div class="meta">${esc(s.title||"")}</div>
@@ -214,19 +226,26 @@ function render(d){
           ${esc(s.pub_date||"undated")} · ${esc(s.validation||"unvalidated")}
         </div>
         ${s.caveat?`<div class="meta">⚠ ${esc(s.caveat)}</div>`:""}
+        <div class="links">
+          ${s.archived_url?`<a class="lnk" data-url="${esc(s.archived_url)}"
+             href="${esc(s.archived_url)}">archived copy</a>`:""}
+          ${s.archived_url && s.url?" · ":""}
+          ${s.url?`<a class="lnk" data-url="${esc(s.url)}" href="${esc(s.url)}">source</a>`:""}
+        </div>
       </div>`).join("")}</div>
     ${gaps.length?`<h2 style="margin-top:1rem">What is missing</h2>
       ${gaps.map(g=>`<div class="gap">${esc(g)}</div>`).join("")}`:""}
     <div class="foot">
       This shows EVIDENCE only. The verdict is deliberately not drawn here: a rendered
       surface freezes what is in it, and a frozen verdict attests nothing.
-      ${d.public_resolver?`Resolve it live: <a href="${esc(d.public_resolver)}" target="_blank">${esc(d.receipt_id||"receipt")}</a>`:""}
+      ${d.public_resolver?`Resolve it live: <a class="lnk" data-url="${esc(d.public_resolver)}" href="${esc(d.public_resolver)}">${esc(d.receipt_id||"receipt")}</a>`:""}
       <div class="meta">${esc((_ctx.hostInfo||{}).name||"host")} ·
         ${esc(_ctx.displayMode||"inline")} ·
         box ${esc(JSON.stringify(_ctx.containerDimensions||"unspecified"))}</div>
     </div>`;
   const more = document.getElementById("more");
   if (more) more.onclick = expand;
+  wireLinks();
 }
 // MCP Apps delivers the tool result by postMessage as `ui/notifications/tool-result`.
 // Accept a couple of shapes: the spec is young and hosts differ, and a template that
@@ -241,7 +260,7 @@ function render(d){
 // Claude Desktop therefore rendered the iframe and correctly sent nothing back,
 // and the panel sat on "loading..." forever. The widget was never broken; the
 // handshake was never opened.
-let _id = 0, _ready = false, _ctx = {}, _data = null, _expanded = false;
+let _id = 0, _ready = false, _ctx = {}, _caps = {}, _data = null, _expanded = false;
 const _pending = new Set();
 const post = m => { try { parent.postMessage(m, "*"); } catch (_) {} };
 const request = (method, params) => {
@@ -282,6 +301,20 @@ function applyHostContext(hc) {
     else if (cd.maxWidth) root.style.maxWidth = cd.maxWidth + "px";
   }
 }
+// A sandboxed iframe cannot navigate the parent, so an <a href target="_blank">
+// silently does nothing — which is why the receipt link and the sources were dead
+// on Desktop. The spec provides `ui/open-link`, gated by hostCapabilities.openLinks.
+// Fall back to window.open for the standalone browser view, where there is no host.
+function openLink(url) {
+  if (!url) return;
+  if (_caps.openLinks) request("ui/open-link", { url: url });
+  else { try { window.open(url, "_blank", "noopener"); } catch (_) {} }
+}
+function wireLinks() {
+  document.querySelectorAll("[data-url]").forEach(el => {
+    el.onclick = e => { e.preventDefault(); openLink(el.getAttribute("data-url")); };
+  });
+}
 function ready() {
   if (_ready) return;
   _ready = true;
@@ -306,7 +339,10 @@ window.addEventListener("message", e => {
   const m = e.data || {};
   if (m.id && _pending.has(m.id)) {        // the Host answered our handshake
     _pending.delete(m.id);
-    if (m.result) { applyHostContext(m.result.hostContext); ready(); }
+    if (m.result) {
+      _caps = m.result.hostCapabilities || {};
+      applyHostContext(m.result.hostContext); ready();
+    }
     return;                                // on error, the fallback below retries
   }
   // Theme or size can change while we are on screen (light/dark toggle, expand).

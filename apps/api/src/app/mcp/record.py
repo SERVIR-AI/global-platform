@@ -12,6 +12,13 @@ from datetime import datetime, timezone
 from . import feeds, loop, store, ui
 
 
+def _abs(path: str) -> str:
+    """Platform-absolute, from the same config the resolver uses."""
+    if not path or path.startswith(("http://", "https://")):
+        return path
+    return ui.tokens()["product"]["resolver"]["base"].rstrip("/") + path
+
+
 def _resolver_url(receipt_id: str) -> str:
     """Absolute so trust chrome resolves against the PLATFORM, never the consuming
     app's own origin. Config-driven: conf/ui_theme.json product.resolver."""
@@ -40,6 +47,11 @@ def _sources(pack: dict) -> list[dict]:
         entry = {"n": c.get("n"), "source": c.get("source"), "title": c.get("title"),
                  "validation": c.get("validation"),
                  "archived_copy": c.get("archived_copy"),
+                 # ABSOLUTE too. The relative form resolves against whatever origin
+                 # is rendering — which for an MCP App iframe or a consumer's page is
+                 # not us, so the archived copy 404s exactly where it matters most.
+                 **({"archived_url": _abs(c["archived_copy"])}
+                    if c.get("archived_copy") else {}),
                  "pub_date": c.get("pub_date"), "url": c.get("url"),
                  "temporal": c.get("temporal"), "score": c.get("score"),
                  "residency": c.get("residency"), "authority": c.get("authority"),
