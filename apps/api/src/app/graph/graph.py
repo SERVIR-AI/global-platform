@@ -437,12 +437,14 @@ def finalize(state: State, config) -> dict:
     model = config["configurable"]["model"]
     result = state["result"]
 
-    # Rebuild the tool-call exchange so the model phrases from the real result.
-    arguments = json.dumps({"place": state["place"], **(state.get("op_args") or {})})
-    assistant = {"role": "assistant", "content": None, "tool_calls": [{
-        "id": state["tool_call_id"], "type": "function",
-        "function": {"name": state["operation"], "arguments": arguments}}]}
-    tool_msg = {"role": "tool", "tool_call_id": state["tool_call_id"], "content": str(result)}
+    # Hand the model the real result to phrase — as plain text, NOT a replayed OpenAI
+    # tool-call. Replaying the function-call handshake makes Gemini 3.x require a
+    # "thought_signature" we can't reconstruct (400 on this call); passing the already-
+    # grounded result as content sidesteps it and stays provider-agnostic.
+    result_note = {"role": "user", "content": (
+        f"The `{state['operation']}` tool ran for {state['place']!r} "
+        f"with {state.get('op_args') or {}} and returned:\n{result}\n\n"
+        "Answer my question using ONLY this result — quote the number and name the source.")}
 
     system = prompts.system_prompt()
     if state.get("req_geometry"):
@@ -450,7 +452,7 @@ def finalize(state: State, config) -> dict:
                    "Phrase it naturally (e.g. 'in the selected area') and do not ask for or "
                    "mention a missing place name.")
     messages = [{"role": "system", "content": system},
-                *state["messages"], assistant, tool_msg]
+                *state["messages"], result_note]
     resp = client.chat.completions.create(model=model, messages=messages, max_tokens=400)
     answer = resp.choices[0].message.content or ""
 

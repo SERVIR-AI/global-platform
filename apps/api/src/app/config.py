@@ -47,6 +47,39 @@ class Settings(BaseSettings):
     raster_schema_path: Path = _REPO_ROOT / "conf" / "raster_schema.yml"
     risk_l2_config_path: Path = _REPO_ROOT / "conf" / "risk_l2.yml"
 
+    # --- Food security ---
+    # Hub-adjustable crop calendars (the Call-2 ministry ask); per-request
+    # overrides are cited in the brief as ADJUSTED.
+    crop_calendar_path: Path = _REPO_ROOT / "conf" / "crop_calendar.yml"
+
+    # --- Food security (GEOGLAM Crop Monitor) ---
+    # The CMET Global_SHP FeatureServer: per-region crop-condition expert
+    # assessments, one layer per month. Layer ids are discovered live, never derived.
+    cropmonitor_url: str = (
+        "https://data.cropmonitor.org/arcgis/rest/services/CMET/Global_SHP/FeatureServer")
+    # Hours a cached service response stays fresh (0 disables caching). Assessments
+    # are monthly, so a long TTL keeps repeat demo runs off the service entirely.
+    cropmonitor_cache_ttl_hours: float = 24.0
+    # The host sends a leaf-only TLS chain, so plain certifi can't build a path.
+    # This published intermediate is appended to the certifi bundle at runtime to
+    # complete the chain; if the file is absent, plain certifi is used. Setting
+    # CROPMONITOR_VERIFY_TLS=false is the last-ditch fallback, never the default.
+    cropmonitor_ca_extra: Path = _REPO_ROOT / "conf" / "cropmonitor_ca.pem"
+    cropmonitor_verify_tls: bool = True
+
+    # --- RAG engine (the shared document library) ---
+    # Embeddings go through a provider's OpenAI-compat /embeddings endpoint.
+    # Separate from default_provider because claude serves no embeddings; swap
+    # the backend entirely by handing Corpus any object with .embed(texts).
+    embedding_provider: Provider = "gemini"
+    embedding_model: str = "gemini-embedding-001"
+    # Cosine floor below which retrieval returns nothing and the caller declines
+    # ("no relevant document") — never a weak match dressed up as an answer.
+    # UNCALIBRATED default: score distributions are model-specific; calibrate
+    # against real bulletins once the corpus lands (A4) — the live test logs the
+    # related-vs-unrelated similarity spread to support that.
+    rag_min_relevance: float = 0.5
+
     # --- LLM defaults ---
     # Which provider to use when a request doesn't specify one.
     default_provider: Provider = "gemini"
@@ -54,7 +87,7 @@ class Settings(BaseSettings):
     # Default model per provider; a request may override `model` per call.
     claude_model: str = "claude-opus-4-8"
     openai_model: str = "gpt-4o"
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.1-flash-lite"
 
     # Each provider is reached through its OpenAI-compatible endpoint, so it's one
     # SDK with a different base_url per provider. Override to add a custom endpoint.

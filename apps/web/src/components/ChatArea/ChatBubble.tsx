@@ -1,9 +1,10 @@
 import { useChat } from '@/hooks/useChat';
 import { cn, getChatItemDate } from '@/lib/utils';
-import type { ChatChoice, ChatItem, ChatMessage } from '@/types/chat';
-import { FC } from 'react';
+import type { ChatChoice, ChatItem, ChatMessage, Citation, Grounded } from '@/types/chat';
+import { FC, useMemo } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { BriefSources, CopyBriefButton, DeclineCard, GroundedStrip, jumpToCitation } from './Brief';
 import TracePanel from '../Trace/TracePanel';
 import ChatMapLayer from './ChatMapLayer';
 
@@ -50,6 +51,29 @@ const markdownComponents: Components = {
 const itemMessage = (item: ChatItem): ChatMessage =>
   'message' in item ? item.message : item.messages[item.messages.length - 1];
 
+// Brief prose carries [n] markers — single, clustered [1, 9], or ranged [1-3]
+// (all forms the backend gate accepts). Each cited number becomes a chip link
+// (`cite:` protocol); bracketed years stay plain text. The markdown's own
+// "## Sources" block is dropped from display — the structured cards replace it
+// (the full text, sources included, remains behind the copy button).
+const briefBody = (markdown: string): string =>
+  markdown.split(/\n## Sources\b/)[0].replace(/\[([\d\s,\-–]{1,24})\]/g, (match, group: string) => {
+    const nums = new Set<number>();
+    for (const part of group.replace(/–/g, '-').split(/[\s,]+/)) {
+      const range = part.match(/^(\d+)-(\d+)$/);
+      if (range) {
+        const a = Number(range[1]);
+        const b = Math.min(Number(range[2]), a + 50);
+        for (let n = a; n <= b; n++) nums.add(n);
+      } else if (/^\d+$/.test(part)) {
+        nums.add(Number(part));
+      }
+    }
+    const cites = [...nums].filter((n) => n > 0 && n < 1000).sort((a, b) => a - b);
+    if (cites.length === 0) return match; // e.g. [2016] — a year, not a citation
+    return cites.map((n) => `[**[${n}]**](cite:${n})`).join('');
+  });
+
 // The agent's exposure-vs-risk question comes back with `choices`; render them as
 // buttons that send the option's `value` (e.g. "1") as the next reply on this thread.
 const ChoiceButtons: FC<{ choices: ChatChoice[] }> = ({ choices }) => {
@@ -76,18 +100,71 @@ const ChatBubble: FC<{ chatItem: ChatItem }> = ({ chatItem }) => {
   const isUser = message.role === 'user';
   const date = getChatItemDate(chatItem);
   const choices = (chatItem as { choices?: ChatChoice[] | null }).choices;
+
+  // Food-security brief fields (absent on risk turns).
+  const brief = (chatItem as { brief?: string | null }).brief;
+  const citations = (chatItem as { citations?: Citation[] }).citations ?? [];
+  const grounded = (chatItem as { grounded?: Grounded | null }).grounded;
+  const declined = (chatItem as { declined?: boolean }).declined === true;
+  const model = (chatItem as { model?: string }).model;
+  const bubbleId = useMemo(() => ('id' in chatItem ? String(chatItem.id) : ''), [chatItem]);
+  const isBrief = !isUser && !declined && !!brief;
+
+  const briefComponents: Components = useMemo(
+    () => ({
+      ...markdownComponents,
+      a: ({ children, href }) => {
+        const cite = href?.startsWith('cite:') ? Number(href.slice(5)) : null;
+        if (cite !== null)
+          return (
+            <button
+              type="button"
+              className="align-super text-[0.7em] font-semibold text-primary hover:underline"
+              title="Jump to this source"
+              onClick={() => jumpToCitation(bubbleId, cite)}
+            >
+              {children}
+            </button>
+          );
+        return (
+          <a href={href} target="_blank" rel="noreferrer" className="link">
+            {children}
+          </a>
+        );
+      },
+    }),
+    [bubbleId],
+  );
+
   return (
     <div className={cn('flex flex-col gap-2', isUser ? 'items-end' : 'items-start')}>
       <div
         className={cn(
-          'w-fit max-w-[90%] rounded-xl px-4 py-2',
+          'w-fit rounded-xl',
+          isBrief ? 'max-w-full' : 'max-w-[90%]',
+          !isUser && declined ? 'p-0' : 'px-4 py-2',
           isUser
             ? 'bg-primary text-primary-content whitespace-pre-wrap'
-            : 'bg-base-300 text-base-content',
+            : declined
+              ? ''
+              : 'bg-base-300 text-base-content',
         )}
       >
         {isUser ? (
           message.content
+        ) : declined ? (
+          <DeclineCard reason={message.content} />
+        ) : isBrief ? (
+          <div className="flex flex-col gap-2">
+            <GroundedStrip grounded={grounded!} citations={citations} model={model} />
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={briefComponents}>
+              {briefBody(brief!)}
+            </ReactMarkdown>
+            <BriefSources citations={citations} bubbleId={bubbleId} />
+            <div className="self-end">
+              <CopyBriefButton brief={brief!} grounded={grounded} model={model} />
+            </div>
+          </div>
         ) : (
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
             {message.content}

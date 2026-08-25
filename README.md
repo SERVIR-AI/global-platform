@@ -17,6 +17,8 @@ Monorepo, managed with [uv](https://docs.astral.sh/uv/) (backend) and npm (front
 └── pyproject.toml   # uv workspace root
 ```
 
+> Source code was migrated here separately
+
 ## How it answers a question
 
 ```
@@ -100,3 +102,7 @@ Both follow the same working style: survey the codebase first, then propose opti
 - [`apps/api/API_EXAMPLES.md`](apps/api/API_EXAMPLES.md) — the `/api/chat` request/response contract (frontend source of truth).
 - [`apps/api/DEMO.md`](apps/api/DEMO.md) — an exhaustive set of example queries.
 - [`SOURCE_DATA_APPROACH.md`](SOURCE_DATA_APPROACH.md) — the four-layer risk model and design rationale.
+
+## License
+
+Licensed under the `Eclipse Public License 2.0 (EPL-2.0)` license. See [LICENSE](LICENSE.md) for the full text.
