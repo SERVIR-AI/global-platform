@@ -14,6 +14,7 @@ screens we never shipped.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from ..config import get_settings
@@ -26,8 +27,23 @@ def theme_path() -> Path:
 
 
 def tokens() -> dict:
-    """The canonical token JSON — what an LLM reasons over."""
-    return json.loads(theme_path().read_text())
+    """The canonical token JSON — what an LLM reasons over.
+
+    `GRP_PUBLIC_BASE` overrides where trust chrome resolves. The committed theme
+    carries LOCALHOST values because that is right for development — but the file
+    is baked into the image (`COPY conf ./conf`) with no override, so a shared
+    deployment handed every consumer a resolver URL pointing at THEIR OWN machine.
+    Dead "Resolve it live" links, dead ui_embed iframes, and a provenance graph
+    that cannot render — on the one server other people were told to use. The
+    verdict has to resolve against the PLATFORM (rule 5), which means the platform
+    has to know its own public address.
+    """
+    t = json.loads(theme_path().read_text())
+    base = os.environ.get("GRP_PUBLIC_BASE", "").strip().rstrip("/")
+    if base:
+        t["product"]["resolver"]["base"] = base
+        t["product"]["embed_base"]["url"] = base
+    return t
 
 
 def css_vars(t: dict | None = None) -> str:
