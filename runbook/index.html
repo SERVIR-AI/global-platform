@@ -261,17 +261,16 @@ footer{border-top:1px solid var(--rule);margin-top:3rem;padding:1.6rem 0;
   <p class="lede">Three paths. Pick one. All require the SERVIR virtual private network (VPN),
   because the server is not public.</p>
 
-  <h3>You will need a token</h3>
-  <p>The tools are token-gated. The receipt resolver deliberately is not, because a receipt nobody
-  can open attests nothing.</p>
-<pre><code>export GRP_TOKEN=$(ssh pgarg@10.1.30.110 \
-  'grep "^GRP_API_TOKEN=" /home/pgarg/grp/.env | cut -d= -f2-')
-echo "token length: ${#GRP_TOKEN}"   # expect 32</code></pre>
+  <h3>No token needed</h3>
+  <p>Inside the virtual private network there is no API token: the network itself is the
+  perimeter, and everyone who can reach the address is a colleague. A shared secret added
+  friction without adding security, so it was removed. Per-user authentication (OAuth, with
+  organisation accounts) is planned for the day this server leaves the private network,
+  because that is the day it starts to matter.</p>
 
   <h3>A. Claude Code, the simplest path</h3>
 <pre><code>mkdir -p ~/servirplatform-test &amp;&amp; cd ~/servirplatform-test
-claude mcp add --transport http servirplatform http://10.1.30.110:8080/mcp \
-  --header "Authorization: Bearer $GRP_TOKEN"
+claude mcp add --transport http servirplatform http://10.1.30.110:8080/mcp
 claude</code></pre>
   <div class="note gap">
     <span class="label">Do not do this</span>
@@ -290,8 +289,7 @@ claude</code></pre>
     "servirplatform": {
       "command": "npx",
       "args": ["-y", "mcp-remote", "http://10.1.30.110:8080/mcp",
-               "--allow-http",
-               "--header", "Authorization: Bearer YOUR_TOKEN_HERE"]
+               "--allow-http"]
     }
   }
 }</code></pre>
@@ -301,7 +299,6 @@ claude</code></pre>
   the <code>sed</code> line strips.</p>
 <pre><code>mcp() {
   curl -s -m 90 -X POST http://10.1.30.110:8080/mcp \
-    -H "Authorization: Bearer $GRP_TOKEN" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",
@@ -711,8 +708,8 @@ Then tell me which platform URL your trust chrome resolves against.</code></pre>
     <tbody>
       <tr><td>Connection times out, nothing responds</td><td>Not on the VPN.</td>
           <td>Connect to the SERVIR VPN. The address is private.</td></tr>
-      <tr><td><code>401</code>, "missing or invalid API token"</td><td>Header absent or wrong.</td>
-          <td>Send <code>Authorization: Bearer &lt;token&gt;</code>. Check the length is 32, because a truncated paste is the usual culprit.</td></tr>
+      <tr><td><code>401</code>, "missing or invalid API token"</td><td>You are connecting to an old build or a gated deployment.</td>
+          <td>The private-network server runs without a token. If you see this, the server was redeployed gated — ask in the channel.</td></tr>
       <tr><td>Client dies with "Invalid OAuth error response"</td>
           <td>The client probed for authentication endpoints and could not parse the 404.</td>
           <td>Fixed server-side, so 404s now match the expected shape and clients fall back to bearer authentication. Update your client if you still see it.</td></tr>
@@ -720,8 +717,8 @@ Then tell me which platform URL your trust chrome resolves against.</code></pre>
           <td>Add <code>--allow-http</code>.</td></tr>
       <tr><td><code>405 Method Not Allowed</code></td><td>You posted to a path that is not <code>/mcp</code>.</td>
           <td>The transport is <code>POST /mcp</code>. The web interface lives under <code>/api</code>.</td></tr>
-      <tr><td><code>/docs</code> returns 404 even with a valid token</td>
-          <td>Expected. Setting an API token switches the schema pages off.</td>
+      <tr><td><code>/docs</code> returns 404</td>
+          <td>Expected on gated deployments only. Ungated (the current setup), <code>/docs</code> works.</td>
           <td>Publishing the schema of gated endpoints to anonymous callers would defeat the gate.</td></tr>
       <tr><td>Every search declines as irrelevant</td>
           <td>The document library was indexed with a different model than the one configured.</td>
@@ -763,7 +760,7 @@ ssh pgarg@10.1.30.110 'sudo journalctl -u grp.service -n 40 --no-pager'</code></
   country-specific question from them alone.</p>
 
   <h3>Not public</h3>
-  <p>VPN only, plain HTTP, one shared token. There is no per-user attribution and no per-hub
+  <p>VPN only, plain HTTP, no authentication inside the perimeter. There is no per-user attribution and no per-hub
   revocation. A public HTTPS endpoint is the open blocker.</p>
 
   <h3>Deliberately not built</h3>
