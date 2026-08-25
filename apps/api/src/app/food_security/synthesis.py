@@ -223,7 +223,14 @@ def _driver_citations(trace):
             trace.append(f"driver[{name}] -> STALE ({stale.get('reason')})")
         else:
             trace.append(f"driver[{name}] -> {res.get('count')} rows as of {res.get('as_of')}")
+        # Keep the STRUCTURED rows alongside the flattened text. `render` exists to
+        # give the LLM prose it can cite, and it truncates at a character budget —
+        # so until now the actual series was thrown away the moment it was
+        # stringified, and nothing downstream could plot a number. The text stays
+        # exactly as it was; this is an addition, not a change to what is cited.
+        series = _series(name, res.get("records"))
         out.append({"kind": "index",          # `index` is in record._PULLED -> tagged as a live pull
+                    **({"series": series} if series else {}),
                     "source": spec.get("source"), "title": spec.get("title") or spec.get("description", name),
                     "pub_date": res.get("as_of"), "validation": spec.get("validation"),
                     "residency": spec.get("residency"), "url": p.get("url"),
@@ -232,6 +239,27 @@ def _driver_citations(trace):
                                 or "outlook" in name else "observation",
                     "text": text})
     return out, gaps
+
+
+def _series(name: str, records) -> dict | None:
+    """A plottable view of a monthly index, or None if these rows are not a series.
+
+    Deliberately narrow: {season|year|month, value, classification} is the shape the
+    climate-index adapter returns, and anything else (verbatim narrative sections,
+    the derived event catalogue) has no y-axis and is left alone. Capped, because
+    this rides in a tool result that a host renders.
+    """
+    pts = []
+    for r in records or []:
+        if not isinstance(r, dict) or r.get("value") is None:
+            continue
+        label = (f"{r['season']} {r['year']}" if r.get("season")
+                 else f"{r.get('year')}-{r.get('month'):02d}" if r.get("month")
+                 else str(r.get("year") or ""))
+        pts.append({"t": label, "v": r["value"], "c": r.get("classification")})
+    if len(pts) < 2:
+        return None
+    return {"id": name, "points": pts[-24:], "unit": "degrees C anomaly"}
 
 
 def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None, None)):

@@ -123,3 +123,38 @@ def test_assemble_pack_tells_a_model_to_prefer_it_over_web_search(log):
     log("CHECK", d.splitlines()[0][:70])
     assert "START HERE" in d and "INSTEAD OF A WEB SEARCH" in d
     assert "what is MISSING" in d          # says what a web search cannot give
+
+
+def test_the_view_opens_the_handshake_with_a_ui_initialize_REQUEST(log):
+    """The bug that made Claude Desktop render a blank panel. Spec 2026-01-26:
+    "The Host MUST NOT send any request or notification to the View before it
+    receives an `initialized` notification" — and `initialized` is only valid after
+    a `ui/initialize` REQUEST completes. We posted the notification unilaterally and
+    never opened the request, so the host correctly sent nothing and the app sat on
+    "loading..." forever."""
+    html = app_ui.template()
+    log("CHECK", "ui/initialize is sent as a request, with a JSON-RPC envelope")
+    assert 'request("ui/initialize"' in html
+    assert 'jsonrpc: "2.0", id, method, params' in html     # a REQUEST: it carries an id
+    assert '"2026-01-26"' in html                           # the protocol version
+    # the notification is now a RESPONSE to the host, not an opening move
+    assert 'function ready()' in html and 'ui/notifications/initialized' in html
+
+
+def test_it_declares_app_capabilities_both_ways(log):
+    """The spec's normative text names `appCapabilities`; its own sample code uses
+    MCP-style `capabilities`/`clientInfo`. A missing field hangs the handshake; an
+    extra one is ignored — so send both rather than bet on the host."""
+    html = app_ui.template()
+    log("CHECK", "appCapabilities AND capabilities/clientInfo present")
+    assert "appCapabilities" in html and "availableDisplayModes" in html
+    assert "clientInfo" in html and "capabilities: {}" in html
+
+
+def test_it_reads_the_tool_result_where_the_spec_puts_it(log):
+    """`ui/notifications/tool-result` carries a raw CallToolResult as `params`, so
+    the payload is `params.structuredContent`."""
+    html = app_ui.template()
+    log("CHECK", "params.structuredContent read from the notification")
+    assert 'm.method === "ui/notifications/tool-result"' in html
+    assert "m.params?.structuredContent" in html

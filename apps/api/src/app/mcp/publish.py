@@ -17,7 +17,26 @@ exactly as they were for callers that want the steps separately.
 
 from __future__ import annotations
 
-from . import loop, record, verify
+from . import loop, record, store, verify
+
+
+def _insight(pack_id: str, draft: str) -> dict:
+    """What the answer SAYS, plus the numbers behind it — so a rendering surface can
+    show the insight, not only its provenance.
+
+    Until now the app received the receipt alone: sources, dates, validation,
+    freshness. Metadata ABOUT evidence, with no values and no brief in it, which is
+    why it could only ever draw a provenance view. The series are preserved by
+    `synthesis._series`; the brief is the text that just passed the gate.
+    """
+    pack = store.load_pack(pack_id) or {}
+    series = [{"n": c.get("n"), "title": c.get("title"), "source": c.get("source"),
+               "as_of": c.get("pub_date"), **c["series"]}
+              for c in pack.get("citations", []) if c.get("series")]
+    context = {c["kind"]: c.get("text") for c in pack.get("citations", [])
+               if c.get("kind") in ("conditions", "calendar")}
+    return {"brief": draft, "series": series, "context": context,
+            "country": pack.get("country"), "crop": pack.get("crop")}
 
 
 def answer(pack_id: str, draft: str, question: str | None = None) -> dict:
@@ -48,6 +67,9 @@ def answer(pack_id: str, draft: str, question: str | None = None) -> dict:
     # The receipt already carries its own forward edge (show it via ui_embed), so
     # this returns the verdict fields alongside it rather than restating them.
     return {"status": "ok", "passed": True,
+            # The gated text comes BACK to the caller: a model that publishes and
+            # then has nothing to restate answers with a bare embed and two lines.
+            "insight": _insight(pack_id, draft),
             "report_id": v["report_id"], "draft_sha256": v["draft_sha256"],
             "evidence_tier": v["evidence_tier"],
             "numbers_unverified_recorded": v["numbers_unverified_recorded"],

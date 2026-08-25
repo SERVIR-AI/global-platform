@@ -211,3 +211,26 @@ def test_the_apps_field_list_is_generated_not_retyped(log):
     injected = app_ui.template().split("const VERDICT_FIELDS = ")[1].split(";")[0]
     log("OUTPUT", injected)
     assert _json.loads(injected) == list(app_ui._VERDICT_FIELDS)
+
+
+def test_trust_chrome_can_be_pointed_at_the_deployed_platform(monkeypatch, log):
+    """The committed theme holds LOCALHOST values, which are right for dev and wrong
+    the moment the image is shared: `COPY conf ./conf` baked them in, so the
+    deployed server handed every consumer a resolver URL pointing at THEIR OWN
+    machine. Dead resolve links, dead embeds, no provenance graph — rule 5 says the
+    verdict resolves against the PLATFORM, so the platform must know its address."""
+    from app.mcp import ui
+    monkeypatch.setenv("GRP_PUBLIC_BASE", "http://10.1.30.110:8080/")
+    t = ui.tokens()
+    log("OUTPUT", t["product"]["resolver"]["base"])
+    assert t["product"]["resolver"]["base"] == "http://10.1.30.110:8080"   # trailing / trimmed
+    assert t["product"]["embed_base"]["url"] == "http://10.1.30.110:8080"
+    assert ui.embed("provenance_graph", receipt_id="x")["src"].startswith(
+        "http://10.1.30.110:8080/?embed=")
+
+
+def test_localhost_stays_the_default_for_development(log):
+    """Unset means dev: the override must not become a required variable."""
+    from app.mcp import ui
+    log("CHECK", "no GRP_PUBLIC_BASE -> committed theme values")
+    assert ui.tokens()["product"]["resolver"]["base"].startswith("http://localhost")
