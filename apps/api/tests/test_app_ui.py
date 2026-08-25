@@ -160,23 +160,32 @@ def test_it_reads_the_tool_result_where_the_spec_puts_it(log):
     assert "m.params?.structuredContent" in html
 
 
-def test_sources_carry_a_platform_absolute_archived_link(log):
+def test_sources_carry_a_platform_absolute_archived_link(monkeypatch, log):
     """A relative archived path resolves against whatever origin is RENDERING —
     an MCP App iframe or a consumer's page, neither of which is us. So it 404s
-    exactly where the trace-back matters most."""
-    import os
-    from app.mcp import assemble, record, ui
-    os.environ["GRP_PUBLIC_BASE"] = "http://10.1.30.110:8080"
-    try:
-        p = assemble.assemble(country="Kenya", crop="maize")
-        r = record.record(pack_id=p["pack_id"], question="q")
-        docs = [s for s in r["sources"] if s.get("archived_copy")]
-        log("OUTPUT", docs[0]["archived_url"])
-        assert docs, "expected at least one archived document source"
-        assert all(s["archived_url"].startswith("http://10.1.30.110:8080/api/")
-                   for s in docs)
-    finally:
-        os.environ.pop("GRP_PUBLIC_BASE", None)
+    exactly where the trace-back matters most.
+
+    Built from a hand-made pack, not assemble(): retrieval needs the embeddings API,
+    and a suite that reaches the network fails on someone else's timeout.
+    """
+    from app.mcp import record, store
+    monkeypatch.setenv("GRP_PUBLIC_BASE", "http://10.1.30.110:8080")
+    pack_id = store.save_pack({
+        "country": "Kenya", "crop": "maize", "citations": [
+            {"n": 1, "kind": "document", "source": "FEWS NET", "title": "outlook",
+             "archived_copy": "/api/food-security/rag/document/abc123",
+             "url": "https://fews.net/x.pdf"},
+            {"n": 2, "kind": "index", "source": "NOAA CPC", "title": "ONI",
+             "url": "https://cpc.example/oni.txt"}],
+        "gaps": [], "required_sections": ["## A"]})
+    r = record.record(pack_id=pack_id, question="q")
+    docs = [s for s in r["sources"] if s.get("archived_copy")]
+    log("OUTPUT", docs[0]["archived_url"])
+    assert docs, "expected the document source to carry an archived copy"
+    assert docs[0]["archived_url"] == (
+        "http://10.1.30.110:8080/api/food-security/rag/document/abc123")
+    # a live pull has no archived document, and must not invent one
+    assert "archived_url" not in [s for s in r["sources"] if s["n"] == 2][0]
 
 
 def test_links_go_through_the_host_not_the_iframe(log):
@@ -197,3 +206,41 @@ def test_every_source_card_offers_its_document(log):
     log("CHECK", "archived copy + upstream source on each card")
     assert "archived copy" in html and ">source</a>" in html
     assert 'data-url="${esc(s.archived_url)}"' in html
+
+
+def test_a_link_response_does_not_wipe_host_capabilities(log):
+    """The "works once or twice then stops" bug. `_pending` was a bare Set of ids, so
+    EVERY response was handled as the initialize response — and `ui/open-link` acks
+    with an empty result, so `_caps = m.result.hostCapabilities || {}` erased
+    openLinks after the first click. Links then fell through to window.open, which a
+    sandboxed iframe blocks. request-display-mode broke it the same way."""
+    html = app_ui.template()
+    log("CHECK", "responses are dispatched by the METHOD that was requested")
+    assert "const _pending = new Map()" in html          # id -> method, not a bare Set
+    assert 'const method = _pending.get(m.id)' in html
+    # capabilities may only be adopted from the handshake response
+    body = html.split('const method = _pending.get(m.id)')[1]
+    caps_line = body.index("_caps = m.result.hostCapabilities")
+    init_guard = body.index('method === "ui/initialize"')
+    assert init_guard < caps_line, "capabilities must be set inside the init branch"
+
+
+def test_a_blocked_link_says_so_instead_of_looking_dead(log):
+    """A host may deny ui/open-link. Silence is indistinguishable from a broken app."""
+    html = app_ui.template()
+    log("CHECK", "denied and unsupported links both surface a note with the URL")
+    assert 'method === "ui/open-link" && m.error' in html
+    assert "Link blocked by the host" in html
+    assert "will not open links from the panel" in html
+
+
+def test_the_charts_are_interactive(log):
+    """User: the graphs should be apps with clickers and pickers, not pictures."""
+    html = app_ui.template()
+    log("CHECK", "range picker, point picker, threshold toggle, live readout")
+    assert "data-range" in html and "data-pt" in html and "data-bands" in html
+    assert "redrawChart" in html and "wireCharts()" in html
+    assert 'class="readout"' in html
+    # a redraw must re-report height or the host keeps the old box
+    assert html.split("function redrawChart")[1].split("}")[0].count("reportSize") \
+        or "reportSize();" in html.split("function redrawChart")[1][:400]
