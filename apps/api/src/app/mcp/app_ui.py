@@ -27,7 +27,7 @@ import json
 
 from . import ui
 
-UI_URI = "ui://grp/evidence"
+UI_URI = "ui://servirplatform/evidence"
 UI_MIME = "text/html;profile=mcp-app"
 
 
@@ -563,11 +563,11 @@ const request = (method, params) => {
 const INIT_PARAMS = {
   protocolVersion: "2026-01-26",
   appCapabilities: { availableDisplayModes: ["inline", "fullscreen"] },
-  appInfo: { name: "grp-evidence", version: "0.1.0" },
+  appInfo: { name: "servirplatform-evidence", version: "0.1.0" },
   // The spec's normative text names `appCapabilities`; its own inline sample uses
   // the MCP-style `capabilities`/`clientInfo`. Send both rather than bet on which
   // one a given host reads — extra JSON-RPC params are ignored, a missing one hangs.
-  capabilities: {}, clientInfo: { name: "grp-evidence", version: "0.1.0" }
+  capabilities: {}, clientInfo: { name: "servirplatform-evidence", version: "0.1.0" }
 };
 // The host hands the View its OWN design tokens, fonts, theme and container size
 // in `hostContext`. Adopting them is the difference between a panel that belongs in

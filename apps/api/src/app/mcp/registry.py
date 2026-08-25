@@ -353,7 +353,7 @@ def pack_manifest() -> dict:
         "compositions": sorted(COMPOSITIONS),
         "guidance": {"instructions": "delivered at connect",
                      "prompts": ["build_a_tool", "run_analysis", "explain_platform"],
-                     "resources": ["grp://how-to-use", "grp://pack/food-security"]},
+                     "resources": ["servirplatform://how-to-use", "servirplatform://pack/food-security"]},
         "gaps": gaps,
         "worked_example": ({"receipt_id": demo,
                             "resolve_with": f"record_receipt(receipt_id='{demo}')",
@@ -403,12 +403,12 @@ def capabilities(available_tools=None, available_prompts=None,
     prompts = sorted(available_prompts or [])
     resources = sorted(available_resources or [])
     return {
-        "server": {"name": "global-risk-platform", "version": VERSION,
+        "server": {"name": "servirplatform", "version": VERSION,
                    "transport": os.environ.get("GRP_MCP_TRANSPORT", "stdio")},
         "contract": CONTRACT,
         "usage": {"instructions": "delivered to the LLM at connect (initialize)",
                   "prompts": prompts,  # user-selectable in the host menu (build vs run)
-                  "resources": resources,  # human-readable guides (e.g. grp://how-to-use)
+                  "resources": resources,  # human-readable guides (e.g. servirplatform://how-to-use)
                   "modes": ["build-time: build a reusable app on the tools",
                             "run-time: answer one question now"]},
         "tools_available": tools,

@@ -269,14 +269,14 @@ footer{border-top:1px solid var(--rule);margin-top:3rem;padding:1.6rem 0;
 echo "token length: ${#GRP_TOKEN}"   # expect 32</code></pre>
 
   <h3>A. Claude Code, the simplest path</h3>
-<pre><code>mkdir -p ~/grp-test &amp;&amp; cd ~/grp-test
-claude mcp add --transport http grp http://10.1.30.110:8080/mcp \
+<pre><code>mkdir -p ~/servirplatform-test &amp;&amp; cd ~/servirplatform-test
+claude mcp add --transport http servirplatform http://10.1.30.110:8080/mcp \
   --header "Authorization: Bearer $GRP_TOKEN"
 claude</code></pre>
   <div class="note gap">
     <span class="label">Do not do this</span>
     <p>Never register the server with a filesystem path, for example
-    <code>claude mcp add grp -- uv run --directory ...</code>. That writes a local path into your
+    <code>claude mcp add servirplatform -- uv run --directory ...</code>. That writes a local path into your
     global configuration, where it shadows the project setting for every other repository you open.
     Register by URL.</p>
   </div>
@@ -287,7 +287,7 @@ claude</code></pre>
   and <code>mcp-remote</code> refuses non-localhost HTTP without it.</p>
 <pre><code>{
   "mcpServers": {
-    "grp": {
+    "servirplatform": {
       "command": "npx",
       "args": ["-y", "mcp-remote", "http://10.1.30.110:8080/mcp",
                "--allow-http",
@@ -323,7 +323,7 @@ mcp platform_capabilities '{}'</code></pre>
 <section id="first">
   <h2><span class="num">05</span>Your first query</h2>
   <p>Paste this to your assistant once connected. It exercises the whole loop.</p>
-<pre><code>Using only the grp MCP server, brief me on El Nino in Kenya.
+<pre><code>Using only the servirplatform MCP server, brief me on El Nino in Kenya.
 
 Assemble an evidence pack, draft the brief from that pack only, run it
 through verify_groundedness, and mint a receipt. Then show me:
@@ -485,8 +485,8 @@ ui_embed                   needs receipt_id</code></pre>
 
   <h3>Resources</h3>
   <ul>
-    <li><code>grp://how-to-use</code>: a written guide, served by the server itself.</li>
-    <li><code>grp://pack/food-security</code>: the food security subject area manifest, as data.</li>
+    <li><code>servirplatform://how-to-use</code>: a written guide, served by the server itself.</li>
+    <li><code>servirplatform://pack/food-security</code>: the food security subject area manifest, as data.</li>
   </ul>
 </section>
 
@@ -653,7 +653,7 @@ ui_embed                   needs receipt_id</code></pre>
   <h2><span class="num">13</span>Recipes</h2>
 
   <h3>A. Analysis</h3>
-<pre><code>Using only the grp MCP server, brief me on El Nino in Kenya and whether
+<pre><code>Using only the servirplatform MCP server, brief me on El Nino in Kenya and whether
 this season's maize is at risk. Compare it to past El Nino events.
 
 Then report separately:
@@ -684,7 +684,7 @@ For each, if you cannot answer, tell me exactly what the server said and why.</c
   </div>
 
   <h3>C. Build an application on the platform</h3>
-<pre><code>Build me a single-page "ENSO Driver Desk", using only the grp MCP server
+<pre><code>Build me a single-page "ENSO Driver Desk", using only the servirplatform MCP server
 for both data and design.
 
 - Ask the server which feeds exist and which are declared gaps.

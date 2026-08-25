@@ -12,8 +12,8 @@ set -euo pipefail
 
 PROJECT="${PROJECT:?set PROJECT=<gcp-project-id>}"
 REGION="${REGION:-us-central1}"
-SERVICE="${SERVICE:-grp-platform}"
-BUCKET="${BUCKET:-${PROJECT}-grp-receipts}"
+SERVICE="${SERVICE:-servirplatform}"
+BUCKET="${BUCKET:-${PROJECT}-servirplatform-receipts}"
 EMBED_MODEL="${EMBED_MODEL:-gemini-embedding-001}"
 
 : "${GRP_API_TOKEN:?set GRP_API_TOKEN=<a long random string> — this gates the tools}"
@@ -66,7 +66,7 @@ Deployed: ${URL}
   Embed host     ${URL}/?embed=provenance_graph&receipt_id=<id>
 
 Connect a client:
-  claude mcp add --transport http grp ${URL}/mcp --header "Authorization: Bearer \$GRP_API_TOKEN"
+  claude mcp add --transport http servirplatform ${URL}/mcp --header "Authorization: Bearer \$GRP_API_TOKEN"
 
 Reminders:
   - --allow-unauthenticated is Cloud Run's IAM, not ours: MCP clients cannot do

@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     )
 
     # --- Service ---
-    app_name: str = "global-risk-platform-api"
+    app_name: str = "servirplatform-api"
     # Origins allowed to call the API from a browser. Accepts `*`, a
     # comma-separated list, or a JSON array.
     # localhost and 127.0.0.1 are DIFFERENT origins to a browser: omitting either

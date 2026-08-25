@@ -88,13 +88,13 @@ things separately if you want them apart.) Use platform_capabilities to scope \
 honestly, corpus_search/corpus_document for evidence with provenance, context_get \
 for the (adjustable) crop calendar.
 
-If the user asks how to use this server, read the `grp://how-to-use` resource (a \
+If the user asks how to use this server, read the `servirplatform://how-to-use` resource (a \
 human-readable guide) — or run the `explain_platform` prompt — and answer from it."""
 
 # Host/port for the remote (streamable-http) transport. Remote is the faithful
 # build surface: consumers connect by URL, so no filesystem path leaks into a
 # client config for a coding agent to follow into our source (ARCHITECTURE §6).
-mcp = FastMCP("global-risk-platform",
+mcp = FastMCP("servirplatform",
               instructions=INSTRUCTIONS,
               host=os.environ.get("GRP_MCP_HOST", "127.0.0.1"),
               port=int(os.environ.get("GRP_MCP_PORT", "8000")),
@@ -247,7 +247,7 @@ def compose_run(composition: str = "foodsecurity.brief", question: str = "",
 
 
 # `meta.ui.resourceUri` is how MCP Apps links a result to a renderable surface:
-# a host that advertises io.modelcontextprotocol/ui fetches ui://grp/evidence and
+# a host that advertises io.modelcontextprotocol/ui fetches ui://servirplatform/evidence and
 # renders it in a sandboxed iframe beside the text. Hosts that do not understand
 # _meta ignore it, so the text answer is unchanged for everyone else.
 @mcp.tool(meta={"ui": {"resourceUri": app_ui.UI_URI}}, structured_output=True)
@@ -319,7 +319,7 @@ def corpus_document(doc_id: str | None = None) -> dict:
     return fetch.document(doc_id)
 
 
-@mcp.resource("grp://pack/food-security", mime_type="application/json")
+@mcp.resource("servirplatform://pack/food-security", mime_type="application/json")
 def food_security_pack() -> dict:
     """The Food-Security domain pack manifest (v0): what ships, what it produces,
     and every declared gap — plus a real worked-example receipt to resolve."""
@@ -338,7 +338,7 @@ def evidence_app() -> str:
     return app_ui.template()
 
 
-@mcp.resource("grp://how-to-use", mime_type="text/markdown")
+@mcp.resource("servirplatform://how-to-use", mime_type="text/markdown")
 def how_to_use() -> str:
     """How to use the Global Risk Platform (human-readable) — attach/open in the host."""
     return """# How to use the Global Risk Platform
@@ -374,9 +374,9 @@ server, so it's always accurate.
 
 @mcp.prompt()
 def build_a_tool(goal: str = "a food-security bulletin generator") -> str:
-    """BUILD-TIME: scaffold a reusable app/tool on the grp platform (not a one-off run)."""
+    """BUILD-TIME: scaffold a reusable app/tool on the servirplatform platform (not a one-off run)."""
     return (f"Build a REUSABLE tool that: {goal}.\n\n"
-            "Use the grp MCP server. Produce a standalone artifact (a script/app) written "
+            "Use the servirplatform MCP server. Produce a standalone artifact (a script/app) written "
             "as SOURCE FILES IN MY PROJECT that I can run, version and deploy — not a "
             "hosted preview. Do NOT just run the pipeline once in chat. Follow the "
             "canonical loop: call platform_capabilities first (scope honestly, surface "
@@ -389,7 +389,7 @@ def build_a_tool(goal: str = "a food-security bulletin generator") -> str:
 @mcp.prompt()
 def run_analysis(country: str = "Kenya", crop: str = "maize") -> str:
     """RUN-TIME: answer one food-security question now via the canonical loop."""
-    return (f"Using the grp MCP server, produce a grounded brief for {crop} in {country} "
+    return (f"Using the servirplatform MCP server, produce a grounded brief for {crop} in {country} "
             "now: assemble_pack, draft from the pack citing [n] in the required_sections, "
             "verify_groundedness, and give me the brief plus the report_id — or the "
             "decline reason if it can't be grounded. Do not fabricate beyond the pack.\n\n"
@@ -405,8 +405,8 @@ def run_analysis(country: str = "Kenya", crop: str = "maize") -> str:
 
 @mcp.prompt()
 def explain_platform() -> str:
-    """What the grp platform is and how to use it (build-time vs run-time)."""
-    return ("Call platform_capabilities, then explain in plain terms what the grp "
+    """What the servirplatform platform is and how to use it (build-time vs run-time)."""
+    return ("Call platform_capabilities, then explain in plain terms what the servirplatform "
             "platform is, what it can and can't do right now (its declared gaps), and "
             "the two ways to use it: BUILD-TIME (build a reusable tool on its bones) vs "
             "RUN-TIME (answer one question now).")
