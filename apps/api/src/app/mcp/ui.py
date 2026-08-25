@@ -351,10 +351,14 @@ def describe_embed() -> str:
     pending = [f"  - `{k}` — {v.get('status', 'not embeddable yet')}"
                for k, v in sorted(comps.items())
                if v.get("delivery") == "embed" and not v.get("embeddable")]
-    return ("Embed a LIVE platform component in your page — our component, running our "
-            "code, resolving its own state. Use this instead of a copied recipe whenever "
-            "a verdict is shown: an embed cannot be handed a 'passed' flag and cannot "
-            "freeze one into your markup.\n\nEmbeddable now:\n" + ("\n".join(live) or "  (none)")
+    return ("Embed a LIVE platform component in a PAGE YOU ARE WRITING — our "
+            "component, running our code, resolving its own state. Use this instead of "
+            "a copied recipe whenever a verdict is shown: an embed cannot be handed a "
+            "'passed' flag and cannot freeze one into your markup.\n\n"
+            "FOR WEB PAGES AND APPS ONLY — never paste the iframe into a chat reply. "
+            "Chat hosts forbid external frames (CSP frame-src 'self'), so in chat it "
+            "renders as a blank box; there the evidence panel already displays beside "
+            "the tool result.\n\nEmbeddable now:\n" + ("\n".join(live) or "  (none)")
             + ("\n\nPlanned:\n" + "\n".join(pending) if pending else "")
             + "\n\nReturns an iframe snippet bound to your id. Copy the recipe instead "
               "(ui_component) only for inert chrome like source cards.")

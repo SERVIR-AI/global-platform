@@ -67,6 +67,11 @@ component for each part. Reach for those before hand-rolling a chart, a graph or
 colour scheme; what you invent will not match, and a verdict you draw yourself \
 attests nothing.
 
+NEVER PASTE IFRAME MARKUP INTO A CHAT REPLY. Chat hosts block external frames \
+(CSP frame-src 'self'), so it renders as a blank white box. In hosts that render \
+MCP Apps the evidence panel appears beside the tool result by itself; ui_embed's \
+iframe is only for web pages you are writing.
+
 ONE HARD LIMIT: a rendered page FREEZES whatever is in it. Evidence, dates, numbers \
 and sources are safe to freeze; they are snapshots and say so. A VERDICT is not. \
 Never paint "verified"/"passed" into an artifact. Show it through `ui_embed`, which \

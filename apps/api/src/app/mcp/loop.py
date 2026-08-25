@@ -45,16 +45,14 @@ _LOST_AT_VERDICT = (
 
 
 RECEIPT_NEEDS_SHOWING = (
-    "GOVERNED and replayable. Now SHOW it — call ui_embed for the evidence chain "
-    "rather than describing it in prose.")
+    "GOVERNED and replayable. If your host renders MCP Apps (Claude Desktop, "
+    "claude.ai), the evidence panel is ALREADY displayed beside this result — do "
+    "not add a visual. NEVER paste iframe markup into a chat reply: chat hosts "
+    "forbid external frames (CSP frame-src 'self'), so it renders as a blank box.")
 
 
-# Placed at the TAIL of the pack as well as the head. The first attempt put the
-# forward edge at the top only, reasoning that a model "stops reading once it has
-# enough" — that is human intuition and it measured as wrong: gpt-4o read past it
-# and wrote the brief into its reply anyway. The whole payload is in context, and
-# the text closest to the generation point is the END, not the start. So the
-# instruction is repeated where it is read last.
+# Placed at the TAIL of the pack as well as the head — an LLM holds the whole
+# payload, and the text closest to the generation point is the END, not the start.
 YOUR_NEXT_OUTPUT = (
     "STOP — do not write the brief as your reply yet. Write it, then send it as your "
     "next output: publish_answer(pack_id='{pack_id}', draft=<the full brief>, "
@@ -127,23 +125,30 @@ def after_verify(pack_id: str, report_id: str, passed: bool,
 
 
 def after_record(receipt_id: str) -> dict:
-    """The last seam, and the reason the visual never appeared: the evidence view
-    hangs off the receipt, so a loop that ends here ends in prose."""
+    """The last seam. This USED to say "call ui_embed" unconditionally — written for
+    coding hosts before the MCP App existed. In a chat host the panel has already
+    rendered beside the result, and a model that obeyed anyway pasted an <iframe>
+    into its reply, which the host's CSP (frame-src 'self' blob: data:) blocked into
+    a giant blank white box. Measured on Claude Desktop, 2026-08-25. So the guidance
+    is now conditional on what kind of host is reading it."""
     return {
-        # Not required — a host that cannot render markup should not be told to
-        # emit it. But the default must be to show, not to describe.
         "required": False,
-        "unless": ("your host cannot render markup — then present the sources as a "
-                   "TABLE with publisher, date and validation. Never a paragraph."),
-        "step": "3 of 3 — show the evidence chain",
-        "call": {"tool": "ui_embed",
-                 "args": {"component": "provenance_graph", "receipt_id": receipt_id}},
-        "why": ("The reader is deciding whether to act months ahead. What helps them "
-                "is SEEING which sources are live pulls, how old each one is, and "
-                "what is missing. `render_with` names the component for each part."),
-        "if_you_stop_here": (
-            "The answer is governed but reads like any other prose answer — the user "
-            "cannot see the evidence chain they are being asked to trust."),
+        "step": "presentation — depends on your host",
+        "if_host_renders_mcp_apps": (
+            "Claude Desktop / claude.ai: the evidence panel is ALREADY shown beside "
+            "this tool result. Add nothing visual. Do NOT paste iframe markup into "
+            "the chat — external frames are blocked by the host's CSP and render as "
+            "a blank box."),
+        "if_building_a_web_page": {
+            "note": ("ui_embed's iframe is for pages YOU are writing (a dashboard, "
+                     "a report file the user opens in a browser) — there it "
+                     "re-resolves live and is the only way to show a verdict."),
+            "call": {"tool": "ui_embed",
+                     "args": {"component": "provenance_graph",
+                              "receipt_id": receipt_id}}},
+        "if_neither": (
+            "Text-only host: present the sources as a TABLE with publisher, date "
+            "and validation. Never a paragraph."),
     }
 
 

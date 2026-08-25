@@ -94,19 +94,23 @@ def test_a_blocked_draft_is_never_sent_on_to_the_receipt(pack, log):
     assert v["next_step"]["fix_then_retry"] == v["failures"]
 
 
-def test_the_receipt_asks_to_be_SHOWN_not_described(pack, log):
-    """Third seam, and the reason no visual ever appeared: the evidence view hangs
-    off the receipt, so a loop that ends at the receipt ends in prose."""
+def test_the_receipt_guidance_depends_on_the_host(pack, log):
+    """This USED to say "call ui_embed" unconditionally — and on Claude Desktop the
+    model obeyed, pasting an <iframe> into chat, which the host CSP
+    (frame-src 'self' blob: data:) blocked into a giant blank white box. In an
+    MCP-Apps host the panel has ALREADY rendered; the iframe is for pages a model
+    is writing. So the guidance now branches on the host."""
     r = record.record(pack_id=pack["pack_id"], question="El Nino in Kenya")
     nxt = r["next_step"]
-    log("OUTPUT", f"{nxt['call']['tool']}({nxt['call']['args']['component']})")
-    assert nxt["call"] == {"tool": "ui_embed",
+    log("OUTPUT", nxt["step"])
+    assert nxt["required"] is False
+    assert "Do NOT paste iframe markup" in nxt["if_host_renders_mcp_apps"]
+    web = nxt["if_building_a_web_page"]
+    assert web["call"] == {"tool": "ui_embed",
                            "args": {"component": "provenance_graph",
                                     "receipt_id": r["receipt_id"]}}
-    # required=False is deliberate: a host that cannot render markup should not be
-    # told to emit it — but it is told what to do instead, never "prose is fine".
-    assert nxt["required"] is False
-    assert "TABLE" in nxt["unless"] and "Never a paragraph" in nxt["unless"]
+    assert "TABLE" in nxt["if_neither"]
+    assert "blank box" in loop.RECEIPT_NEEDS_SHOWING
 
 
 def test_every_stage_of_the_loop_hands_on_to_the_next(pack, log):
@@ -114,10 +118,12 @@ def test_every_stage_of_the_loop_hands_on_to_the_next(pack, log):
     drops the forward edge from any seam, this fails."""
     v = verify.groundedness(_passing_draft(pack), pack["pack_id"])
     r = record.record(pack_id=pack["pack_id"], report_id=v["report_id"], question="q")
-    chain = [pack["next_step"]["call"]["tool"], v["next_step"]["call"]["tool"],
-             r["next_step"]["call"]["tool"]]
-    log("OUTPUT", " -> ".join(["assemble_pack"] + chain))
-    assert chain == ["publish_answer", "record_receipt", "ui_embed"]
+    chain = [pack["next_step"]["call"]["tool"], v["next_step"]["call"]["tool"]]
+    log("OUTPUT", " -> ".join(["assemble_pack"] + chain) + " -> host-aware display")
+    assert chain == ["publish_answer", "record_receipt"]
+    # the last seam no longer commands a call — it branches on the host, and the
+    # web-page branch still names ui_embed with the real receipt id
+    assert r["next_step"]["if_building_a_web_page"]["call"]["tool"] == "ui_embed"
 
 
 def test_the_reminder_is_repeated_at_the_very_END_of_the_pack(pack, log):
