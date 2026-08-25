@@ -143,7 +143,12 @@ const VERDICT_FIELDS = __VERDICT_FIELDS__;
 // blind the model; stripping here keeps the verdict out of the frozen surface
 // without taking it away from the caller.
 const strip = o => { const c = {...o}; for (const k of VERDICT_FIELDS) delete c[k]; return c; };
-const esc = s => String(s ?? "").replace(/[<>&]/g, c => ({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));
+// Quotes INCLUDED: esc'd values land inside double-quoted attributes
+// (href/data-url/aria-label), and titles/URLs come from external feeds and corpus
+// documents. Without &quot; a title like x" onpointerover="... closes the
+// attribute and injects a handler — script in the panel can then reach tools/call.
+const esc = s => String(s ?? "").replace(/[<>&"']/g, c => (
+  {"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;","'":"&#39;"}[c]));
 // ---- ANALYTICS -------------------------------------------------------------
 // The panel is an analytics surface, not a picture. Inline SVG and hand-wired
 // listeners because the sandbox CSP forbids loading any charting library; every
@@ -218,9 +223,7 @@ function stats(pts) {
   if (!pts.length) return null;
   let lo = pts[0].v, hi = pts[0].v, sum = 0;
   for (const p of pts) { if (p.v < lo) lo = p.v; if (p.v > hi) hi = p.v; sum += p.v; }
-  const last = pts[pts.length - 1], prev = pts[pts.length - 2];
-  return { n: pts.length, min: lo, max: hi, mean: sum / pts.length,
-           last: last, d: prev ? last.v - prev.v : null };
+  return { n: pts.length, min: lo, max: hi, mean: sum / pts.length };
 }
 function chartSVG(sr, i, st) {
   const pts = activePoints(sr, st);
@@ -243,7 +246,10 @@ function chartSVG(sr, i, st) {
       r="${k === sel ? 3.5 : 1.8}" fill="currentColor"
       opacity="${k === sel ? 1 : .45}" pointer-events="none"/>`).join("");
   const s = stats(pts);
-  const dtxt = s.d === null ? "" : (s.d >= 0 ? " · +" : " · ") + f2(s.d) + " vs prev";
+  // Delta follows the SELECTION, not the window end: showing MJJ 2026's move next
+  // to a clicked NDJ 2017 readout misreports data — caught in browser verification.
+  const dv = sel > 0 ? pts[sel].v - pts[sel - 1].v : null;
+  const dtxt = dv === null ? "" : (dv >= 0 ? " · +" : " · ") + f2(dv) + " vs prev";
   return `
     <svg class="cv" data-chart="${i}" viewBox="0 0 ${W} ${H}" width="100%" height="${H}"
          role="img" aria-label="${esc(sr.title || sr.id)}" style="cursor:crosshair">
@@ -409,10 +415,21 @@ function wireCharts() {
       const sr = seriesList()[i]; if (!sr) return;
       const st = chartState(i), pts = activePoints(sr, st);
       if (pts.length < 2) return;
-      const r = sv.getBoundingClientRect();
+      // getScreenCTM maps client px -> viewBox units exactly, INCLUDING the
+      // letterbox margins preserveAspectRatio adds once the element is wider
+      // than 560px — which Desktop's 736px box always is. The naive
+      // width-proportional map read ~10% off near the edges there: a click on
+      // MJJ 2026 reported an earlier month in an EVIDENCE panel.
       const W = 560, PAD = 24;
-      const xv = (e.clientX - r.left) / r.width * W;
-      let k = Math.round((xv - PAD) / (W - 2 * PAD) * (pts.length - 1));
+      let xv;
+      try {
+        xv = new DOMPoint(e.clientX, e.clientY)
+               .matrixTransform(sv.getScreenCTM().inverse()).x;
+      } catch (err) {
+        const r = sv.getBoundingClientRect();
+        xv = (e.clientX - r.left) / r.width * W;
+      }
+      const k = Math.round((xv - PAD) / (W - 2 * PAD) * (pts.length - 1));
       st.sel = Math.max(0, Math.min(pts.length - 1, k));
       redrawChart(i);
     };
@@ -625,13 +642,25 @@ function reportSize(){
 try { new ResizeObserver(reportSize).observe(document.documentElement); } catch (_) {}
 window.addEventListener("message", e => {
   const m = e.data || {};
-  if (m.id && _calls.has(m.id)) {         // a server tool answered
+  // A REQUEST or NOTIFICATION carries `method`; a RESPONSE does not. Classify on
+  // that, never on id alone: the host numbers its own requests from its own
+  // counter, and an id collision with ours previously swallowed the host's
+  // request as if it were an answer to us. JSON-RPC also obliges us to answer
+  // every id-bearing request — `ping` is exactly that, and an unanswered ping
+  // reads as a dead View.
+  if (m.method && m.id !== undefined && m.id !== null) {
+    if (m.method === "ping") post({ jsonrpc: "2.0", id: m.id, result: {} });
+    else post({ jsonrpc: "2.0", id: m.id,
+                error: { code: -32601, message: "not implemented: " + m.method } });
+    return;
+  }
+  if (!m.method && m.id && _calls.has(m.id)) {   // a server tool answered
     const h = _calls.get(m.id); _calls.delete(m.id);
     if (m.error) h.reject(new Error((m.error && m.error.message) || "tool call failed"));
     else h.resolve(m.result);
     return;
   }
-  if (m.id && _pending.has(m.id)) {
+  if (!m.method && m.id && _pending.has(m.id)) {
     const method = _pending.get(m.id);
     _pending.delete(m.id);
     if (method === "ui/initialize" || method === "initialize") {
@@ -692,4 +721,7 @@ def standalone(data: dict) -> str:
     return template().replace(
         marker,
         marker + '\n<script type="application/json" id="payload">'
-        + json.dumps(evidence_payload(data)) + "</script>")
+        # "</" escaped: a source title containing "</script>" would otherwise
+        # terminate the block at HTML-parse time and execute what follows.
+        # "<\/" is legal JSON and identical after JSON.parse.
+        + json.dumps(evidence_payload(data)).replace("</", "<\\/") + "</script>")

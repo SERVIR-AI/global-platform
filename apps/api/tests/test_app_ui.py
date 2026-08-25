@@ -246,3 +246,50 @@ def test_the_charts_are_interactive(log):
     assert 'class="readout"' in html
     # a redraw must re-report height or the host keeps the old box
     assert "reportSize();" in html.split("function redrawChart")[1][:400]
+
+
+def test_esc_closes_the_attribute_injection_hole(log):
+    """CONFIRMED by adversarial review: esc() covered only <>& while its output
+    lands inside double-quoted attributes (href, data-url, aria-label) — and titles
+    and URLs come from external feeds and corpus documents. A title of
+    x" onpointerover="... closed the attribute and injected a handler; script in
+    the panel can reach tools/call. Quotes are now escaped."""
+    html = app_ui.template()
+    log("CHECK", "quote characters in the esc character class")
+    esc_block = html.split("const esc")[1][:300]   # entities contain ';', so no split on it
+    assert "&quot;" in esc_block and "&#39;" in esc_block
+
+
+def test_the_view_answers_ping_and_swallows_no_host_request(log):
+    """CONFIRMED by review: messages were classified by id alone, so a host request
+    whose id collided with ours was consumed as if it answered us — and no host
+    request was ever answered, so JSON-RPC `ping` liveness read the View as dead."""
+    html = app_ui.template()
+    log("CHECK", "structural classification + ping response")
+    assert 'm.method === "ping"' in html
+    assert '"not implemented: " + m.method' in html
+    assert "!m.method && m.id && _calls.has(m.id)" in html
+
+
+def test_svg_click_survives_letterboxing(log):
+    """CONFIRMED by review: width-proportional click math is only correct at or
+    under 560px; Desktop's 736px box letterboxes the chart and the readout named
+    an earlier month than the one clicked. getScreenCTM maps exactly."""
+    html = app_ui.template()
+    log("CHECK", "getScreenCTM used with a proportional fallback")
+    assert "getScreenCTM" in html and "matrixTransform" in html
+    assert "getBoundingClientRect" in html
+
+
+def test_standalone_payload_cannot_break_out_of_its_script_block(log):
+    """CONFIRMED by review: json.dumps leaves "</" intact, so a title containing
+    "</script>" terminated the payload block at HTML-parse time and executed what
+    followed. "<\\/" is legal JSON and identical after parsing."""
+    import json as _json
+    h = app_ui.standalone({"question": "q",
+                           "sources": [{"n": 1, "title": "</script><script>evil()</script>"}]})
+    seg = h.split('id="payload">')[1]
+    payload = seg[:seg.index("</script>")]
+    d = _json.loads(payload)
+    log("OUTPUT", d["sources"][0]["title"])
+    assert d["sources"][0]["title"] == "</script><script>evil()</script>"
