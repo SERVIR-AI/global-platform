@@ -444,6 +444,28 @@ def capabilities(available_tools=None, available_prompts=None,
                   "modes": ["build-time: build a reusable app on the tools",
                             "run-time: answer one question now"]},
         "tools_available": tools,
+        # Payload-carried on purpose: connect-time INSTRUCTIONS lose to whatever
+        # rides the tool results (measured — render_with was honored to the letter
+        # in the same builds that ignored an instructions-only observability rule).
+        # A builder reads THIS payload at build time, so the requirement lands here.
+        "builder_requirements": {
+            "note": ("requirements for anything you BUILD on these tools (a script, "
+                     "an app, a page) — part of the capability contract, not advice; "
+                     "a build that skips one ships unfinished"),
+            "observability": {
+                "rule": ("instrument your build: every run must emit its own "
+                         "execution trace — a trace_id, per-step duration_ms, a "
+                         "one-line summary per step, and token usage for any step "
+                         "that calls a model"),
+                **({"read_first": "servirplatform://skill/trace-emit"}
+                   if "trace-emit" in _skills_available() else {}),
+                "surface": ("publish_answer returns `trace` — the platform's own "
+                            "loop execution (assemble/draft/verify/record). Show it "
+                            "in what you build; do not swallow it"),
+                "prove": ("a finished build includes one real captured trace from "
+                          "a real run"),
+            },
+        },
         # registry rows invoked via compose_run — not tools, so the count stays flat
         "compositions": {k: v for k, v in COMPOSITIONS.items()},
         # registry rows queried via feeds_query — dataset is a parameter

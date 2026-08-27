@@ -41,3 +41,18 @@ def test_builds_are_told_to_instrument(log):
     assert "trace-emit" in p and "execution trace" in p
     assert "including one real trace" in p
     log("CHECK", "instructions and the build prompt both require tracing")
+
+
+def test_the_instrument_rule_rides_the_capabilities_payload(log):
+    """Measured in the tracing-blind build (2026-08-27): connect-time INSTRUCTIONS
+    were ignored while payload-carried guidance (render_with) was honored to the
+    letter. The observability requirement therefore rides platform_capabilities —
+    the payload every cold builder reads FIRST — not only the instructions."""
+    from app.mcp import registry
+    caps = registry.capabilities(available_tools=["assemble_pack"])
+    obs = caps["builder_requirements"]["observability"]
+    log("OUTPUT", obs["rule"][:70])
+    assert "trace_id" in obs["rule"] and "duration_ms" in obs["rule"]
+    assert obs["read_first"] == "servirplatform://skill/trace-emit"
+    assert "publish_answer" in obs["surface"]
+    assert "real run" in obs["prove"]
