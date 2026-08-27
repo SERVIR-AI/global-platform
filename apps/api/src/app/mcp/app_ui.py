@@ -72,6 +72,7 @@ h2{margin:0 0 .15rem;font-size:var(--font-heading-sm-size,1rem);
   padding:.05rem .4rem;border-radius:var(--border-radius-sm,4px);
   border:var(--border-width-regular,1px) solid currentColor;margin-right:.25rem}
 .live{color:var(--color-text-info,var(--grp-info,#2380b0))}
+.comp{color:var(--color-text-success,var(--grp-good,#256b4e))}
 .arch{color:var(--color-text-tertiary,var(--grp-neutral,#5a6472))}
 .gap{border-left:3px solid var(--color-border-warning,var(--grp-warning,#a06a08));
   background:var(--color-background-warning,transparent);
@@ -230,42 +231,62 @@ function chartSVG(sr, i, st) {
   if (pts.length < 2) return '<div class="meta">not enough data in this window</div>';
   const W = 560, H = 116, PAD = 24;
   const vs = pts.map(p => p.v);
-  const lo = Math.min(-0.8, ...vs), hi = Math.max(0.8, ...vs);
-  const x = k => PAD + k * (W - PAD * 2) / (pts.length - 1);
+  // The y-domain and threshold bands come from the SERIES, never the renderer:
+  // hardcoded ENSO chrome mislabelled DMI and would be nonsense on a risk chart.
+  const bands = sr.bands || [];
+  const bandVs = bands.map(b => b.v);
+  const cat = !!sr.categorical;
+  const lo = cat ? 0 : Math.min(...vs, ...bandVs, 0) * 1.15 - 0.05;
+  const hi = Math.max(...vs, ...bandVs.map(v => Math.abs(v)), cat ? 1 : 0.1) * 1.15;
+  const x = k => PAD + (pts.length === 1 ? (W - PAD * 2) / 2
+                                         : k * (W - PAD * 2) / (pts.length - 1));
   const y = v => H - PAD - (v - lo) * (H - PAD * 2) / (hi - lo);
-  const line = pts.map((p, k) => (k ? "L" : "M") + x(k).toFixed(1) + "," + y(p.v).toFixed(1)).join("");
-  const band = (v, label) => !st.bands ? "" : `
-    <line x1="${PAD}" x2="${W - PAD}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}"
-      stroke="currentColor" stroke-dasharray="3 3" opacity=".35"/>
-    <text x="${W - PAD + 2}" y="${(y(v) + 3).toFixed(1)}" font-size="8"
-      fill="currentColor" opacity=".55">${label}</text>`;
   const sel = st.sel < 0 ? pts.length - 1 : Math.min(st.sel, pts.length - 1);
   const sp = pts[sel];
-  const dots = pts.length > 60 ? "" : pts.map((p, k) => `
-    <circle cx="${x(k).toFixed(1)}" cy="${y(p.v).toFixed(1)}"
-      r="${k === sel ? 3.5 : 1.8}" fill="currentColor"
-      opacity="${k === sel ? 1 : .45}" pointer-events="none"/>`).join("");
-  const s = stats(pts);
-  // Delta follows the SELECTION, not the window end: showing MJJ 2026's move next
-  // to a clicked NDJ 2017 readout misreports data — caught in browser verification.
-  const dv = sel > 0 ? pts[sel].v - pts[sel - 1].v : null;
-  const dtxt = dv === null ? "" : (dv >= 0 ? " · +" : " · ") + f2(dv) + " vs prev";
-  return `
-    <svg class="cv" data-chart="${i}" viewBox="0 0 ${W} ${H}" width="100%" height="${H}"
-         role="img" aria-label="${esc(sr.title || sr.id)}" style="cursor:crosshair">
-      ${band(0.5, "+0.5 El Nino")}${band(-0.5, "-0.5 La Nina")}
+  const bandMarks = !st.bands ? "" : bands.map(b => `
+    <line x1="${PAD}" x2="${W - PAD}" y1="${y(b.v).toFixed(1)}" y2="${y(b.v).toFixed(1)}"
+      stroke="currentColor" stroke-dasharray="3 3" opacity=".35"/>
+    <text x="${W - PAD + 2}" y="${(y(b.v) + 3).toFixed(1)}" font-size="8"
+      fill="currentColor" opacity=".55">${esc(b.label)}</text>`).join("");
+  let body;
+  if (cat) {
+    // Categorical: bars, one per class — a line through classes implies an
+    // ordering trend that does not exist.
+    const bw = (W - PAD * 2) / pts.length * 0.62;
+    body = pts.map((p, k) => `
+      <rect x="${(x(k) - bw / 2).toFixed(1)}" y="${y(p.v).toFixed(1)}"
+        width="${bw.toFixed(1)}" height="${(y(0) - y(p.v)).toFixed(1)}"
+        fill="currentColor" opacity="${k === sel ? .95 : .55}"/>
+      <text x="${x(k).toFixed(1)}" y="${(y(p.v) - 4).toFixed(1)}" font-size="9"
+        text-anchor="middle" fill="currentColor">${esc(p.v)}</text>`).join("");
+  } else {
+    const line = pts.map((p, k) => (k ? "L" : "M") + x(k).toFixed(1) + "," + y(p.v).toFixed(1)).join("");
+    const dots = pts.length > 60 ? "" : pts.map((p, k) => `
+      <circle cx="${x(k).toFixed(1)}" cy="${y(p.v).toFixed(1)}"
+        r="${k === sel ? 3.5 : 1.8}" fill="currentColor"
+        opacity="${k === sel ? 1 : .45}" pointer-events="none"/>`).join("");
+    body = `
       <line x1="${x(sel).toFixed(1)}" x2="${x(sel).toFixed(1)}" y1="${PAD - 8}"
         y2="${H - PAD}" stroke="currentColor" opacity=".28"/>
       <path d="${line}" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".85"/>
       ${dots}
-      <circle cx="${x(sel).toFixed(1)}" cy="${y(sp.v).toFixed(1)}" r="3.5" fill="currentColor"/>
+      <circle cx="${x(sel).toFixed(1)}" cy="${y(sp.v).toFixed(1)}" r="3.5" fill="currentColor"/>`;
+  }
+  const s = stats(pts);
+  const dv = sel > 0 && !cat ? pts[sel].v - pts[sel - 1].v : null;
+  const dtxt = dv === null ? "" : (dv >= 0 ? " · +" : " · ") + f2(dv) + " vs prev";
+  return `
+    <svg class="cv" data-chart="${i}" viewBox="0 0 ${W} ${H}" width="100%" height="${H}"
+         role="img" aria-label="${esc(sr.title || sr.id)}" style="cursor:crosshair">
+      ${bandMarks}
+      ${body}
       <text x="${PAD}" y="${H - 6}" font-size="8" fill="currentColor"
         opacity=".55">${esc(pts[0].t)}</text>
       <text x="${W - PAD}" y="${H - 6}" font-size="8" text-anchor="end"
         fill="currentColor" opacity=".55">${esc(pts[pts.length - 1].t)}</text>
     </svg>
     <div class="readout"><b>${esc(sp.t)}</b> &nbsp;${esc(sp.v)} ${esc(sp.c || "")}${dtxt}
-      <span class="meta">— click anywhere on the chart to read a month</span></div>
+      <span class="meta">— click anywhere on the chart to read a ${cat ? "class" : "month"}</span></div>
     <div class="stats">${s.n} pts · min ${f2(s.min)} · max ${f2(s.max)} · mean ${f2(s.mean)}</div>`;
 }
 function tableHTML(pts) {
@@ -283,7 +304,11 @@ function chartInner(sr, i) {
   const st = chartState(i);
   const live = st.src === "live" && st.hist && st.hist.points;
   const histErr = st.hist && st.hist.err;
-  const chips = [
+  const cat = !!sr.categorical;
+  const chips = cat ? [
+    chip(i, "table", "table", st.table),
+    (sr.bands && sr.bands.length) ? chip(i, "bands", "thresholds", st.bands) : "",
+  ] : [
     chip(i, "src-pack", "pack (" + (sr.points || []).length + ")", st.src === "pack"),
     serverToolsOK() ? chip(i, "src-live", st.loading ? "loading…" : "full history",
                            st.src === "live") : "",
@@ -291,7 +316,7 @@ function chartInner(sr, i) {
     chip(i, "range-60", "5y", st.range === 60),
     chip(i, "range-0", "all", st.range === 0),
     chip(i, "table", "table", st.table),
-    chip(i, "bands", "thresholds", st.bands),
+    (sr.bands && sr.bands.length) ? chip(i, "bands", "thresholds", st.bands) : "",
   ];
   return `
     <div class="meta"><b>${esc(sr.title || sr.id)}</b> · ${esc(sr.source || "")} ·
@@ -314,7 +339,8 @@ function redrawChart(i) {
   wireCharts();
   reportSize();
 }
-function overlayCard(series) {
+function overlayCard(all) {
+  const series = all.filter(sr => !sr.categorical);
   const a = series[0], b = series[1];
   const pa = a.points || [], pb = b.points || [];
   const K = Math.min(pa.length, pb.length);
@@ -329,8 +355,8 @@ function overlayCard(series) {
   return `<div class="card chart">
     <div class="meta"><b>Overlay</b> · <span class="s0">■ ${esc(a.title || a.id)}</span>
       · <span class="s1">■ ${esc(b.title || b.id)}</span></div>
-    <div class="stats">both in °C anomaly · aligned by recency, last ${K} points — the
-      cadences differ, so read co-movement, not exact dates</div>
+    <div class="stats">both in ${esc(a.unit || "the same unit")} · aligned by recency,
+      last ${K} points — the cadences differ, so read co-movement, not exact dates</div>
     <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img" aria-label="overlay">
       <line x1="${PAD}" x2="${W - PAD}" y1="${y(0).toFixed(1)}" y2="${y(0).toFixed(1)}"
         stroke="currentColor" stroke-dasharray="3 3" opacity=".3"/>
@@ -346,9 +372,12 @@ function overlayCard(series) {
 }
 function globalBar(series) {
   const items = [];
-  if (series.length > 1)
+  const cont = series.filter(sr => !sr.categorical);
+  if (cont.length > 1)
     items.push(`<button class="chip${_ov ? " on" : ""}" data-act="overlay">overlay indices</button>`);
-  if (serverToolsOK())
+  // The analogue view is ENSO knowledge — offered only when an ENSO series is
+  // actually in this pack's evidence, never as furniture on another domain.
+  if (serverToolsOK() && series.some(sr => String(sr.id || "").indexOf("enso") === 0))
     items.push(`<button class="chip${_anaOpen ? " on" : ""}" data-act="ana">El Niño analogues</button>`);
   return items.length ? `<div class="ctl">${items.join("")}</div>` : "";
 }
@@ -487,11 +516,12 @@ function render(d){
   const shown = series.slice(0, budget === Infinity ? series.length : budget);
   const hidden = series.slice(shown.length);
   const pulled = new Set((d.evidence_freshness||{}).pulled_sources || []);
+  const computed = new Set((d.evidence_freshness||{}).computed_sources || []);
   document.getElementById("root").innerHTML = `
     <h2>${esc(d.question || "Evidence")}</h2>
-    <div class="sub">${srcs.length} sources · ${pulled.size} pulled live · ${gaps.length} declared gap(s)</div>
+    <div class="sub">${srcs.length} sources · ${pulled.size} pulled live${computed.size?` · ${computed.size} computed`:""} · ${gaps.length} declared gap(s)</div>
     ${globalBar(series)}
-    ${_ov && series.length > 1 ? overlayCard(series) : ""}
+    ${_ov && series.filter(sr => !sr.categorical).length > 1 ? overlayCard(series) : ""}
     ${shown.map((sr, i) => chart(sr, i)).join("")}
     <div id="ana">${anaHTML()}</div>
     ${hidden.map(sr => `<div class="meta oneline"><b>${esc(sr.title||sr.id)}</b> ·
@@ -506,7 +536,7 @@ function render(d){
         <b>[${esc(s.n)}] ${esc(s.source)}</b>
         <div class="meta">${esc(s.title||"")}</div>
         <div class="meta">
-          <span class="pill ${pulled.has(s.n)?"live":"arch"}">${pulled.has(s.n)?"pulled live":"archived"}</span>
+          <span class="pill ${pulled.has(s.n)?"live":computed.has(s.n)?"comp":"arch"}">${pulled.has(s.n)?"pulled live":computed.has(s.n)?"computed":"archived"}</span>
           ${esc(s.pub_date||"undated")} · ${esc(s.validation||"unvalidated")}
         </div>
         ${s.caveat?`<div class="meta">⚠ ${esc(s.caveat)}</div>`:""}

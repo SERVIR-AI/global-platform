@@ -74,7 +74,8 @@ def _risk_manifest() -> dict:
             "no risk corpus", "raster vintages/licences unrecorded",
             "BYOD uploads are session-scoped and cannot enter a pack",
         ],
-        "compositions": ["risk.brief"],
+        "compositions": {"risk.brief": "declared gap — runner not implemented; "
+                                        "use the assemble -> publish_answer loop"},
     }
 
 

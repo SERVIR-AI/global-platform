@@ -260,7 +260,22 @@ def _series(name: str, records) -> dict | None:
         pts.append({"t": label, "v": r["value"], "c": r.get("classification")})
     if len(pts) < 2:
         return None
-    return {"id": name, "points": pts[-24:], "unit": "degrees C anomaly"}
+    # Threshold bands are INDEX knowledge, carried on the series so the renderer
+    # never invents them: the panel used to hardcode +/-0.5 "El Nino/La Nina" on
+    # EVERY chart — approximately right for ONI, wrong for DMI (+/-0.4 is the IOD
+    # convention), and nonsense for any other pack's series.
+    bands = {"oni": [{"v": 0.5, "label": "+0.5 El Nino"},
+                     {"v": -0.5, "label": "-0.5 La Nina"}],
+             "enso_oni": [{"v": 0.5, "label": "+0.5 El Nino"},
+                          {"v": -0.5, "label": "-0.5 La Nina"}],
+             "dmi": [{"v": 0.4, "label": "+0.4 positive IOD"},
+                     {"v": -0.4, "label": "-0.4 negative IOD"}],
+             "iod_dmi": [{"v": 0.4, "label": "+0.4 positive IOD"},
+                         {"v": -0.4, "label": "-0.4 negative IOD"}]}
+    out = {"id": name, "points": pts[-24:], "unit": "degrees C anomaly"}
+    if name in bands:
+        out["bands"] = bands[name]
+    return out
 
 
 def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None, None)):

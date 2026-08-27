@@ -145,8 +145,11 @@
     "hazard_map": {
       "trust_class": "presentational",
       "delivery": "embed",
-      "source": "apps/web Maps/ (flood/risk)",
-      "status": "generic — risk pack"
+      "embeddable": true,
+      "binds": "receipt_id",
+      "renders": "AOI, severity-tagged assets and the clipped hazard layer from the receipt's recorded evidence pack",
+      "source": "apps/web EmbedMap (risk pack)",
+      "status": "live"
     },
     "chat_shell": {
       "trust_class": "presentational",

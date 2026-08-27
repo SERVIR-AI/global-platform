@@ -37,6 +37,9 @@ _PUBLIC_PREFIXES = (
     "/api/health",
     "/api/resolve/",
     "/api/food-security/rag/document/",
+    # The hazard_map embed's raster option: an embed a consumer cannot load is
+    # dead chrome, same argument as the resolver itself.
+    "/api/raster/",
 )
 
 
