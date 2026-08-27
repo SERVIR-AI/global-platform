@@ -18,7 +18,7 @@ def _register_flood(tif_writer, thread="t1"):
 
 
 def _cfg(client, thread):
-    return {"configurable": {"thread_id": thread, "client": client, "model": "stub"}}
+    return {"configurable": {"thread_id": thread, "client": client, "model": "stub", "provider": "stub"}}
 
 
 def test_route_menu_merges_byod_per_thread(tif_writer, byod_env, log):

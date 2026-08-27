@@ -160,6 +160,11 @@ class Settings(BaseSettings):
     price_in: float = 0.0
     price_out: float = 0.0
 
+    # Whether trace events carry the full text of the prompts sent to the model. Off keeps
+    # the shape — one entry per message, with its role — and nulls every body, so the trace
+    # still reports how many messages were sent without carrying their contents.
+    trace_prompts: bool = True
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 344 462" width="344" height="462"
+     role="img" aria-label="Backend execution graph: which nodes this turn ran">
+  <title>Execution graph</title>
+
+  <!-- Swap these to restyle. Every node/edge below carries data-state, so a turn is
+       rendered by setting one attribute per element - no geometry changes. -->
+  <style>
+    .edge  { fill: none; stroke: #d4d4d8; stroke-width: 1.5; }
+    .box   { fill: #fafafa; stroke: #d4d4d8; stroke-width: 1.5; }
+    .label { font: 500 12px ui-sans-serif, system-ui, sans-serif; fill: #52525b;
+             text-anchor: middle; dominant-baseline: middle; }
+    .term  { font-size: 10px; letter-spacing: .06em; }
+
+    [data-state="visited"].box   { fill: #eff6ff; stroke: #3b82f6; }
+    [data-state="visited"].label { fill: #1d4ed8; }
+    [data-state="visited"].edge  { stroke: #3b82f6; stroke-width: 2; }
+    [data-state="errored"].box   { fill: #fef2f2; stroke: #ef4444; }
+    [data-state="errored"].label { fill: #b91c1c; }
+    [data-state="paused"].box    { fill: #fffbeb; stroke: #f59e0b; }
+    [data-state="paused"].label  { fill: #b45309; }
+    /* skipped is the default above: it is DRAWN, not hidden - see SKILL.md */
+    [data-state="skipped"].box   { stroke-dasharray: 4 3; }
+    [data-state="skipped"].edge  { stroke-dasharray: 4 3; }
+
+    @media (prefers-color-scheme: dark) {
+      .box { fill: #18181b; stroke: #3f3f46; } .label { fill: #a1a1aa; }
+      .edge { stroke: #3f3f46; }
+    }
+  </style>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5"
+            markerHeight="5" orient="auto-start-reverse">
+      <path d="M 0 1 L 7 4 L 0 7 z" fill="context-stroke"/>
+    </marker>
+  </defs>
+
+  <g id="edges">
+    <path class="edge" id="start->route" data-state="skipped" marker-end="url(#arrow)"
+          d="M 150 29 L 150 51"><title>every turn starts here</title></path>
+    <path class="edge" id="route->resolve" data-state="skipped" marker-end="url(#arrow)"
+          d="M 150 85 L 150 127"><title>normal turn</title></path>
+    <path class="edge" id="route->fetch" data-state="skipped" marker-end="url(#arrow)"
+          d="M 90 76 C 56 76, 56 212, 90 212"><title>resumed a choice you already made</title></path>
+    <path class="edge" id="route->finalize" data-state="skipped" marker-end="url(#arrow)"
+          d="M 90 60 C 14 60, 14 364, 90 364"><title>could not understand the question</title></path>
+    <path class="edge" id="resolve->fetch" data-state="skipped" marker-end="url(#arrow)"
+          d="M 150 161 L 150 203"><title>nothing to choose between</title></path>
+    <path class="edge" id="resolve->ask_end" data-state="skipped" marker-end="url(#arrow)"
+          d="M 210 144 L 242 144"><title>paused to ask you which kind of answer you want</title></path>
+    <path class="edge" id="resolve->finalize" data-state="skipped" marker-end="url(#arrow)"
+          d="M 90 152 C 35 152, 35 372, 90 372"><title>no data available for that hazard</title></path>
+    <path class="edge" id="fetch->operate" data-state="skipped" marker-end="url(#arrow)"
+          d="M 150 237 L 150 279"><title>data gathered successfully</title></path>
+    <path class="edge" id="fetch->finalize" data-state="skipped" marker-end="url(#arrow)"
+          d="M 90 228 C 56 228, 56 380, 90 380"><title>could not gather the data</title></path>
+    <path class="edge" id="operate->finalize" data-state="skipped" marker-end="url(#arrow)"
+          d="M 150 313 L 150 355"><title>number computed</title></path>
+    <path class="edge" id="finalize->end" data-state="skipped" marker-end="url(#arrow)"
+          d="M 150 389 L 150 427"><title>answer returned to you</title></path>
+  </g>
+
+  <g id="nodes">
+    <g id="node-start" data-state="skipped" data-kind="terminal">
+      <rect class="box" x="118" y="7" width="64" height="22" rx="11"/>
+      <text class="label term" x="150" y="19">START</text>
+    </g>
+    <g id="node-route" data-state="skipped" data-kind="node">
+      <rect class="box" x="90" y="51" width="120" height="34" rx="6"/>
+      <text class="label" x="150" y="69">route</text>
+    </g>
+    <g id="node-resolve" data-state="skipped" data-kind="node">
+      <rect class="box" x="90" y="127" width="120" height="34" rx="6"/>
+      <text class="label" x="150" y="145">resolve</text>
+    </g>
+    <g id="node-fetch" data-state="skipped" data-kind="node">
+      <rect class="box" x="90" y="203" width="120" height="34" rx="6"/>
+      <text class="label" x="150" y="221">fetch</text>
+    </g>
+    <g id="node-operate" data-state="skipped" data-kind="node">
+      <rect class="box" x="90" y="279" width="120" height="34" rx="6"/>
+      <text class="label" x="150" y="297">operate</text>
+    </g>
+    <g id="node-finalize" data-state="skipped" data-kind="node">
+      <rect class="box" x="90" y="355" width="120" height="34" rx="6"/>
+      <text class="label" x="150" y="373">finalize</text>
+    </g>
+    <g id="node-end" data-state="skipped" data-kind="terminal">
+      <rect class="box" x="118" y="427" width="64" height="22" rx="11"/>
+      <text class="label term" x="150" y="439">END</text>
+    </g>
+    <g id="node-ask_end" data-state="skipped" data-kind="terminal">
+      <rect class="box" x="242" y="131" width="96" height="26" rx="13"/>
+      <text class="label term" x="290" y="145">paused - asked you</text>
+    </g>
+  </g>
+</svg>

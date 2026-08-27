@@ -1,0 +1,551 @@
+import json
+
+from datetime import datetime, timezone
+from langchain_core.runnables import RunnableConfig
+from ..config import get_settings
+from .geo import operations, registry
+
+def _last_user_message(messages: list) -> dict | None:
+    return next((m for m in reversed(messages) if m.get("role") == "user"), None)
+
+def _transcript(messages: list[dict] | None) -> list[dict] | None:
+    """Map the message list actually SENT to the model into the trace's message shape.
+
+    This is the prompt, never the reply — what came back is recorded separately
+    (`llm_response` for text, `derived_tool_calls` for tool calls). Recording the reply in
+    here as well is how the same answer ended up in one event twice.
+
+    A message carrying tool_calls is typed "tool_call" and keeps no content: the call
+    itself is already in `derived_tool_calls`, and its `content` is None by construction.
+    When settings.trace_prompts is off, every body is dropped but the roles and the count
+    survive, so the trace still says how much was sent.
+    """
+    if not messages:
+        return None
+    keep = get_settings().trace_prompts
+    out = []
+    for message in messages:
+        is_tool_call = bool(message.get("tool_calls"))
+        content = message.get("content")
+        out.append({
+            "role": message.get("role"),
+            "type": "tool_call" if is_tool_call else "text",
+            "content": None if (is_tool_call or not keep) else content,
+        })
+    return out
+
+def _usage(resp, price_in, price_out) -> dict | None:
+    """Token counts and cost for one model call, or None when there was no call.
+
+    None and a zeroed dict are different claims: None says no model ran, zeros would say
+    one ran and used nothing. The router's apply_choice branch is the case that matters —
+    it resumes a paused turn deterministically, and reporting `0 in / 0 out` there reads
+    as a free model call rather than as no call at all.
+    """
+    u = getattr(resp, "usage", None)
+    if not u:
+        return None
+    priced = bool(price_in or price_out)
+    rate_in, rate_out = price_in / 1_000_000, price_out / 1_000_000  # price is per million tokens
+    tokens = {
+        "in": getattr(u, "prompt_tokens", 0) or 0,
+        "out": getattr(u, "completion_tokens", 0) or 0,
+    }
+    tokens["total"] = tokens["in"] + tokens["out"]
+    tokens["cost_in"] = tokens["in"]*rate_in if priced else None
+    tokens["cost_out"] = tokens["out"]*rate_out if priced else None
+    tokens["cost"] = tokens["cost_in"] + tokens["cost_out"] if priced else None
+    tokens["rate_usd_per_mtok"] = {"in": price_in, "out": price_out} if priced else None
+    return tokens
+
+def get_tool_calls(tool_call_schema):
+    return [item["function"]["name"] for item in tool_call_schema]
+
+def _split_data_layers_by_prefix(layers) -> tuple[list, list]:
+    """hazard_<x> vs risk_<x>[_l2] — the naming convention every layer name follows."""
+    hazard = [l for l in layers if l.startswith("hazard_")]
+    risk = [l for l in layers if l.startswith("risk_")]
+    return hazard, risk
+
+def _drawn_area_type(geometry) -> str | None:
+    """req_geometry is either a GeoJSON dict (has its own "type") or a 4-element
+    [minLon,minLat,maxLon,maxLat] bbox list/tuple (Mode 2 — see ingest.py's own
+    isinstance(geometry, (list, tuple)) and len(geometry) == 4 check)."""
+    if isinstance(geometry, (list, tuple)):
+        return "rectangle" if len(geometry) == 4 else None
+    if isinstance(geometry, dict):
+        return geometry.get("type")
+    return None
+
+def _summarize_aoi(aoi: dict | None) -> dict:
+    """Compact aoi view for the fetch step, never the full path bundle. aoi is None on the
+    failure branch (ensure_aoi never returned one that turn)."""
+    aoi = aoi or {}
+    return {"name": aoi.get("name"), "area_km2": aoi.get("area_km2"), "how": aoi.get("how")}
+
+def _derive_countable_assets(call_args: dict, function_name: str | None) -> list[str]:
+    """Guess which countable asset (roads/hospitals/schools/buildings) a tool call
+    targets. count_features/count_in_hazard name it via `layer`; roads_in_hazard has
+    no such arg — "roads" is implied by the tool itself, not sent as data. Best-effort,
+    not confirmed against the user."""
+    if call_args.get("layer"):
+        return [call_args["layer"]]
+    if function_name == "roads_in_hazard":
+        return ["roads"]
+    return []
+
+def make_trace_event_router(
+        start_time: float,
+        end_time: float,
+        started_at: str,
+        ended_at: str,
+        state: dict,
+        config: RunnableConfig,
+        llm_response,
+        messages: list,
+        available_layers: dict,
+        error: str | None,
+) -> dict:
+    """Build one route step trace event for route()'s LLM-calling branches (declined /
+    missing_place / routed — NOT apply_choice, which has no LLM call and uses
+    make_trace_event_no_llm instead).
+
+    `error` should be exactly what route() set on out["error"] this turn (None on the
+    success path). Combined with whether the model returned a tool call, this determines
+    `kind`:
+      - no tool call                -> "declined"
+      - tool call, error is set     -> "missing_place"
+      - tool call, error is None    -> "routed"
+    """
+    settings = get_settings()
+    state = state or {}
+    configurable = config["configurable"]
+    llm_provider = configurable["provider"]
+    model_used = configurable["model"]
+    tokens = _usage(llm_response, price_in=settings.price_in, price_out=settings.price_out)
+
+    geometry = state.get("req_geometry", None)
+    user_drawn_area = bool(geometry)
+    drawn_area_type = _drawn_area_type(geometry)
+
+    llm_message = llm_response.choices[0].message
+    messages_out = _transcript(messages)
+
+    if llm_message.tool_calls:
+        llm_answer = None
+        derived_tool_calls = [
+            {"id": tool_call.id, "function_name": tool_call.function.name, "function_args": json.loads(tool_call.function.arguments)}
+            for tool_call in llm_message.tool_calls
+        ]
+    else:
+        llm_answer = llm_message.content
+        derived_tool_calls = None
+
+    tool_call_schema = operations.schema(list(available_layers))
+    available_tools = get_tool_calls(tool_call_schema)
+    countable_assets = list(registry.COUNTABLE)
+    available_hazard_layers, available_risk_layers = _split_data_layers_by_prefix(available_layers)
+
+    # derived_tool_calls is None on the declined branch (no tool call at all) — a real,
+    # reachable case now that this function covers all three LLM-calling outcomes, not
+    # just the success path.
+    primary_call = derived_tool_calls[0] if derived_tool_calls else None
+    call_args = primary_call["function_args"] if primary_call else {}
+    function_name = primary_call["function_name"] if primary_call else None
+
+    derived_place = call_args.get("place")
+    derived_hazard_layers_used, derived_risk_layers_used = _split_data_layers_by_prefix(call_args.get("hazard_layers") or [])
+    derived_countable_assets = _derive_countable_assets(call_args, function_name)
+
+    if derived_tool_calls is None:
+        kind = "declined"
+        summary = "Router received a text reply with no tool call"
+        why = "The model didn't match the question to any available tool, so it answered directly instead."
+    elif error is not None:
+        kind = "missing_place"
+        summary = f"Router matched `{function_name}` but no place was named"
+        why = "A place (or a drawn area) is needed to answer, and neither was given, so the router is asking for one instead of guessing."
+    else:
+        kind = "routed"
+        summary = f"Router matched the question to `{function_name}` for '{derived_place}'"
+        why = "This step only extracts the tool call and its arguments from the model; no computation happens here."
+
+    trace_event = {
+        "node": "router",
+        "step": len(state.get("events", [])),
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "duration_ms": round((end_time - start_time)*1000, 1),
+        "summary": summary,
+        "why": why,
+        "kind": kind,
+        "llm_provider": llm_provider,
+        "model_used": model_used,
+        "user_drawn_area": user_drawn_area,
+        "drawn_area_type": drawn_area_type,
+        "tokens": tokens,
+        "llm_response": llm_answer,
+        "messages": messages_out,
+        "derived_tool_calls": derived_tool_calls,
+        "available_assets": {
+            "available_tools": available_tools,
+            "countable": countable_assets,
+            "hazard_layers": available_hazard_layers,
+            "risk_layers": available_risk_layers,
+        },
+        "derived_place": derived_place,
+        "derived_countable_assets": derived_countable_assets,
+        "derived_hazard_layers_used": derived_hazard_layers_used,
+        "derived_risk_layers_used": derived_risk_layers_used,
+        "error": error,
+    }
+    return trace_event
+
+def make_trace_event_no_llm(
+        start_time: float,
+        end_time: float,
+        started_at: str,
+        ended_at: str,
+        state: dict,
+        config: RunnableConfig,
+        resumed_delta: dict,
+        awaiting_choice: dict,
+) -> dict:
+    """Build one route step trace event for route()'s apply_choice branch: resuming a
+    paused exposure/risk choice with no LLM call this turn.
+
+    resumed_delta is exactly what _apply_choice(state) returned. awaiting_choice is
+    state["awaiting_choice"] as read BEFORE _apply_choice ran (it clears that key in
+    its own return value, so the caller must capture it first).
+    """
+    settings = get_settings()
+    state = state or {}
+
+    tokens = _usage(None, price_in=settings.price_in, price_out=settings.price_out)
+
+    geometry = resumed_delta.get("req_geometry")
+    user_drawn_area = bool(geometry)
+    drawn_area_type = _drawn_area_type(geometry)
+
+    user_message = _last_user_message(state["messages"])
+    messages_out = _transcript([user_message] if user_message else None)
+
+    derived_place = resumed_delta.get("place")
+    derived_hazard_layers_used, derived_risk_layers_used = _split_data_layers_by_prefix(resumed_delta.get("tiffs") or [])
+    derived_countable_assets = _derive_countable_assets(resumed_delta.get("op_args") or {}, resumed_delta.get("operation"))
+
+    chosen_layer = (resumed_delta.get("tiffs") or [None])[0]
+    chosen_option = next((o for o in (awaiting_choice.get("options") or []) if o[1] == chosen_layer), None)
+    chosen_label = chosen_option[0] if chosen_option else chosen_layer
+
+    trace_event = {
+        "node": "router",
+        "step": len(state.get("events", [])),
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "duration_ms": round((end_time - start_time)*1000, 1),
+        "summary": f"Applied the user's choice: {chosen_label}",
+        "why": "This turn resumed a paused exposure/risk question and applied the user's "
+               "reply deterministically — no model call was made.",
+        "kind": "apply_choice",
+        "llm_provider": None,
+        "model_used": None,
+        "user_drawn_area": user_drawn_area,
+        "drawn_area_type": drawn_area_type,
+        "tokens": tokens,
+        "llm_response": None,
+        "messages": messages_out,
+        "derived_tool_calls": None,
+        "available_assets": {
+            "available_tools": None,
+            "countable": None,
+            "hazard_layers": None,
+            "risk_layers": None,
+        },
+        "derived_place": derived_place,
+        "derived_countable_assets": derived_countable_assets,
+        "derived_hazard_layers_used": derived_hazard_layers_used,
+        "derived_risk_layers_used": derived_risk_layers_used,
+        "error": None,
+    }
+    return trace_event
+
+def make_trace_event_operate(
+        start_time: float,
+        end_time: float,
+        started_at: str,
+        ended_at: str,
+        state: dict,
+        operation: str | None,
+        min_severity: int | None,
+        result: dict | None,
+        num: int | float | None,
+        error: str | None,
+) -> dict:
+    """Build one operate step trace event. operate() never calls an LLM.
+
+    `result` is the raw store.py dict (None on failure); 
+    `num` is operate()'s own already-computed result.get("length_km", result.get("count")).
+    `min_severity` is passed in rather than read from `result` here. 
+    on success it's `result.get("min_severity")`; 
+    on failure there's no `result` to read it from, so the caller falls back to 
+    `op_args` instead - passing None when the model never explicitly supplied one.
+    """
+    state = state or {}
+
+    if result is not None:
+        result_out = {"method": result.get("method"), "value": num,
+                      "by_severity": result.get("by_severity"), "source": result.get("source")}
+        summary = f"Computed {result.get('method')} = {num}"
+        why = "This is the only step that produces a number — a deterministic overlay, no model involved."
+    else:
+        result_out = None
+        summary = f"Couldn't compute {operation}" if operation else "Couldn't compute the result"
+        why = f"The overlay failed: {error}"
+
+    trace_event = {
+        "node": "operate",
+        "step": len(state.get("events", [])),
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "duration_ms": round((end_time - start_time)*1000, 1),
+        "summary": summary,
+        "why": why,
+        "operation": operation,
+        "min_severity": min_severity,
+        "result": result_out,
+        "error": error,
+    }
+    return trace_event
+
+def _is_answer_grounded(result: dict, answer: str):
+    """Check if the LLM answer is grounded in the calculated data
+
+    Returns:
+        bool: Whether the answer is grounded
+    """
+    grounded = True
+    if result is not None:
+        number = result.get("count", result.get("length_km", ""))
+        grounded = str(number) in answer.replace(",", "")
+    return grounded
+
+def make_trace_event_finalize(
+        start_time: float,
+        end_time: float,
+        started_at: str,
+        ended_at: str,
+        state: dict,
+        config: RunnableConfig,
+        messages: list[dict] | None,
+        answer: str,
+        resp,
+        error: str | None,
+) -> dict:
+    """Build one finalize step event. kind is "error_echo" if error is set, else "llm_phrase"."""
+    state = state or {}
+    kind = "error_echo" if error is not None else "llm_phrase"
+    
+    if kind == "error_echo":
+        llm_provider = model_used = tokens = None
+        summary = "Returned the refusal/failure message as-is"
+        why = "No model call - the message is already final."
+    else:
+        settings = get_settings()
+        configurable = config["configurable"]
+        llm_provider = configurable["provider"]
+        model_used = configurable["model"]
+        tokens = _usage(resp, price_in=settings.price_in, price_out=settings.price_out)
+        summary = "Phrased the final answer from the computed result"
+        why = "The model only phrases the result; it doesn't compute the number."
+    messages_out = _transcript(messages)
+
+    trace_event = {
+        "node": "finalize",
+        "step": len(state.get("events", [])),
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "duration_ms": round((end_time - start_time)*1000, 1),
+        "summary": summary,
+        "why": why,
+        "kind": kind,
+        "error": error,
+        "llm_provider": llm_provider,
+        "model_used": model_used,
+        "tokens": tokens,
+        "llm_response": answer,
+        "messages": messages_out,
+        "grounded": _is_answer_grounded(state.get("result"), answer=answer) if not error else None,
+    }
+    return trace_event
+
+def make_trace_event_resolve(
+        start_time: float,
+        end_time: float,
+        started_at: str,
+        ended_at: str,
+        state: dict,
+        hazard: str | None,
+        options: list[dict] | None,
+        byod_passthrough: bool | None,
+        awaiting_choice_set: bool,
+        question_asked: str | None,
+        error: str | None,
+) -> dict:
+    """Build one resolve step event.
+
+    hazard: logical hazard name, None only on passthrough (no hazard layer, or a BYOD one).
+    options: the [{key, layer, label}] choices offered; None on passthrough.
+    byod_passthrough: True/False on passthrough (was it a BYOD layer, or just no hazard at
+    all); None on every other branch, where it doesn't apply.
+    awaiting_choice_set: True only when the graph paused here for the user's reply.
+
+    decision is derived, not passed in:
+      hazard is None       -> "passthrough_no_hazard"
+      error is set         -> "no_data"
+      awaiting_choice_set  -> "asked"
+      else                 -> "auto_single"
+    """
+    state = state or {}
+
+    if hazard is None:
+        decision = "passthrough_no_hazard"
+        summary = "Using your uploaded layer directly" if byod_passthrough else "No hazard choice needed"
+        why = ("A user-uploaded layer has one meaning, so there's nothing to ask." if byod_passthrough
+               else "This question reads no hazard raster, so there's nothing to choose.")
+    elif error is not None:
+        decision = "no_data"
+        summary = f"No data to assess {hazard} — refusing"
+        why = "Neither an exposure nor a risk layer is available for this hazard."
+    elif awaiting_choice_set:
+        decision = "asked"
+        summary = f"Asked how to answer {hazard}"
+        why = "Exposure vs risk is never guessed — the agent pauses and asks."
+    else:
+        decision = "auto_single"
+        summary = f"Only one way to answer {hazard} — used it without asking"
+        why = "Just one data path exists, so there's nothing to choose."
+
+    trace_event = {
+        "node": "resolve",
+        "step": len(state.get("events", [])),
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "duration_ms": round((end_time - start_time)*1000, 1),
+        "summary": summary,
+        "why": why,
+        "decision": decision,
+        "hazard": hazard,
+        "options": options,
+        "byod_passthrough": byod_passthrough,
+        "awaiting_choice_set": awaiting_choice_set,
+        "question_asked": question_asked,
+        "error": error,
+    }
+    return trace_event
+
+def make_trace_event_fetch(
+        start_time: float,
+        end_time: float,
+        started_at: str,
+        ended_at: str,
+        state: dict,
+        mode: str,
+        aoi: dict | None,
+        layers_fetched: list[str] | None,
+        rasters_clipped: list[str],
+        l2_computed: list[str],
+        drained_io_events: list[dict],
+        error: str | None,
+) -> dict:
+    """Build one fetch step event. drained_io_events is the raw list from the IOCollector
+    installed around this turn's ingest calls, split here by `kind` into three buckets:
+
+      api_calls - a third party was contacted (Nominatim, Overpass).
+      cache     - a local artifact was reused or built (AOI boundary, OSM layer, hazard
+                  clip). Emitted on hit AND miss, so `was_cached` is the answer to "was
+                  this fresh?" and an absent event means the check never happened.
+      downloads - bytes actually pulled from a remote store (Google Drive).
+
+    Clipping a raster is a local derivation, not a download, and used to land in
+    `downloads` only because the split was `kind != "api"`.
+
+    aoi is the RAW ensure_aoi bundle (or None on failure) — this function derives the
+    compact {name, area_km2, how} view itself via _summarize_aoi, same as every other
+    builder derives its own summary fields internally.
+    """
+    state = state or {}
+    aoi_view = _summarize_aoi(aoi)
+    api_calls = [e for e in drained_io_events if e.get("kind") == "api"]
+    cache = [e for e in drained_io_events if e.get("kind") == "cache"]
+    downloads = [e for e in drained_io_events if e.get("kind") == "download"]
+
+    if error is not None:
+        summary = f"Couldn't fetch the data: {error}"
+        why = "The AOI/raster fetch failed, so nothing downstream can compute a number."
+    else:
+        summary = f"Fetched {aoi_view.get('name')} ({len(rasters_clipped) + len(l2_computed)} raster(s))"
+        why = "Acquires the OSM assets and clips the hazard/risk rasters this question needs; no LLM calls."
+
+    trace_event = {
+        "node": "fetch",
+        "step": len(state.get("events", [])),
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "duration_ms": round((end_time - start_time)*1000, 1),
+        "summary": summary,
+        "why": why,
+        "mode": mode,
+        "aoi": aoi_view,
+        "layers_fetched": layers_fetched,
+        "rasters_clipped": rasters_clipped,
+        "l2_computed": l2_computed,
+        "api_calls": api_calls,
+        "cache": cache,
+        "downloads": downloads,
+        "error": error,
+    }
+    return trace_event
+
+def build_trace_envelope(events: list[dict], thread_id: str, trace_id: str,
+                         legend: dict | None = None) -> dict:
+    """Build the per-turn trace envelope from this
+    turn's step events. total_duration sums every step's duration. total_tokens sums only
+    steps that carry a real tokens value (resolve/operate never produce one; finalize's
+    error_echo branch sets it to None) — skipped, not coerced to zero.
+
+    `step` is renumbered here, and this is the authoritative value. 
+    Renumbering by position sets the correct step value for
+    every node at once, and stays correct whichever node runs first.
+    """
+    events = [{**event, "step": index} for index, event in enumerate(events)]
+    total_duration = round(sum(e["duration_ms"] for e in events), 1)
+    token_steps = [e["tokens"] for e in events if e.get("tokens")]
+    # Skip, never coerce: a step with no cost is unpriced, not free. If nothing was priced
+    # the total is None too, rather than a $0.00 that looks like a measurement.
+    costs = [t["cost"] for t in token_steps if t.get("cost") is not None]
+    total_tokens = {
+        "in": sum(t["in"] for t in token_steps),
+        "out": sum(t["out"] for t in token_steps),
+        "total": sum(t["total"] for t in token_steps),
+        "cost": sum(costs) if costs else None,
+    }
+    return {
+        "thread_id": thread_id,
+        "trace_id": trace_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "total_duration": total_duration,
+        "total_tokens": total_tokens,
+        "legend": legend,
+        "steps": events,
+    }
+
+def write_trace_envelope(envelope: dict) -> None:
+    """Persist the per-turn trace envelope to disk — a second, richer file alongside
+    geo/trace.py's record() (the old per-query mechanism). 
+    Named by trace_id, not a timestamp, so two turns completing in the
+    same millisecond can't collide."""
+    settings = get_settings()
+    settings.traces_dir.mkdir(parents=True, exist_ok=True)
+    path = settings.traces_dir / f"{envelope['trace_id']}.envelope.json"
+    path.write_text(json.dumps(envelope, indent=2))
