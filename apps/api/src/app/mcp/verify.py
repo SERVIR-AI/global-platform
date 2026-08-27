@@ -24,9 +24,19 @@ def groundedness(draft: str, pack_id: str) -> dict:
                 "available_packs": packs.available()}
     # Sections come from the PACK, not a food-security import — so a second domain
     # pack is gated against ITS OWN contract, not this one's.
-    # No fallback to any domain's constant: assemble persists the contract on the
-    # pack, and a pack without one is a storage bug worth surfacing, not papering.
-    sections = pack.get("required_sections") or []
+    # ABSENT contract (legacy pack, pre-2026-08-27): those were all food-security
+    # by construction — gate against FS sections and SAY so; review found the
+    # falsy-collapse version reported required_sections=[] while blocking on the
+    # FS headers: contradictory guidance a drafter can loop on forever. An EMPTY
+    # contract is a storage bug: decline, never gate against another domain's
+    # headers.
+    sections = pack.get("required_sections")
+    if sections is None:
+        sections = list(synthesis.SECTIONS)
+    elif not sections:
+        return {"status": "declined",
+                "note": (f"pack {pack_id!r} carries an EMPTY required_sections — a "
+                         "storage bug, not a gateable contract. Re-assemble the pack.")}
     citations = pack.get("citations", [])
     r = synthesis.check_grounded(draft, citations, sections=sections)
     # Store the FULL verified text + its hash: a receipt that can't show what

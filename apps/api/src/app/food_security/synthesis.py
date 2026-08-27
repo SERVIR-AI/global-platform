@@ -368,7 +368,7 @@ def check_grounded(draft, citations, sections=None):
     valid = {c["n"] for c in citations}
     used = _cited_numbers(draft)
     phantom = sorted(used - valid)
-    missing_sections = [s for s in (sections or SECTIONS) if s not in draft]
+    missing_sections = [s for s in (SECTIONS if sections is None else sections) if s not in draft]
     wrote_sources = "## Sources" in draft
     paragraphs = []                    # header lines don't shield the prose under them
     for block in draft.split("\n\n"):

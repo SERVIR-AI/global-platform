@@ -56,6 +56,14 @@ def assemble(country: str | None = None, crop: str | None = None,
         # GOVERNED decline, not a transport error — rule 2, at the dispatch seam
         # so it holds for every pack.
         return {"status": "declined", "note": str(exc)}
+    except (OSError, RuntimeError) as exc:
+        # Upstream infrastructure failing mid-gather (geocoder down, mirrors
+        # exhausted, raster unreadable) must also decline with the cause. OSError
+        # covers requests' connection errors and rasterio's IO errors alike.
+        return {"status": "declined",
+                "note": f"evidence gathering failed: {type(exc).__name__}: {exc}. "
+                        "This is an upstream/infrastructure failure, not a coverage "
+                        "gap — retrying later may succeed."}
     except CorpusError as exc:
         return {"status": "declined", "note": str(exc)}
     pack_body = {"pack": pack_id_name, "target": target, "focus": focus,
@@ -74,8 +82,15 @@ def assemble(country: str | None = None, crop: str | None = None,
         pack_body["viz"] = stats["viz"]
         pack_body["stats"].pop("viz", None)
     pack_id = store.save_pack(pack_body)
+    # The viz payload is PERSISTED for the embed resolver, never returned inline:
+    # 850 KB of hazard polygons in a tool result is 850 KB in the consumer LLM's
+    # context, paying tokens to carry pixels it cannot see (adversarial review).
+    response = {k: v for k, v in pack_body.items() if k != "viz"}
+    if "viz" in pack_body:
+        response["viz_recorded"] = ("map payload recorded with the pack — rendered "
+                                    "by the hazard_map embed for this receipt")
     return {"status": "ok", "pack_id": pack_id,
             "answer_status": loop.PACK_IS_NOT_AN_ANSWER,
             "next_step": loop.after_assemble(pack_id, pack_body["required_sections"]),
-            **pack_body,
+            **response,
             "your_next_output": loop.YOUR_NEXT_OUTPUT.format(pack_id=pack_id)}

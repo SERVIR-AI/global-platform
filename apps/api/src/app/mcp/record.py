@@ -19,6 +19,33 @@ def _abs(path: str) -> str:
     return ui.tokens()["product"]["resolver"]["base"].rstrip("/") + path
 
 
+def _render_with(pack: dict, rid: str) -> dict:
+    """Which platform components display THIS receipt — dispatched on the pack.
+    Review: the hardcoded FS block pointed risk receipts at the provenance graph
+    (food-security furniture lanes) and never mentioned the map recorded on the
+    pack precisely to be its replay visual."""
+    out = {
+        "verdict": {"tool": "ui_embed", "component": "groundedness_strip",
+                    "receipt_id": rid},
+        "sources": {"tool": "ui_component", "component": "source_card",
+                    "note": "one card per numbered source; copy-owned recipe"},
+        "note": ("Do not hand-roll a chart, graph or map for this. Call ui_catalog "
+                 "to see every component, then ui_embed for anything showing a "
+                 "verdict and ui_component for anything you own outright."),
+    }
+    if pack.get("viz") is not None:
+        out["map"] = {"tool": "ui_embed", "component": "hazard_map",
+                      "receipt_id": rid,
+                      "note": "the recorded AOI, assets and hazard layer for this receipt"}
+    if pack.get("pack", "food-security") == "food-security":
+        out["provenance"] = {"tool": "ui_embed", "component": "provenance_graph",
+                             "receipt_id": rid}
+    else:
+        out["provenance_note"] = ("provenance_graph's lanes are food-security-"
+                                  "shaped and are not offered for this pack yet")
+    return out
+
+
 def _default_question(pack: dict) -> str:
     t = pack.get("target") or {}
     if t:
@@ -177,15 +204,5 @@ def record(pack_id: str | None = None, report_id: str | None = None,
             # receipt_bound and delivered as an EMBED, so it re-resolves its state
             # here at view time — which is the only way a verdict can be displayed
             # without being frozen into the page (rule 5).
-            "render_with": {
-                "provenance": {"tool": "ui_embed", "component": "provenance_graph",
-                               "receipt_id": rid},
-                "verdict": {"tool": "ui_embed", "component": "groundedness_strip",
-                            "receipt_id": rid},
-                "sources": {"tool": "ui_component", "component": "source_card",
-                            "note": "one card per numbered source; copy-owned recipe"},
-                "note": ("Do not hand-roll a chart or graph for this. Call ui_catalog to "
-                         "see every component, then ui_embed for anything showing a "
-                         "verdict and ui_component for anything you own outright."),
-            },
+            "render_with": _render_with(pack, rid),
             **receipt}

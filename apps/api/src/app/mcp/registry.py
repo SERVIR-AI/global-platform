@@ -319,7 +319,20 @@ def pack_manifest(pack_id: str = "food-security") -> dict:
         if spec is None:
             return {"id": pack_id, "error": "unknown pack",
                     "available": packs.available()}
-        return spec["manifest"]()
+        builder = spec.get("manifest")
+        if builder is None:
+            return {"id": pack_id,
+                    "display_name": spec.get("display_name", pack_id),
+                    "version": spec.get("version", "v0"),
+                    "target": spec.get("target_doc", {}),
+                    "note": "this pack registers no manifest — target params only"}
+        try:
+            return builder()
+        except Exception as exc:   # same discipline as _corpus_summary: the map
+            return {"id": pack_id,  # never crashes on one pack's bad day
+                    "display_name": spec.get("display_name", pack_id),
+                    "status": "manifest unavailable",
+                    "reason": f"{type(exc).__name__}: {exc}"}
     from ..food_security import synthesis  # local: avoids importing llm deps at module load
     corpus = _corpus_summary()
     gaps = [
