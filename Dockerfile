@@ -46,6 +46,10 @@ COPY apps/api/src ./apps/api/src
 COPY conf ./conf
 COPY cache/rag ./cache/rag
 COPY deploy ./deploy
+# The platform SERVES trace-emit/trace-visualize as MCP resources — without this
+# the deployed server declines them as not installed.
+COPY .claude/skills/trace-emit ./.claude/skills/trace-emit
+COPY .claude/skills/trace-visualize ./.claude/skills/trace-visualize
 COPY --from=web /w/dist ./web
 # Some hosts (Hugging Face Spaces) run the container as a non-root uid, so the
 # receipts dir has to be writable by whoever ends up owning the process.
