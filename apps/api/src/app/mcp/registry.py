@@ -420,6 +420,11 @@ def _design_language() -> dict:
                          "served. It is a maintained copy, not the live design file.")}
 
 
+def _skills_available() -> list[str]:
+    from . import skills
+    return skills.available()
+
+
 def capabilities(available_tools=None, available_prompts=None,
                  available_resources=None) -> dict:
     """The honest platform map. Bone status + the tool/prompt/resource lists are
@@ -433,6 +438,7 @@ def capabilities(available_tools=None, available_prompts=None,
                    "transport": os.environ.get("GRP_MCP_TRANSPORT", "stdio")},
         "contract": CONTRACT,
         "usage": {"instructions": "delivered to the LLM at connect (initialize)",
+                  "skills": {n: f"servirplatform://skill/{n}" for n in _skills_available()},
                   "prompts": prompts,  # user-selectable in the host menu (build vs run)
                   "resources": resources,  # human-readable guides (e.g. servirplatform://how-to-use)
                   "modes": ["build-time: build a reusable app on the tools",

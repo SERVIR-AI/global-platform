@@ -67,6 +67,14 @@ component for each part. Reach for those before hand-rolling a chart, a graph or
 colour scheme; what you invent will not match, and a verdict you draw yourself \
 attests nothing.
 
+SHIP OBSERVABILITY WITH ANYTHING YOU BUILD. A product built on this platform \
+must emit an execution trace: every response it produces carries a structured \
+record of what ran — steps, timings, upstream calls, LLM usage and cost, and what \
+each step decided. Read `servirplatform://skill/trace-emit` BEFORE writing the \
+backend (it is a complete, portable guide with worked examples) and \
+`servirplatform://skill/trace-visualize` for rendering the trace. An answer whose \
+execution cannot be inspected is only half governed.
+
 NEVER PASTE IFRAME MARKUP INTO A CHAT REPLY. Chat hosts block external frames \
 (CSP frame-src 'self'), so it renders as a blank white box. In hosts that render \
 MCP Apps the evidence panel appears beside the tool result by itself; ui_embed's \
@@ -344,6 +352,25 @@ def _register_pack_manifests() -> None:
 _register_pack_manifests()
 
 
+def _register_skills() -> None:
+    """servirplatform://skill/<name> — the build disciplines a consumer's agent
+    reads before writing code. Registered even when the files are absent so the
+    resource DECLINES with a reason instead of vanishing (rule 2, for guidance)."""
+    from . import skills as _skills
+    for name in _skills.SERVED:
+        def _mk(name: str = name):
+            def skill() -> str:
+                return _skills.bundle(name)
+            skill.__name__ = "skill_" + name.replace("-", "_")
+            skill.__doc__ = f"The {name} skill, bundled whole (SKILL.md + references + assets)."
+            return skill
+        mcp.resource(f"servirplatform://skill/{name}",
+                     mime_type="text/markdown")(_mk())
+
+
+_register_skills()
+
+
 # MCP Apps (Jan 2026): a host advertising `io.modelcontextprotocol/ui` renders this
 # in a sandboxed iframe beside the tool result. Claude Desktop advertises exactly
 # that in its initialize handshake, so this does NOT depend on the model deciding to
@@ -400,8 +427,12 @@ def build_a_tool(goal: str = "a food-security bulletin generator") -> str:
             "canonical loop: call platform_capabilities first (scope honestly, surface "
             "declared gaps), assemble_pack(country, crop), have the tool's own LLM draft "
             "a brief from the pack citing [n] in the pack's required_sections, then "
-            "verify_groundedness(draft, pack_id) and publish ONLY if it passes. Show me "
-            "the finished artifact and prove it runs.")
+            "verify_groundedness(draft, pack_id) and publish ONLY if it passes. "
+            "INSTRUMENT IT: read servirplatform://skill/trace-emit first and make every "
+            "response the tool produces carry an execution trace (steps, timings, "
+            "upstream calls, LLM usage); surface the trace per "
+            "servirplatform://skill/trace-visualize. Show me the finished artifact and "
+            "prove it runs — including one real trace.")
 
 
 @mcp.prompt()
