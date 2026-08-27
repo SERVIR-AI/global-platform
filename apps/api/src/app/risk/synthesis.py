@@ -138,10 +138,11 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
         passport_bits.append(
             f"Declared contract: dtype {contract.get('dtype')}, valid "
             f"{contract.get('valid_min')}-{contract.get('valid_max')} {contract.get('units')}.")
-    if obs:
+    if obs and obs.get("sampled_min") is not None:
         passport_bits.append(
-            f"Observed on this AOI clip: dtype {obs.get('dtype')}, "
-            f"range {obs.get('min')}-{obs.get('max')} (sampled).")
+            f"Observed on this AOI clip: dtype {obs.get('dtype')}, range "
+            f"{obs['sampled_min']:g}-{obs['sampled_max']:g} across "
+            f"{obs.get('sampled_distinct')} distinct values (sampled).")
     passport_bits.append("Legend: "
                          + "; ".join(f"{k}={v}" for k, v in sorted(legend.items())))
     citations.append({
