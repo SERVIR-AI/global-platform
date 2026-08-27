@@ -162,10 +162,16 @@ const esc = s => String(s ?? "").replace(/[<>&"']/g, c => (
 //          call server tools when hostCapabilities.serverTools is set). Live
 //          points are NOT attested by the receipt, and every live view says so.
 const _cs = {};
+// Keyed by SERIES IDENTITY, not chart index: review showed a repeated
+// tool-result could put a categorical series at an index whose previous
+// occupant had live history loaded — and the bars drew the old dataset's
+// points with no affordance to escape.
 function chartState(i) {
-  if (!_cs[i]) _cs[i] = { src: "pack", range: 0, sel: -1, bands: true,
-                          table: false, hist: null, loading: false };
-  return _cs[i];
+  const sr = seriesList()[i] || {};
+  const key = sr.id || ("idx" + i);
+  if (!_cs[key]) _cs[key] = { src: "pack", range: 0, sel: -1, bands: true,
+                              table: false, hist: null, loading: false };
+  return _cs[key];
 }
 let _ov = false;                        // overlay: both indices on one axis
 let _ana = null;                        // analogue events cache
@@ -255,13 +261,17 @@ function chartSVG(sr, i, st) {
   let body;
   if (cat) {
     // Categorical: bars, one per class — a line through classes implies an
-    // ordering trend that does not exist.
-    const bw = (W - PAD * 2) / pts.length * 0.62;
+    // ordering trend that does not exist. Bars use SLOT centers, not the
+    // line-chart point scale: with 5 classes that scale put half of the first
+    // and last bars outside the plot (review, verified numerically).
+    const slot = (W - PAD * 2) / pts.length;
+    const xc = k => PAD + (k + 0.5) * slot;
+    const bw = slot * 0.62;
     body = pts.map((p, k) => `
-      <rect x="${(x(k) - bw / 2).toFixed(1)}" y="${y(p.v).toFixed(1)}"
+      <rect x="${(xc(k) - bw / 2).toFixed(1)}" y="${y(p.v).toFixed(1)}"
         width="${bw.toFixed(1)}" height="${(y(0) - y(p.v)).toFixed(1)}"
         fill="currentColor" opacity="${k === sel ? .95 : .55}"/>
-      <text x="${x(k).toFixed(1)}" y="${(y(p.v) - 4).toFixed(1)}" font-size="9"
+      <text x="${xc(k).toFixed(1)}" y="${(y(p.v) - 4).toFixed(1)}" font-size="9"
         text-anchor="middle" fill="currentColor">${esc(p.v)}</text>`).join("");
   } else {
     const line = pts.map((p, k) => (k ? "L" : "M") + x(k).toFixed(1) + "," + y(p.v).toFixed(1)).join("");
@@ -284,9 +294,11 @@ function chartSVG(sr, i, st) {
          role="img" aria-label="${esc(sr.title || sr.id)}" style="cursor:crosshair">
       ${bandMarks}
       ${body}
-      <text x="${PAD}" y="${H - 6}" font-size="8" fill="currentColor"
+      <text x="${cat ? PAD + (W - PAD * 2) / pts.length / 2 : PAD}" y="${H - 6}"
+        font-size="8" fill="currentColor" ${cat ? 'text-anchor="middle"' : ""}
         opacity=".55">${esc(pts[0].t)}</text>
-      <text x="${W - PAD}" y="${H - 6}" font-size="8" text-anchor="end"
+      <text x="${cat ? W - PAD - (W - PAD * 2) / pts.length / 2 : W - PAD}" y="${H - 6}"
+        font-size="8" text-anchor="${cat ? "middle" : "end"}"
         fill="currentColor" opacity=".55">${esc(pts[pts.length - 1].t)}</text>
     </svg>
     <div class="readout"><b>${esc(sp.t)}</b> &nbsp;${esc(sp.v)} ${esc(sp.c || "")}${dtxt}
@@ -462,7 +474,9 @@ function wireCharts() {
         const r = sv.getBoundingClientRect();
         xv = (e.clientX - r.left) / r.width * W;
       }
-      const k = Math.round((xv - PAD) / (W - 2 * PAD) * (pts.length - 1));
+      const k = sr.categorical
+        ? Math.floor((xv - PAD) / (W - 2 * PAD) * pts.length)
+        : Math.round((xv - PAD) / (W - 2 * PAD) * (pts.length - 1));
       st.sel = Math.max(0, Math.min(pts.length - 1, k));
       redrawChart(i);
     };
