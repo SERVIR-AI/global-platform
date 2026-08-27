@@ -208,11 +208,15 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     return citations, gaps, stats
 
 
-def _bounded_viz(v: dict, tol: float = 5e-4, geojson_cap: int = 400_000) -> dict:
+def _bounded_viz(v: dict, tol: float = 2e-3, geojson_cap: int = 400_000) -> dict:
     """Keep the recorded map payload proportionate: simplify the vectorized hazard
     polygons (pixel-edge unions at full float precision measured 842 KB for one
     town), and if still over the cap drop the geojson — the raster_url remains and
-    the embed renders from it. Persisted state should cost what it is worth."""
+    the embed renders from it. Persisted state should cost what it is worth.
+
+    Tolerance is ~2 raster pixels (3 arcsec pixels = 8.3e-4 deg): the first pass
+    used 5e-4 — SMALLER than one pixel — which simplified nothing and silently
+    dropped every real town's polygons over the cap."""
     import json as _json
 
     from shapely.geometry import mapping, shape as _shape

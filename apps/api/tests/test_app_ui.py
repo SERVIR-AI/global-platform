@@ -304,5 +304,7 @@ def test_a_blocked_publish_renders_the_refusal_not_loading_forever(log):
     log("CHECK", "blocked/declined route to renderRefusal before the sources guard")
     assert "renderRefusal" in html
     assert 'd.status === "blocked" || d.status === "declined"' in html
-    assert "Groundedness gate: draft blocked" in html
-    assert "No receipt was minted" in html
+    # the refusal is deliberately QUIET now (user: mid-retry blocks are workflow
+    # noise) — one line, details collapsed, but still shown, never suppressed
+    assert "Draft blocked by the groundedness gate" in html
+    assert "what failed" in html

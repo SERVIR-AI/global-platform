@@ -532,17 +532,73 @@ function expand(){
 // "loading…" forever, as this did) hides exactly what must be shown.
 function renderRefusal(d){
   const fails = d.failures || [];
-  const secs = d.required_sections || [];
   document.getElementById("root").innerHTML = `
-    <h2>${d.status === "blocked" ? "Groundedness gate: draft blocked" : "Declined"}</h2>
-    <div class="livewarn">${esc(d.note || "The draft did not pass the evidence gate.")}</div>
-    ${fails.length ? `<div class="sub" style="margin-top:.5rem">What failed:</div>
-      ${fails.map(f => `<div class="gap">${esc(f)}</div>`).join("")}` : ""}
-    ${secs.length ? `<div class="meta" style="margin-top:.5rem">Required sections:
-      ${secs.map(esc).join(" · ")}</div>` : ""}
-    <div class="foot">No receipt was minted and nothing was published. If the
-    assistant is revising, a corrected result will appear as a new panel below.</div>`;
+    <div class="livewarn">${d.status === "blocked"
+      ? "Draft blocked by the groundedness gate — the assistant is revising; the published result will appear below."
+      : esc(d.note || "Declined.")}
+      ${fails.length ? `<details style="margin-top:.3rem"><summary style="cursor:pointer">what failed (${fails.length})</summary>
+        ${fails.map(f => `<div class="meta" style="margin-top:.25rem">${esc(f)}</div>`).join("")}
+      </details>` : ""}
+    </div>`;
+  const det = document.querySelector("details");
+  if (det) det.addEventListener("toggle", reportSize);
   reportSize();
+}
+// The recorded hazard map, drawn as inline SVG by the panel itself. No tiles, no
+// map library, no external origin — the sandbox CSP forbids them all — just the
+// pack's recorded geometry: hazard classes in legend colours, the AOI outline,
+// asset dots. The full-fidelity live map remains the hazard_map embed; this is
+// the recorded snapshot, at panel scale, present the moment the receipt exists.
+function geomPaths(geom, prj) {
+  const rings = [];
+  const walk = (coords, depth) => {
+    if (depth === 0) { rings.push(coords); return; }
+    for (const c of coords) walk(c, depth - 1);
+  };
+  if (geom.type === "Polygon") walk(geom.coordinates, 1);
+  else if (geom.type === "MultiPolygon") walk(geom.coordinates, 2);
+  else return "";
+  return rings.map(ring =>
+    ring.map((pt, i) => (i ? "L" : "M") + prj(pt[0], pt[1])).join("") + "Z").join(" ");
+}
+function mapCard(m) {
+  const b = m.bounds;
+  if (!b || b.length !== 4) return "";
+  const W = 560, PAD = 10;
+  const spanX = Math.max(b[2] - b[0], 1e-6), spanY = Math.max(b[3] - b[1], 1e-6);
+  const H = Math.max(170, Math.min(300, Math.round((W - PAD * 2) * spanY / spanX) + PAD * 2));
+  const prj = (lon, lat) =>
+    (PAD + (lon - b[0]) / spanX * (W - PAD * 2)).toFixed(1) + "," +
+    (PAD + (b[3] - lat) / spanY * (H - PAD * 2)).toFixed(1);
+  const legend = m.legend || {};
+  const color = cls => (legend[cls] || legend[String(cls)] || {}).color || "currentColor";
+  const hz = ((m.hazard_geojson || {}).features || [])
+    .slice().sort((a, c) => (a.properties?.severity || 0) - (c.properties?.severity || 0))
+    .map(f => `<path d="${geomPaths(f.geometry, prj)}" fill="${esc(color(f.properties?.severity))}"
+        fill-opacity=".55" fill-rule="evenodd" stroke="none"/>`).join("");
+  const aoi = m.aoi ? `<path d="${geomPaths(m.aoi.geometry || m.aoi, prj)}"
+      fill="none" stroke="currentColor" stroke-width="1.4" opacity=".8"/>` : "";
+  const assets = ((m.assets || {}).features || []).map(f => {
+    const g = f.geometry || {};
+    if (g.type !== "Point") return "";
+    const xy = prj(g.coordinates[0], g.coordinates[1]).split(",");
+    const sev = f.properties?.severity || 0;
+    return `<circle cx="${xy[0]}" cy="${xy[1]}" r="3.5"
+        fill="${sev > 0 ? esc(color(sev)) : "#8a8a86"}"
+        stroke="currentColor" stroke-width=".8"/>`;
+  }).join("");
+  const chips = Object.keys(legend).sort().map(k =>
+    `<span class="pill" style="border-color:${esc(legend[k].color || "")};
+       color:${esc(legend[k].color || "")}">${esc(k)}: ${esc(legend[k].label || "")}</span>`).join(" ");
+  return `<div class="card chart">
+    <div class="meta"><b>${esc(m.place || "Area")}</b> · ${esc(String(m.hazard || "").replace("hazard_", ""))} hazard
+      ${m.metric && m.metric.value != null ? " · " + esc(m.metric.value) + " exposed" : ""}</div>
+    <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img"
+         aria-label="recorded hazard map">${hz}${aoi}${assets}</svg>
+    <div class="stats">${chips}</div>
+    <div class="stats">recorded at pack time — the live, zoomable map is the hazard_map
+      embed this receipt's render_with names</div>
+  </div>`;
 }
 function render(d){
   _data = d;
@@ -558,6 +614,7 @@ function render(d){
     <div class="sub">${srcs.length} sources · ${pulled.size} pulled live${computed.size?` · ${computed.size} computed`:""} · ${gaps.length} declared gap(s)</div>
     ${globalBar(series)}
     ${_ov && series.filter(sr => !sr.categorical).length > 1 ? overlayCard(series) : ""}
+    ${ins.map ? mapCard(ins.map) : ""}
     ${shown.map((sr, i) => chart(sr, i)).join("")}
     <div id="ana">${anaHTML()}</div>
     ${hidden.map(sr => `<div class="meta oneline"><b>${esc(sr.title||sr.id)}</b> ·

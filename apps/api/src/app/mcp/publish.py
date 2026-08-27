@@ -36,9 +36,67 @@ def _insight(pack_id: str, draft: str) -> dict:
     context = {c["kind"]: c.get("text") for c in pack.get("citations", [])
                if c.get("kind") in ("conditions", "calendar")}
     return {"brief": draft, "series": series, "context": context,
+            **({"map": _panel_map(pack)} if _panel_map(pack) else {}),
             "pack": pack.get("pack"), "target": pack.get("target"),
             **({"country": pack.get("country"), "crop": pack.get("crop")}
                if pack.get("country") or pack.get("crop") else {})}
+
+
+def _panel_map(pack: dict) -> dict | None:
+    """A compact copy of the recorded viz, small enough to ride the tool result —
+    so the MCP App can DRAW the map inline (SVG, no external origins, which the
+    sandbox CSP forbids). The full-fidelity map stays the hazard_map embed; this
+    is the recorded snapshot at panel scale. Capped: the panel result reaches the
+    consumer LLM's context, and pixels must not cost more tokens than the words."""
+    import json as _json
+    viz = pack.get("viz")
+    if not viz:
+        return None
+    hl = viz.get("hazard_layer") or {}
+    m = {"place": viz.get("place"), "hazard": viz.get("hazard"),
+         "bounds": viz.get("bounds"), "legend": viz.get("legend"),
+         "aoi": _coarse(viz.get("aoi"), 2e-3),
+         "hazard_geojson": _coarse(hl.get("geojson"), 1e-2),
+         "assets": viz.get("features"), "metric": viz.get("metric")}
+    if len(_json.dumps(m)) > 34_000:
+        m["hazard_geojson"] = None            # keep AOI+assets; drop the heavy layer
+        if len(_json.dumps(m)) > 34_000:
+            return None
+    return m
+
+
+def _coarse(gj, tol: float):
+    """Panel-scale geometry: ~500 px wide schematic needs nothing finer than
+    ~1 km. Embed-grade detail stays on the pack; this copy is for an SVG."""
+    if not gj:
+        return gj
+    try:
+        from shapely.geometry import mapping, shape
+
+        def one(feature):
+            g = shape(feature["geometry"])
+            # The size is RINGS, not vertices: a hazard class is thousands of
+            # pixel islands, and simplify() keeps every one. A panel schematic
+            # keeps only islands you could see at ~500 px wide.
+            if g.geom_type == "MultiPolygon":
+                parts = sorted(g.geoms, key=lambda q: q.area, reverse=True)
+                keep = [q for q in parts if q.area >= tol * tol] or parts[:1]
+                from shapely.geometry import MultiPolygon
+                g = MultiPolygon(keep[:40])
+            g = g.simplify(tol, preserve_topology=True)
+            geom = mapping(g)
+            def r(x):
+                return [r(i) for i in x] if isinstance(x, (list, tuple)) else (
+                    round(x, 3) if isinstance(x, float) else x)
+            return {**feature, "geometry": {**geom, "coordinates": r(geom["coordinates"])}}
+
+        if gj.get("type") == "FeatureCollection":
+            return {**gj, "features": [one(f) for f in gj.get("features", [])]}
+        if gj.get("type") == "Feature":
+            return one(gj)
+    except Exception:
+        return gj
+    return gj
 
 
 def answer(pack_id: str, draft: str, question: str | None = None) -> dict:
