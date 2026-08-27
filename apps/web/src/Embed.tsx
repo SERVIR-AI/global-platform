@@ -6,7 +6,7 @@
  * resolver can't be reached the embed says so rather than showing anything.
  * This is the difference between a live verdict and one frozen into markup.
  */
-import { useEffect, useState, type FC } from 'react';
+import { Component, useEffect, useState, type FC, type ReactNode } from 'react';
 import { Graph } from '@/components/Provenance';
 import EmbedMap, { type VizPayload } from '@/components/EmbedMap';
 import { parseProvenance, type ProvenanceData } from '@/lib/provenance';
@@ -37,6 +37,20 @@ const loadByReceipt = async (receiptId: string): Promise<ProvenanceData> => {
   );
 };
 
+/** Any render/effect crash inside an embed must surface as the platform's
+ * fail-closed voice — a blank iframe reads as broken chrome, not caution. */
+class FailClosed extends Component<{ children: ReactNode }, { err: string | null }> {
+  state = { err: null as string | null };
+  static getDerivedStateFromError(e: unknown) {
+    return { err: String(e) };
+  }
+  render() {
+    if (this.state.err)
+      return <Notice title="unverified by this platform" detail={`render failed: ${this.state.err}`} />;
+    return this.props.children;
+  }
+}
+
 const Notice: FC<{ title: string; detail?: string }> = ({ title, detail }) => (
   <div className="p-4 text-sm">
     <div className="font-semibold">{title}</div>
@@ -44,12 +58,28 @@ const Notice: FC<{ title: string; detail?: string }> = ({ title, detail }) => (
   </div>
 );
 
-/** The viz payload a risk receipt's pack carries, by receipt id. */
+/** The viz payload a risk receipt's pack carries, by receipt id — SHAPE-CHECKED.
+ * A truthy-but-partial payload must fail closed, not render a confident empty
+ * world map under a fidelity caption (adversarial review). */
 const loadVizByReceipt = async (receiptId: string): Promise<VizPayload> => {
   const receipt = await get(`/api/resolve/receipt/${receiptId}`);
   const pack = await get(`/api/resolve/pack/${receipt.pack_id}`);
-  if (!pack.viz) throw new Error('this receipt carries no map payload');
-  return pack.viz as VizPayload;
+  const viz = pack.viz as VizPayload | undefined;
+  if (!viz) throw new Error('this receipt carries no map payload');
+  if (!viz.aoi || !viz.bounds) throw new Error('recorded map payload is incomplete (no AOI/bounds)');
+  if (!viz.hazard_layer?.raster_url && !viz.hazard_layer?.geojson)
+    throw new Error('recorded map payload carries no hazard layer');
+  // Sanitize the legend: it is recorded JSON, and one null entry must not crash
+  // the whole embed into a blank iframe with no 'unverified' voice.
+  if (viz.legend) {
+    const safe: NonNullable<VizPayload['legend']> = {};
+    for (const [cls, v] of Object.entries(viz.legend)) {
+      if (v && typeof v === 'object' && typeof v.color === 'string' && Number.isFinite(Number(cls)))
+        safe[cls] = v;
+    }
+    viz.legend = safe;
+  }
+  return viz;
 };
 
 const EMBEDDABLE = ['provenance_graph', 'hazard_map'] as const;
@@ -79,9 +109,11 @@ const Embed: FC = () => {
   if (component === 'hazard_map') {
     if (!viz) return <Notice title="Resolving…" detail={`receipt ${receiptId}`} />;
     return (
-      <div className="h-screen">
-        <EmbedMap viz={viz} />
-      </div>
+      <FailClosed>
+        <div className="h-screen">
+          <EmbedMap viz={viz} />
+        </div>
+      </FailClosed>
     );
   }
   if (!data) return <Notice title="Resolving…" detail={`receipt ${receiptId}`} />;
