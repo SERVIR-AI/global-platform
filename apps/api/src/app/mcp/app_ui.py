@@ -241,7 +241,11 @@ function chartSVG(sr, i, st) {
   const x = k => PAD + (pts.length === 1 ? (W - PAD * 2) / 2
                                          : k * (W - PAD * 2) / (pts.length - 1));
   const y = v => H - PAD - (v - lo) * (H - PAD * 2) / (hi - lo);
-  const sel = st.sel < 0 ? pts.length - 1 : Math.min(st.sel, pts.length - 1);
+  // Default selection: latest point for a time series, the LARGEST bar for a
+  // categorical one — "class 5: 0" is a useless first readout.
+  const argmax = pts.reduce((m, p, k) => (p.v > pts[m].v ? k : m), 0);
+  const sel = st.sel < 0 ? (cat ? argmax : pts.length - 1)
+                         : Math.min(st.sel, pts.length - 1);
   const sp = pts[sel];
   const bandMarks = !st.bands ? "" : bands.map(b => `
     <line x1="${PAD}" x2="${W - PAD}" y1="${y(b.v).toFixed(1)}" y2="${y(b.v).toFixed(1)}"
@@ -319,8 +323,8 @@ function chartInner(sr, i) {
     (sr.bands && sr.bands.length) ? chip(i, "bands", "thresholds", st.bands) : "",
   ];
   return `
-    <div class="meta"><b>${esc(sr.title || sr.id)}</b> · ${esc(sr.source || "")} ·
-      as of ${esc(sr.as_of || "")}${sr.n ? " · [" + esc(sr.n) + "]" : ""}</div>
+    <div class="meta"><b>${esc(sr.title || sr.id)}</b> · ${esc(sr.source || "")}${
+      sr.as_of ? " · as of " + esc(sr.as_of) : ""}${sr.n ? " · [" + esc(sr.n) + "]" : ""}</div>
     <div class="ctl">${chips.join("")}</div>
     ${live ? `<div class="livewarn">live pull to ${esc(st.hist.as_of || "")} — beyond this
       receipt's evidence pack, not attested by it${st.hist.stale ? " · SERVED FROM CACHE" : ""}</div>` : ""}
