@@ -56,10 +56,15 @@ def test_fs_still_rides_the_registry_unchanged(monkeypatch, log):
     assert out["required_sections"][0] == "## What history says"
 
 
-def test_params_no_pack_claims_decline_honestly(log):
-    out = assemble.assemble(place="battambang", hazard="flood")
-    log("OUTPUT", out["note"][:80])
-    assert out["status"] == "declined" and "available" in out["note"]
+def test_params_no_pack_claims_resolve_to_no_pack(log):
+    """place/hazard are claimed by risk now, so the unclaimed case needs a param
+    that never existed — infer must return None, and assemble turns None into a
+    decline listing every pack (covered by the toy-pack test's decline path)."""
+    assert packs.infer(None, frobnicate="x") is None
+    assert packs.infer(None, place="battambang") == "risk"
+    assert packs.infer(None, country="Kenya") == "food-security"
+    assert packs.infer(None) == "food-security"          # bare call stays FS
+    log("CHECK", "inference: claimed params route, unclaimed decline, bare = FS")
 
 
 def test_a_row_only_pack_flows_the_entire_loop(toy_pack, log):

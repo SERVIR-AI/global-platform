@@ -51,6 +51,11 @@ def assemble(country: str | None = None, crop: str | None = None,
         citations, gaps, stats = spec["gather"](target, focus, trace, extras)
     except MissingAPIKey as exc:
         return {"status": "declined", "note": f"embedding key missing: {exc}"}
+    except ValueError as exc:
+        # A gatherer refusing its target (unknown hazard, bad month...) is a
+        # GOVERNED decline, not a transport error — rule 2, at the dispatch seam
+        # so it holds for every pack.
+        return {"status": "declined", "note": str(exc)}
     except CorpusError as exc:
         return {"status": "declined", "note": str(exc)}
     pack_body = {"pack": pack_id_name, "target": target, "focus": focus,

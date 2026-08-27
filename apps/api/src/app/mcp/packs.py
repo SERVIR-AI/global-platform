@@ -31,6 +31,53 @@ def _fs_sections() -> list[str]:
     return list(synthesis.SECTIONS)
 
 
+def _gather_risk(target: dict, focus: str, trace: list,
+                 extras: dict) -> tuple[list, list, dict]:
+    from ..risk import synthesis as risk_synthesis
+    return risk_synthesis.gather_risk_evidence(target, focus, trace, extras)
+
+
+def _risk_sections() -> list[str]:
+    from ..risk import synthesis as risk_synthesis
+    return list(risk_synthesis.SECTIONS)
+
+
+def _risk_manifest() -> dict:
+    """Honest v0: what the risk pack ships and what it does not. Real state where
+    derivable, gaps declared in one place."""
+    from ..graph.geo import tiffs
+    cat = tiffs.catalog()
+    hazards = sorted(k.removeprefix("hazard_") for k in cat if k.startswith("hazard_"))
+    return {
+        "id": "risk", "display_name": "Risk Platform", "version": "v0",
+        "profile": "v0 — hazard exposure only; risk levels and corpus are declared gaps",
+        "built_for": "asset exposure to a mapped hazard for one place, replayable",
+        "output_contract": {
+            "required_sections": _risk_sections(),
+            "gate": "verify_groundedness — same blocking rules as every pack",
+            "receipt": "record_receipt / publish_answer — pack carries the map viz",
+        },
+        "sources": {
+            "corpus": {"status": "declared_gap",
+                       "reason": "no risk document corpus exists yet"},
+            "rasters": {"status": "available", "hazards": hazards,
+                        "note": ("only hazard_flood states lineage (ADPC, derived "
+                                 "from JRC GLOFAS v2.1); vintages/licences are "
+                                 "unrecorded for all — declared in every pack")},
+            "assets": {"status": "available", "source": "OSM via Overpass",
+                       "note": "no retrieval date recorded in the AOI bundle"},
+        },
+        "target": {"place": "geocodable place name", "hazard": "one of: " + ", ".join(hazards),
+                   "min_severity": "optional, 1-5, default 1"},
+        "gaps": [
+            "risk levels (L1/L2) not in the pack — exposure only, engine exists",
+            "no risk corpus", "raster vintages/licences unrecorded",
+            "BYOD uploads are session-scoped and cannot enter a pack",
+        ],
+        "compositions": ["risk.brief"],
+    }
+
+
 # id -> the pack row. `target_keys` name the assemble_pack parameters that select
 # this pack; `build_target` validates them into the generic target dict every
 # downstream consumer (record, publish, embeds) reads instead of country/crop.
@@ -44,6 +91,18 @@ PACKS: dict[str, dict] = {
         "sections": _fs_sections,
         "corpus": "food-security",
         "default_focus": lambda t: f"{t.get('country', '')} {t.get('crop', '')}".strip(),
+    },
+    "risk": {
+        "display_name": "Risk Platform",
+        "version": "v0",
+        "target_keys": ("place", "hazard"),
+        "target_doc": {"place": "geocodable place name",
+                       "hazard": "hazard name, e.g. flood, fire, drought"},
+        "gather": _gather_risk,
+        "sections": _risk_sections,
+        "corpus": None,
+        "manifest": _risk_manifest,
+        "default_focus": lambda t: f"{t.get('hazard', '')} exposure in {t.get('place', '')}".strip(),
     },
 }
 
