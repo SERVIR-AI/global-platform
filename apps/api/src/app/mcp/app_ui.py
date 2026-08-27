@@ -624,6 +624,28 @@ function mapCard(m) {
       embed this receipt's render_with names</div>
   </div>`;
 }
+// The platform's own execution trace for this answer (publish_answer.trace):
+// assemble -> draft (consumer's, declared unobserved) -> verify -> record. Rendered
+// collapsed: it is the governance detail, not the headline. The draft step is the
+// honest boundary — the platform shows where its own attestation stops.
+function traceCard(t){
+  const steps = (t && t.steps) || [];
+  if (!steps.length) return "";
+  const ms = v => v == null ? "" : (v >= 1000 ? (v/1000).toFixed(1) + " s" : Math.round(v) + " ms");
+  const row = st => `
+    <div class="meta" style="margin-top:.3rem">
+      <b>${esc(st.step)}</b>${st.outside_platform ? ` <span class="pill arch">outside the platform</span>` : ""}
+      ${st.duration_ms != null ? ` · ${ms(st.duration_ms)}` : (st.elapsed_ms != null ? ` · ~${ms(st.elapsed_ms)} elapsed` : "")}
+      <div>${esc(st.summary || "")}</div>
+      ${(st.detail || []).length ? `<details style="margin-top:.15rem"><summary style="cursor:pointer">assembly detail (${st.detail.length})</summary>
+        ${st.detail.map(x => `<div class="meta" style="margin-top:.2rem">${esc(x)}</div>`).join("")}
+      </details>` : ""}
+    </div>`;
+  return `<details class="trace" style="margin-top:1rem"><summary style="cursor:pointer">how this answer was produced — platform execution</summary>
+    ${steps.map(row).join("")}
+    ${t.note ? `<div class="meta" style="margin-top:.35rem">${esc(t.note)}</div>` : ""}
+  </details>`;
+}
 function render(d){
   _data = d;
   const srcs = d.sources || [], gaps = d.gaps || [];
@@ -666,6 +688,7 @@ function render(d){
       </div>`).join("")}</div>
     ${gaps.length?`<h2 style="margin-top:1rem">What is missing</h2>
       ${gaps.map(g=>`<div class="gap">${esc(g)}</div>`).join("")}`:""}
+    ${traceCard(d.trace)}
     <div class="foot">
       This shows EVIDENCE only. The verdict is deliberately not drawn here: a rendered
       surface freezes what is in it, and a frozen verdict attests nothing.
@@ -678,6 +701,8 @@ function render(d){
     </div>`;
   const more = document.getElementById("more");
   if (more) more.onclick = expand;
+  for (const det of document.querySelectorAll("details"))
+    det.addEventListener("toggle", reportSize);
   wireLinks();
   wireCharts();
 }

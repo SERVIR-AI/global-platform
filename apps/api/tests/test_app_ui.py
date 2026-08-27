@@ -308,3 +308,15 @@ def test_a_blocked_publish_renders_the_refusal_not_loading_forever(log):
     # noise) — one line, details collapsed, but still shown, never suppressed
     assert "Draft blocked by the groundedness gate" in html
     assert "what failed" in html
+
+
+def test_the_panel_renders_the_platform_execution_trace(log):
+    """publish_answer now returns `trace` — the loop's own execution story. The
+    panel must render it (collapsed: governance detail, not headline) including
+    the honest boundary: the draft step is the consumer's, declared unobserved."""
+    html = app_ui.template()
+    log("CHECK", "traceCard wired into render() and honest about the draft boundary")
+    assert "function traceCard" in html
+    assert "traceCard(d.trace)" in html
+    assert "how this answer was produced" in html
+    assert "outside the platform" in html

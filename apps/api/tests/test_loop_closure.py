@@ -147,6 +147,26 @@ def test_publish_gates_and_receipts_in_one_call(pack, log):
     assert out["render_with"]["provenance"]["tool"] == "ui_embed"
 
 
+def test_publish_carries_the_platform_execution_trace(pack, log):
+    """A published answer says HOW the loop ran, not only what it produced: the
+    gather is timed on the pack, the gate and mint are timed at publish, and the
+    consumer's drafting step is DECLARED as outside the platform rather than
+    silently missing — the attestation boundary is stated, not implied."""
+    out = publish.answer(pack["pack_id"], _passing_draft(pack), question="q")
+    t = out["trace"]
+    names = [st["step"] for st in t["steps"]]
+    log("OUTPUT", f"steps={names}")
+    assert names == ["assemble", "draft", "verify", "record"]
+    by = {st["step"]: st for st in t["steps"]}
+    assert by["assemble"]["duration_ms"] is not None          # timed at gather
+    assert by["assemble"]["detail"]                           # assembly trace strings
+    assert by["draft"]["outside_platform"] is True
+    assert by["draft"]["duration_ms"] is None                 # declared, not measured
+    assert by["verify"]["duration_ms"] >= 0
+    assert by["record"]["duration_ms"] >= 0
+    assert out["receipt_id"] in by["record"]["summary"]
+
+
 def test_publish_mints_NO_receipt_for_a_blocked_draft(pack, log):
     """The composite must not become a way around the gate. A real model hit this
     in UAT: its first draft was blocked, it fixed it, the second passed."""

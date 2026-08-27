@@ -7,6 +7,9 @@ Declared gaps are content, not omissions.
 
 from __future__ import annotations
 
+import time
+from datetime import datetime, timezone
+
 from ..llm import MissingAPIKey
 from ..rag.store import CorpusError
 from . import context, loop, packs, store
@@ -47,6 +50,7 @@ def assemble(country: str | None = None, crop: str | None = None,
     trace: list[str] = []
     extras = {"override": override, "override_country": override_country,
               "override_crop": override_crop, "min_severity": min_severity}
+    t_gather = time.perf_counter()
     try:
         citations, gaps, stats = spec["gather"](target, focus, trace, extras)
     except MissingAPIKey as exc:
@@ -77,7 +81,10 @@ def assemble(country: str | None = None, crop: str | None = None,
                  # PACK ROW — the contract is pack data, not imported code
                  "required_sections": list(spec["sections"]()),
                  "stats": {k: v for k, v in stats.items() if k != "queries"},
-                 "trace": trace}
+                 "trace": trace,
+                 # execution provenance for the loop trace publish_answer surfaces
+                 "exec": {"assembled_at": datetime.now(timezone.utc).isoformat(),
+                          "gather_ms": round((time.perf_counter() - t_gather) * 1000, 1)}}
     if stats.get("viz") is not None:                # a pack may carry embed data
         pack_body["viz"] = stats["viz"]
         pack_body["stats"].pop("viz", None)
