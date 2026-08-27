@@ -56,10 +56,10 @@ def _panel_map(pack: dict) -> dict | None:
     m = {"place": viz.get("place"), "hazard": viz.get("hazard"),
          "bounds": viz.get("bounds"), "legend": viz.get("legend"),
          "aoi": _coarse(viz.get("aoi"), 2e-3),
-         "hazard_geojson": _coarse(hl.get("geojson"), 1e-2),
+         "hazard_grid": viz.get("hazard_grid"),
          "assets": viz.get("features"), "metric": viz.get("metric")}
     if len(_json.dumps(m)) > 34_000:
-        m["hazard_geojson"] = None            # keep AOI+assets; drop the heavy layer
+        m["hazard_grid"] = None               # keep AOI+assets; drop the heavy layer
         if len(_json.dumps(m)) > 34_000:
             return None
     return m

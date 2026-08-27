@@ -198,6 +198,7 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
         "OSM asset data carries no retrieval date in the AOI bundle",
     ]
 
+    grid = _severity_grid(aoi[hz])
     stats = {"queries": None, "place": aoi.get("name", place), "hazard": hz,
              "min_severity": min_sev, "counts": counts,
              "viz": _bounded_viz(viz.build_payload(aoi, {
@@ -205,7 +206,28 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
                  "place": aoi.get("name", place), "min_severity": min_sev,
                  "count": counts["hospitals"]["exposed"],
                  "by_severity": counts["hospitals"]["by_severity"]}))}
+    if grid:
+        stats["viz"]["hazard_grid"] = grid
     return citations, gaps, stats
+
+
+def _severity_grid(clip_path: str, cells: int = 56) -> dict | None:
+    """The clip downsampled to a small severity grid — the honest way to show a
+    raster small. Vectorized polygons simplified to panel scale turned into
+    abstract shards (holes distort first); pixels stay pixels. ~3 KB as a
+    row-major digit string."""
+    try:
+        import rasterio
+        with rasterio.open(clip_path) as src:
+            h = max(1, min(cells, src.height))
+            w = max(1, min(cells, src.width))
+            arr = src.read(1, out_shape=(h, w))
+            b = src.bounds
+        vals = "".join(str(min(9, max(0, int(v)))) for row in arr for v in row)
+        return {"w": w, "h": h, "cells": vals,
+                "bounds": [b.left, b.bottom, b.right, b.top]}
+    except Exception:
+        return None
 
 
 def _bounded_viz(v: dict, tol: float = 2e-3, geojson_cap: int = 400_000) -> dict:

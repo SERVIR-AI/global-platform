@@ -572,10 +572,34 @@ function mapCard(m) {
     (PAD + (b[3] - lat) / spanY * (H - PAD * 2)).toFixed(1);
   const legend = m.legend || {};
   const color = cls => (legend[cls] || legend[String(cls)] || {}).color || "currentColor";
-  const hz = ((m.hazard_geojson || {}).features || [])
-    .slice().sort((a, c) => (a.properties?.severity || 0) - (c.properties?.severity || 0))
-    .map(f => `<path d="${geomPaths(f.geometry, prj)}" fill="${esc(color(f.properties?.severity))}"
-        fill-opacity=".55" fill-rule="evenodd" stroke="none"/>`).join("");
+  // Pixels stay pixels: the grid is the clip downsampled, drawn as cells. The
+  // earlier polygon-simplification pass rendered as abstract shards — hole rings
+  // distort first — which is worse than honest blockiness.
+  let hz = "";
+  const g = m.hazard_grid;
+  if (g && g.cells && g.bounds) {
+    const gb = g.bounds;
+    const x0 = PAD + (gb[0] - b[0]) / spanX * (W - PAD * 2);
+    const y0 = PAD + (b[3] - gb[3]) / spanY * (H - PAD * 2);
+    const cw = ((gb[2] - gb[0]) / spanX * (W - PAD * 2)) / g.w;
+    const ch = ((gb[3] - gb[1]) / spanY * (H - PAD * 2)) / g.h;
+    const parts = [];
+    for (let r = 0; r < g.h; r++) {
+      for (let c = 0; c < g.w; c++) {
+        const v = g.cells.charCodeAt(r * g.w + c) - 48;
+        if (v < 1) continue;
+        parts.push(`<rect x="${(x0 + c * cw).toFixed(1)}" y="${(y0 + r * ch).toFixed(1)}"
+          width="${(cw + 0.3).toFixed(1)}" height="${(ch + 0.3).toFixed(1)}"
+          fill="${esc(color(v))}" fill-opacity=".8"/>`);
+      }
+    }
+    hz = parts.join("");
+  } else {
+    hz = ((m.hazard_geojson || {}).features || [])
+      .slice().sort((a, c) => (a.properties?.severity || 0) - (c.properties?.severity || 0))
+      .map(f => `<path d="${geomPaths(f.geometry, prj)}" fill="${esc(color(f.properties?.severity))}"
+          fill-opacity=".55" fill-rule="evenodd" stroke="none"/>`).join("");
+  }
   const aoi = m.aoi ? `<path d="${geomPaths(m.aoi.geometry || m.aoi, prj)}"
       fill="none" stroke="currentColor" stroke-width="1.4" opacity=".8"/>` : "";
   const assets = ((m.assets || {}).features || []).map(f => {
