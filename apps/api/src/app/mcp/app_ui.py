@@ -526,6 +526,24 @@ function expand(){
   request("ui/request-display-mode", { mode: "fullscreen" });
   if (_data) { render(_data); reportSize(); }
 }
+// A BLOCKED or DECLINED result is a first-class display state, not a failure to
+// render: the host mounts this panel for EVERY publish_answer call, and the gate
+// refusing a draft is the platform doing its job — suppressing it (or sitting on
+// "loading…" forever, as this did) hides exactly what must be shown.
+function renderRefusal(d){
+  const fails = d.failures || [];
+  const secs = d.required_sections || [];
+  document.getElementById("root").innerHTML = `
+    <h2>${d.status === "blocked" ? "Groundedness gate: draft blocked" : "Declined"}</h2>
+    <div class="livewarn">${esc(d.note || "The draft did not pass the evidence gate.")}</div>
+    ${fails.length ? `<div class="sub" style="margin-top:.5rem">What failed:</div>
+      ${fails.map(f => `<div class="gap">${esc(f)}</div>`).join("")}` : ""}
+    ${secs.length ? `<div class="meta" style="margin-top:.5rem">Required sections:
+      ${secs.map(esc).join(" · ")}</div>` : ""}
+    <div class="foot">No receipt was minted and nothing was published. If the
+    assistant is revising, a corrected result will appear as a new panel below.</div>`;
+  reportSize();
+}
 function render(d){
   _data = d;
   const srcs = d.sources || [], gaps = d.gaps || [];
@@ -729,7 +747,9 @@ window.addEventListener("message", e => {
   const isResult = m.method === "ui/notifications/tool-result";
   const d = (isResult && (m.params?.structuredContent || m.params))
          || m.structuredContent || m.evidence;
-  if (d && (d.sources || d.question)) { render(strip(d)); reportSize(); }
+  if (!d) return;
+  if (d.status === "blocked" || d.status === "declined") { renderRefusal(strip(d)); return; }
+  if (d.sources || d.question) { render(strip(d)); reportSize(); }
 });
 request("ui/initialize", INIT_PARAMS);
 // Same spec document names the method `ui/initialize` in its normative text and

@@ -293,3 +293,16 @@ def test_standalone_payload_cannot_break_out_of_its_script_block(log):
     d = _json.loads(payload)
     log("OUTPUT", d["sources"][0]["title"])
     assert d["sources"][0]["title"] == "</script><script>evil()</script>"
+
+
+def test_a_blocked_publish_renders_the_refusal_not_loading_forever(log):
+    """Desktop mounts the panel for EVERY publish_answer call. A blocked result has
+    no sources and no question, so the render guard never fired and the panel sat
+    on 'loading…' — seen live on Desktop 2026-08-27. A refusal is a first-class
+    display state: the gate refusing is the platform working."""
+    html = app_ui.template()
+    log("CHECK", "blocked/declined route to renderRefusal before the sources guard")
+    assert "renderRefusal" in html
+    assert 'd.status === "blocked" || d.status === "declined"' in html
+    assert "Groundedness gate: draft blocked" in html
+    assert "No receipt was minted" in html
