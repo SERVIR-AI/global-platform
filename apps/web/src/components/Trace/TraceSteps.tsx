@@ -57,7 +57,16 @@ const TraceSteps: FC<TraceStepsProps> = ({ rows, selectedIndex, onSelect }) => (
           {/* Backend-authored summary — rendered verbatim, never paraphrased. */}
           <div className="text-base-content/70 mt-0.5 break-words">{row.summary}</div>
 
-          {row.error && <div className="text-error mt-0.5 break-words">{row.error}</div>}
+          {row.error && (
+            <div
+              className={cn(
+                'mt-0.5 break-words',
+                row.status === 'error' ? 'text-error' : 'text-base-content/60',
+              )}
+            >
+              {row.error}
+            </div>
+          )}
 
           <div className="mt-1 h-1 w-full rounded-full bg-base-300 overflow-hidden">
             <div

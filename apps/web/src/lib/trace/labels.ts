@@ -83,7 +83,7 @@ const RESOLVE_TITLE: Record<ResolveStep['decision'], string> = {
 
 const FINALIZE_TITLE: Record<FinalizeStep['kind'], string> = {
   llm_phrase: 'Wrote the answer',
-  error_echo: 'Returned the problem as-is',
+  error_echo: 'Delivered the message as-is',
 };
 
 /**

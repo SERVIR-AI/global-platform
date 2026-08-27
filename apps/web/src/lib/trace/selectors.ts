@@ -55,6 +55,23 @@ const stepError = (step: TraceStep): string | null =>
   'error' in step && typeof step.error === 'string' ? step.error : null;
 
 /**
+ * Did the pipeline itself break at this step?
+ *
+ * `error` presence alone over-reports: the graph routes every non-tool reply — clarifying
+ * questions, grounding refusals, "name a place" — down the same `error` channel that
+ * carries real failures, so finalize can echo it. The step's own branch tag is the
+ * discriminator. Router `declined`/`missing_place` are the assistant talking; finalize
+ * `error_echo` only delivers what upstream put in the channel (severity belongs to the
+ * origin step, which is flagged here). What remains — resolve `no_data`, fetch and
+ * operate errors — is the pipeline breaking.
+ */
+export const stepFailed = (step: TraceStep): boolean => {
+  if (stepError(step) === null) return false;
+  if (step.node === 'router' || step.node === 'finalize') return false;
+  return true;
+};
+
+/**
  * Did this step actually call a model?
  *
  * Read `llm_provider`, never the token counts. `tokens.total === 0` is ambiguous — it
@@ -68,7 +85,7 @@ export const stepUsedModel = (step: TraceStep): boolean =>
 
 const stepStatus = (step: TraceStep): StepStatus => {
   if (step.node === 'resolve' && step.awaiting_choice_set) return 'paused';
-  return stepError(step) ? 'error' : 'ok';
+  return stepFailed(step) ? 'error' : 'ok';
 };
 
 /** Header stats for the collapsed panel. */
@@ -76,7 +93,7 @@ export const summarizeEnvelope = (envelope: TraceEnvelope): TraceSummaryView => 
   const { steps } = envelope;
   const finalize = steps.find((step) => step.node === 'finalize');
   const paused = steps.some((step) => step.node === 'resolve' && step.awaiting_choice_set);
-  const failedStep = steps.find((step) => stepError(step) !== null) ?? null;
+  const failedStep = steps.find(stepFailed) ?? null;
 
   // Order matters: a paused turn is a deliberate stop and reads as neither answered nor
   // failed, so it wins over the error check — resolve()'s `no_data` branch sets both an

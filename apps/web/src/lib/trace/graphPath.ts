@@ -7,6 +7,7 @@
  */
 
 import type { TraceEnvelope, TraceNode } from '@/types/trace';
+import { stepFailed } from './selectors';
 import { GRAPH_EDGES, type GraphNodeId } from './graphTopology';
 
 /**
@@ -65,8 +66,7 @@ export const toGraphPath = (envelope: TraceEnvelope): GraphPath => {
     visited.push(id);
 
     const paused = step.node === 'resolve' && step.awaiting_choice_set;
-    const failed = 'error' in step && typeof step.error === 'string' && step.error.length > 0;
-    nodeStates[id] = paused ? 'paused' : failed ? 'errored' : 'visited';
+    nodeStates[id] = paused ? 'paused' : stepFailed(step) ? 'errored' : 'visited';
   }
 
   if (visited.length === 0) {
