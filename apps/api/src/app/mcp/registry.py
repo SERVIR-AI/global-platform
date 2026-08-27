@@ -9,6 +9,7 @@ import os
 
 from ..food_security import calendar as fs_calendar
 from ..rag.store import Corpus, CorpusError
+from . import packs
 
 VERSION = "0.2.0-phase1"
 _FS_CORPUS = "food-security"
@@ -250,6 +251,11 @@ FEEDS = {
 }
 
 
+# Every current feed belongs to the food-security pack; a row may override.
+for _spec in FEEDS.values():
+    _spec.setdefault("pack", "food-security")
+
+
 # Compositions are REGISTRY ROWS invoked through the one `compose_run` tool — so a
 # new pack/composition adds zero tools (the count discipline, ARCHITECTURE §2).
 COMPOSITIONS = {
@@ -304,10 +310,16 @@ def _calendars() -> list[dict]:
     return [{"country": c, "crops": sorted(crops)} for c, crops in sorted(cal.items())]
 
 
-def pack_manifest() -> dict:
-    """The Food-Security DOMAIN PACK, v0 — the versioned bundle a hub adopts: what
-    ships, what it produces, and what is missing. Real state where derivable; every
-    gap declared in one place rather than scattered."""
+def pack_manifest(pack_id: str = "food-security") -> dict:
+    """A DOMAIN PACK manifest — the versioned bundle a hub adopts: what ships,
+    what it produces, and what is missing. The food-security body is authored
+    here (the v0 pattern); other packs supply `manifest` on their PACKS row."""
+    if pack_id != "food-security":
+        spec = packs.PACKS.get(pack_id)
+        if spec is None:
+            return {"id": pack_id, "error": "unknown pack",
+                    "available": packs.available()}
+        return spec["manifest"]()
     from ..food_security import synthesis  # local: avoids importing llm deps at module load
     corpus = _corpus_summary()
     gaps = [
@@ -343,7 +355,8 @@ def pack_manifest() -> dict:
             "feeds": {k: {"status": v["status"],
                           **({"source": v["source"]} if v.get("source") else {}),
                           **({"reason": v["reason"]} if v.get("reason") else {})}
-                      for k, v in FEEDS.items()},
+                      for k, v in FEEDS.items()
+                      if v.get("pack", "food-security") == "food-security"},
         },
         "calendars": _calendars(),
         "calendar_provenance": ("hub defaults are hand-authored approximations of "
@@ -422,7 +435,7 @@ def capabilities(available_tools=None, available_prompts=None,
         # domain. An EVIDENCE PACK (pack_id, from assemble_pack) is a per-question
         # snapshot of gathered evidence — a new one is minted on every call.
         "design_language": _design_language(),
-        "domain_packs": [pack_manifest()],
+        "domain_packs": [pack_manifest(pid) for pid in packs.available()],
     }
 
 
@@ -490,10 +503,13 @@ def describe_assemble() -> str:
         "dates and validation levels, the literal queries run, and an explicit list "
         "of what is MISSING — then verify_groundedness can gate your draft against "
         "it and record_receipt makes the answer replayable.\n\n"
-        "Assembles a deterministic, citable EVIDENCE PACK for a country/crop and "
-        "mints a pack_id. Returns numbered citations, declared gaps, and the exact "
-        "section headers your draft must use. No LLM runs here; assembly is "
-        "deterministic.\n\n"
+        "Assembles a deterministic, citable EVIDENCE PACK and mints a pack_id. "
+        "Returns numbered citations, declared gaps, and the exact section headers "
+        "your draft must use. No LLM runs here; assembly is deterministic.\n\n"
+        "DOMAIN PACKS and their target params — pass the ones for your question "
+        "(bare country/crop stays food-security): "
+        + "; ".join(f"`{pid}` ({', '.join(sp['target_keys'])})"
+                    for pid, sp in sorted(packs.PACKS.items())) + ".\n\n"
         "STEP 1 OF 3 — the pack is evidence, NOT a finished answer. You then draft "
         "from it, call verify_groundedness(draft, pack_id) to gate the draft, and "
         "call record_receipt(pack_id, report_id) to mint the receipt. An answer that "

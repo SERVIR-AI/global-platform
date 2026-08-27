@@ -54,7 +54,7 @@ def citation(country: str, crop: str, asked_month: int,
         # statement that says so.
         why = ("no crop was named in the question" if not crop
                else f"the calendar has no entry for {country or 'that country'} {crop}")
-        return {"kind": "calendar",
+        return {"kind": "calendar", "retrieval": "config",
                 "source": "Crop calendar (hub default, GEOGLAM/FAO-derived)",
                 "title": f"No crop calendar for {country or 'unspecified'} "
                          f"{crop or 'unspecified crop'}",
@@ -70,7 +70,7 @@ def citation(country: str, crop: str, asked_month: int,
     header = (f"CROP CALENDAR for {country} {crop}, ADJUSTED by the requester for this "
               "run (not the hub default)" if adjusted else
               f"Crop calendar for {country} {crop} (hub default configuration)")
-    return {"kind": "calendar",
+    return {"kind": "calendar", "retrieval": "config",
             "source": ("Requester-adjusted crop calendar" if adjusted
                        else "Crop calendar (hub default, GEOGLAM/FAO-derived)"),
             "title": f"{country} {crop} season windows",

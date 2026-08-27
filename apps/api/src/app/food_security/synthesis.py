@@ -152,7 +152,8 @@ def _conditions_citation(crop, country, trace):
                  f"the last-good cache (last successful fetch {stale.get('last_good_fetch')}) "
                  f"— treat as possibly out of date.")
         trace.append(f"conditions -> STALE (last good {stale.get('last_good_fetch')})")
-    return {"kind": "conditions", "source": "GEOGLAM Crop Monitor (CMET)",
+    return {"kind": "conditions", "retrieval": "pulled-at-pack-time",
+            "source": "GEOGLAM Crop Monitor (CMET)",
             "title": f"{country or 'Global'} {crop or 'crop'} conditions".strip(),
             "pub_date": res["as_of"], "validation": "multi-agency-consensus",
             "url": res["query"]["url"], "query": res["query"]["where"],
@@ -229,7 +230,7 @@ def _driver_citations(trace):
         # stringified, and nothing downstream could plot a number. The text stays
         # exactly as it was; this is an addition, not a change to what is cited.
         series = _series(name, res.get("records"))
-        out.append({"kind": "index",          # `index` is in record._PULLED -> tagged as a live pull
+        out.append({"kind": "index", "retrieval": "pulled-at-pack-time",
                     **({"series": series} if series else {}),
                     "source": spec.get("source"), "title": spec.get("title") or spec.get("description", name),
                     "pub_date": res.get("as_of"), "validation": spec.get("validation"),
@@ -287,7 +288,8 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
     for h in forecast_hits + retro_hits:
         m = h["metadata"]
         citations.append({
-            "kind": "document", "source": m.get("source"), "title": m.get("title"),
+            "kind": "document", "retrieval": "archived-document",
+            "source": m.get("source"), "title": m.get("title"),
             "pub_date": m.get("pub_date"), "validation": m.get("validation"),
             "temporal": m.get("temporal"), "url": m.get("url"), "score": h["score"],
             "doc_id": h["doc_id"], "chunk_id": h["id"],

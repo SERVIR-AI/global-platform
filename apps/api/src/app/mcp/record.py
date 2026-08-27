@@ -19,6 +19,13 @@ def _abs(path: str) -> str:
     return ui.tokens()["product"]["resolver"]["base"].rstrip("/") + path
 
 
+def _default_question(pack: dict) -> str:
+    t = pack.get("target") or {}
+    if t:
+        return " ".join(str(v) for v in t.values())
+    return f"{pack.get('crop')} in {pack.get('country')}"
+
+
 def _resolver_url(receipt_id: str) -> str:
     """Absolute so trust chrome resolves against the PLATFORM, never the consuming
     app's own origin. Config-driven: conf/ui_theme.json product.resolver."""
@@ -29,11 +36,21 @@ def _resolver_url(receipt_id: str) -> str:
 _PULLED = ("conditions", "feed", "index")   # citation kinds fetched at pack time
 
 
+def _retrieval(c: dict) -> str:
+    """How this evidence came to exist — load-bearing for what a receipt attests.
+    pulled-at-pack-time: a live value; re-running returns a different number.
+    computed-at-pack-time: deterministic from named inputs; re-runnable.
+    archived-document: bytes re-readable forever.  config: platform configuration.
+    Stamped ON the citation at assembly since 2026-08-27; the kind-tuple fallback
+    covers packs minted before that."""
+    r = c.get("retrieval")
+    if r:
+        return r
+    return "pulled-at-pack-time" if c.get("kind") in _PULLED else "archived-document"
+
+
 def _is_pulled(c: dict) -> bool:
-    """A live PULL, not an archived document. The distinction is load-bearing: an
-    archived document can be re-read byte-for-byte forever, a pulled value cannot —
-    re-running the same query next month returns a different number."""
-    return c.get("kind") in _PULLED
+    return _retrieval(c) == "pulled-at-pack-time"
 
 
 def _sources(pack: dict) -> list[dict]:
@@ -46,6 +63,7 @@ def _sources(pack: dict) -> list[dict]:
     for c in pack.get("citations", []):
         entry = {"n": c.get("n"), "source": c.get("source"), "title": c.get("title"),
                  "validation": c.get("validation"),
+                 "retrieval": _retrieval(c),
                  "archived_copy": c.get("archived_copy"),
                  # ABSOLUTE too. The relative form resolves against whatever origin
                  # is rendering — which for an MCP App iframe or a consumer's page is
@@ -56,7 +74,6 @@ def _sources(pack: dict) -> list[dict]:
                  "temporal": c.get("temporal"), "score": c.get("score"),
                  "residency": c.get("residency"), "authority": c.get("authority"),
                  # how this evidence was obtained, and whether it can be re-read
-                 "retrieval": "pulled-at-pack-time" if _is_pulled(c) else "archived-document",
                  "query_receipt": c.get("query")}
         stale = c.get("stale_data")
         if stale:
@@ -72,23 +89,32 @@ def _sources(pack: dict) -> list[dict]:
 
 
 def _freshness(pack: dict) -> dict:
-    """One place a reader can see, without parsing every source, whether this answer
-    rested on live pulls and whether any of them were stale."""
-    cites = pack.get("citations", [])
-    pulled = [c for c in cites if _is_pulled(c)]
-    stale = [c.get("n") for c in pulled if feeds.is_stale(c.get("stale_data"))]
-    return {
-        "pulled_sources": [c.get("n") for c in pulled],
-        "archived_sources": [c.get("n") for c in cites if not _is_pulled(c)],
-        "stale_sources": stale,
-        "as_of": {c.get("n"): c.get("pub_date") for c in pulled if c.get("pub_date")},
-        "note": ("Pulled sources were read at pack time and are a SNAPSHOT: re-running "
-                 "the same query later can legitimately return different values, so this "
-                 "receipt is not reproducible from the upstream — only from the stored pack."
-                 + (f" Sources {stale} were served from cache, not a live read."
-                    if stale else "")) if pulled else
-                "All sources are archived documents and can be re-read unchanged.",
-    }
+    """Pulled / computed / archived, per source — with as_of for anything not
+    re-readable. A receipt that cannot age its own evidence is prose."""
+    pulled, computed, archived, stale, as_of = [], [], [], [], {}
+    for c in pack.get("citations", []):
+        n, r = c.get("n"), _retrieval(c)
+        if r == "pulled-at-pack-time":
+            pulled.append(n)
+            if c.get("pub_date"):
+                as_of[str(n)] = c["pub_date"]
+            if feeds.is_stale(c.get("stale_data")):
+                stale.append(n)
+        elif r == "computed-at-pack-time":
+            computed.append(n)
+        else:
+            archived.append(n)
+    out = {"pulled_sources": pulled, "archived_sources": archived,
+           "stale_sources": stale, "as_of": as_of,
+           "note": ("Pulled sources were read at pack time and are a SNAPSHOT: "
+                    "re-running the same query later can legitimately return "
+                    "different values, so this receipt is not reproducible from "
+                    "the upstream — only from the stored pack.")}
+    if computed:
+        out["computed_sources"] = computed
+        out["note"] += (" Computed sources are deterministic from the named "
+                        "inputs and method — re-runnable, not re-readable.")
+    return out
 
 
 def _claim_scope(pack: dict) -> str:
@@ -119,8 +145,10 @@ def record(pack_id: str | None = None, report_id: str | None = None,
                 "note": "to mint a receipt pass a valid pack_id (from assemble_pack)"}
     report = store.load_report(report_id) if report_id else None
     receipt = {
-        "question": question or f"{pack.get('crop')} in {pack.get('country')}",
-        "country": pack.get("country"), "crop": pack.get("crop"),
+        "question": question or _default_question(pack),
+        "pack": pack.get("pack"), "target": pack.get("target"),
+        **({"country": pack.get("country"), "crop": pack.get("crop")}
+           if pack.get("country") or pack.get("crop") else {}),
         "pack_id": pack_id, "report_id": report_id,
         "passed": (report or {}).get("passed"),
         "evidence_tier": (report or {}).get("evidence_tier", "platform-registered"),

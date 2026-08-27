@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 
 from ..food_security import synthesis
-from . import loop, store
+from . import loop, packs, store
 
 
 def groundedness(draft: str, pack_id: str) -> dict:
@@ -21,10 +21,12 @@ def groundedness(draft: str, pack_id: str) -> dict:
     if pack is None:
         return {"status": "declined",
                 "note": f"no evidence pack with id {pack_id!r} — call assemble_pack first",
-                "required_sections": list(synthesis.SECTIONS)}
+                "available_packs": packs.available()}
     # Sections come from the PACK, not a food-security import — so a second domain
     # pack is gated against ITS OWN contract, not this one's.
-    sections = pack.get("required_sections") or list(synthesis.SECTIONS)
+    # No fallback to any domain's constant: assemble persists the contract on the
+    # pack, and a pack without one is a storage bug worth surfacing, not papering.
+    sections = pack.get("required_sections") or []
     citations = pack.get("citations", [])
     r = synthesis.check_grounded(draft, citations, sections=sections)
     # Store the FULL verified text + its hash: a receipt that can't show what

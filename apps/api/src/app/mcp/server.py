@@ -160,7 +160,10 @@ def context_get(country: str, crop: str, asked_month: int | None = None,
 
 
 @mcp.tool(description=registry.describe_assemble())
-def assemble_pack(country: str, crop: str, focus: str | None = None,
+def assemble_pack(country: str | None = None, crop: str | None = None,
+                  focus: str | None = None, pack: str | None = None,
+                  place: str | None = None, hazard: str | None = None,
+                  min_severity: int | None = None,
                   override: list[dict] | None = None,
                   override_country: str | None = None,
                   override_crop: str | None = None) -> dict:
@@ -180,8 +183,10 @@ def assemble_pack(country: str, crop: str, focus: str | None = None,
     will demand — draft those exact section headers so the gate passes in one shot.
     status "declined" -> `note` (missing key / torn corpus / bad override).
     """
-    return assemble.assemble(country, crop, focus=focus, override=override,
-                             override_country=override_country, override_crop=override_crop)
+    return assemble.assemble(country=country, crop=crop, focus=focus, pack=pack,
+                             place=place, hazard=hazard, min_severity=min_severity,
+                             override=override, override_country=override_country,
+                             override_crop=override_crop)
 
 
 @mcp.tool()
@@ -319,11 +324,24 @@ def corpus_document(doc_id: str | None = None) -> dict:
     return fetch.document(doc_id)
 
 
-@mcp.resource("servirplatform://pack/food-security", mime_type="application/json")
-def food_security_pack() -> dict:
-    """The Food-Security domain pack manifest (v0): what ships, what it produces,
-    and every declared gap — plus a real worked-example receipt to resolve."""
-    return registry.pack_manifest()
+def _register_pack_manifests() -> None:
+    """One servirplatform://pack/<id> resource per PACKS row — a new pack's
+    manifest appears with no server edit (the count discipline, applied to
+    resources)."""
+    from . import packs as _packs
+    for pid in _packs.available():
+        def _mk(pid: str = pid):
+            def manifest() -> dict:
+                return registry.pack_manifest(pid)
+            manifest.__name__ = "pack_" + pid.replace("-", "_")
+            manifest.__doc__ = (f"The {pid} domain pack manifest: what ships, what "
+                                "it produces, and every declared gap.")
+            return manifest
+        mcp.resource(f"servirplatform://pack/{pid}",
+                     mime_type="application/json")(_mk())
+
+
+_register_pack_manifests()
 
 
 # MCP Apps (Jan 2026): a host advertising `io.modelcontextprotocol/ui` renders this

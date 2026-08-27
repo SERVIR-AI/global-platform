@@ -36,7 +36,9 @@ def _insight(pack_id: str, draft: str) -> dict:
     context = {c["kind"]: c.get("text") for c in pack.get("citations", [])
                if c.get("kind") in ("conditions", "calendar")}
     return {"brief": draft, "series": series, "context": context,
-            "country": pack.get("country"), "crop": pack.get("crop")}
+            "pack": pack.get("pack"), "target": pack.get("target"),
+            **({"country": pack.get("country"), "crop": pack.get("crop")}
+               if pack.get("country") or pack.get("crop") else {})}
 
 
 def answer(pack_id: str, draft: str, question: str | None = None) -> dict:
