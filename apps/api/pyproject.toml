@@ -17,7 +17,14 @@ dependencies = [
     "pyyaml>=6.0.3",
     "gdown>=6.1.0",
     "python-multipart>=0.0.9",
+    "pypdf>=5.1.0",
+    "python-docx>=1.1.2",
+    "mcp>=1.2",
+    "google-auth>=2.35",
 ]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
 
 [build-system]
 requires = ["hatchling"]

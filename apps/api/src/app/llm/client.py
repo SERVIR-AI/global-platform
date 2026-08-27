@@ -33,6 +33,9 @@ def _registry() -> dict[Provider, _Row]:
         "claude": _Row(s.claude_base_url, s.anthropic_api_key, s.claude_model, "ANTHROPIC_API_KEY"),
         "openai": _Row(s.openai_base_url, s.openai_api_key, s.openai_model, "OPENAI_API_KEY"),
         "gemini": _Row(s.gemini_base_url, s.google_api_key, s.gemini_model, "GOOGLE_API_KEY"),
+        # Local server: the key is a placeholder because the SDK insists on one and
+        # a loopback service has nothing to authenticate.
+        "onprem": _Row(s.onprem_base_url, "not-needed", s.onprem_model, ""),
     }
 
 

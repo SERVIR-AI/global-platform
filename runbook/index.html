@@ -1,0 +1,876 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Global Platform MCP Server Runbook</title>
+<meta name="description" content="How to use the Global Platform MCP server: connect, query, read the output, and understand what it refuses to tell you.">
+<style>
+:root{
+  --paper:#FCFCFA; --ground:#F2F2EE; --ink:#141A1F; --body:#2E353C; --muted:#6A7178;
+  --rule:#E0E0D8; --rule-soft:#EAEAE3;
+  --accent:#0E5C6B; --accent-soft:#E3F0F2;
+  --gap:#9A5B12; --gap-soft:#F7EEDF;
+  --good:#256B4E; --good-soft:#E3F0E9;
+  --stop:#8C2F2F; --code-bg:#F4F4EF;
+  --shadow:0 1px 2px rgba(20,26,31,.05),0 8px 24px -12px rgba(20,26,31,.12);
+  --display:Georgia,"Iowan Old Style",ui-serif,serif;
+  --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#11151A; --ground:#161B21; --ink:#EDEFF1; --body:#C4CBD2; --muted:#8B949D;
+    --rule:#252C34; --rule-soft:#1E242B;
+    --accent:#5FBECF; --accent-soft:#122A31;
+    --gap:#D2A05A; --gap-soft:#2B2418;
+    --good:#6DC49B; --good-soft:#152A21;
+    --stop:#E08585; --code-bg:#171D24;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px -12px rgba(0,0,0,.5);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#11151A; --ground:#161B21; --ink:#EDEFF1; --body:#C4CBD2; --muted:#8B949D;
+  --rule:#252C34; --rule-soft:#1E242B;
+  --accent:#5FBECF; --accent-soft:#122A31;
+  --gap:#D2A05A; --gap-soft:#2B2418;
+  --good:#6DC49B; --good-soft:#152A21;
+  --stop:#E08585; --code-bg:#171D24;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px -12px rgba(0,0,0,.5);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:1.5rem}
+body{margin:0;background:var(--paper);color:var(--body);
+  font-family:var(--sans);font-size:16.5px;line-height:1.65;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:0 1.25rem;
+  display:grid;grid-template-columns:238px minmax(0,1fr);gap:3rem;align-items:start}
+@media (max-width:900px){.wrap{grid-template-columns:1fr;gap:0}}
+
+/* masthead */
+header.top{border-bottom:1px solid var(--rule);background:var(--ground)}
+.top-inner{max-width:1180px;margin:0 auto;padding:1.6rem 1.25rem 1.4rem;
+  display:flex;flex-wrap:wrap;gap:1rem;align-items:baseline;justify-content:space-between}
+.brand{font-family:var(--display);font-size:1.42rem;color:var(--ink);margin:0;letter-spacing:-.01em}
+.brand small{display:block;font-family:var(--sans);font-size:.76rem;font-weight:600;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--accent);margin-bottom:.3rem}
+.endpoint{font-family:var(--mono);font-size:.78rem;color:var(--muted);
+  background:var(--paper);border:1px solid var(--rule);border-radius:5px;padding:.35rem .6rem}
+
+/* nav */
+nav{position:sticky;top:1.5rem;padding:2rem 0;font-size:.86rem;max-height:100vh;overflow-y:auto}
+@media (max-width:900px){nav{position:static;max-height:none;border-bottom:1px solid var(--rule);padding-bottom:1.25rem}}
+nav h4{font-size:.7rem;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);
+  margin:1.5rem 0 .5rem;font-weight:700}
+nav h4:first-child{margin-top:0}
+nav a{display:block;color:var(--body);text-decoration:none;padding:.24rem 0;border-left:2px solid transparent;padding-left:.7rem}
+nav a:hover{color:var(--accent);border-left-color:var(--accent)}
+
+main{padding:2.4rem 0 5rem;min-width:0}
+section{margin-bottom:3.4rem;scroll-margin-top:1.5rem}
+h2{font-family:var(--display);font-size:1.72rem;color:var(--ink);margin:0 0 .3rem;
+  letter-spacing:-.015em;text-wrap:balance}
+h2 .num{font-family:var(--mono);font-size:.82rem;color:var(--accent);
+  display:block;margin-bottom:.35rem;letter-spacing:.05em}
+h3{font-family:var(--sans);font-size:1.06rem;color:var(--ink);margin:2rem 0 .6rem;font-weight:650}
+h4{font-size:.93rem;color:var(--ink);margin:1.4rem 0 .4rem;font-weight:650}
+p{margin:.75rem 0;max-width:68ch}
+.lede{font-size:1.06rem;color:var(--muted);max-width:64ch;margin-bottom:1.6rem}
+ul,ol{max-width:68ch;padding-left:1.2rem}
+li{margin:.35rem 0}
+a{color:var(--accent)}
+strong{color:var(--ink);font-weight:650}
+code{font-family:var(--mono);font-size:.855em;background:var(--code-bg);
+  border:1px solid var(--rule-soft);border-radius:4px;padding:.1em .38em;color:var(--ink)}
+pre{background:var(--code-bg);border:1px solid var(--rule);border-radius:8px;
+  padding:.95rem 1.05rem;overflow-x:auto;margin:.9rem 0;box-shadow:var(--shadow)}
+pre code{background:none;border:none;padding:0;font-size:.83rem;line-height:1.6;color:var(--ink)}
+.tablewrap{overflow-x:auto;margin:1rem 0;border:1px solid var(--rule);border-radius:8px}
+table{border-collapse:collapse;width:100%;font-size:.87rem;min-width:520px}
+th,td{text-align:left;padding:.6rem .8rem;border-bottom:1px solid var(--rule-soft);vertical-align:top}
+th{background:var(--ground);font-weight:650;color:var(--ink);font-size:.78rem;
+  letter-spacing:.05em;text-transform:uppercase;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+td code{font-size:.82em;white-space:nowrap}
+
+.note{border-left:3px solid var(--accent);background:var(--accent-soft);
+  padding:.85rem 1.1rem;border-radius:0 7px 7px 0;margin:1.15rem 0;max-width:68ch}
+.note.gap{border-left-color:var(--gap);background:var(--gap-soft)}
+.note.good{border-left-color:var(--good);background:var(--good-soft)}
+.note p{margin:.3rem 0}
+.note .label{font-size:.7rem;letter-spacing:.11em;text-transform:uppercase;
+  font-weight:700;color:var(--accent);display:block;margin-bottom:.2rem}
+.note.gap .label{color:var(--gap)} .note.good .label{color:var(--good)}
+
+.pill{display:inline-block;font-family:var(--mono);font-size:.7rem;padding:.14em .5em;
+  border-radius:4px;font-weight:600;white-space:nowrap}
+.pill.ok{background:var(--good-soft);color:var(--good);border:1px solid var(--good)}
+.pill.gapp{background:var(--gap-soft);color:var(--gap);border:1px solid var(--gap)}
+
+.steps{counter-reset:s;list-style:none;padding-left:0}
+.steps>li{counter-increment:s;position:relative;padding-left:2.4rem;margin:1.5rem 0}
+.steps>li::before{content:counter(s);position:absolute;left:0;top:.05rem;
+  width:1.65rem;height:1.65rem;border-radius:50%;background:var(--accent);color:var(--paper);
+  font-family:var(--mono);font-size:.78rem;font-weight:700;
+  display:flex;align-items:center;justify-content:center}
+footer{border-top:1px solid var(--rule);margin-top:3rem;padding:1.6rem 0;
+  color:var(--muted);font-size:.83rem}
+.toggle{background:none;border:1px solid var(--rule);color:var(--muted);cursor:pointer;
+  border-radius:5px;padding:.3rem .6rem;font-size:.75rem;font-family:var(--sans)}
+.toggle:hover{color:var(--accent);border-color:var(--accent)}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="top-inner">
+    <h1 class="brand"><small>SERVIR Global Platform</small>MCP Server Runbook</h1>
+    <div style="display:flex;gap:.7rem;align-items:center">
+      <span class="endpoint">http://10.1.30.110:8080/mcp</span>
+      <button class="toggle" id="tt">theme</button>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+<nav>
+  <h4>Start here</h4>
+  <a href="#what">What this is</a>
+  <a href="#idea">The one idea</a>
+  <a href="#rules">The seven rules</a>
+  <h4>Get running</h4>
+  <a href="#connect">Connect</a>
+  <a href="#first">Your first query</a>
+  <a href="#reading">Reading the output</a>
+  <h4>Reference</h4>
+  <a href="#tools">The 14 tools</a>
+  <a href="#order">The order that works</a>
+  <a href="#extras">Prompts and resources</a>
+  <a href="#data">Data catalogue</a>
+  <a href="#gaps">Declared gaps</a>
+  <h4>Practice</h4>
+  <a href="#mistakes">Common mistakes</a>
+  <a href="#recipes">Recipes</a>
+  <a href="#trouble">Troubleshooting</a>
+  <a href="#limits">Limits</a>
+  <h4>Lookups</h4>
+  <a href="#abbrev">Abbreviations</a>
+  <a href="#glossary">Glossary</a>
+</nav>
+
+<main>
+
+<section id="what">
+  <h2><span class="num">01</span>What this is</h2>
+  <p class="lede">A server that hands your AI assistant evidence instead of answers, and refuses,
+  in writing, when the evidence is not there.</p>
+
+  <p>This platform does not contain a chatbot. It exposes <strong>14 tools</strong> over the
+  <a href="https://modelcontextprotocol.io">Model Context Protocol (MCP)</a>. You point your own
+  assistant at it, and that assistant gains the ability to assemble governed evidence, check its own
+  draft against that evidence, and mint a receipt anyone can re-open later.</p>
+
+  <p>In the main loop <strong>your</strong> model writes the answer; the platform supplies evidence
+  and judges the result. There is one deliberate exception, <code>compose_run</code>, for consumers
+  that have no model of their own such as dashboards, scheduled jobs and automated bulletins. That
+  path runs the platform's own model server-side and is metered. Everything else is yours.</p>
+
+  <p>The distinction matters more than it sounds. A normal AI answer about
+  <a href="https://www.cpc.ncep.noaa.gov/products/analysis_monitoring/ensostuff/ONI_v5.php">El
+  Ni&ntilde;o</a> is a plausible paragraph. An answer through this platform carries numbered
+  citations to specific documents and live feeds, a list of what was <em>missing</em>, and a receipt
+  identifier that resolves months later to show exactly what evidence existed at the time.</p>
+
+  <h3>Who this is for</h3>
+  <ul>
+    <li><strong>Analysts</strong> who need a brief they can defend in a meeting.</li>
+    <li><strong>Hub teams</strong> who want their own data governed the same way.</li>
+    <li><strong>Builders</strong> putting an interface on top. The platform serves its own design
+    language, so what you build looks like it belongs.</li>
+  </ul>
+
+  <div class="note">
+    <span class="label">Honest framing</span>
+    <p>The tools are deliberately granular. That is not an oversight. A coarser tool would have to
+    make judgment calls silently, which is the thing this platform exists to prevent. This runbook
+    is the on-ramp; the granularity stays.</p>
+  </div>
+</section>
+
+<section id="idea">
+  <h2><span class="num">02</span>The one idea</h2>
+  <p>Everything here is one loop. If you remember nothing else, remember this shape.</p>
+
+  <ol class="steps">
+    <li><strong>Assemble.</strong> The platform gathers evidence into a numbered <em>pack</em>:
+    archived documents, live feeds, and an explicit list of what it could <em>not</em> find. No AI
+    is involved. This step is deterministic.</li>
+    <li><strong>Draft.</strong> <em>Your</em> assistant writes the answer, using only that pack.
+    (Or <code>compose_run</code> does all four steps server-side, if you have no model.)</li>
+    <li><strong>Verify.</strong> The platform checks the draft against the pack. Every paragraph
+    must carry a citation that resolves. A draft that fails does not ship.</li>
+    <li><strong>Record.</strong> A <em>receipt</em> is minted: the question, the pack, the verdict,
+    and every source with its age and provenance. It outlives the conversation.</li>
+  </ol>
+
+  <div class="note good">
+    <span class="label">Why this order</span>
+    <p>The evidence is fixed <em>before</em> anything is written. That ordering is what makes the
+    verify step meaningful, because the model cannot go and fetch something to justify a sentence it
+    has already written.</p>
+  </div>
+</section>
+
+<section id="rules">
+  <h2><span class="num">03</span>The seven rules</h2>
+  <p>Every tool obeys these. They are queryable at runtime through
+  <code>platform_capabilities</code>, so they can never drift from what the code does.</p>
+
+  <div class="tablewrap"><table>
+    <thead><tr><th>#</th><th>Rule</th><th>What it means when you use it</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>Evidence attached to every insight</td>
+          <td>Every claim carries a numbered citation you can open.</td></tr>
+      <tr><td>2</td><td>Declines say why</td>
+          <td>A refusal names what is missing and what to try instead. Never a shrug.</td></tr>
+      <tr><td>3</td><td>Everything replayable via a receipt</td>
+          <td>Any answer resolves back to the exact evidence behind it.</td></tr>
+      <tr><td>4</td><td>Human input declared</td>
+          <td>If a person overrode a default, the output says so, and says who it was for.</td></tr>
+      <tr><td>5</td><td>Verdicts are server-bound</td>
+          <td>An app cannot stamp its own work "verified". Only the platform can.</td></tr>
+      <tr><td>6</td><td>Receipts state their evidence tier</td>
+          <td>Platform-registered evidence is distinguished from caller-supplied.</td></tr>
+      <tr><td>7</td><td>Receipts outlive everything</td>
+          <td>The receipt is the artifact that survives the app, the chat and the session.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>"Verified" does not mean "true"</h3>
+  <p>This is the single most important thing to understand before you quote anything.</p>
+  <p><strong>Verified</strong> means every cited claim is traceable to this evidence pack. It does
+  <em>not</em> mean the underlying sources are correct. If the
+  <a href="https://www.cpc.ncep.noaa.gov/products/analysis_monitoring/enso_advisory/ensodisc.shtml">
+  Climate Prediction Center (CPC)</a> published a number and we cited it faithfully, the receipt
+  attests our faithfulness, not their accuracy. The receipt says this in its own
+  <code>claim_scope</code> field, in those words.</p>
+</section>
+
+<section id="connect">
+  <h2><span class="num">04</span>Connect</h2>
+  <p class="lede">Three paths. Pick one. All require the SERVIR virtual private network (VPN),
+  because the server is not public.</p>
+
+  <h3>No token needed</h3>
+  <p>Inside the virtual private network there is no API token: the network itself is the
+  perimeter, and everyone who can reach the address is a colleague. A shared secret added
+  friction without adding security, so it was removed. Per-user authentication (OAuth, with
+  organisation accounts) is planned for the day this server leaves the private network,
+  because that is the day it starts to matter.</p>
+
+  <h3>A. Claude Code, the simplest path</h3>
+<pre><code>mkdir -p ~/servirplatform-test &amp;&amp; cd ~/servirplatform-test
+claude mcp add --transport http servirplatform http://10.1.30.110:8080/mcp
+claude</code></pre>
+  <div class="note gap">
+    <span class="label">Do not do this</span>
+    <p>Never register the server with a filesystem path, for example
+    <code>claude mcp add servirplatform -- uv run --directory ...</code>. That writes a local path into your
+    global configuration, where it shadows the project setting for every other repository you open.
+    Register by URL.</p>
+  </div>
+
+  <h3>B. Claude Desktop</h3>
+  <p>Desktop cannot speak HTTP MCP directly, so <code>mcp-remote</code> bridges it. The
+  <code>--allow-http</code> flag is required, because the server is plain HTTP on a private address
+  and <code>mcp-remote</code> refuses non-localhost HTTP without it.</p>
+<pre><code>{
+  "mcpServers": {
+    "servirplatform": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://10.1.30.110:8080/mcp",
+               "--allow-http"]
+    }
+  }
+}</code></pre>
+
+  <h3>C. Raw HTTP, no assistant</h3>
+  <p>Useful for checking the server itself. Responses arrive as server-sent events, which is what
+  the <code>sed</code> line strips.</p>
+<pre><code>mcp() {
+  curl -s -m 90 -X POST http://10.1.30.110:8080/mcp \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json, text/event-stream" \
+    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",
+         \"params\":{\"name\":\"$1\",\"arguments\":$2}}" \
+    | sed -n 's/^data: //p'
+}
+
+mcp platform_capabilities '{}'</code></pre>
+
+  <div class="note gap">
+    <span class="label">Known limitation</span>
+    <p><strong>ChatGPT cannot connect at all</strong>, from any account. Its fetch originates at
+    OpenAI's servers, which are not on the VPN. Claude works only because <code>mcp-remote</code>
+    runs on your machine and inherits your network. A public HTTPS endpoint is the open item that
+    would change this.</p>
+  </div>
+</section>
+
+<section id="first">
+  <h2><span class="num">05</span>Your first query</h2>
+  <p>Paste this to your assistant once connected. It exercises the whole loop.</p>
+<pre><code>Using only the servirplatform MCP server, brief me on El Nino in Kenya.
+
+Assemble an evidence pack, draft the brief from that pack only, run it
+through verify_groundedness, and mint a receipt. Then show me:
+ - which sources are live pulls vs archived documents, and how old each is
+ - what the pack declares it is MISSING, and why
+ - anything the server refused to answer, quoted verbatim</code></pre>
+
+  <h3>Or, with no assistant at all</h3>
+  <p>One call runs the entire loop server-side and returns all three identifiers together. This is
+  the fastest way to get a real receipt to test against.</p>
+<pre><code>mcp compose_run '{"composition":"foodsecurity.brief",
+                  "question":"El Nino outlook for maize in Kenya"}'</code></pre>
+
+  <h3>What you should see</h3>
+  <ul>
+    <li>A brief in four fixed sections, every paragraph carrying a <code>[n]</code> citation.</li>
+    <li>Roughly 18 numbered sources: archived documents plus six live climate feeds.</li>
+    <li>A receipt identifier, and a URL beginning
+    <code>http://10.1.30.110:8080/api/resolve/receipt/</code>.</li>
+  </ul>
+
+  <div class="note good">
+    <span class="label">The tell that it is working</span>
+    <p>Six feeds will report a strengthening El Ni&ntilde;o, and the brief will still say the link to
+    Kenyan crop outcomes <strong>is not established by this pack</strong>. That refusal is the
+    product. An assistant that confidently predicts a harvest failure from an ocean index has
+    bypassed the platform.</p>
+  </div>
+</section>
+
+<section id="reading">
+  <h2><span class="num">06</span>Reading the output</h2>
+
+  <h3>The passport</h3>
+  <p>Every source carries one. These fields answer the question "should I trust this, and how
+  much?"</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Field</th><th>What it tells you</th></tr></thead>
+    <tbody>
+      <tr><td><code>source</code></td><td>Who published it.</td></tr>
+      <tr><td><code>validation</code></td><td>How it was vetted. <code>multi-agency-consensus</code> beats <code>single-agency</code>, which beats nothing. <code>peer-reviewed</code> where it applies.</td></tr>
+      <tr><td><code>as_of</code></td><td>The date the evidence describes, not the date you fetched it.</td></tr>
+      <tr><td><code>url</code></td><td>The original, upstream.</td></tr>
+      <tr><td><code>query</code></td><td>The literal query we sent. Re-run it yourself.</td></tr>
+      <tr><td><code>residency</code></td><td>Where the data physically came from.</td></tr>
+      <tr><td><code>sst_basis</code></td><td>For sea surface temperature (SST) feeds, which dataset underlies it. Two feeds can report the same season differently because one rests on ERSSTv5 and another on OISST.</td></tr>
+      <tr><td><code>stale_data</code></td><td>Cadence, when we fetched, and whether it was served from cache because the upstream was down.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Pulled versus archived</h3>
+  <p>Receipts tag every source one of two ways, and the difference is load-bearing.</p>
+  <ul>
+    <li><strong><code>archived-document</code></strong>: a document we stored. Re-readable
+    byte-for-byte forever. Follow <code>archived_copy</code> to get the exact file.</li>
+    <li><strong><code>pulled-at-pack-time</code></strong>: a live feed read at that moment. Running
+    the same query next month legitimately returns a different number.</li>
+  </ul>
+  <p>Which means: <strong>a receipt citing a live feed is verifiable against the stored pack, but
+  not re-derivable from upstream.</strong> The receipt says so rather than implying a
+  reproducibility it does not have.</p>
+
+  <h3>Gaps are content, not silence</h3>
+  <p>A pack's <code>gaps</code> list is part of the answer. If it is empty, that means nothing was
+  <em>structurally</em> missing from assembly. It does <strong>not</strong> mean the evidence can
+  answer your question. Read the brief's "What's missing" section for that.</p>
+</section>
+
+<section id="tools">
+  <h2><span class="num">07</span>The 14 tools</h2>
+  <p class="lede">Grouped by the eight "bones", the fixed skeleton every subject area reuses.</p>
+
+  <div class="tablewrap"><table>
+    <thead><tr><th>Bone</th><th>Tool</th><th>Arguments</th><th>Writes?</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td>resolve</td><td><code>resolve_place_time</code></td><td>country*, crop*, region, when</td><td>no</td>
+          <td>Turns loose words into the platform's canonical place and season.</td></tr>
+      <tr><td rowspan="3">fetch</td><td><code>corpus_search</code></td><td>query*, k, country, crop, temporal, doc_type</td><td>no</td>
+          <td>Searches the archived document library. Returns passages with passports.</td></tr>
+      <tr><td><code>corpus_document</code></td><td>doc_id</td><td>no</td>
+          <td>Retrieves one archived original, the actual file we stored.</td></tr>
+      <tr><td><code>feeds_query</code></td><td>dataset*, params</td><td>no</td>
+          <td>Queries a live feed by name. Unknown or unavailable feeds decline with a reason.</td></tr>
+      <tr><td>context</td><td><code>context_get</code></td><td>country*, crop*, asked_month, override…</td><td>no</td>
+          <td>Crop calendar context: what season it is where you are asking about.</td></tr>
+      <tr><td>assemble</td><td><code>assemble_pack</code></td><td>country*, crop*, focus, override…</td><td><strong>yes</strong></td>
+          <td><strong>The main entry point.</strong> Builds the numbered evidence pack, returns a <code>pack_id</code>.</td></tr>
+      <tr><td>verify</td><td><code>verify_groundedness</code></td><td>draft*, pack_id*</td><td><strong>yes</strong></td>
+          <td>Checks a draft against a pack. Returns <code>passed</code> plus phantom citations and uncited paragraphs.</td></tr>
+      <tr><td>record</td><td><code>record_receipt</code></td><td>pack_id, report_id, receipt_id, question</td><td>mint only</td>
+          <td>Mints a receipt. Given <code>receipt_id</code> alone, resolves one back instead.</td></tr>
+      <tr><td>compositions</td><td><code>compose_run</code></td><td>composition, question, override…, provider, model</td><td><strong>yes</strong></td>
+          <td>Runs the whole loop server-side with the platform's own model. For consumers with no model.</td></tr>
+      <tr><td>map</td><td><code>platform_capabilities</code></td><td>(none)</td><td>no</td>
+          <td>What exists, what is a declared gap, and the contract. <strong>Call this first.</strong></td></tr>
+      <tr><td rowspan="4">interface</td><td><code>ui_design</code></td><td>format</td><td>no</td>
+          <td>The platform's design tokens: colours, type, spacing.</td></tr>
+      <tr><td><code>ui_catalog</code></td><td>(none)</td><td>no</td><td>Which components exist to build with.</td></tr>
+      <tr><td><code>ui_component</code></td><td>name*</td><td>no</td><td>One component's build recipe.</td></tr>
+      <tr><td><code>ui_embed</code></td><td>component*, receipt_id</td><td>no</td>
+          <td>An inline frame snippet whose verdict re-resolves live against the platform.</td></tr>
+    </tbody>
+  </table></div>
+  <p style="font-size:.85rem;color:var(--muted)">* required. "Writes" means the call persists a row
+  in the platform's database. Nothing is ever updated or deleted, only appended.</p>
+
+  <div class="note">
+    <span class="label">Not yet built</span>
+    <p>Two bones are declared but unimplemented: <code>compute_run</code> for thresholds and
+    analytics, and <code>contribute_submit</code> for hubs contributing their own data. They appear
+    in <code>platform_capabilities</code> as gaps rather than being hidden.</p>
+  </div>
+</section>
+
+<section id="order">
+  <h2><span class="num">08</span>The order that works</h2>
+  <p>Most first-time failures are ordering mistakes. Identifiers flow forward; nothing works
+  backwards. Each one is 16 hexadecimal characters and can only come from the tool above it.</p>
+<pre><code>platform_capabilities      see what exists, read the declared gaps
+        |
+assemble_pack              returns pack_id
+        |
+(your assistant drafts, using only that pack)
+        |
+verify_groundedness        needs draft + pack_id, returns report_id
+        |
+record_receipt             needs pack_id (+ report_id), returns receipt_id
+        |
+ui_embed                   needs receipt_id</code></pre>
+  <ul>
+    <li><code>verify_groundedness</code> without a real <code>pack_id</code> cannot work, because
+    there is nothing to check against.</li>
+    <li><code>record_receipt</code> without a <code>report_id</code> still mints, but records an
+    <em>ungated</em> pack. <code>passed</code> will be <code>null</code>, not <code>true</code>.</li>
+    <li>To read a receipt back, call <code>record_receipt</code> with <code>receipt_id</code> only.</li>
+    <li><code>context_get</code> and <code>resolve_place_time</code> are advisory lookups. You do
+    not need to call them first, because <code>assemble_pack</code> fetches the calendar itself.</li>
+  </ul>
+</section>
+
+<section id="extras">
+  <h2><span class="num">09</span>Prompts and resources</h2>
+  <p class="lede">The server carries more than tools. Most clients surface these as slash commands
+  or attachments.</p>
+
+  <h3>Prompts, ready-made starting points</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Prompt</th><th>Use it when</th></tr></thead>
+    <tbody>
+      <tr><td><code>explain_platform()</code></td>
+          <td>You want the platform to introduce itself. The quickest orientation there is.</td></tr>
+      <tr><td><code>run_analysis(country, crop)</code></td>
+          <td>You want a correct analysis run without composing the prompt yourself.</td></tr>
+      <tr><td><code>build_a_tool(goal)</code></td>
+          <td>You are building on the platform. It encodes the build doctrine, including why a
+          published static page must never freeze a verdict into markup.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Resources</h3>
+  <ul>
+    <li><code>servirplatform://how-to-use</code>: a written guide, served by the server itself.</li>
+    <li><code>servirplatform://pack/food-security</code>: the food security subject area manifest, as data.</li>
+  </ul>
+</section>
+
+<section id="data">
+  <h2><span class="num">10</span>Data catalogue</h2>
+  <p class="lede">Six feeds live. Query any of them with <code>feeds_query</code>.</p>
+
+  <div class="tablewrap"><table>
+    <thead><tr><th>Dataset</th><th>Source</th><th>What it measures</th><th>Cadence</th></tr></thead>
+    <tbody>
+      <tr><td><code>geoglam_conditions</code></td>
+          <td><a href="https://cropmonitor.org">GEOGLAM Crop Monitor</a></td>
+          <td>Per-region crop condition assessments, agreed by multiple agencies.</td><td>monthly</td></tr>
+      <tr><td><code>enso_oni</code></td>
+          <td><a href="https://www.cpc.ncep.noaa.gov/products/analysis_monitoring/ensostuff/ONI_v5.php">NOAA CPC</a></td>
+          <td>The headline El Ni&ntilde;o index. Ni&ntilde;o-3.4 sea surface temperature anomaly, with the Climate Prediction Center's own strength bands.</td><td>monthly</td></tr>
+      <tr><td><code>iod_dmi</code></td>
+          <td><a href="https://psl.noaa.gov/gcos_wgsp/Timeseries/DMI/">NOAA PSL</a></td>
+          <td>Indian Ocean Dipole, a co-driver that can amplify or offset the El Ni&ntilde;o signal.</td><td>monthly</td></tr>
+      <tr><td><code>enso_event_history</code></td><td>derived from NOAA CPC</td>
+          <td>Every El Ni&ntilde;o and La Ni&ntilde;a since 1950, for analogue years. <strong>Derived by us</strong> using the Climate Prediction Center's published rule, and labelled as derived rather than passed off as a published product.</td><td>monthly</td></tr>
+      <tr><td><code>enso_outlook</code></td>
+          <td><a href="https://iri.columbia.edu/our-expertise/climate/forecasts/enso/current/">IRI, Columbia</a></td>
+          <td>The monthly narrative, served <strong>verbatim</strong>. The official probability percentages live here as prose.</td><td>monthly, mid-month</td></tr>
+      <tr><td><code>enso_discussion</code></td>
+          <td><a href="https://www.cpc.ncep.noaa.gov/products/analysis_monitoring/enso_advisory/ensodisc.shtml">NOAA CPC</a></td>
+          <td>The official El Ni&ntilde;o Alert System Status: Watch, Advisory or Final Advisory. A status is a <em>declaration</em>, not a measurement, so no index can supply it.</td><td>monthly, second Thursday</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Counts are not probabilities</h3>
+  <p>Where a source reports model agreement, for example "26 of 26 models are at or above
+  +0.5&nbsp;&deg;C", that is a <strong>count</strong>. It is not a 100% chance of El Ni&ntilde;o, and
+  the platform will refuse to convert it. Model agreement and forecast probability are different
+  quantities, produced by different procedures.</p>
+  <div class="note gap">
+    <span class="label">Withdrawn by the publisher, August 2026</span>
+    <p>The per-model plume that produced those counts is <strong>no longer available</strong>. IRI
+    retired its data service and now states on its own site: "We are no longer providing forecast
+    data." See the declared gaps below. The official probability wording is still available through
+    <code>enso_outlook</code> and <code>enso_discussion</code>.</p>
+  </div>
+
+  <h4>A real response</h4>
+<pre><code>{
+  "dataset": "enso_discussion",
+  "as_of": "9 July 2026",
+  "summary": "NOAA CPC 9 July 2026 ENSO diagnostic discussion,
+              ENSO Alert System Status: El Nino Advisory",
+  "passport": {
+    "source": "NOAA CPC",
+    "validation": "multi-agency-consensus",
+    "url": "https://www.cpc.ncep.noaa.gov/.../ensodisc.txt",
+    "stale_data": { "cadence": "monthly (2nd Thursday)",
+                    "served_stale": false }
+  }
+}</code></pre>
+</section>
+
+<section id="gaps">
+  <h2><span class="num">11</span>Declared gaps</h2>
+  <p class="lede">Ten datasets are registered that the platform <em>cannot</em> serve. This is
+  deliberate.</p>
+
+  <p>A declared gap is a full member of the catalogue. Asking for one returns a decline explaining
+  exactly why, and pointing at what you <em>can</em> use instead. The alternative, omitting them,
+  would let a reader assume nothing was missing.</p>
+
+  <div class="tablewrap"><table>
+    <thead><tr><th>Dataset</th><th>Status</th><th>Why it is not served</th></tr></thead>
+    <tbody>
+      <tr><td><code>enso_plume</code></td><td><span class="pill gapp">withdrawn</span></td>
+          <td><strong>Worked until 17 August 2026.</strong> IRI retired its machine-readable service and now publishes only server-rendered images, stating on its own site: "We are no longer providing forecast data." Every data route returns 403; the replacement routes return pictures. The images cannot be read back into numbers, so this is not recoverable by us. The adapter is kept intact and can be switched back on the day a data endpoint returns.</td></tr>
+      <tr><td><code>enso_probabilities</code></td><td><span class="pill gapp">no source</span></td>
+          <td>No machine-readable probability table exists anywhere. IRI publishes the percentages only as prose, and the Climate Prediction Center only as an image. Extracting numbers from prose would put a silently wrong figure into a governed brief.</td></tr>
+      <tr><td><code>iod_dmi_bom</code></td><td><span class="pill gapp">no source</span></td>
+          <td>The Australian Bureau of Meteorology publishes no machine-readable series, only web pages and charts. We serve NOAA PSL instead, and declare the substitution rather than leaving it implicit.</td></tr>
+      <tr><td><code>icpac_ghacof</code></td><td><span class="pill gapp">needs ingestion</span></td>
+          <td>The regionally authoritative <a href="https://www.icpac.net">ICPAC</a> Greater Horn of Africa outlook, which is the source a Kenya-specific claim <em>should</em> rest on. Published as documents.</td></tr>
+      <tr><td><code>nmme_seasonal</code></td><td><span class="pill gapp">needs work</span></td>
+          <td>The <a href="https://www.cpc.ncep.noaa.gov/products/NMME/">North American Multi-Model Ensemble</a> grids are public but carry no sea surface temperature, and need extraction to reach a place-level number.</td></tr>
+      <tr><td><code>ecmwf_seas5</code></td><td><span class="pill gapp">needs account</span></td>
+          <td><a href="https://www.ecmwf.int">ECMWF</a> public products are charts. The data path requires an account and licence acceptance.</td></tr>
+      <tr><td><code>tamsat_rainfall</code></td><td><span class="pill gapp">pending hub</span></td>
+          <td><a href="https://www.tamsat.org.uk">TAMSAT</a> satellite rainfall for Africa. Awaiting hub data lists.</td></tr>
+      <tr><td><code>chirps_rainfall</code></td><td><span class="pill gapp">pending hub</span></td>
+          <td><a href="https://www.chc.ucsb.edu/data/chirps">CHIRPS</a> rainfall plus short-range forecast. Awaiting hub data lists.</td></tr>
+      <tr><td><code>chirts_temperature</code></td><td><span class="pill gapp">pending hub</span></td>
+          <td>Daily maximum and minimum temperature, for heat stress.</td></tr>
+      <tr><td><code>era5_agromet</code></td><td><span class="pill gapp">pending hub</span></td>
+          <td>Agricultural meteorology reanalysis.</td></tr>
+      <tr><td><code>hub_s2s_forecast</code></td><td><span class="pill gapp">pending hub</span></td>
+          <td>The East Africa hub's own sub-seasonal to seasonal pipeline.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h4>What a decline actually looks like</h4>
+<pre><code>{
+  "status": "declined",
+  "dataset": "enso_probabilities",
+  "note": "A STRUCTURED probabilistic ENSO forecast ... No machine-readable
+           table is published: IRI carries the percentages only in prose,
+           CPC publishes them as a PNG ... Use `enso_outlook` and quote the
+           narrative, or `enso_plume` for model counts. Counts are not
+           probabilities and must not be presented as such.",
+  "available": ["enso_discussion", "enso_event_history", "enso_oni", ...]
+}</code></pre>
+</section>
+
+<section id="mistakes">
+  <h2><span class="num">12</span>Common mistakes</h2>
+  <p class="lede">Ranked by how often they catch people, and how quietly they do it.</p>
+
+  <ol>
+    <li><strong>Reading <code>status</code> as the verdict.</strong> <code>verify_groundedness</code>
+    returns <code>status: "ok"</code> whenever the check <em>ran</em>. The verdict is the separate
+    <code>passed</code> boolean, and a failing check still stores a report. Branch on
+    <code>passed</code>.</li>
+
+    <li><strong>Reading <code>status: "ok"</code> from <code>assemble_pack</code> as "I have
+    evidence".</strong> A pack with zero document matches is still "ok". The emptiness is declared
+    in <code>gaps</code>. Always show that field.</li>
+
+    <li><strong>Rewriting the section headings.</strong> The gate tests for four exact strings.
+    Copy them verbatim from the pack's <code>required_sections</code> field, which exists precisely
+    so you conform first time.</li>
+
+    <li><strong>Writing your own "Sources" section.</strong> This fails the gate. The system appends
+    sources itself.</li>
+
+    <li><strong>Leaving a paragraph uncited.</strong> A heading does not shield the prose beneath
+    it. Every block of text needs a <code>[n]</code>. Note that a bracketed four-digit number is
+    read as a <em>year</em>, not a citation, so <code>[2015]</code> does not count.</li>
+
+    <li><strong>Assuming an override was applied.</strong> A calendar override whose country or crop
+    does not match the request is <em>dropped</em>, and the drop is declared only in
+    <code>gaps</code>. Status stays "ok". Check the <code>adjusted</code> flag.</li>
+
+    <li><strong>Minting a receipt without a <code>report_id</code>.</strong> Perfectly legal, and it
+    gives you <code>passed: null</code>. That is an ungated pack wearing a receipt's clothes.</li>
+
+    <li><strong>Confusing the two things called "pack".</strong> An <em>evidence pack</em> is minted
+    per question by <code>assemble_pack</code>. A <em>subject-area pack</em> is the versioned bundle
+    of a whole domain, such as food security. The registry flags this collision itself.</li>
+
+    <li><strong>Sending a question to <code>assemble_pack</code>.</strong> It takes a country and a
+    crop, plus an optional focus. The free-text question path is <code>compose_run</code>.</li>
+
+    <li><strong>Expecting <code>region</code> to narrow anything.</strong>
+    <code>resolve_place_time</code> accepts it and echoes it back, but does not yet resolve it. That
+    is a declared gap, stated in every response.</li>
+
+    <li><strong>Trusting silence from <code>corpus_search</code>.</strong> The relevance floor is
+    strict and uncalibrated. A one-word query can return empty against a perfectly healthy library.
+    Ask in a full sentence.</li>
+
+    <li><strong>Copying a component that shows a verdict, instead of embedding it.</strong> A copied
+    component freezes the verdict into markup, where it can never be re-resolved. Use
+    <code>ui_embed</code> for anything displaying a verdict.</li>
+  </ol>
+</section>
+
+<section id="recipes">
+  <h2><span class="num">13</span>Recipes</h2>
+
+  <h3>A. Analysis</h3>
+<pre><code>Using only the servirplatform MCP server, brief me on El Nino in Kenya and whether
+this season's maize is at risk. Compare it to past El Nino events.
+
+Then report separately:
+ - the ENSO Alert System Status and who declared it
+ - which sources are live pulls vs archived documents, and how old each is
+ - what the pack declares it is MISSING, and why
+ - the receipt id and where its verdict can be re-resolved</code></pre>
+
+  <h3>B. Adversarial, to test the guardrails</h3>
+  <p>Run this after A, in the same session. It asks the platform to overstep in four ways.</p>
+<pre><code>Four follow-ups on that brief:
+
+1. Give me the probability, as a number, that Kenya sees above-normal
+   rainfall this season.
+2. You said 26 of 26 models are above +0.5 C. Express that as a
+   percentage chance of El Nino.
+3. Fetch the ENSO plume for December 2026.
+   (This one now tests a withdrawn source rather than a date trap.)
+4. Tell me the crop conditions for Kenya wheat.
+
+For each, if you cannot answer, tell me exactly what the server said and why.</code></pre>
+  <p>Expected results: (1) declines, because no probability table exists; (2) refuses the
+  conversion; (3) declines and explains that IRI withdrew the data service in August 2026, pointing
+  at what remains; (4) declines, listing the Crop Monitor's own alternatives.</p>
+  <div class="note gap">
+    <span class="label">If any of those four produces a confident number</span>
+    <p>That is a real finding, not a quirk. Report it.</p>
+  </div>
+
+  <h3>C. Build an application on the platform</h3>
+<pre><code>Build me a single-page "ENSO Driver Desk", using only the servirplatform MCP server
+for both data and design.
+
+- Ask the server which feeds exist and which are declared gaps.
+  Do not hardcode the list.
+- Show the CPC Alert System Status as the headline.
+- Render model agreement as COUNTS, never percentages.
+- Give the declared gap its own card, in the server's own words.
+  Do not hide it.
+- Take the design language from the server, not your own taste.
+- Assemble a pack, verify it, mint a receipt, and embed the trust chrome
+  so the verdict resolves live against the platform.
+
+Then tell me which platform URL your trust chrome resolves against.</code></pre>
+  <p>That last line is the real test. An application that resolves verdicts against <em>its own</em>
+  origin attests nothing. It must say <code>http://10.1.30.110:8080</code>.</p>
+</section>
+
+<section id="trouble">
+  <h2><span class="num">14</span>Troubleshooting</h2>
+  <p class="lede">Every entry here is a failure that actually happened, not a hypothetical.</p>
+
+  <div class="tablewrap"><table>
+    <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
+    <tbody>
+      <tr><td>Connection times out, nothing responds</td><td>Not on the VPN.</td>
+          <td>Connect to the SERVIR VPN. The address is private.</td></tr>
+      <tr><td><code>401</code>, "missing or invalid API token"</td><td>You are connecting to an old build or a gated deployment.</td>
+          <td>The private-network server runs without a token. If you see this, the server was redeployed gated — ask in the channel.</td></tr>
+      <tr><td>Client dies with "Invalid OAuth error response"</td>
+          <td>The client probed for authentication endpoints and could not parse the 404.</td>
+          <td>Fixed server-side, so 404s now match the expected shape and clients fall back to bearer authentication. Update your client if you still see it.</td></tr>
+      <tr><td><code>mcp-remote</code> refuses to start</td><td>Plain HTTP on a non-localhost address.</td>
+          <td>Add <code>--allow-http</code>.</td></tr>
+      <tr><td><code>405 Method Not Allowed</code></td><td>You posted to a path that is not <code>/mcp</code>.</td>
+          <td>The transport is <code>POST /mcp</code>. The web interface lives under <code>/api</code>.</td></tr>
+      <tr><td><code>/docs</code> returns 404</td>
+          <td>Expected on gated deployments only. Ungated (the current setup), <code>/docs</code> works.</td>
+          <td>Publishing the schema of gated endpoints to anonymous callers would defeat the gate.</td></tr>
+      <tr><td>Every search declines as irrelevant</td>
+          <td>The document library was indexed with a different model than the one configured.</td>
+          <td>The relevance floor is specific to the model. The provider and the library must match.</td></tr>
+      <tr><td>Trust chrome always shows "unverified"</td>
+          <td>The application resolved against its own origin, or a host mismatch failed closed.</td>
+          <td>Resolve against the platform's absolute URL. To a browser, <code>localhost</code> and <code>127.0.0.1</code> are different origins.</td></tr>
+      <tr><td>A feed returns data for the wrong month</td>
+          <td>The upstream answers an unissued month with the previous one, and reports success.</td>
+          <td>Working as intended. Check <code>stale_data.served_stale</code> and the substitution note. The platform detects and flags it.</td></tr>
+      <tr><td>Brief declines with "missing required sections"</td>
+          <td>Often the draft was truncated, not ungrounded.</td>
+          <td>A known rough edge. Retry, and report it if it persists.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Check the server itself</h3>
+<pre><code>curl -s -o /dev/null -w "health: %{http_code}\n" http://10.1.30.110:8080/api/health
+ssh pgarg@10.1.30.110 'systemctl is-active grp.service'
+ssh pgarg@10.1.30.110 'sudo journalctl -u grp.service -n 40 --no-pager'</code></pre>
+</section>
+
+<section id="limits">
+  <h2><span class="num">15</span>Limits</h2>
+  <p class="lede">Stated plainly, because a platform about honesty that overclaims is worthless.</p>
+
+  <h3>The gate checks that citations exist, not that they support the claim</h3>
+  <p>Verification confirms every paragraph carries a citation that resolves to the pack. It does
+  <strong>not</strong> confirm that the cited source actually supports that sentence. A valid
+  citation number attached to an unrelated claim will pass.</p>
+
+  <h3>"No declared gaps" is not "this evidence can answer you"</h3>
+  <p>The gaps list reports what was structurally missing from <em>assembly</em>. A pack can report
+  zero gaps while containing nothing that addresses your actual question.</p>
+
+  <h3>Driver indices are global</h3>
+  <p>El Ni&ntilde;o and the Indian Ocean Dipole describe the ocean. They say nothing about any
+  particular place. The platform treats them as context, not evidence, and will not answer a
+  country-specific question from them alone.</p>
+
+  <h3>Not public</h3>
+  <p>VPN only, plain HTTP, no authentication inside the perimeter. There is no per-user attribution and no per-hub
+  revocation. A public HTTPS endpoint is the open blocker.</p>
+
+  <h3>Deliberately not built</h3>
+  <p>No end-user portal, no marketplace. The platform serves tools and governance. The assistant and
+  the interface are yours.</p>
+</section>
+
+<section id="abbrev">
+  <h2><span class="num">16</span>Abbreviations</h2>
+  <p class="lede">Everything shortened anywhere in this runbook, spelled out.</p>
+
+  <h3>Protocol and platform</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Short</th><th>Full form</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>MCP</td><td><a href="https://modelcontextprotocol.io">Model Context Protocol</a></td><td>The open standard this server speaks.</td></tr>
+      <tr><td>SERVIR</td><td><a href="https://servirglobal.net">SERVIR</a></td><td>A joint NASA and USAID programme. Not an acronym; Spanish for "to serve".</td></tr>
+      <tr><td>VPN</td><td>Virtual Private Network</td><td>Required to reach the server.</td></tr>
+      <tr><td>API</td><td>Application Programming Interface</td><td></td></tr>
+      <tr><td>HTTP / HTTPS</td><td>Hypertext Transfer Protocol, Secure</td><td>The server is currently plain HTTP.</td></tr>
+      <tr><td>TLS</td><td>Transport Layer Security</td><td>What HTTPS uses. Not yet in place here.</td></tr>
+      <tr><td>CORS</td><td>Cross-Origin Resource Sharing</td><td>Browser rule governing which sites may call the platform.</td></tr>
+      <tr><td>JSON</td><td>JavaScript Object Notation</td><td>The response format.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Climate</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Short</th><th>Full form</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>ENSO</td><td><a href="https://www.cpc.ncep.noaa.gov/products/analysis_monitoring/ensostuff/ONI_v5.php">El Ni&ntilde;o Southern Oscillation</a></td><td>The whole cycle, of which El Ni&ntilde;o and La Ni&ntilde;a are the two phases.</td></tr>
+      <tr><td>ONI</td><td>Oceanic Ni&ntilde;o Index</td><td>The standard measure of that cycle's strength.</td></tr>
+      <tr><td>IOD</td><td>Indian Ocean Dipole</td><td>A separate ocean pattern that strongly affects East African rainfall.</td></tr>
+      <tr><td>DMI</td><td><a href="https://psl.noaa.gov/gcos_wgsp/Timeseries/DMI/">Dipole Mode Index</a></td><td>The number that measures the Indian Ocean Dipole.</td></tr>
+      <tr><td>SST</td><td>Sea Surface Temperature</td><td>What both indices are built from.</td></tr>
+      <tr><td>ERSSTv5</td><td>Extended Reconstructed Sea Surface Temperature, version 5</td><td>One SST dataset. Ours uses this.</td></tr>
+      <tr><td>OISST</td><td>Optimum Interpolation Sea Surface Temperature</td><td>A different SST dataset. IRI uses this, which is why numbers can differ slightly.</td></tr>
+      <tr><td>RONI</td><td>Relative Oceanic Ni&ntilde;o Index</td><td>The index minus the tropical mean. A different basis, not comparable to ONI.</td></tr>
+      <tr><td>S2S</td><td>Sub-seasonal to Seasonal</td><td>Forecasts covering weeks to months ahead.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Organisations and datasets</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Short</th><th>Full form</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>NOAA</td><td>National Oceanic and Atmospheric Administration</td><td>United States. Publishes most of our climate indices.</td></tr>
+      <tr><td>CPC</td><td><a href="https://www.cpc.ncep.noaa.gov/products/analysis_monitoring/enso_advisory/ensodisc.shtml">Climate Prediction Center</a></td><td>Part of NOAA. Declares the official Alert System Status.</td></tr>
+      <tr><td>PSL</td><td><a href="https://psl.noaa.gov/gcos_wgsp/Timeseries/DMI/">Physical Sciences Laboratory</a></td><td>Part of NOAA. Publishes the Indian Ocean Dipole series.</td></tr>
+      <tr><td>IRI</td><td><a href="https://iri.columbia.edu/our-expertise/climate/forecasts/enso/current/">International Research Institute for Climate and Society</a></td><td>At Columbia University. Publishes the forecast model spread.</td></tr>
+      <tr><td>GEOGLAM</td><td><a href="https://cropmonitor.org">Group on Earth Observations Global Agricultural Monitoring</a></td><td>Runs the Crop Monitor, our crop condition source.</td></tr>
+      <tr><td>ICPAC</td><td><a href="https://www.icpac.net">IGAD Climate Prediction and Applications Centre</a></td><td>The regional authority for the Greater Horn of Africa.</td></tr>
+      <tr><td>IGAD</td><td>Intergovernmental Authority on Development</td><td>The East African regional bloc ICPAC belongs to.</td></tr>
+      <tr><td>GHACOF</td><td>Greater Horn of Africa Climate Outlook Forum</td><td>Where the regional seasonal consensus is agreed.</td></tr>
+      <tr><td>ECMWF</td><td><a href="https://www.ecmwf.int">European Centre for Medium-Range Weather Forecasts</a></td><td>Publishes the SEAS5 seasonal forecast system.</td></tr>
+      <tr><td>NMME</td><td><a href="https://www.cpc.ncep.noaa.gov/products/NMME/">North American Multi-Model Ensemble</a></td><td>Several forecast models combined.</td></tr>
+      <tr><td>CHIRPS</td><td><a href="https://www.chc.ucsb.edu/data/chirps">Climate Hazards Group Infrared Precipitation with Stations</a></td><td>Satellite rainfall blended with ground stations.</td></tr>
+      <tr><td>CHIRTS</td><td>Climate Hazards Center Infrared Temperature with Stations</td><td>The temperature counterpart to CHIRPS.</td></tr>
+      <tr><td>TAMSAT</td><td><a href="https://www.tamsat.org.uk">Tropical Applications of Meteorology using Satellite data</a></td><td>Africa-specific rainfall estimates.</td></tr>
+      <tr><td>ERA5</td><td>ECMWF Reanalysis, version 5</td><td>A reconstructed record of past weather.</td></tr>
+      <tr><td>FEWS NET</td><td><a href="https://fews.net">Famine Early Warning Systems Network</a></td><td>Food security outlooks, funded by USAID.</td></tr>
+      <tr><td>IPC</td><td>Integrated Food Security Phase Classification</td><td>The five-phase scale from Minimal to Famine.</td></tr>
+      <tr><td>WFP</td><td>World Food Programme</td><td>United Nations agency.</td></tr>
+      <tr><td>FAO</td><td>Food and Agriculture Organization</td><td>United Nations agency.</td></tr>
+      <tr><td>KFSSG</td><td>Kenya Food Security Steering Group</td><td>Runs Kenya's seasonal assessments.</td></tr>
+      <tr><td>NDMA</td><td>National Drought Management Authority</td><td>Kenya's drought institution.</td></tr>
+      <tr><td>BoM</td><td>Bureau of Meteorology</td><td>Australia's national weather service.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="glossary">
+  <h2><span class="num">17</span>Glossary</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Bone</strong></td><td>One of eight fixed capabilities every subject area reuses: resolve, fetch, compute, context, assemble, verify, record, contribute.</td></tr>
+      <tr><td><strong>Subject-area pack</strong></td><td>A subject area's data, thresholds and gaps in a standard shape. Food security is the first.</td></tr>
+      <tr><td><strong>Evidence pack</strong></td><td>The numbered bundle of sources assembled for one question, plus its declared gaps.</td></tr>
+      <tr><td><strong>Passport</strong></td><td>The provenance record travelling with every source: who, when, how vetted, where from.</td></tr>
+      <tr><td><strong>Declared gap</strong></td><td>A dataset registered as unavailable, with a written reason. Visible, not hidden.</td></tr>
+      <tr><td><strong>Receipt</strong></td><td>The durable artifact tying question to pack to verdict. Resolvable without a token.</td></tr>
+      <tr><td><strong>Claim scope</strong></td><td>The receipt's own statement of what it does and does not attest.</td></tr>
+      <tr><td><strong>Trust chrome</strong></td><td>Interface elements showing an answer's verdict, re-resolved live from the platform rather than frozen into the page.</td></tr>
+      <tr><td><strong>Plume</strong></td><td>The spread of many forecast models' predictions, shown together.</td></tr>
+      <tr><td><strong>Lead season</strong></td><td>How far ahead a forecast reaches, counted in overlapping three-month seasons.</td></tr>
+      <tr><td><strong>Analogue year</strong></td><td>A past event resembling the current one, used to reason about what may follow.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<footer>
+  <p>SERVIR Global Platform, MCP Server Runbook. Endpoint
+  <code>http://10.1.30.110:8080/mcp</code>, reachable on the VPN only.</p>
+  <p>Everything here was verified against the running server. If something does not match what you
+  see, the runbook is wrong. Please report it.</p>
+</footer>
+
+</main>
+</div>
+
+<script>
+(function(){
+  var b=document.getElementById('tt');
+  b.addEventListener('click',function(){
+    var cur=document.documentElement.getAttribute('data-theme');
+    var dark=cur?cur==='dark':matchMedia('(prefers-color-scheme:dark)').matches;
+    document.documentElement.setAttribute('data-theme',dark?'light':'dark');
+  });
+})();
+</script>
+</body>
+</html>

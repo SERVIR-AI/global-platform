@@ -1,0 +1,29 @@
+<!-- source_card — one cited evidence item with its provenance.
+     data: { n, source, title, pub_date, validation, role, url, archived_copy, doc_id, score } -->
+<style>
+  .grp-source{display:flex;gap:.75rem;padding:.75rem .9rem;border:1px solid var(--grp-base-300);
+    border-radius:var(--grp-radius-box,.5rem);background:var(--grp-base-100);font:14px/1.5 var(--grp-font-sans)}
+  .grp-source__n{flex:0 0 auto;font:600 12px/1 var(--grp-font-mono);color:var(--grp-primary);
+    background:color-mix(in oklab,var(--grp-primary) 10%,transparent);border-radius:.35rem;padding:.35em .5em;height:fit-content}
+  .grp-source__title{font-weight:600;color:var(--grp-base-content)}
+  .grp-source__meta{display:flex;flex-wrap:wrap;gap:.4rem .6rem;align-items:center;
+    margin-top:.25rem;font-size:12px;color:color-mix(in oklab,var(--grp-base-content) 65%,transparent)}
+  .grp-source__links{display:flex;gap:.75rem;margin-top:.35rem;font-size:12px}
+  .grp-source__links a{color:var(--grp-primary);text-decoration:none}
+  .grp-source__links a:hover{text-decoration:underline}
+  .grp-source__links a:focus-visible{outline:2px solid var(--grp-primary);outline-offset:2px}
+</style>
+<div class="grp-source">
+  <span class="grp-source__n">[{{n}}]</span>
+  <div>
+    <div class="grp-source__title">{{title}}</div>
+    <div class="grp-source__meta">
+      <span>{{source}}</span><span>·</span><span>{{pub_date}}</span>
+      <!-- include validation_badge here -->
+    </div>
+    <div class="grp-source__links">
+      <a href="{{url}}" target="_blank" rel="noopener">original ↗</a>
+      <a href="{{archived_copy}}">archived copy</a>
+    </div>
+  </div>
+</div>

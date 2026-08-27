@@ -1,0 +1,101 @@
+/**
+ * Shape-guards for the trace envelope.
+ *
+ * The backend builds and persists the envelope inside a bare `except`
+ * (`chat.py:97-104`) precisely so a tracing bug can never break the answer. This module
+ * is the client half of that stance: everything here returns `null` or a repaired value
+ * rather than throwing, so a malformed or stale envelope costs one missing panel, never
+ * a blank chat.
+ */
+
+import type { Legend, LegendEntry } from '@/types/chat';
+import type { EnvelopeTokens, TraceEnvelope, TraceStep } from '@/types/trace';
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * Deliberately lenient: a step needs only the fields every renderer relies on. An
+ * unrecognized `node` still passes, because `TraceStepDetail`'s fallback branch can
+ * render it — a schema that has run ahead of this UI should degrade, not disappear.
+ */
+const isTraceStep = (value: unknown): value is TraceStep =>
+  isRecord(value) &&
+  typeof value.node === 'string' &&
+  typeof value.summary === 'string' &&
+  typeof value.duration_ms === 'number' &&
+  Number.isFinite(value.duration_ms);
+
+/**
+ * Sum token counts the way `tracing.py:build_trace_envelope` does: include every step
+ * that carries a tokens object, skip the ones whose `tokens` is null because no model
+ * ran. Cost skips rather than coerces — if no step was priced the total is null, not a
+ * $0.00 that reads like a measurement.
+ */
+const sumTokens = (steps: TraceStep[]): EnvelopeTokens => {
+  const carried = steps
+    .map((step) => ('tokens' in step ? step.tokens : null))
+    .filter((tokens): tokens is NonNullable<typeof tokens> => isRecord(tokens));
+  const priced = carried
+    .map((t) => t.cost)
+    .filter((cost): cost is number => typeof cost === 'number');
+  return {
+    in: carried.reduce((sum, t) => sum + (t.in || 0), 0),
+    out: carried.reduce((sum, t) => sum + (t.out || 0), 0),
+    total: carried.reduce((sum, t) => sum + (t.total || 0), 0),
+    cost: priced.length > 0 ? priced.reduce((sum, cost) => sum + cost, 0) : null,
+  };
+};
+
+const isLegendEntry = (value: unknown): value is LegendEntry =>
+  isRecord(value) && typeof value.label === 'string' && typeof value.color === 'string';
+
+/**
+ * A legend with no usable entries is `null`, not `{}`: an empty scale would render as a
+ * breakdown with no labels, which is worse than falling back to bare class numbers.
+ */
+const parseLegend = (raw: unknown): Legend | null => {
+  if (!isRecord(raw)) return null;
+  const entries = Object.entries(raw).filter(([, entry]) => isLegendEntry(entry));
+  return entries.length > 0 ? (Object.fromEntries(entries) as Legend) : null;
+};
+
+const sumDuration = (steps: TraceStep[]): number =>
+  steps.reduce((sum, step) => sum + (step.duration_ms || 0), 0);
+
+/**
+ * Validate a raw `trace_envelope` and return it typed, or `null` if it isn't one.
+ *
+ * `total_duration` and `total_tokens` are recomputed when absent or non-numeric rather
+ * than treated as fatal — they are derivable from `steps`, so a missing header is a
+ * cosmetic defect, not a reason to drop the whole trace.
+ */
+export const parseEnvelope = (raw: unknown): TraceEnvelope | null => {
+  if (!isRecord(raw) || !Array.isArray(raw.steps)) return null;
+
+  const steps = raw.steps.filter(isTraceStep);
+  // An envelope whose steps are all malformed carries nothing renderable. An envelope
+  // with genuinely zero steps is different, and is handled by the panel as an empty state.
+  if (steps.length === 0 && raw.steps.length > 0) return null;
+
+  const totals = raw.total_tokens;
+  return {
+    thread_id: typeof raw.thread_id === 'string' ? raw.thread_id : '',
+    trace_id: typeof raw.trace_id === 'string' ? raw.trace_id : '',
+    created_at: typeof raw.created_at === 'string' ? raw.created_at : '',
+    total_duration:
+      typeof raw.total_duration === 'number' && Number.isFinite(raw.total_duration)
+        ? raw.total_duration
+        : sumDuration(steps),
+    total_tokens: isRecord(totals)
+      ? {
+          in: Number(totals.in) || 0,
+          out: Number(totals.out) || 0,
+          total: Number(totals.total) || 0,
+          cost: typeof totals.cost === 'number' ? totals.cost : null,
+        }
+      : sumTokens(steps),
+    legend: parseLegend(raw.legend),
+    steps,
+  };
+};

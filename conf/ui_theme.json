@@ -1,0 +1,203 @@
+{
+  "id": "grp",
+  "version": "v0",
+  "description": "The Global Risk Platform design language, built on the official SERVIR identity (styleguide/). Single source of truth: the web app imports generated artifacts from this file, and ui.design serves it. Edit here, regenerate — never hand-edit the generated files.",
+  "brand": {
+    "name": "SERVIR",
+    "source": "styleguide/identity-guidelines.png + SERVIR_Style_guide/ (2026 identity)",
+    "blue": "#2380b0",
+    "green": "#91af3d",
+    "ink": "#1c212a",
+    "slate": "#485e88",
+    "logo_variants": [
+      "colour on dark",
+      "colour on light",
+      "white/mono"
+    ],
+    "usage": [
+      "brand blue leads; brand green is the supporting accent",
+      "the identity's dark navy is for headers/hero surfaces, not body text backgrounds",
+      "brand green is NOT the verified colour — see trust_rules; a brand accent must never read as a verdict",
+      "hub apps replace the wordmark with their own; the platform mark stays a neutral built-with credit"
+    ],
+    "logo": {
+      "data_uri": "data:image/png;base64,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",
+      "alt": "SERVIR",
+      "intrinsic_size": "240x48",
+      "variants": [
+        "colour (default, transparent PNG)",
+        "white/mono for dark headers"
+      ],
+      "usage": [
+        "always render it in the platform header, next to the domain name",
+        "never recolour, distort or crop the mark",
+        "self-contained data URI — no network fetch, works in any page"
+      ]
+    }
+  },
+  "palette": {
+    "base-100": "#fbfcfd",
+    "base-200": "#f1f4f7",
+    "base-300": "#e0e6ec",
+    "base-content": "#1c212a",
+    "primary": "#2380b0",
+    "primary-content": "#f7fbfd",
+    "secondary": "#91af3d",
+    "secondary-content": "#12180a",
+    "accent": "#485e88",
+    "accent-content": "#f6f8fc",
+    "neutral": "#1c212a",
+    "neutral-content": "#eef2f5",
+    "info": "#2380b0",
+    "success": "#1f7a4d",
+    "warning": "#a06a08",
+    "error": "#9b2c2c"
+  },
+  "trust_rules": {
+    "success_reserved_for": "server_verified",
+    "default_state": "unverified",
+    "chip_states": [
+      "pass",
+      "fail",
+      "not_run"
+    ],
+    "verified_requires_receipt_link": true,
+    "never": [
+      "a verdict may not be set by the host/client — it resolves from the server",
+      "declines, declared gaps, honest zeros and ADJUSTED labels may not be suppressed",
+      "no partner/agency logo packs; only a neutral built-with mark carrying a receipt link"
+    ]
+  },
+  "semantic": {
+    "verified": {
+      "role": "success",
+      "meaning": "server-verified against registered evidence"
+    },
+    "caution": {
+      "role": "warning",
+      "meaning": "adjusted by a human, model-output, or a declared gap"
+    },
+    "declined": {
+      "role": "error",
+      "meaning": "refused, with a stated cause"
+    },
+    "neutral": {
+      "role": "base-content",
+      "meaning": "unverified / informational — the default"
+    }
+  },
+  "validation_levels": {
+    "multi-agency-consensus": "verified",
+    "peer-reviewed": "verified",
+    "single-agency": "neutral",
+    "model-output": "caution"
+  },
+  "provenance": {
+    "section_edges": [
+      "#2380b0",
+      "#91af3d",
+      "#c98a12",
+      "#7c5cbf"
+    ],
+    "parse_edge": "#7c5cbf",
+    "cite_edge": "#8b98a8"
+  },
+  "components": {
+    "note": "The inventory ui.catalog exposes. Trust classes decide delivery: receipt_bound surfaces are EMBEDDED (verdict resolves server-side, never a prop); input surfaces emit a human judgement but never render their own verdict; presentational chrome may ship as copy-in recipes.",
+    "provenance_graph": {
+      "trust_class": "receipt_bound",
+      "delivery": "embed",
+      "source": "apps/web Provenance/",
+      "binds": "receipt_id",
+      "embeddable": true,
+      "renders": "question -> parse -> retrieval feeds -> chunks in documents -> the gate -> claims, with hover tracing"
+    },
+    "crop_calendar_editor": {
+      "trust_class": "input",
+      "delivery": "embed",
+      "source": "apps/web ChatArea/CalendarPanel",
+      "emits": "calendar override (ADJUSTED, target-pinned)",
+      "embeddable": false,
+      "status": "embed pending — emits an override via postMessage; not yet decoupled"
+    },
+    "groundedness_strip": {
+      "trust_class": "receipt_bound",
+      "delivery": "embed",
+      "source": "apps/web ChatArea/Brief",
+      "binds": "report_id"
+    },
+    "source_card": {
+      "trust_class": "receipt_bound",
+      "delivery": "recipe",
+      "source": "apps/web ChatArea/Brief",
+      "requires": "doc_id + archived copy"
+    },
+    "decline_card": {
+      "trust_class": "receipt_bound",
+      "delivery": "recipe",
+      "source": "apps/web ChatArea/Brief"
+    },
+    "validation_badge": {
+      "trust_class": "presentational",
+      "delivery": "recipe",
+      "maps": "validation_levels"
+    },
+    "hazard_map": {
+      "trust_class": "presentational",
+      "delivery": "embed",
+      "embeddable": true,
+      "binds": "receipt_id",
+      "renders": "AOI, severity-tagged assets and the clipped hazard layer from the receipt's recorded evidence pack",
+      "source": "apps/web EmbedMap (risk pack)",
+      "status": "live"
+    },
+    "chat_shell": {
+      "trust_class": "presentational",
+      "delivery": "recipe",
+      "source": "apps/web ChatArea/",
+      "status": "generic scaffold"
+    },
+    "platform_header": {
+      "trust_class": "presentational",
+      "delivery": "recipe",
+      "required": true,
+      "purpose": "SERVIR logo + the domain name — REQUIRED on every page built on this platform",
+      "data": "domain_name (from the pack manifest's display_name); logo + platform name are substituted for you"
+    }
+  },
+  "typography": {
+    "font_sans": "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
+    "font_mono": "ui-monospace, SFMono-Regular, Menlo, monospace",
+    "numeric": "tabular-nums for any aligned figures"
+  },
+  "radii": {
+    "box": "0.5rem",
+    "field": "0.375rem",
+    "selector": "0.5rem"
+  },
+  "voice": {
+    "decline": "The system declined to answer — declining beats guessing.",
+    "adjusted": "ADJUSTED by the requester (not the hub default)",
+    "hub_default": "hub default configuration",
+    "honest_zero": "0 matched — declared as a gap, not hidden",
+    "unverified": "unverified by this platform",
+    "claim_scope": "verified = every cited claim traces to the evidence pack; NOT the truth of the underlying sources",
+    "retrieved_uncited": "retrieved, not cited by any claim"
+  },
+  "product": {
+    "platform_name": "SERVIR Global Risk Platform",
+    "rule": "Every UI built on this platform MUST show the platform header: the SERVIR logo plus the DOMAIN name (e.g. 'Food Security Platform'). Get the domain's display_name from the pack manifest. A hub's own branding sits alongside, never replacing the attribution.",
+    "resolver": {
+      "base": "http://localhost:8001",
+      "receipt": "/api/resolve/receipt/{receipt_id}",
+      "report": "/api/resolve/report/{report_id}",
+      "pack": "/api/resolve/pack/{pack_id}",
+      "note": "Trust chrome resolves verdicts here at VIEW time (a browser cannot call an MCP tool). Paths are relative to `base`; recipes ship with `base` already prefixed. Use hostnames as given — to a browser localhost and 127.0.0.1 are different origins, and a mismatch is a CORS failure that fails closed to 'unverified'."
+    },
+    "embed_base": {
+      "url": "http://localhost:5173",
+      "path": "/?embed={component}&receipt_id={receipt_id}",
+      "note": "The web app renders a single component standalone in embed mode. Point embed_base.url at wherever the platform UI is served; it resolves its data from /api/resolve/* at view time, so the verdict is never frozen."
+    }
+  }
+}

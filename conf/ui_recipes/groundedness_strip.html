@@ -1,0 +1,54 @@
+<!-- groundedness_strip — RECEIPT-BOUND, FAIL-CLOSED.
+
+     There is deliberately NO slot for the verdict. `data-state` is hardcoded to
+     "unverified" and the verdict text says so: filling this template in cannot make
+     it claim a pass. A static page freezes whatever you bake in, and a frozen
+     "PASSED" is unfalsifiable — precisely what this must never produce.
+
+     A real verdict is RESOLVED AT VIEW TIME: put the receipt id in data-receipt-id
+     and the platform's resolver URL on the link; the script below asks the platform
+     and only then stamps pass/fail. No platform, no answer -> it stays unverified,
+     which is the honest state. For an always-live verdict prefer the EMBED.
+
+     data: { receipt_id, cited_count, source_count, evidence_tier, resolver_url } -->
+<style>
+  .grp-gate{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .9rem;padding:.5rem .8rem;
+    border:1px solid var(--grp-base-300);border-radius:var(--grp-radius-box,.5rem);
+    background:var(--grp-base-200);font:12px/1.5 var(--grp-font-sans);color:var(--grp-base-content)}
+  .grp-gate__chip{display:inline-flex;align-items:center;gap:.3em}
+  .grp-gate__verdict{font-weight:600}
+  /* unverified is the DEFAULT; pass/fail styling only applies once the platform has
+     answered and the script has stamped data-state. */
+  .grp-gate[data-state="unverified"] .grp-gate__verdict{color:color-mix(in oklab,var(--grp-base-content) 60%,transparent)}
+  .grp-gate[data-state="pass"] .grp-gate__verdict{color:var(--grp-success)}
+  .grp-gate[data-state="fail"] .grp-gate__verdict{color:var(--grp-error)}
+  .grp-gate__link{color:var(--grp-primary);text-decoration:none}
+  .grp-gate__link:focus-visible{outline:2px solid var(--grp-primary);outline-offset:2px}
+</style>
+
+<div class="grp-gate" data-state="unverified" data-receipt-id="{{receipt_id}}">
+  <span class="grp-gate__chip grp-gate__verdict">unverified by this platform</span>
+  <span class="grp-gate__chip">cites {{cited_count}} of {{source_count}} sources</span>
+  <span class="grp-gate__chip">evidence: {{evidence_tier}}</span>
+  <a class="grp-gate__link" href="{{resolver_url}}">resolve receipt {{receipt_id}}</a>
+</div>
+
+<script>
+// Resolve the verdict from the platform at view time. Never set data-state by hand.
+(async function () {
+  for (const el of document.querySelectorAll('.grp-gate[data-receipt-id]')) {
+    const id = el.dataset.receiptId;
+    const url = el.querySelector('.grp-gate__link')?.getAttribute('href');
+    if (!id || !url || id.indexOf('{{') === 0) continue;  // unfilled template -> unverified
+    try {
+      const res = await fetch(url, { headers: { accept: 'application/json' } });
+      const receipt = await res.json();
+      if (receipt && typeof receipt.passed === 'boolean') {
+        el.dataset.state = receipt.passed ? 'pass' : 'fail';
+        el.querySelector('.grp-gate__verdict').textContent =
+          receipt.passed ? 'groundedness gate: PASSED' : 'groundedness gate: FAILED';
+      }
+    } catch (e) { /* platform unreachable -> stays unverified, the honest state */ }
+  }
+})();
+</script>

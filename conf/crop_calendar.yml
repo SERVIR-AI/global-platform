@@ -1,0 +1,18 @@
+# Crop calendars — hub-adjustable (the Call-2 ministry ask). Months are 1-12;
+# windows are [start, end] and may wrap the year end (e.g. [10, 2]).
+# Defaults approximate GEOGLAM/FAO baseline calendars (cropmonitor.org/baseline-data);
+# each hub adjusts these for its regions and the current year — that adjustability
+# is the point, and any per-request adjustment is cited in the brief as ADJUSTED.
+kenya:
+  maize:
+    - season: Long rains
+      planting: [3, 5]
+      harvest: [8, 10]
+    - season: Short rains
+      planting: [10, 11]
+      harvest: [1, 2]
+zambia:
+  maize:
+    - season: Main season
+      planting: [11, 12]
+      harvest: [4, 6]

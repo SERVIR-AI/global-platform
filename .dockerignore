@@ -1,0 +1,36 @@
+# Build context = what the MCP needs and nothing else.
+# cache/ is 2GB, of which 1.8GB is flood/risk tiffs that this deployment does not
+# serve; only the RAG corpus is shipped. Allow-list rather than block-list so a
+# new cache subdir can never silently balloon the image.
+cache/*
+!cache/rag
+
+# Runtime record-state. Must NOT ship: a baked grp.db would shadow the replica
+# restored at boot and resurrect stale receipts over the live institution.
+cache/rag/**/*.tmp
+
+.git
+.gitignore
+.venv
+**/.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+**/node_modules
+apps/web/dist
+
+# Local-only: secrets, planning docs, scratch artifacts, demo captures.
+**/.env
+**/.env.*
+docs/
+styleguide/
+grp_mvp/
+BUILD_PLAN.md
+gitleaks-report.json
+*.pdf
+*.xlsx
+e2e_*.json
+**/.DS_Store
+
+# local rollback copy of the pre-Vertex corpus — never ships
+cache/rag/*.openai-backup

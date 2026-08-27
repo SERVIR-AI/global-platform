@@ -2,6 +2,7 @@
 flood-hazard raster clipped to it. Raises ValueError if the place can't be
 resolved or is too large — it never silently falls back to somewhere else.
 """
+import contextvars
 import hashlib
 import json
 import math
@@ -32,6 +33,56 @@ RADIUS_KM = 12.0          # fallback AOI: box of this radius around the centre p
 ASSET_LAYERS = ("roads", "hospitals", "schools", "buildings")
 OVERPASS_TIMEOUT = 60          # client HTTP timeout (was 180) — fail over a stalled mirror fast
 OVERPASS_SERVER_TIMEOUT = 55   # Overpass server-side [timeout:] budget per query
+
+_ACTIVE_COLLECTOR: contextvars.ContextVar = contextvars.ContextVar("io_events_collector", default=None)
+
+
+class IOCollector:
+    """Accumulates {kind, ...} io events for one fetch() call."""
+
+    def __init__(self):
+        self.events: list[dict] = []
+
+    def record(self, event: dict) -> None:
+        "Append one io event."
+        self.events.append(event)
+
+    def drain(self) -> list[dict]:
+        "Return the accumulated events and clear them."
+        events, self.events = self.events, []
+        return events
+
+
+def install(collector: IOCollector):
+    "Make `collector` active for this context; returns a token for uninstall()."
+    return _ACTIVE_COLLECTOR.set(collector)
+
+
+def uninstall(token) -> None:
+    "Undo install(), restoring whatever collector (if any) was active before."
+    _ACTIVE_COLLECTOR.reset(token)
+
+
+def emit(event: dict) -> None:
+    "Record one io event on the active collector, if any (else a no-op)."
+    collector = _ACTIVE_COLLECTOR.get()
+    if collector is not None:
+        collector.record(event)
+
+
+def short_path(path: str) -> str:
+    """A cache-relative path for the trace - 'battambang/roads.geojson', not the machine
+    layout it happens to sit in.
+
+    Falls back to the basename if the path is outside cache_dir, which relpath would 
+    otherwise render as a chain of '..'.
+    """
+    cache_dir = get_settings().cache_dir
+    try:
+        relative = os.path.relpath(path, cache_dir)
+    except ValueError:                       # different drive on Windows
+        return os.path.basename(path)
+    return os.path.basename(path) if relative.startswith("..") else relative
 
 
 def _slug(place):
@@ -75,7 +126,17 @@ def _search(place):
     r = requests.get(f"{NOMINATIM}/search", headers=HEADERS, timeout=40, params={
         "q": place, "format": "json", "polygon_geojson": 1, "limit": 10, "accept-language": "en"})
     r.raise_for_status()
-    return r.json()
+    results = r.json()
+    first = results[0] if results else {}
+    emit({"kind": "api",
+          "api": "Nominatim",
+          "op": "geocode",
+          "query": place,
+          "place_id": first.get("place_id"),
+          "retrieved_name": first.get("display_name"),
+          "type": first.get("type"),
+          "n_results": len(results)})
+    return results
 
 
 def _under_cap_admin(results):
@@ -111,7 +172,10 @@ def _overpass(query, attempts=3):
                     last = f"{r.status_code} from {url}"
                     continue
                 r.raise_for_status()
-                return r.json()["elements"]
+                elements = r.json()["elements"]
+                emit({"kind": "api", "api": "Overpass", "mirror_used": url,
+                      "attempts": attempt + 1, "n_elements": len(elements), "api_query": query})
+                return elements
             except requests.RequestException as e:
                 last = str(e)
         time.sleep(2 ** attempt)
@@ -143,13 +207,19 @@ def source_raster(layer="hazard_flood"):
         fname = layer if layer.endswith(".tif") else f"{layer}.tif"
         fallback_url = None
     path = os.path.join(settings.tiffs_dir, fname)
-    if not os.path.exists(path):
+    was_cached = os.path.exists(path)
+    if not was_cached:
         fid = drive_tifs.drive_id(fname) or (_drive_id(fallback_url) if fallback_url else None)
         if not fid:
             raise ValueError(f"no Drive id for '{layer}' (looked up '{fname}' in drive_tifs + tiffs.yml)")
         os.makedirs(settings.tiffs_dir, exist_ok=True)
         import gdown
         gdown.download(id=fid, output=path, quiet=True)
+        emit({"kind": "download", "what": "source_raster", "api": "Google Drive", "layer": layer,
+              "filename": fname, "drive_id": fid, "dest": short_path(path), "was_cached": was_cached})
+    else:
+        emit({"kind": "download", "what": "source_raster", "api": "Google Drive", "layer": layer,
+              "filename": fname, "dest": short_path(path), "was_cached": was_cached})
     return path
 
 
@@ -175,6 +245,8 @@ def ensure_aoi(place=None, geometry=None, layers=None):
     meta = os.path.join(adir, "meta.json")
 
     # Resolve the AOI boundary once (or reload it from a prior fetch of this AOI).
+    emit({"kind": "cache", "what": "aoi_boundary", "key": slug,
+          "dest": short_path(meta), "was_cached": os.path.exists(meta)})
     if os.path.exists(meta):
         info = json.load(open(meta))
         boundary = shape(json.load(open(os.path.join(adir, "admin.geojson")))["features"][0]["geometry"])
@@ -197,7 +269,13 @@ def ensure_aoi(place=None, geometry=None, layers=None):
     bbox = f"{miny - BUFFER_DEG},{minx - BUFFER_DEG},{maxy + BUFFER_DEG},{maxx + BUFFER_DEG}"
     fetched = False
     for layer in needed:
-        if layer not in ASSET_LAYERS or os.path.exists(os.path.join(adir, f"{layer}.geojson")):
+        if layer not in ASSET_LAYERS:
+            continue
+        dest = os.path.join(adir, f"{layer}.geojson")
+        was_cached = os.path.exists(dest)
+        emit({"kind": "cache", "what": "osm_layer", "layer": layer,
+              "dest": short_path(dest), "was_cached": was_cached})
+        if was_cached:
             continue
         features = _fetch_layer(layer, bbox, boundary)
         _write(adir, layer, features)
@@ -206,7 +284,6 @@ def ensure_aoi(place=None, geometry=None, layers=None):
     if fetched:
         json.dump(info, open(meta, "w"), indent=2)
     return _bundle(adir, info)
-
 
 def _fetch_layer(layer, bbox, boundary):
     """Fetch one OSM asset layer within `bbox`, clipped/filtered to `boundary`."""
@@ -258,12 +335,32 @@ def hazard_clip(aoi, layer):
     """Clip `layer`'s severity raster to the AOI bundle; cache per (AOI, layer); return path."""
     adir = os.path.dirname(aoi["admin"])
     clip = os.path.join(adir, f"{layer}.tif")
-    if not os.path.exists(clip):
+    was_cached = os.path.exists(clip)
+    emit({"kind": "cache", "what": "hazard_clip", "layer": layer,
+          "dest": short_path(clip), "was_cached": was_cached})
+    if not was_cached:
         boundary = shape(json.load(open(aoi["admin"]))["features"][0]["geometry"])
         minx, miny, maxx, maxy = boundary.bounds
         with rasterio.open(source_raster(layer)) as src:
             win = from_bounds(minx - BUFFER_DEG, miny - BUFFER_DEG,
                               maxx + BUFFER_DEG, maxy + BUFFER_DEG, src.transform)
+            # INTERSECT with the dataset before reading. read() silently crops the
+            # array to the raster's extent, but window_transform(win) describes the
+            # UNCROPPED request — an AOI straddling the extent got a clip whose
+            # georeference was shifted by the out-of-extent margin, and every
+            # severity lookup after that sampled the wrong pixel: confidently
+            # wrong exposure numbers with no error. Found by adversarial review,
+            # reproduced empirically before fixing.
+            full = rasterio.windows.Window(0, 0, src.width, src.height)
+            try:
+                win = win.intersection(full)
+            except rasterio.errors.WindowError:
+                win = None
+            if win is None or win.width <= 0 or win.height <= 0:
+                raise ValueError(
+                    f"{aoi.get('name', 'this area')} lies outside {layer}'s coverage "
+                    "— the catalog raster does not extend there, so exposure cannot "
+                    "be computed against it")
             arr = src.read(1, window=win)
             prof = src.profile | {"height": arr.shape[0], "width": arr.shape[1],
                                   "transform": src.window_transform(win), "compress": "lzw"}

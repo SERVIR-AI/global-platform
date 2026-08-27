@@ -2,6 +2,7 @@ import type {
   ChatRequest,
   ChatResponse,
   HTTPValidationError,
+  SeasonSpec,
   TiffUploadResponse,
 } from '@/types/chat';
 
@@ -52,6 +53,33 @@ export const postChat = (payload: ChatRequest, signal?: AbortSignal): Promise<Ch
     body: JSON.stringify(payload),
     signal,
   });
+
+/** POST /api/food-security/chat — one question in, a grounded cited brief out. */
+export const postFoodSecurityChat = (
+  payload: {
+    question: string;
+    provider?: string | null;
+    model?: string | null;
+    verbose?: boolean;
+    /** Per-request crop-calendar adjustment; cited in the brief as ADJUSTED. */
+    calendar?: SeasonSpec[] | null;
+    /** The target the adjustment was made for — a mismatching question drops it, declared. */
+    calendar_country?: string | null;
+    calendar_crop?: string | null;
+  },
+  signal?: AbortSignal,
+): Promise<Partial<ChatResponse>> =>
+  request<Partial<ChatResponse>>('/api/food-security/chat', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+    signal,
+  });
+
+/** GET /api/food-security/calendar — the hub-default crop calendars. */
+export const getCropCalendar = (): Promise<{
+  calendar: Record<string, Record<string, SeasonSpec[]>>;
+  note: string;
+}> => request('/api/food-security/calendar');
 
 /**
  * POST /api/tiffs — upload a GeoTIFF (multipart). The browser sets the multipart

@@ -17,18 +17,38 @@ JSON-serializable for the checkpointer (multi-turn memory keyed by thread_id).
 from __future__ import annotations
 
 import json
+import time
+from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Annotated, Any, TypedDict, NotRequired
-
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
-from . import prompts
-from .geo import byod_registry, combine, ingest, operations, resolver, tiffs, trace
+from . import prompts, tracing
+from .geo import byod_registry, combine, ingest, operations, resolver, tiffs
 
 
 def _add(left: list | None, right: list | None) -> list:
     return (left or []) + (right or [])
+
+
+# events must reset each turn instead of growing forever across a checkpointed thread.
+# A node can't reach into State and clear it directly - it can only return a delta for
+# the reducer to merge. A placeholder sentinel value like the below allows the custom
+# reducer to only return the events from this turn.
+_RESET = "__events_reset__"
+
+
+def _add_reset(left: list | None, right: list | None) -> list:
+    """
+    Return only the trace events from the current turn instead of the whole list so far.
+    left contains trace events so far, right contains things from the current turn.
+    This is only passed by the route() node, as it is always the first node.
+    """
+    left, right = left or [], right or []
+    if right and right[0] == _RESET:
+        return right[1:]            # discard everything accumulated so far, strip the marker
+    return left + right
 
 
 class InputState(TypedDict):
@@ -61,6 +81,10 @@ class State(TypedDict):  # total=True by default: keys are required unless NotRe
     req_geometry: NotRequired[dict | list | None]   # Mode 2: a drawn AOI from the request
     req_hazard: NotRequired[str | None]             # explicit hazard from the request (e.g. a UI button)
     trace: Annotated[list[str], _add]      # plain-text step narration (returned when verbose)
+    events: Annotated[list[dict], _add_reset]  # structured per-step trace events, reset each turn
+                                                # by route() via _RESET — only the turn's FIRST node
+                                                # may emit it; every later node uses plain _add-style
+                                                # appends (return [event], never [_RESET, event])
     awaiting_choice: dict | None           # set when the agent asked L1-vs-L2; resumes on the reply
     _resume: bool                          # transient: this turn applied a pending L1/L2 choice
 
@@ -124,8 +148,26 @@ def _route_menu(thread_id) -> dict:
 def route(state: State, config) -> dict:
     """LLM picks the operation + place + hazard layers. Records intent; runs nothing.
     If we're resuming a pending L1/L2 choice, apply it without an LLM call."""
+    t_start = time.perf_counter()
+    started_at = datetime.now(timezone.utc).isoformat()
     if state.get("awaiting_choice"):
-        return _apply_choice(state)
+        awaiting_choice = state["awaiting_choice"]
+        out = _apply_choice(state)
+        t_end = time.perf_counter()
+        ended_at = datetime.now(timezone.utc).isoformat()
+        trace_event = tracing.make_trace_event_no_llm(
+            start_time=t_start,
+            end_time=t_end,
+            started_at=started_at,
+            ended_at=ended_at,
+            state=state,
+            config=config,
+            resumed_delta=out,
+            awaiting_choice=awaiting_choice,
+        )
+        out["events"] = [_RESET, trace_event]
+        return out
+
     client = config["configurable"]["client"]
     model = config["configurable"]["model"]
     geom = state.get("req_geometry")
@@ -151,26 +193,71 @@ def route(state: State, config) -> dict:
     if not msg.tool_calls:                       # model declined -> plain-text reply
         out["error"] = msg.content or "I can't answer that with the data I have."
         out["trace"].append("route → declined (no tool call)")
+        t_end = time.perf_counter()
+        ended_at = datetime.now(timezone.utc).isoformat()
+        trace_event = tracing.make_trace_event_router(
+            start_time=t_start,
+            end_time=t_end,
+            started_at=started_at,
+            ended_at=ended_at,
+            state=state,
+            config=config,
+            llm_response=resp,
+            messages=messages,
+            available_layers=layers,
+            error=out["error"],
+        )
+        out["events"] = [_RESET, trace_event]
         return out
 
     call = msg.tool_calls[0]
     args = json.loads(call.function.arguments)
     place = args.pop("place", None)
-    selected = args.pop("hazard_layers", [])
+    selected_hazard_layers = args.pop("hazard_layers", [])
     if state.get("req_hazard"):                  # explicit hazard (e.g. a UI button) overrides
         forced = tiffs.resolve(state["req_hazard"])
         if forced:
-            selected = [forced]
+            selected_hazard_layers = [forced]
     if not place and geom is None:               # a drawn area makes a place name unnecessary
         out["error"] = "Name a place (a city or district) and I'll check it."
         out["trace"].append(f"route → {call.function.name} but no place named — refusing")
+        t_end = time.perf_counter()
+        ended_at = datetime.now(timezone.utc).isoformat()
+        trace_event = tracing.make_trace_event_router(
+            start_time=t_start,
+            end_time=t_end,
+            started_at=started_at,
+            ended_at=ended_at,
+            state=state,
+            config=config,
+            llm_response=resp,
+            messages=messages,
+            available_layers=layers,
+            error=out["error"],
+        )
+        out["events"] = [_RESET, trace_event]
         return out
 
     out.update(operation=call.function.name, place=place or "drawn area", op_args=args,
-               tiffs=selected, tool_call_id=call.id, _resume=False)
+               tiffs=selected_hazard_layers, tool_call_id=call.id, _resume=False)
     out["trace"].append(
-        f"route → {call.function.name}(place={place!r}, hazard_layers={selected}, {args})"
+        f"route → {call.function.name}(place={place!r}, hazard_layers={selected_hazard_layers}, {args})"
         "  [the model extracts these; it computes no numbers]")
+    t_end = time.perf_counter()
+    ended_at = datetime.now(timezone.utc).isoformat()
+    trace_event = tracing.make_trace_event_router(
+        start_time=t_start,
+        end_time=t_end,
+        started_at=started_at,
+        ended_at=ended_at,
+        state=state,
+        config=config,
+        llm_response=resp,
+        messages=messages,
+        available_layers=layers,
+        error=out["error"],
+    )
+    out["events"] = [_RESET, trace_event]
     return out
 
 
@@ -178,11 +265,29 @@ def resolve(state: State) -> dict:
     """For any hazard question, ASK the user how to answer it — exposure vs precomputed risk
     (L1) vs recomputed risk (L2) — and pause (human-in-the-loop). With one path, use it; with
     none, refuse cleanly. The LLM only picks the hazard; the agent never guesses exposure vs risk."""
-    layer = next((l for l in (state.get("tiffs") or []) if l.startswith(("hazard_", "risk_"))), None)
-    if not layer:
-        return {}                                  # e.g. count_features (no hazard) -> fetch
+    t_start = time.perf_counter()
+    started_at = datetime.now(timezone.utc).isoformat()
+    tiff_layers = state.get("tiffs") or []
+    layer = next((l for l in tiff_layers if l.startswith(("hazard_", "risk_"))), None)
+
+    def _emit(**fields) -> dict:
+        "Build this step's trace event."
+        t_end = time.perf_counter()
+        ended_at = datetime.now(timezone.utc).isoformat()
+        return tracing.make_trace_event_resolve(
+            start_time=t_start, end_time=t_end, started_at=started_at, ended_at=ended_at,
+            state=state, **fields)
+
+    if not layer:                                  # e.g. count_features (no hazard) -> fetch
+        byod_passthrough = any(l.startswith("byod_") for l in tiff_layers)
+        trace_event = _emit(hazard=None, options=None, byod_passthrough=byod_passthrough,
+                            awaiting_choice_set=False, question_asked=None, error=None)
+        return {"events": [trace_event]}
+
     hz = resolver._logical(layer)
     options = resolver.options_for(layer)
+    options_view = [{"key": o[0], "layer": o[1], "label": o[2]} for o in options]
+
     if len(options) >= 2:                          # a real choice -> ask
         # Blank line between options so each renders on its own line (markdown collapses
         # single newlines into one paragraph); the UI also shows these as buttons.
@@ -193,13 +298,24 @@ def resolve(state: State) -> dict:
         awaiting = {"operation": state.get("operation"), "place": state.get("place"),
                     "op_args": state.get("op_args") or {}, "tool_call_id": state.get("tool_call_id"),
                     "req_geometry": state.get("req_geometry"), "options": options}
-        return {"messages": [{"role": "assistant", "content": q}], "awaiting_choice": awaiting,
-                "trace": [f"resolve → asking {hz}: {', '.join(o[0] for o in options)}; paused for the user"]}
+        delta = {"messages": [{"role": "assistant", "content": q}], "awaiting_choice": awaiting,
+                 "trace": [f"resolve → asking {hz}: {', '.join(o[0] for o in options)}; paused for the user"]}
+        trace_event = _emit(hazard=hz, options=options_view, byod_passthrough=None,
+                            awaiting_choice_set=True, question_asked=q, error=None)
+        return {**delta, "events": [trace_event]}
+
     if options:                                    # exactly one path -> use it, no question
-        return {"tiffs": [options[0][1]],
-                "trace": [f"resolve → only {options[0][0]} available for {hz}"]}
-    return {"error": f"I don't have the data to assess {hz} in {state.get('place') or 'that area'}.",
-            "trace": [f"resolve → no data for {hz}"]}
+        delta = {"tiffs": [options[0][1]],
+                 "trace": [f"resolve → only {options[0][0]} available for {hz}"]}
+        trace_event = _emit(hazard=hz, options=options_view, byod_passthrough=None,
+                            awaiting_choice_set=False, question_asked=None, error=None)
+        return {**delta, "events": [trace_event]}
+
+    error = f"I don't have the data to assess {hz} in {state.get('place') or 'that area'}."
+    delta = {"error": error, "trace": [f"resolve → no data for {hz}"]}
+    trace_event = _emit(hazard=hz, options=options_view, byod_passthrough=None,
+                        awaiting_choice_set=False, question_asked=None, error=error)
+    return {**delta, "events": [trace_event]}
 
 
 def _needed_layers(state: State):
@@ -218,10 +334,27 @@ def fetch(state: State) -> dict:
     """Acquire the OSM data + clip the selected hazard rasters to the AOI (place or drawn geometry).
     A drawn AOI persists across turns via the req_geometry channel, so a 'same area' follow-up that
     re-sends no geometry still resolves — `place='drawn area'` is never geocoded as a literal string."""
+    t_start = time.perf_counter()
+    started_at = datetime.now(timezone.utc).isoformat()
+    geom = state.get("req_geometry")
+    place = state.get("place")
+    needed = _needed_layers(state)
+    mode = "drawn_area" if (geom is not None or place == "drawn area") else "place_lookup"
+    rasters_clipped, l2_computed = [], []
+
+    collector = ingest.IOCollector()
+    token = ingest.install(collector)
+
+    def _emit(**fields) -> dict:
+        "Build this step's trace event."
+        t_end = time.perf_counter()
+        ended_at = datetime.now(timezone.utc).isoformat()
+        return tracing.make_trace_event_fetch(
+            start_time=t_start, end_time=t_end, started_at=started_at, ended_at=ended_at,
+            state=state, mode=mode, layers_fetched=needed, rasters_clipped=rasters_clipped,
+            l2_computed=l2_computed, drained_io_events=collector.drain(), **fields)
+
     try:
-        geom = state.get("req_geometry")
-        place = state.get("place")
-        needed = _needed_layers(state)
         if geom is not None and place in (None, "drawn area"):
             aoi = ingest.ensure_aoi(geometry=geom, layers=needed)        # Mode 2: drawn / persisted AOI
         elif place == "drawn area":
@@ -232,8 +365,10 @@ def fetch(state: State) -> dict:
             if layer.startswith("risk_") and layer.endswith("_l2"):     # computed Layer-2 risk grid
                 hazard = "hazard_" + layer[len("risk_"):-len("_l2")]    # risk_flood_l2 -> hazard_flood
                 aoi = {**aoi, layer: combine.combine_l2(aoi, hazard)}
+                l2_computed.append(layer)
             else:
                 aoi = {**aoi, layer: ingest.hazard_clip(aoi, layer)}
+                rasters_clipped.append(layer)
         c = aoi.get("counts") or {}
         trace = [f"boundary → {aoi['name']}  [{aoi.get('how') or 'cached AOI'}]",
                  f"exposure (OSM) → roads {c.get('roads', '?')} · hospitals {c.get('hospitals', '?')} · "
@@ -242,33 +377,61 @@ def fetch(state: State) -> dict:
             bits = [f"{l} (computed: Hazard × Vulnerability)" if l.startswith("risk_") and l.endswith("_l2")
                     else f"{l} clipped" for l in state["tiffs"]]
             trace.append("hazard/risk raster → " + ", ".join(bits))
-        return {"aoi": aoi, "trace": trace}
+        trace_event = _emit(aoi=aoi, error=None)
+        return {"aoi": aoi, "trace": trace, "events": [trace_event]}
     except Exception as e:                        # unresolvable place, too large, Overpass down
-        return {"error": f"No data for that request: {e}", "trace": [f"fetch → failed: {e}"]}
+        error = f"No data for that request: {e}"
+        trace_event = _emit(aoi=None, error=error)  # aoi may never have been bound if ensure_aoi raised
+        return {"error": error, "trace": [f"fetch → failed: {e}"], "events": [trace_event]}
+    finally:
+        ingest.uninstall(token)
 
 
 def operate(state: State) -> dict:
     """Run the deterministic spatial op over the bundle — the only number-producing step."""
+    t_start = time.perf_counter()
+    started_at = datetime.now(timezone.utc).isoformat()
+    operation = state.get("operation")
+    min_severity = (state.get("op_args") or {}).get("min_severity")   # failure-branch value only
     try:
-        result = operations.dispatch(state.get("operation"), state.get("aoi"),
+        result = operations.dispatch(operation, state.get("aoi"),
                                      hazard_layers=state.get("tiffs"), **state["op_args"])
         num = result.get("length_km", result.get("count"))
         line = f"overlay (deterministic, no LLM) → {result['method']} = {num}"
         if result.get("by_severity"):
             line += f"  by_severity={result['by_severity']}"
-        return {"result": result, "trace": [line]}
+        t_end = time.perf_counter()
+        ended_at = datetime.now(timezone.utc).isoformat()
+        trace_event = tracing.make_trace_event_operate(
+            start_time=t_start, end_time=t_end, started_at=started_at, ended_at=ended_at,
+            state=state, operation=operation, min_severity=result.get("min_severity"),
+            result=result, num=num, error=None)
+        
+        return {"result": result, "trace": [line], "events": [trace_event]}
     except Exception as e:
-        return {"error": f"No data for that request: {e}", "trace": [f"operate → failed: {e}"]}
+        t_end = time.perf_counter()
+        ended_at = datetime.now(timezone.utc).isoformat()
+        error_msg = f"No data for that request: {e}"
+        trace_event = tracing.make_trace_event_operate(
+            start_time=t_start, end_time=t_end, started_at=started_at, ended_at=ended_at,
+            state=state, operation=operation, min_severity=min_severity,
+            result=None, num=None, error=error_msg)
+        return {"error": error_msg, "trace": [f"operate → failed: {e}"], "events": [trace_event]}
 
 
 def finalize(state: State, config) -> dict:
     """Phrase the answer (quoting the number + source). On error, return it without an LLM call."""
-    question = _last_user(state["messages"])
+    t_start = time.perf_counter()
+    started_at = datetime.now(timezone.utc).isoformat()
 
     if state.get("error"):
         answer = state["error"]
-        trace.record(question, answer, state.get("usage") or [], args=state.get("op_args"))
-        return {"messages": [{"role": "assistant", "content": answer}]}
+        t_end = time.perf_counter()
+        ended_at = datetime.now(timezone.utc).isoformat()
+        trace_event = tracing.make_trace_event_finalize(
+            start_time=t_start, end_time=t_end, started_at=started_at, ended_at=ended_at,
+            state=state, config=config, answer=answer, messages=None, resp=None, error=answer)
+        return {"messages": [{"role": "assistant", "content": answer}], "events": [trace_event]}
 
     client = config["configurable"]["client"]
     model = config["configurable"]["model"]
@@ -293,9 +456,13 @@ def finalize(state: State, config) -> dict:
     resp = client.chat.completions.create(model=model, messages=messages, max_tokens=400)
     answer = resp.choices[0].message.content or ""
 
-    usages = (state.get("usage") or []) + [_usage(resp)]
-    trace.record(question, answer, usages, result=result, args=state.get("op_args"))
-    return {"messages": [{"role": "assistant", "content": answer}], "usage": [_usage(resp)]}
+    t_end = time.perf_counter()
+    ended_at = datetime.now(timezone.utc).isoformat()
+    trace_event = tracing.make_trace_event_finalize(
+        start_time=t_start, end_time=t_end, started_at=started_at, ended_at=ended_at,
+        messages=messages, state=state, config=config, answer=answer, resp=resp, error=None)
+    return {"messages": [{"role": "assistant", "content": answer}], "usage": [_usage(resp)],
+            "events": [trace_event]}
 
 
 def _after_route(state: State) -> str:

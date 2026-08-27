@@ -22,6 +22,7 @@ const drawButtons: { mode: DrawMode; Icon: LucideIcon; label: string }[] = [
 
 const InputMessage: FC = () => {
   const hasMessages = useChatStore((store) => !!store.messages.length);
+  const useCase = useChatStore((store) => store.useCase);
   const geometryType = useCustomGeometryStore((store) => store.geometryType);
   const setGeometry = useCustomGeometryStore((store) => store.setGeometry);
   const drawMode = useCustomGeometryStore((store) => store.drawMode);
@@ -49,6 +50,9 @@ const InputMessage: FC = () => {
   const getPlaceholder = (): string | undefined => {
     if (hasMessages) {
       return undefined;
+    }
+    if (useCase === 'food-security') {
+      return 'A strong El Niño is developing — what should I expect for maize in Zambia this season, and how much should I trust it?';
     }
     if (drawMode === 'Point' || geometryType === 'Point') {
       return 'Show me schools at high risk of flooding within 5kms from this point.';
@@ -82,16 +86,18 @@ const InputMessage: FC = () => {
       />
       <div className="flex flex-col md:flex-row justify-between gap-4">
         <div className="flex flex-row flex-wrap gap-2">
-          <button
-            type="button"
-            className="btn rounded-xl h-6 p-1 text-xs font-medium text-zinc-500 tooltip"
-            data-tip="Coming Soon"
-            disabled={loading}
-          >
-            <Paperclip className="w-4 h-4" />
-            Attach files
-          </button>
-          {drawButtons.map(({ mode, Icon, label }) => {
+          {useCase === 'risk' && (
+            <button
+              type="button"
+              className="btn rounded-xl h-6 p-1 text-xs font-medium text-zinc-500 tooltip"
+              data-tip="Coming Soon"
+              disabled={loading}
+            >
+              <Paperclip className="w-4 h-4" />
+              Attach files
+            </button>
+          )}
+          {useCase === 'risk' && drawButtons.map(({ mode, Icon, label }) => {
             // A geometry of this mode is attached: this button removes it instead
             // of drawing. A geometry of a *different* mode blocks (disables) this one.
             const attached = geometryType === mode;
