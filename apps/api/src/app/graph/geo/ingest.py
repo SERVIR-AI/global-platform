@@ -264,6 +264,23 @@ def hazard_clip(aoi, layer):
         with rasterio.open(source_raster(layer)) as src:
             win = from_bounds(minx - BUFFER_DEG, miny - BUFFER_DEG,
                               maxx + BUFFER_DEG, maxy + BUFFER_DEG, src.transform)
+            # INTERSECT with the dataset before reading. read() silently crops the
+            # array to the raster's extent, but window_transform(win) describes the
+            # UNCROPPED request — an AOI straddling the extent got a clip whose
+            # georeference was shifted by the out-of-extent margin, and every
+            # severity lookup after that sampled the wrong pixel: confidently
+            # wrong exposure numbers with no error. Found by adversarial review,
+            # reproduced empirically before fixing.
+            full = rasterio.windows.Window(0, 0, src.width, src.height)
+            try:
+                win = win.intersection(full)
+            except rasterio.errors.WindowError:
+                win = None
+            if win is None or win.width <= 0 or win.height <= 0:
+                raise ValueError(
+                    f"{aoi.get('name', 'this area')} lies outside {layer}'s coverage "
+                    "— the catalog raster does not extend there, so exposure cannot "
+                    "be computed against it")
             arr = src.read(1, window=win)
             prof = src.profile | {"height": arr.shape[0], "width": arr.shape[1],
                                   "transform": src.window_transform(win), "compress": "lzw"}

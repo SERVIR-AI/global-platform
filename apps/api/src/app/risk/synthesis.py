@@ -118,16 +118,17 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
 
     # --- the hazard layer's passport: declared contract vs observed clip ------
     meta = tiffs.entry(hz)
-    contract = None
+    contract, obs, check_notes = None, None, []
     try:
         contract = schema.schema_for(hz)
-    except Exception:
-        pass
-    obs = None
+    except Exception as exc:
+        check_notes.append(f"declared contract unreadable ({type(exc).__name__})")
+        gaps.append(f"{hz}: raster contract could not be read — layer unvalidated")
     try:
         obs = rasterstats.windowed_stats(aoi[hz])
-    except Exception:
-        pass
+    except Exception as exc:
+        check_notes.append(f"clip stats unreadable ({type(exc).__name__})")
+        gaps.append(f"{hz}: clip statistics could not be read — layer unvalidated")
     n += 1
     passport_bits = [f"Hazard layer {hz}: {meta.get('title', hz)}."]
     if hz == "hazard_flood":
@@ -145,10 +146,30 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
             f"{obs.get('sampled_distinct')} distinct values (sampled).")
     passport_bits.append("Legend: "
                          + "; ".join(f"{k}={v}" for k, v in sorted(legend.items())))
+    # "checked" must mean CHECKED: compare declared vs observed, never co-print
+    # them under a passing label (adversarial review).
+    validation = "unvalidated"
+    if contract and obs and obs.get("sampled_min") is not None:
+        mism = []
+        if str(obs.get("dtype")) != str(contract.get("dtype")):
+            mism.append(f"dtype {obs.get('dtype')} != declared {contract.get('dtype')}")
+        lo_ok = contract.get("valid_min") is None or obs["sampled_min"] >= contract["valid_min"]
+        hi_ok = contract.get("valid_max") is None or obs["sampled_max"] <= contract["valid_max"]
+        if not (lo_ok and hi_ok):
+            mism.append(f"observed range {obs['sampled_min']:g}-{obs['sampled_max']:g} "
+                        f"outside declared {contract.get('valid_min')}-{contract.get('valid_max')}")
+        if mism:
+            validation = "structural-contract-FAILED"
+            passport_bits.append("CONTRACT MISMATCH: " + "; ".join(mism) + ".")
+            gaps.append(f"{hz} failed its structural contract: " + "; ".join(mism))
+        else:
+            validation = "structural-contract-checked"
+    if check_notes:
+        passport_bits.append("Verification notes: " + "; ".join(check_notes) + ".")
     citations.append({
         "n": n, "kind": "hazard_layer", "retrieval": "computed-at-pack-time",
         "source": meta.get("source") or ("ADPC" if hz == "hazard_flood" else "catalog (unattributed)"),
-        "title": meta.get("title", hz), "validation": "structural-contract-checked" if contract and obs else "unvalidated",
+        "title": meta.get("title", hz), "validation": validation,
         "text": " ".join(passport_bits),
     })
 
@@ -179,9 +200,48 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
 
     stats = {"queries": None, "place": aoi.get("name", place), "hazard": hz,
              "min_severity": min_sev, "counts": counts,
-             "viz": viz.build_payload(aoi, {
+             "viz": _bounded_viz(viz.build_payload(aoi, {
                  "hazard": hz, "method": "count_in_hazard", "layer": "hospitals",
                  "place": aoi.get("name", place), "min_severity": min_sev,
                  "count": counts["hospitals"]["exposed"],
-                 "by_severity": counts["hospitals"]["by_severity"]})}
+                 "by_severity": counts["hospitals"]["by_severity"]}))}
     return citations, gaps, stats
+
+
+def _bounded_viz(v: dict, tol: float = 5e-4, geojson_cap: int = 400_000) -> dict:
+    """Keep the recorded map payload proportionate: simplify the vectorized hazard
+    polygons (pixel-edge unions at full float precision measured 842 KB for one
+    town), and if still over the cap drop the geojson — the raster_url remains and
+    the embed renders from it. Persisted state should cost what it is worth."""
+    import json as _json
+
+    from shapely.geometry import mapping, shape as _shape
+
+    hl = v.get("hazard_layer") or {}
+    gj = hl.get("geojson")
+    if gj and gj.get("features"):
+        simplified = []
+        for f in gj["features"]:
+            try:
+                g = _shape(f["geometry"]).simplify(tol, preserve_topology=True)
+                geom = mapping(g)
+            except Exception:
+                geom = f["geometry"]
+            simplified.append({**f, "geometry": _round_coords(geom)})
+        gj = {**gj, "features": simplified}
+        if len(_json.dumps(gj)) > geojson_cap:
+            hl = {**hl, "geojson": None,
+                  "note": "vectorized polygons exceeded the recorded-size cap; "
+                          "the embed renders from raster_url"}
+        else:
+            hl = {**hl, "geojson": gj}
+        v = {**v, "hazard_layer": hl}
+    return v
+
+
+def _round_coords(geom: dict, nd: int = 5) -> dict:
+    def r(x):
+        if isinstance(x, (list, tuple)):
+            return [r(i) for i in x]
+        return round(x, nd) if isinstance(x, float) else x
+    return {**geom, "coordinates": r(geom.get("coordinates", []))}

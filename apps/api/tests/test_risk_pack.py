@@ -85,3 +85,64 @@ def test_unknown_hazard_declines_with_the_menu(offline_aoi, log):
     log("OUTPUT", p.get("note", "")[:90])
     assert p["status"] == "declined"
     assert "available" in p["note"] and "flood" in p["note"]
+
+
+def test_a_clip_straddling_the_raster_extent_is_georeferenced_correctly(tif_writer, tmp_path, log):
+    """CRITICAL, from adversarial review: read() crops the array to the raster's
+    extent but window_transform described the uncropped request, shifting the
+    whole clip by the out-of-extent margin — every exposure lookup then sampled
+    the wrong pixel, silently."""
+    import json as _json
+    import numpy as np
+    import rasterio
+    from app.graph.geo import ingest
+
+    # raster spans lon 100.0-100.1; AOI requests from 99.95 (straddles the west edge)
+    data = np.arange(100, dtype="int16").reshape(10, 10) % 5 + 1
+    src = tif_writer(data, bounds=(100.0, 13.0, 100.1, 13.1), name="src_x.tif")
+    adir = tmp_path / "aoi"; adir.mkdir(exist_ok=True)
+    admin = adir / "admin.geojson"
+    admin.write_text(_json.dumps({"type": "FeatureCollection", "features": [{
+        "type": "Feature", "properties": {},
+        "geometry": {"type": "Polygon", "coordinates": [[
+            [99.95, 13.02], [100.05, 13.02], [100.05, 13.08],
+            [99.95, 13.08], [99.95, 13.02]]]}}]}))
+    aoi = {"admin": str(admin), "name": "edge-case"}
+
+    import app.graph.geo.ingest as ing
+    orig = ing.source_raster
+    ing.source_raster = lambda layer: src
+    try:
+        clip = ingest.hazard_clip(aoi, "hazard_x")
+    finally:
+        ing.source_raster = orig
+    with rasterio.open(clip) as c:
+        left = c.transform.c
+        log("OUTPUT", f"clip left edge lon = {left}")
+        # the clip must START at the raster's true edge, not the requested 99.95-ish
+        assert left >= 100.0 - 1e-9, "clip georeferenced into the void west of the raster"
+
+
+def test_fully_outside_the_raster_declines_rather_than_tracebacks(tif_writer, tmp_path, log):
+    import json as _json
+    import numpy as np
+    from app.graph.geo import ingest
+    data = np.ones((4, 4), dtype="int16")
+    src = tif_writer(data, bounds=(100.0, 13.0, 100.1, 13.1), name="src_y.tif")
+    adir = tmp_path / "aoi"; adir.mkdir(exist_ok=True)
+    admin = adir / "admin.geojson"
+    admin.write_text(_json.dumps({"type": "FeatureCollection", "features": [{
+        "type": "Feature", "properties": {},
+        "geometry": {"type": "Polygon", "coordinates": [[
+            [36.7, -1.4], [36.9, -1.4], [36.9, -1.2], [36.7, -1.2], [36.7, -1.4]]]}}]}))
+    aoi = {"admin": str(admin), "name": "Nairobi-ish"}
+    import app.graph.geo.ingest as ing
+    orig = ing.source_raster
+    ing.source_raster = lambda layer: src
+    try:
+        import pytest as _pytest
+        with _pytest.raises(ValueError, match="outside"):
+            ingest.hazard_clip(aoi, "hazard_y")
+    finally:
+        ing.source_raster = orig
+    log("CHECK", "outside-coverage raises ValueError -> governed decline upstream")
