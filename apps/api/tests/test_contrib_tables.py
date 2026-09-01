@@ -75,3 +75,13 @@ def test_no_overwrite_of_landed_datasets(env, log):
     log("OUTPUT", out["failures"][0][:80])
     assert out["status"] == "declined"
     assert "do not overwrite" in out["failures"][0]
+
+
+def test_landed_tables_never_claim_cache_staleness(env, log):
+    """UAT catch: is_stale reads a flag-less stale_data dict as 'served from
+    fallback', so landed tables carried a false cache warning into answers."""
+    out = tables.add(_manifest(env))
+    spec = yaml.safe_load(open(out["feed_row"]))
+    res = feeds._adapt_generic_csv({}, spec)
+    log("OUTPUT", str(res["stale_data"]))
+    assert feeds.is_stale(res["stale_data"]) is False

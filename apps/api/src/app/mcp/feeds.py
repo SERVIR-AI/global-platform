@@ -353,7 +353,11 @@ def _adapt_generic_csv(params: dict, spec: dict) -> dict:
             "query_receipt": f"columns {cols} from platform-archived {path.name} "
                              f"(sha256 {digest[:12]})",
             "url": None,
-            "stale_data": {"cadence": spec.get("cadence")},
+            # The landed copy IS the source — there is no live upstream to be
+            # stale against. Without the explicit flag, is_stale reads bare
+            # presence as the fallback signal and cries wolf (caught by a cold
+            # model in UAT repeating the false cache warning).
+            "stale_data": {"cadence": spec.get("cadence"), "served_stale": False},
             "note": spec.get("note")}
 
 
