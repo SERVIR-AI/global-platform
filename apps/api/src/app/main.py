@@ -134,7 +134,8 @@ async def _lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     """Build the app: CORS, the /api router, the /mcp transport, and the web app."""
     settings = get_settings()
-    token = os.environ.get("GRP_API_TOKEN", "").strip()
+    token = (os.environ.get("GRP_API_TOKEN", "").strip()
+             or (settings.grp_api_token or "").strip())
 
     # Publishing the schema of gated endpoints to anonymous callers defeats the
     # point of gating them, so the docs go away exactly when the gate goes up.

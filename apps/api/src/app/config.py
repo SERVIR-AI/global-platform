@@ -83,6 +83,9 @@ class Settings(BaseSettings):
     # overrides are cited in the brief as ADJUSTED.
     crop_calendar_path: Path = _REPO_ROOT / "conf" / "crop_calendar.yml"
     feeds_conf_dir: Path = _REPO_ROOT / "conf" / "feeds"
+    # Interim auth: the same gate everywhere. Sourced from .env too, so a local
+    # launch without an exported env var still comes up gated.
+    grp_api_token: str | None = None
 
     # --- Food security (GEOGLAM Crop Monitor) ---
     # The CMET Global_SHP FeatureServer: per-region crop-condition expert
