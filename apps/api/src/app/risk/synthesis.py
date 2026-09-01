@@ -271,3 +271,146 @@ def _round_coords(geom: dict, nd: int = 5) -> dict:
             return [r(i) for i in x]
         return round(x, nd) if isinstance(x, float) else x
     return {**geom, "coordinates": r(geom.get("coordinates", []))}
+
+
+# ---- risk.brief: the accompanied path (platform LLM drafts server-side) -------
+
+_PARSE_SYSTEM = (
+    "Extract the risk-analysis target from the question. Call set_risk_target "
+    "with the place (a city/district/province name) and the hazard. If the "
+    "question is not about hazard exposure or risk for a place, do not call the "
+    "tool — reply with one sentence saying why you cannot brief on it.")
+
+_PARSE_TOOLS = [{
+    "type": "function",
+    "function": {
+        "name": "set_risk_target",
+        "description": "Record the place and hazard the question asks about.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "place": {"type": "string", "description": "named place"},
+                "hazard": {"type": "string",
+                           "description": "hazard type, e.g. flood, cyclone, "
+                                          "earthquake, drought, fire"},
+                "min_severity": {"type": "integer", "minimum": 1, "maximum": 5},
+                "focus": {"type": "string"},
+            },
+            "required": ["place", "hazard"],
+        },
+    },
+}]
+
+_SYNTH_SYSTEM_TMPL = """You write hazard-exposure briefs for risk analysts.
+
+Non-negotiable rules:
+- Use ONLY the numbered evidence provided. Every paragraph must carry at least one citation marker like [3]. Never use a citation number that is not in the evidence list.
+- Never state a number that does not appear in the evidence text.
+- The declared-gaps evidence entry is citable: cite it in the what's-missing section.
+- Exposure numbers are deterministic computations, not model predictions — attribute them to the named hazard layer and method, never to yourself.
+- If the evidence cannot support an answer, write no sections; reply with one paragraph starting "DECLINE:" naming exactly what is missing.
+
+Write EXACTLY these markdown sections and nothing else:
+{sections}
+
+Do not write a Sources section — the system appends it."""
+
+
+def synthesize(question: str, provider: str | None = None,
+               model: str | None = None) -> dict:
+    """The accompanied pipeline for one risk question: LLM parse -> deterministic
+    gather -> platform-LLM draft -> groundedness gate (retry x1). Returns the
+    synthesize-shaped dict compose.run persists, plus required_sections/pack/
+    target so the generic persistence stops assuming food-security."""
+    from ..config import get_settings
+    from ..food_security import synthesis as fs
+    from ..llm import build_client, default_model
+    from ..mcp import packs as mcp_packs
+
+    settings = get_settings()
+    provider = provider or settings.default_provider
+    model = model or default_model(provider)
+    client = build_client(provider)
+    trace, usage = [f'question: "{question}"'], []
+    base = {"provider": provider, "model": model,
+            "required_sections": list(SECTIONS), "pack": "risk"}
+
+    resp = client.chat.completions.create(
+        model=model, max_tokens=300, tools=_PARSE_TOOLS,
+        messages=[{"role": "system", "content": _PARSE_SYSTEM},
+                  {"role": "user", "content": question}])
+    usage.append(fs._usage(resp))
+    msg = resp.choices[0].message
+    if not msg.tool_calls:
+        trace.append("parse -> out of scope (no tool call)")
+        return fs._declined(msg.content or "This question is outside the risk "
+                            "brief's scope.", trace=trace, usage=usage) | base
+    import json
+    try:
+        args = json.loads(msg.tool_calls[0].function.arguments)
+        if not isinstance(args, dict):
+            raise ValueError("tool arguments are not an object")
+    except (ValueError, TypeError) as exc:
+        trace.append(f"parse -> malformed tool arguments ({exc})")
+        return fs._declined("The question could not be parsed reliably — please "
+                            "rephrase it.", trace=trace, usage=usage) | base
+    target = {"place": (args.get("place") or "").strip(),
+              "hazard": (args.get("hazard") or "").strip()}
+    focus = (args.get("focus") or question).strip()
+    trace.append(f"parse -> {target}  [the model extracts the target; it fetches nothing]")
+
+    try:
+        citations, gaps, stats = gather_risk_evidence(
+            target, focus, trace, {"min_severity": args.get("min_severity")})
+    except ValueError as exc:
+        return fs._declined(str(exc), trace=trace, usage=usage) | base
+    except (OSError, RuntimeError) as exc:
+        # Same contract as assemble_pack for the identical gather: upstream
+        # infrastructure failing (geocoder down, Overpass mirrors exhausted,
+        # raster unreadable) is a GOVERNED decline, never a raw tool error.
+        return fs._declined(
+            f"evidence gathering failed: {type(exc).__name__}: {exc}. This is an "
+            "upstream/infrastructure failure, not a coverage gap — retrying later "
+            "may succeed.", trace=trace, usage=usage) | base
+    citations = [*citations, mcp_packs.gaps_citation(citations, gaps)]
+
+    system = _SYNTH_SYSTEM_TMPL.format(sections="\n".join(SECTIONS))
+    user_msg = (f"Question: {question}\n"
+                f"Parsed target: place={target['place']}, hazard={target['hazard']}\n\n"
+                "Numbered evidence (the ONLY permissible sources):\n\n"
+                + fs._render_pack(citations))
+    messages = [{"role": "system", "content": system},
+                {"role": "user", "content": user_msg}]
+    check = None
+    for attempt in (1, 2):
+        resp = client.chat.completions.create(model=model, max_tokens=3000,
+                                              messages=messages)
+        usage.append(fs._usage(resp))
+        draft = (resp.choices[0].message.content or "").strip()
+        if getattr(resp.choices[0], "finish_reason", None) == "length":
+            trace.append(f"synthesis attempt {attempt} -> TRUNCATED at max_tokens; "
+                         "the draft is incomplete, not ungrounded")
+        if draft.startswith("DECLINE:"):
+            trace.append(f"synthesis attempt {attempt} -> model declined")
+            return fs._declined(draft, trace=trace, usage=usage,
+                                citations=citations, stats=stats) | base
+        check = fs.check_grounded(draft, citations, sections=SECTIONS)
+        check["attempts"] = attempt
+        trace.append(f"groundedness attempt {attempt} -> "
+                     + ("PASS" if check["passed"]
+                        else "FAIL: " + "; ".join(check["failures"])))
+        if check["passed"]:
+            brief = draft + "\n\n## Sources\n" + fs._sources_md(citations)
+            return {"declined": False, "brief": brief, "citations": citations,
+                    "parsed": target, "target": target, "evidence": stats,
+                    "gaps": gaps, "grounded": check, "trace": trace,
+                    "usage": usage} | base
+        messages += [{"role": "assistant", "content": draft},
+                     {"role": "user", "content":
+                      "Your draft failed the groundedness check — "
+                      + "; ".join(check["failures"])
+                      + ". Rewrite following the rules exactly."}]
+    return fs._declined(
+        "The draft could not be grounded in the evidence after a retry — refusing "
+        "to ship an uncited brief.", trace=trace, usage=usage, citations=citations,
+        check=check, stats=stats) | base

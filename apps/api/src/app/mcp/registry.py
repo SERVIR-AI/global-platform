@@ -272,6 +272,19 @@ COMPOSITIONS = {
         "for": ("consumers with no model credentials or no place to run code "
                 "(dashboards, cron, REST) — the accompanied path"),
     },
+    "risk.brief": {
+        "description": "Question -> governed 4-section cited hazard-exposure "
+                       "brief for a place x hazard: deterministic geo evidence "
+                       "assembled, drafted, groundedness-gated, receipt minted.",
+        "params": ["question", "provider?", "model?"],
+        "runs_llm_server_side": True,
+        "llm": ("the PLATFORM's model and key; the LLM only parses the target and "
+                "phrases the brief — every number is computed deterministically. "
+                "To use YOUR model, run the loop instead: assemble_pack(pack="
+                "'risk', place=..., hazard=...) -> you draft -> publish_answer."),
+        "for": ("consumers with no model credentials or no place to run code "
+                "(dashboards, cron, REST) — the accompanied path"),
+    },
 }
 
 
