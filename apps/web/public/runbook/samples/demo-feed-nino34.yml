@@ -22,5 +22,6 @@ fetch:
     - {min: 1.5, label: strong El Nino territory}
 params:
   limit: months of series to return (default 12)
-note: Driver signal only. Monthly anomaly, not the official ONI 3-month mean —
-  cite enso_oni for the official index.
+usage_notes: Driver signal only. Monthly anomaly, not the official ONI 3-month
+  mean — cite enso_oni for the official index; never convert this into a local
+  rainfall or crop claim on its own.

@@ -100,6 +100,7 @@ def _sources(pack: dict) -> list[dict]:
                  "pub_date": c.get("pub_date"), "url": c.get("url"),
                  "temporal": c.get("temporal"), "score": c.get("score"),
                  "residency": c.get("residency"), "authority": c.get("authority"),
+                 "usage_notes": c.get("usage_notes"),
                  # how this evidence was obtained, and whether it can be re-read
                  "query_receipt": c.get("query")}
         stale = c.get("stale_data")

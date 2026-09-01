@@ -20,7 +20,8 @@ TEMPORAL = ("forecast", "retrospective")
 VALIDATION = ("multi-agency-consensus", "peer-reviewed", "single-agency",
               "official-statistic", "unvalidated")
 
-OPTIONAL = ("event", "countries", "crops", "doc_type", "filename", "file")
+OPTIONAL = ("event", "countries", "crops", "doc_type", "filename", "file",
+            "usage_notes")
 
 
 def validate_entry(e: dict) -> list[str]:
@@ -43,6 +44,8 @@ def validate_entry(e: dict) -> list[str]:
                      "there are no free-form extras")
     if e.get("file") and not Path(str(e["file"])).is_file():
         fails.append(f"file {e['file']!r} does not exist")
+    from . import notes
+    fails += notes.validate(e.get("usage_notes"))
     return fails
 
 
@@ -102,8 +105,8 @@ def contribute(entries: list[dict], dry_run: bool = False) -> dict:
             text = docloader.extract_text(raw, fname)
             meta = {k: e[k] for k in
                     ("source", "title", "pub_date", "temporal", "validation", "url")}
-            meta |= {k: e[k] for k in ("event", "countries", "crops", "doc_type")
-                     if e.get(k)}
+            meta |= {k: e[k] for k in ("event", "countries", "crops", "doc_type",
+                                        "usage_notes") if e.get(k)}
             out = corpus.ingest(text, meta, raw=raw, filename=fname)
             results.append({"entry": label, "status": "ingested",
                             "doc_id": out["doc_id"], "chunks": out["chunks"],

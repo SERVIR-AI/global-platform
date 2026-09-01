@@ -310,6 +310,7 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
             "doc_id": h["doc_id"], "chunk_id": h["id"],
             "archived_copy": (f"/api/food-security/rag/document/{h['doc_id']}"
                               if corpus.raw_path(h["doc_id"]) else None),
+            "usage_notes": m.get("usage_notes"),
             "text": h["text"]})
     cond, gap = _conditions_citation(crop, country, trace)
     if cond:
@@ -351,10 +352,16 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
 def _render_pack(citations):
     """The numbered evidence block: documents via the source_block seam (E3),
     the conditions feed in the same shape."""
+    def _text(c):
+        t = (f"[temporal={c['temporal']}] {c['text']}"
+             if c.get("temporal") else c["text"])
+        # contributor guidance rides WITH the evidence, where the drafter reads it
+        if c.get("usage_notes"):
+            t = f"[contributor guidance: {c['usage_notes']}] {t}"
+        return t
     doc_like = [{"metadata": {k: c.get(k) for k in
                               ("source", "title", "pub_date", "validation", "url")},
-                 "text": (f"[temporal={c['temporal']}] {c['text']}"
-                          if c.get("temporal") else c["text"])}
+                 "text": _text(c)}
                 for c in citations]
     return source_block(doc_like)
 

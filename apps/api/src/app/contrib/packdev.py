@@ -36,6 +36,8 @@ SPEC = {{
                          "## What's missing and how to weigh it"],
     "corpus": None,
     "default_focus": lambda t: " ".join(str(v) for v in t.values()),
+    # a few lines the consuming agent reads when using this pack (max 500 chars)
+    "usage_notes": "TODO: when to use this pack, and what NOT to conclude from it.",
     "gather": None,          # set below — late so SPEC reads first
     "doctor_target": {{{doctor_target}}},   # a target gather() can serve offline
 }}
@@ -131,6 +133,9 @@ def doctor(pack_id: str) -> dict:
     check("sections are markdown h2", sections and
           all(str(x).startswith("## ") for x in sections),
           f"got {sections!r}")
+    from . import notes
+    for f in notes.validate(spec.get("usage_notes")):
+        check("SPEC.usage_notes", False, f)
 
     target = spec.get("doctor_target")
     if not target:

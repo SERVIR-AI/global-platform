@@ -9,3 +9,5 @@ sources:
     temporal: forecast
     validation: single-agency
     doc_type: enso-status
+    usage_notes: Archival 2025 discussion — use for analog comparison only, never
+      as the current ENSO status; cite the enso_discussion feed for that.

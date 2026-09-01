@@ -44,6 +44,8 @@ def validate_manifest(m: dict) -> list[str]:
                              "file gets verified AGAINST; observation cannot write it")
     elif decl is not None:
         fails.append("declared must be a mapping (dtype/valid_min/valid_max/...)")
+    from . import notes
+    fails += notes.validate(m.get("usage_notes"))
     return fails
 
 
@@ -90,6 +92,8 @@ def add(manifest: dict, dry_run: bool = False) -> dict:
            "title": manifest["title"], "description": manifest["description"],
            "legend": manifest["legend"], "source": manifest["source"],
            "license": manifest["license"], "vintage": manifest["vintage"],
+           **({"usage_notes": manifest["usage_notes"]}
+              if manifest.get("usage_notes") else {}),
            "contributed": True}
     cat_path = Path(settings.tiffs_contrib_path)
     cat = (yaml.safe_load(cat_path.read_text()) or {}) if cat_path.exists() else {}

@@ -349,6 +349,8 @@ def pack_manifest(pack_id: str = "food-security") -> dict:
                     "display_name": spec.get("display_name", pack_id),
                     "version": spec.get("version", "v0"),
                     "target": spec.get("target_doc", {}),
+                    **({"usage_notes": spec["usage_notes"]}
+                       if spec.get("usage_notes") else {}),
                     "note": "this pack registers no manifest — target params only"}
         try:
             return builder()

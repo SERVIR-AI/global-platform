@@ -42,6 +42,8 @@ def validate_manifest(m: dict) -> list[str]:
     cols = m.get("columns")
     if cols is not None and not isinstance(cols, dict):
         fails.append("columns must map output field -> CSV column header")
+    from . import notes
+    fails += notes.validate(m.get("usage_notes"))
     path = m.get("file")
     if path and not Path(str(path)).is_file():
         fails.append(f"file {path!r} does not exist")
@@ -92,7 +94,9 @@ def add(manifest: dict, dry_run: bool = False) -> dict:
                       "columns": manifest["columns"], "units": manifest["units"],
                       **({"as_of_field": manifest["as_of_field"]}
                          if manifest.get("as_of_field") else {})},
-            "params": {"limit": "rows of series to return (default 12)"}}
+            "params": {"limit": "rows of series to return (default 12)"},
+            **({"usage_notes": manifest["usage_notes"]}
+               if manifest.get("usage_notes") else {})}
     feed_yml.parent.mkdir(parents=True, exist_ok=True)
     feed_yml.write_text(yaml.safe_dump(spec, sort_keys=False, allow_unicode=True))
     return {"status": "landed", "dataset": ds, "rows": n_rows, "sha256": digest,

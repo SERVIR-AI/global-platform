@@ -238,7 +238,7 @@ def _adapt_generic_table(params: dict, spec: dict) -> dict:
                            "served_from_cache": res.get("cached"),
                            "served_stale": res.get("served_stale"),
                            "reason": res.get("stale_reason")},
-            "note": spec.get("note")}
+            "note": spec.get("usage_notes") or spec.get("note")}
 
 
 def _dig(obj, path: str):
@@ -302,7 +302,7 @@ def _adapt_generic_json(params: dict, spec: dict) -> dict:
                            "served_from_cache": res.get("cached"),
                            "served_stale": res.get("served_stale"),
                            "reason": res.get("stale_reason")},
-            "note": spec.get("note")}
+            "note": spec.get("usage_notes") or spec.get("note")}
 
 
 def _adapt_generic_csv(params: dict, spec: dict) -> dict:
@@ -358,7 +358,7 @@ def _adapt_generic_csv(params: dict, spec: dict) -> dict:
             # presence as the fallback signal and cries wolf (caught by a cold
             # model in UAT repeating the false cache warning).
             "stale_data": {"cadence": spec.get("cadence"), "served_stale": False},
-            "note": spec.get("note")}
+            "note": spec.get("usage_notes") or spec.get("note")}
 
 
 ADAPTERS = {"cropmonitor_conditions": _adapt_cropmonitor,
@@ -439,10 +439,15 @@ def query(dataset: str, params: dict | None = None) -> dict:
     # adapters always attach a `stale_data` dict (cadence, retrieved_at, ...), so
     # testing the dict's mere PRESENCE flagged every healthy feed as cache-served
     # and put a false staleness warning into the evidence pack. Test the flag.
+    # The adapter's note (contributor usage_notes ride here) belongs on the OK
+    # path too — guidance that only surfaces on failure paths guides nothing.
+    if res.get("note"):
+        out["note"] = res["note"]
     stale = res.get("stale_data") or {}
     if is_stale(stale):
         why = (stale.get("reason")
                or f"last good fetch {stale.get('last_good_fetch')}")
-        out["note"] = ("SERVED FROM LAST-GOOD CACHE — the live feed was unavailable "
-                       f"({why}); treat as possibly out of date")
+        warn = ("SERVED FROM LAST-GOOD CACHE — the live feed was unavailable "
+                f"({why}); treat as possibly out of date")
+        out["note"] = f"{warn}. {out['note']}" if out.get("note") else warn
     return {**out, "status": "ok"}

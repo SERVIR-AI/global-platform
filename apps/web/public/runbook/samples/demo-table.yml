@@ -1,7 +1,7 @@
 # DEMO: land a CSV as a citable platform-hosted series. Self-contained — works
 # offline. Note the honest provenance: synthetic, unvalidated, and it says so.
 dataset: btb_station_maxtemp
-file: runbook/samples/demo-table.csv
+file: apps/web/public/runbook/samples/demo-table.csv
 title: Battambang station monthly max temperature (demonstration)
 description: >
   Monthly maximum temperature from a single Battambang-area station. SYNTHETIC
@@ -16,3 +16,7 @@ columns:
   max_temp_c: MaxTemp_C
 units: degrees C
 as_of_field: month
+usage_notes: >
+  Single-station demo series. Treat as point data — never generalize to the
+  whole province, and pair with a gridded product before citing any trend.
+

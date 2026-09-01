@@ -42,6 +42,8 @@ def validate_spec(spec: dict) -> list[str]:
         for k in _FETCH_REQUIRED[adapter]:
             if not fetch.get(k):
                 fails.append(f"fetch.{k} is required for {adapter}")
+    from . import notes
+    fails += notes.validate(spec.get("usage_notes"))
     return fails
 
 

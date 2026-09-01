@@ -715,6 +715,20 @@ Then tell me which platform URL your trust chrome resolves against.</code></pre>
     contributed rows land in machine-owned <code>*.contrib.yml</code> files, merged at load.</p>
   </div>
 
+  <div class="note good">
+    <span class="label">usage_notes — the skill that travels with the source</span>
+    <p>Every contribution type and every pack accepts an optional
+    <code>usage_notes</code> field: a few contributor-authored lines the consuming
+    agent reads <em>at the moment of use</em> &mdash; &ldquo;single station, never
+    generalize to the province&rdquo;, &ldquo;analog years only, not current
+    status&rdquo;. Hard limit <strong>500 characters</strong>, enforced at the gate:
+    guidance is a hint, not a document &mdash; if it needs more room it belongs in
+    the corpus as a document source. Where it surfaces: feeds carry it on every
+    query response, documents show it beside their text in the evidence block,
+    rasters put it in the hazard passport, and packs return it with every
+    assembled evidence pack.</p>
+  </div>
+
   <p>All commands run from the repository root. Working sample configs for each type live in
   <a href="samples/demo-document.yml">samples/demo-document.yml</a>,
   <a href="samples/demo-feed-nino34.yml">samples/demo-feed-nino34.yml</a> and
@@ -766,7 +780,7 @@ fetch:
 
   <h3>C. Tabular data (CSV) &rarr; a citable platform-hosted series</h3>
 <pre><code>dataset: btb_station_maxtemp
-file: runbook/samples/demo-table.csv
+file: apps/web/public/runbook/samples/demo-table.csv
 title: Battambang station monthly max temperature (demonstration)
 description: SYNTHETIC DEMONSTRATION TABLE — not observed data.
 source: platform demonstration table (synthetic)
