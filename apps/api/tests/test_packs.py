@@ -86,10 +86,12 @@ def test_a_row_only_pack_flows_the_entire_loop(toy_pack, log):
     fresh = out["evidence_freshness"]
     log("OUTPUT", f"computed={fresh.get('computed_sources')}")
     assert fresh["computed_sources"] == [1]              # third retrieval grade
-    assert fresh["archived_sources"] == [2]
+    # [3] is the auto-appended gaps citation (retrieval "config" -> archived bucket)
+    assert fresh["archived_sources"] == [2, 3]
     assert fresh["pulled_sources"] == []
     src = {s["n"]: s for s in out["sources"]}
     assert src[1]["retrieval"] == "computed-at-pack-time"
+    assert src[3]["retrieval"] == "config"
 
 
 def test_verify_decline_no_longer_leaks_fs_sections(log):

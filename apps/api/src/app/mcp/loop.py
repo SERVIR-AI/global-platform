@@ -62,9 +62,9 @@ YOUR_NEXT_OUTPUT = (
     "one failure this platform exists to prevent.")
 
 
-def _draft_rules(required_sections) -> list[str]:
+def _draft_rules(required_sections, gaps_citation_n=None) -> list[str]:
     """The gate's blocking rules, stated where the draft is actually written."""
-    return [
+    rules = [
         "Use these section headers EXACTLY: " + " / ".join(required_sections),
         "Cite pack items as [n]. Every paragraph needs at least one citation.",
         "Only cite numbers that appear in the pack — a [n] that is not in the pack "
@@ -72,9 +72,15 @@ def _draft_rules(required_sections) -> list[str]:
         "Do NOT write your own '## Sources' section; the receipt carries the "
         "sources with their provenance.",
     ]
+    if gaps_citation_n is not None:
+        rules.insert(2, f"The declared gaps are themselves citable evidence: entry "
+                        f"[{gaps_citation_n}]. Your what's-missing paragraphs should "
+                        f"cite [{gaps_citation_n}] — an honest gap statement no "
+                        "longer fails the gate as uncited.")
+    return rules
 
 
-def after_assemble(pack_id: str, required_sections) -> dict:
+def after_assemble(pack_id: str, required_sections, gaps_citation_n=None) -> dict:
     """The hop a model has twice failed to take: pack -> gate -> receipt."""
     return {
         "required": True,
@@ -90,7 +96,7 @@ def after_assemble(pack_id: str, required_sections) -> dict:
         "pass_the_whole_draft": (
             "Send the complete draft text, not a summary: the gate hashes exactly "
             "what it checked so the receipt proves which text passed."),
-        "draft_rules": _draft_rules(required_sections),
+        "draft_rules": _draft_rules(required_sections, gaps_citation_n),
         "granular_alternative": (
             "verify_groundedness(draft, pack_id) then record_receipt(pack_id, "
             "report_id) do the same two things separately — same gate, same receipt."),

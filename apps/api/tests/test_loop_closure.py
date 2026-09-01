@@ -295,3 +295,44 @@ def test_the_panel_is_capability_gated_analytics(log):
     assert "mean" in html and "vs prev" in html  # stats strip
     # degradation is stated, not silent
     assert "host does not proxy tool calls" in html
+
+
+@pytest.fixture(scope="module")
+def risk_pack():
+    """The risk pack always DECLARES gaps (no corpus, no vintages...) — the pack
+    where the citable-gaps contract is always exercised."""
+    return assemble.assemble(pack="risk", place="battambang", hazard="flood")
+
+
+def test_declared_gaps_are_a_citable_pack_entry(risk_pack, pack, log):
+    """Models kept writing honest what's-missing paragraphs the gate then blocked
+    as uncited: gaps were content with no citable identity. They are now the pack's
+    LAST citation, and the draft rules name it. A pack with NO gaps (FS kenya/maize
+    today) gets no such entry — an empty gaps citation would be noise."""
+    last = risk_pack["citations"][-1]
+    log("OUTPUT", f"[{last['n']}] kind={last['kind']} retrieval={last['retrieval']}")
+    assert risk_pack["gaps"], "fixture must declare gaps"
+    assert last["kind"] == "gaps"
+    assert last["retrieval"] == "config"
+    for g in risk_pack["gaps"]:
+        assert g in last["text"]                       # gaps verbatim -> number-scan
+    ns = [c["n"] for c in risk_pack["citations"]]
+    assert len(ns) == len(set(ns)) and last["n"] == max(ns)
+    rules = " ".join(risk_pack["next_step"]["draft_rules"])
+    assert f"[{last['n']}]" in rules                   # the drafter is told
+    assert not pack["gaps"] and pack["citations"][-1]["kind"] != "gaps"
+
+
+def test_a_gaps_only_missing_section_passes_the_gate(risk_pack, log):
+    """The acceptance case for citable gaps: a draft whose what's-missing paragraph
+    cites ONLY the gaps entry must pass — this exact draft was blocked before."""
+    gaps_n = risk_pack["citations"][-1]["n"]
+    parts = []
+    for s in risk_pack["required_sections"]:
+        if "missing" in s.lower():
+            parts.append(f"{s}\n\nThe pack itself declares what is absent [{gaps_n}].")
+        else:
+            parts.append(f"{s}\n\nEvidence for this section is cited here [1].")
+    v = verify.groundedness("\n\n".join(parts), risk_pack["pack_id"])
+    log("OUTPUT", f"passed={v['passed']} failures={v['failures']}")
+    assert v["passed"] is True

@@ -140,3 +140,19 @@ def build_target(pack_id: str, params: dict) -> tuple[dict | None, str | None]:
         return None, (f"pack {pack_id!r} needs {', '.join(missing)} "
                       f"(target params: {', '.join(spec['target_keys'])})")
     return target, None
+
+
+def gaps_citation(citations: list, gaps: list) -> dict | None:
+    """Declared gaps as the pack's LAST numbered citation, so the what's-missing
+    section has something real to cite. Models kept writing honest gap paragraphs
+    the gate then blocked as uncited — the pack declared gaps as content but gave
+    them no citable identity. Any numbers inside a gap statement ride the citation
+    text, so the number-scan can verify them like any other evidence."""
+    if not gaps:
+        return None
+    n = max((int(c.get("n") or 0) for c in citations), default=0) + 1
+    return {"n": n, "kind": "gaps", "source": "platform pack assembly",
+            "title": "declared evidence gaps",
+            "text": "Declared gaps in this evidence pack: "
+                    + " ".join(f"({i}) {g}" for i, g in enumerate(gaps, 1)),
+            "validation": "declared-by-platform", "retrieval": "config"}
