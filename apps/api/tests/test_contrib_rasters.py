@@ -22,14 +22,19 @@ def _manifest(path, **over):
 
 @pytest.fixture
 def conf_env(monkeypatch, tmp_path):
-    """Writable copies of tiffs.yml / raster_schema.yml + isolated tiffs dir."""
+    """Isolated hand-authored conf + EMPTY contrib files + isolated tiffs dir.
+    Contributions must only ever touch the contrib files."""
     cat = tmp_path / "tiffs.yml"
-    cat.write_text(yaml.safe_dump({"hazard_flood": {"local_path": "tiffs/hazard_flood.tif"}}))
+    cat.write_text("# HAND-AUTHORED — a comment the gate must never destroy\n"
+                   + yaml.safe_dump({"hazard_flood": {"local_path": "tiffs/hazard_flood.tif"}}))
     sch = tmp_path / "raster_schema.yml"
     sch.write_text(yaml.safe_dump({"defaults": {"crs": "EPSG:4326", "float_tol": 0.0001},
                                    "layers": {}}))
     monkeypatch.setattr(get_settings(), "tiffs_config_path", cat)
     monkeypatch.setattr(get_settings(), "raster_schema_path", sch)
+    monkeypatch.setattr(get_settings(), "tiffs_contrib_path", tmp_path / "tiffs.contrib.yml")
+    monkeypatch.setattr(get_settings(), "raster_schema_contrib_path",
+                        tmp_path / "raster_schema.contrib.yml")
     monkeypatch.setattr(get_settings(), "tiffs_dir", str(tmp_path / "tiffs"))
     return tmp_path
 
@@ -59,8 +64,7 @@ def test_a_lying_declaration_refuses_and_writes_nothing(conf_env, tif_writer, lo
     out = rasters.add(_manifest(path))
     log("OUTPUT", out["failures"][0][:120])
     assert out["status"] == "declined" and out.get("verified") is False
-    cat = yaml.safe_load((conf_env / "tiffs.yml").read_text())
-    assert "hazard_toyheat" not in cat                       # nothing landed
+    assert not (conf_env / "tiffs.contrib.yml").exists()     # nothing landed
 
 
 def test_a_truthful_layer_lands_catalog_row_and_contract(conf_env, tif_writer, log):
@@ -69,13 +73,18 @@ def test_a_truthful_layer_lands_catalog_row_and_contract(conf_env, tif_writer, l
     out = rasters.add(_manifest(path))
     log("OUTPUT", f"{out['status']} verified={out['verified']}")
     assert out["status"] == "landed" and out["verified"] is True
-    cat = yaml.safe_load((conf_env / "tiffs.yml").read_text())
+    # the landing goes to MACHINE-OWNED contrib files; the hand-authored file
+    # keeps its comments untouched (the X2b yaml-round-trip regression)
+    assert "HAND-AUTHORED" in (conf_env / "tiffs.yml").read_text()
+    cat = yaml.safe_load((conf_env / "tiffs.contrib.yml").read_text())
     row = cat["hazard_toyheat"]
     assert row["license"] == "CC-BY-4.0" and row["vintage"] == "2026-08"
     assert row["contributed"] is True
-    sch = yaml.safe_load((conf_env / "raster_schema.yml").read_text())
+    sch = yaml.safe_load((conf_env / "raster_schema.contrib.yml").read_text())
     assert sch["layers"]["hazard_toyheat"]["dtype"] == "int16"
     assert (conf_env / "tiffs" / "hazard_toyheat.tif").is_file()
+    from app.graph.geo import tiffs as tiffs_mod
+    assert "hazard_toyheat" in tiffs_mod.catalog()           # merged view serves it
 
 
 def test_existing_layers_cannot_be_overwritten(conf_env, tif_writer, log):

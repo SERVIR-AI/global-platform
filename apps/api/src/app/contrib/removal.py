@@ -60,21 +60,25 @@ def remove_raster(layer: str) -> dict:
     (not marked contributed) are refused."""
     from ..config import get_settings
     settings = get_settings()
-    cat_path = Path(settings.tiffs_config_path)
-    cat = yaml.safe_load(cat_path.read_text()) or {}
-    row = cat.get(layer)
-    if row is None:
+    cat_path = Path(settings.tiffs_contrib_path)
+    cat = (yaml.safe_load(cat_path.read_text()) or {}) if cat_path.exists() else {}
+    if layer not in cat:
+        from ..graph.geo import tiffs
+        if layer in tiffs.catalog():
+            return {"status": "declined",
+                    "failures": [f"{layer!r} is a built-in layer, not a contribution "
+                                 "— removing it is a code/catalog decision, not a "
+                                 "CLI one"]}
         return {"status": "declined", "failures": [f"no catalog row {layer!r}"]}
-    if not row.get("contributed"):
-        return {"status": "declined",
-                "failures": [f"{layer!r} is a built-in layer, not a contribution — "
-                             "removing it is a code/catalog decision, not a CLI one"]}
     del cat[layer]
-    cat_path.write_text(yaml.safe_dump(cat, sort_keys=False, allow_unicode=True))
-    sch_path = Path(settings.raster_schema_path)
-    sch = yaml.safe_load(sch_path.read_text()) or {}
+    header = ("# Contributed raster rows — machine-owned; written by the\n"
+              "# contribution gate. Hand-edit conf/tiffs.yml, never this.\n")
+    cat_path.write_text(header + yaml.safe_dump(cat, sort_keys=False, allow_unicode=True))
+    sch_path = Path(settings.raster_schema_contrib_path)
+    sch = (yaml.safe_load(sch_path.read_text()) or {}) if sch_path.exists() else {}
     (sch.get("layers") or {}).pop(layer, None)
-    sch_path.write_text(yaml.safe_dump(sch, sort_keys=False, allow_unicode=True))
+    sch_path.write_text("# Contributed raster contracts — machine-owned.\n"
+                        + yaml.safe_dump(sch, sort_keys=False, allow_unicode=True))
     out = {"catalog_row": "removed", "declared_contract": "removed"}
     tif = Path(settings.tiffs_dir) / f"{layer}.tif"
     if tif.is_file():

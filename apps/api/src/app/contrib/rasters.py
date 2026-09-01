@@ -59,9 +59,8 @@ def add(manifest: dict, dry_run: bool = False) -> dict:
         return {"status": "declined", "failures": fails}
     layer = manifest["layer"]
     settings = get_settings()
-    cat_path = Path(settings.tiffs_config_path)
-    cat = yaml.safe_load(cat_path.read_text()) or {}
-    if layer in cat:
+    from ..graph.geo import tiffs
+    if layer in tiffs.catalog():
         return {"status": "declined",
                 "failures": [f"layer {layer!r} already in the catalog — contributions "
                              "add layers, they do not overwrite them"]}
@@ -83,18 +82,27 @@ def add(manifest: dict, dry_run: bool = False) -> dict:
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(manifest["file"], dest)
 
+    # Contributed rows live in their own MACHINE-OWNED files, merged at load.
+    # The hand-authored conf files are never rewritten by code: a yaml round-trip
+    # strips their comments, which carry the institutional lessons (caught when
+    # X2b's first version silently deleted them).
     row = {"local_path": f"tiffs/{layer}.tif",
            "title": manifest["title"], "description": manifest["description"],
            "legend": manifest["legend"], "source": manifest["source"],
            "license": manifest["license"], "vintage": manifest["vintage"],
            "contributed": True}
+    cat_path = Path(settings.tiffs_contrib_path)
+    cat = (yaml.safe_load(cat_path.read_text()) or {}) if cat_path.exists() else {}
     cat[layer] = row
-    cat_path.write_text(yaml.safe_dump(cat, sort_keys=False, allow_unicode=True))
+    cat_path.write_text("# Contributed raster rows — machine-owned; written by the\n"
+                        "# contribution gate. Hand-edit conf/tiffs.yml, never this.\n"
+                        + yaml.safe_dump(cat, sort_keys=False, allow_unicode=True))
 
-    sch_path = Path(settings.raster_schema_path)
-    sch = yaml.safe_load(sch_path.read_text()) or {}
+    sch_path = Path(settings.raster_schema_contrib_path)
+    sch = (yaml.safe_load(sch_path.read_text()) or {}) if sch_path.exists() else {}
     sch.setdefault("layers", {})[layer] = decl
-    sch_path.write_text(yaml.safe_dump(sch, sort_keys=False, allow_unicode=True))
+    sch_path.write_text("# Contributed raster contracts — machine-owned.\n"
+                        + yaml.safe_dump(sch, sort_keys=False, allow_unicode=True))
 
     return {"status": "landed", "layer": layer, "verified": True,
             "file": str(dest), "observed": obs,

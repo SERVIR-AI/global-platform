@@ -73,7 +73,9 @@ class Settings(BaseSettings):
     traces_dir: Path = cache_dir / "traces"
     prompts_path: Path = _REPO_ROOT / "conf" / "prompts.yml"
     tiffs_config_path: Path = _REPO_ROOT / "conf" / "tiffs.yml"
+    tiffs_contrib_path: Path = _REPO_ROOT / "conf" / "tiffs.contrib.yml"
     raster_schema_path: Path = _REPO_ROOT / "conf" / "raster_schema.yml"
+    raster_schema_contrib_path: Path = _REPO_ROOT / "conf" / "raster_schema.contrib.yml"
     risk_l2_config_path: Path = _REPO_ROOT / "conf" / "risk_l2.yml"
 
     # --- Food security ---

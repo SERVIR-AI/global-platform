@@ -66,20 +66,24 @@ def test_table_removal_retires_the_copy_and_row(env, log):
 
 def test_raster_removal_only_touches_contributions(monkeypatch, tmp_path, log):
     cat = tmp_path / "tiffs.yml"
-    cat.write_text(yaml.safe_dump({
-        "hazard_flood": {"local_path": "tiffs/hazard_flood.tif"},
-        "hazard_scratch": {"local_path": "tiffs/hazard_scratch.tif",
-                           "contributed": True}}))
+    cat.write_text(yaml.safe_dump({"hazard_flood": {"local_path": "tiffs/hazard_flood.tif"}}))
+    contrib = tmp_path / "tiffs.contrib.yml"
+    contrib.write_text(yaml.safe_dump({"hazard_scratch": {
+        "local_path": "tiffs/hazard_scratch.tif", "contributed": True}}))
     sch = tmp_path / "schema.yml"
-    sch.write_text(yaml.safe_dump({"layers": {"hazard_scratch": {"dtype": "int16"}}}))
+    sch.write_text(yaml.safe_dump({"layers": {}}))
+    schc = tmp_path / "schema.contrib.yml"
+    schc.write_text(yaml.safe_dump({"layers": {"hazard_scratch": {"dtype": "int16"}}}))
     monkeypatch.setattr(get_settings(), "tiffs_config_path", cat)
+    monkeypatch.setattr(get_settings(), "tiffs_contrib_path", contrib)
     monkeypatch.setattr(get_settings(), "raster_schema_path", sch)
+    monkeypatch.setattr(get_settings(), "raster_schema_contrib_path", schc)
     monkeypatch.setattr(get_settings(), "tiffs_dir", str(tmp_path))
     (tmp_path / "hazard_scratch.tif").write_bytes(b"x")
     out = removal.remove_raster("hazard_scratch")
     log("OUTPUT", out["file"])
     assert out["status"] == "removed"
-    assert "hazard_scratch" not in yaml.safe_load(cat.read_text())
+    assert "hazard_scratch" not in (yaml.safe_load(contrib.read_text()) or {})
     assert (tmp_path / "hazard_scratch.tif.retired").exists()
     builtin = removal.remove_raster("hazard_flood")
     assert builtin["status"] == "declined"
