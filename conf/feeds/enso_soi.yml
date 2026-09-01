@@ -1,0 +1,27 @@
+# The proof feed for declarative rows: a real NOAA index never integrated before,
+# landed with zero Python. Same text family as ONI/DMI.
+dataset: enso_soi
+title: Southern Oscillation Index (SOI)
+description: Monthly standardized SOI (Tahiti minus Darwin sea-level pressure) —
+  the atmospheric side of ENSO. Sustained negative values lean El Nino.
+source: NOAA PSL
+validation: single-agency
+residency: external call-out
+cadence: monthly
+adapter: generic_table
+fetch:
+  url: https://psl.noaa.gov/data/correlation/soi.data
+  index_name: SOI
+  units: standardized anomaly
+  missing_below: -90
+  round: 2
+  bands:
+    - {max: -1.0, label: strongly negative (El Nino-leaning)}
+    - {min: -1.0, max: -0.5, label: negative}
+    - {min: -0.5, max: 0.5, label: neutral}
+    - {min: 0.5, max: 1.0, label: positive}
+    - {min: 1.0, label: strongly positive (La Nina-leaning)}
+params:
+  limit: months of series to return (default 12)
+note: Driver signal only. This says nothing about local rainfall, crops or food
+  security — cite evidence about the place itself for local claims.

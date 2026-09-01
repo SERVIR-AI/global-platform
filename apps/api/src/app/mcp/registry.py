@@ -250,6 +250,17 @@ FEEDS = {
     },
 }
 
+# Declarative rows (conf/feeds/*.yml) merge in beside the code rows — a feed of a
+# known shape is a YAML file, no Python. Invalid specs register as status
+# "invalid" with their reasons; collisions with code rows refuse loudly.
+def _load_declarative_feeds() -> None:
+    from ..config import get_settings
+    from ..contrib import feedspecs
+    feedspecs.merge_into(FEEDS, feedspecs.load_dir(get_settings().feeds_conf_dir))
+
+
+_load_declarative_feeds()
+
 
 # Every current feed belongs to the food-security pack; a row may override.
 for _spec in FEEDS.values():

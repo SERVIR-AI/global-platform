@@ -168,9 +168,148 @@ def _adapt_enso_forecast(params: dict, spec: dict) -> dict:
 
 # adapter name -> implementation, called as adapter(params, spec). A new upstream
 # adds ONE entry here; a feed reusing an existing shape needs none.
+def _classify_bands(v: float, bands: list) -> str | None:
+    """Label a value against spec-declared bands [{min?, max?, label}]."""
+    for b in bands or []:
+        lo, hi = b.get("min"), b.get("max")
+        if (lo is None or v >= lo) and (hi is None or v < hi):
+            return b.get("label")
+    return None
+
+
+def _adapt_generic_table(params: dict, spec: dict) -> dict:
+    """Declarative adapter for the NOAA text-series family: one row per year,
+    12 monthly values, sentinel for not-yet-published. ONI/DMI/SOI all share it —
+    a new index of this shape is a YAML file and no code."""
+    from . import climate_indices
+    fetch = spec["fetch"]
+    limit = 12
+    if params.get("limit") is not None:
+        try:
+            limit = max(1, int(params["limit"]))
+        except (TypeError, ValueError) as exc:
+            raise FeedDecline("'limit' must be a whole number") from exc
+    missing = float(fetch.get("missing_below", -90))
+    nd = int(fetch.get("round", 3))
+
+    def build() -> dict:
+        import requests
+        r = requests.get(fetch["url"], timeout=30)
+        r.raise_for_status()
+        rows = []
+        for line in r.text.splitlines():
+            parts = line.split()
+            if len(parts) != 13:
+                continue
+            try:
+                year, vals = int(parts[0]), [float(x) for x in parts[1:]]
+            except ValueError:
+                continue
+            for m, v in enumerate(vals, start=1):
+                if v <= missing:
+                    continue
+                rec = {"year": year, "month": m, "value": round(v, nd)}
+                label = _classify_bands(v, fetch.get("bands"))
+                if label:
+                    rec["classification"] = label
+                rows.append(rec)
+        if not rows:
+            raise climate_indices.IndexUnavailable(
+                f"{fetch['url']} returned no parseable rows")
+        return {"rows": rows}
+
+    try:
+        res = climate_indices.cached(f"declarative:{spec['declarative']}", build)
+    except climate_indices.IndexUnavailable as exc:
+        raise FeedDecline(f"feed unavailable: {exc}") from exc
+    except OSError as exc:
+        raise FeedDecline(f"feed unavailable: {type(exc).__name__}: {exc}") from exc
+    rows = res["rows"]
+    latest = rows[-1]
+    as_of = f"{latest['year']}-{latest['month']:02d}"
+    name, units = fetch["index_name"], fetch["units"]
+    summary = (f"{name} {as_of}: {latest['value']} {units}"
+               + (f" — {latest['classification']}" if latest.get("classification") else ""))
+    return {"as_of": as_of, "count": len(rows[-limit:]), "summary": summary,
+            "records": rows[-limit:],
+            "query_receipt": f"{name} via {fetch['url']}", "url": fetch["url"],
+            "stale_data": {"cadence": spec.get("cadence"),
+                           "retrieved_at": res.get("retrieved_at"),
+                           "served_from_cache": res.get("cached"),
+                           "served_stale": res.get("served_stale"),
+                           "reason": res.get("stale_reason")},
+            "note": spec.get("note")}
+
+
+def _dig(obj, path: str):
+    """Dot-path into nested dicts/lists ('data.rows' / 'a.0.b')."""
+    cur = obj
+    for part in str(path).split("."):
+        if isinstance(cur, list):
+            cur = cur[int(part)]
+        elif isinstance(cur, dict):
+            cur = cur.get(part)
+        else:
+            return None
+    return cur
+
+
+def _adapt_generic_json(params: dict, spec: dict) -> dict:
+    """Declarative adapter for JSON APIs: records_path finds the list, fields maps
+    record keys ({out_name: in_path}). No params passthrough in v1 — a URL is a
+    provenance statement and stays exactly what the spec declared."""
+    from . import climate_indices
+    fetch = spec["fetch"]
+    limit = 12
+    if params.get("limit") is not None:
+        try:
+            limit = max(1, int(params["limit"]))
+        except (TypeError, ValueError) as exc:
+            raise FeedDecline("'limit' must be a whole number") from exc
+
+    def build() -> dict:
+        import requests
+        r = requests.get(fetch["url"], timeout=30,
+                         headers={"Accept": "application/json"})
+        r.raise_for_status()
+        raw = _dig(r.json(), fetch["records_path"])
+        if not isinstance(raw, list) or not raw:
+            raise climate_indices.IndexUnavailable(
+                f"records_path {fetch['records_path']!r} found no list at {fetch['url']}")
+        rows = []
+        for rec in raw:
+            out = {}
+            for name, path in (fetch.get("fields") or {}).items():
+                out[name] = _dig(rec, path)
+            rows.append(out)
+        return {"rows": rows}
+
+    try:
+        res = climate_indices.cached(f"declarative:{spec['declarative']}", build)
+    except climate_indices.IndexUnavailable as exc:
+        raise FeedDecline(f"feed unavailable: {exc}") from exc
+    except (OSError, ValueError) as exc:
+        raise FeedDecline(f"feed unavailable: {type(exc).__name__}: {exc}") from exc
+    rows = res["rows"]
+    as_of = fetch.get("as_of_field") and rows[-1].get(fetch["as_of_field"])
+    return {"as_of": as_of, "count": len(rows[-limit:]), "records": rows[-limit:],
+            "summary": f"{len(rows)} records from {spec.get('title')}"
+                       + (f", latest {as_of}" if as_of else ""),
+            "query_receipt": f"{fetch['records_path']} via {fetch['url']}",
+            "url": fetch["url"],
+            "stale_data": {"cadence": spec.get("cadence"),
+                           "retrieved_at": res.get("retrieved_at"),
+                           "served_from_cache": res.get("cached"),
+                           "served_stale": res.get("served_stale"),
+                           "reason": res.get("stale_reason")},
+            "note": spec.get("note")}
+
+
 ADAPTERS = {"cropmonitor_conditions": _adapt_cropmonitor,
             "climate_index": _adapt_climate_index,
-            "enso_forecast": _adapt_enso_forecast}
+            "enso_forecast": _adapt_enso_forecast,
+            "generic_table": _adapt_generic_table,
+            "generic_json": _adapt_generic_json}
 
 
 def describe() -> str:

@@ -80,6 +80,7 @@ class Settings(BaseSettings):
     # Hub-adjustable crop calendars (the Call-2 ministry ask); per-request
     # overrides are cited in the brief as ADJUSTED.
     crop_calendar_path: Path = _REPO_ROOT / "conf" / "crop_calendar.yml"
+    feeds_conf_dir: Path = _REPO_ROOT / "conf" / "feeds"
 
     # --- Food security (GEOGLAM Crop Monitor) ---
     # The CMET Global_SHP FeatureServer: per-region crop-condition expert
