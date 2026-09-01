@@ -227,6 +227,25 @@ class Corpus:
             self._save()
         return {"doc_id": doc_id, "chunks": len(parts), "already_ingested": False}
 
+    def remove(self, doc_id: str) -> dict:
+        """Drop a document from the INDEX — chunks and vectors. The raw archive is
+        deliberately KEPT: receipts minted while it was live must stay replayable;
+        removal stops future retrieval, it does not rewrite history."""
+        with self._lock:
+            self._load()
+            keep = [i for i, c in enumerate(self._chunks) if c["doc_id"] != doc_id]
+            gone = len(self._chunks) - len(keep)
+            if gone == 0:
+                return {"doc_id": doc_id, "removed_chunks": 0, "found": False}
+            self._chunks = [self._chunks[i] for i in keep]
+            # _save writes matrix + dim unconditionally; an emptied corpus keeps a
+            # zero-row matrix of the SAME dimension rather than None, so the next
+            # ingest and every reader see a consistent shape.
+            self._matrix = self._matrix[keep] if len(keep) else                 np.zeros((0, self._matrix.shape[1]), dtype=self._matrix.dtype)
+            self._save()
+        return {"doc_id": doc_id, "removed_chunks": gone, "found": True,
+                "raw_archive_kept": self.raw_path(doc_id) is not None}
+
     def search(self, query: str, k: int = 5, min_relevance: float | None = None,
                **filters) -> list[dict]:
         """Top-k above the relevance floor; metadata filters narrow BEFORE ranking;
