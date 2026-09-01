@@ -305,11 +305,64 @@ def _adapt_generic_json(params: dict, spec: dict) -> dict:
             "note": spec.get("note")}
 
 
+def _adapt_generic_csv(params: dict, spec: dict) -> dict:
+    """Declarative adapter for LANDED tables (X2c). Serves the platform-archived
+    copy and refuses if the bytes changed since landing — a table silently edited
+    after citation is the provenance failure this platform exists to prevent."""
+    import csv as _csv
+    import hashlib as _hashlib
+    import io as _io
+    from pathlib import Path as _Path
+
+    fetch = spec["fetch"]
+    limit = 12
+    if params.get("limit") is not None:
+        try:
+            limit = max(1, int(params["limit"]))
+        except (TypeError, ValueError) as exc:
+            raise FeedDecline("'limit' must be a whole number") from exc
+    path = _Path(fetch["path"])
+    if not path.is_file():
+        raise FeedDecline(f"landed table missing at {path} — re-land it")
+    raw = path.read_bytes()
+    digest = _hashlib.sha256(raw).hexdigest()
+    if fetch.get("sha256") and digest != fetch["sha256"]:
+        raise FeedDecline(
+            "the landed table's bytes no longer match the sha recorded at "
+            "contribution time — the file was modified out-of-band; re-land it "
+            "so provenance stays true",
+            expected_sha256=fetch["sha256"], observed_sha256=digest)
+    rows = []
+    cols = fetch.get("columns") or {}
+    for rec in _csv.DictReader(_io.StringIO(raw.decode("utf-8-sig"))):
+        out = {name: rec.get(col) for name, col in cols.items()}
+        for k, v in out.items():
+            if isinstance(v, str):
+                try:
+                    out[k] = float(v) if "." in v else int(v)
+                except ValueError:
+                    pass
+        rows.append(out)
+    if not rows:
+        raise FeedDecline("the landed table has a header but no rows")
+    as_of = fetch.get("as_of_field") and rows[-1].get(fetch["as_of_field"])
+    return {"as_of": as_of or spec.get("vintage"),
+            "count": len(rows[-limit:]), "records": rows[-limit:],
+            "summary": (f"{len(rows)} rows from {spec.get('title')} "
+                        f"({fetch.get('units')}), landed copy sha {digest[:12]}"),
+            "query_receipt": f"columns {cols} from platform-archived {path.name} "
+                             f"(sha256 {digest[:12]})",
+            "url": None,
+            "stale_data": {"cadence": spec.get("cadence")},
+            "note": spec.get("note")}
+
+
 ADAPTERS = {"cropmonitor_conditions": _adapt_cropmonitor,
             "climate_index": _adapt_climate_index,
             "enso_forecast": _adapt_enso_forecast,
             "generic_table": _adapt_generic_table,
-            "generic_json": _adapt_generic_json}
+            "generic_json": _adapt_generic_json,
+            "generic_csv": _adapt_generic_csv}
 
 
 def describe() -> str:

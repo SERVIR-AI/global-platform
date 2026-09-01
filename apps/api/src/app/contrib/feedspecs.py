@@ -15,10 +15,11 @@ import yaml
 REQUIRED = ("dataset", "title", "description", "source", "validation",
             "residency", "cadence", "adapter")
 
-GENERIC_ADAPTERS = ("generic_table", "generic_json")
+GENERIC_ADAPTERS = ("generic_table", "generic_json", "generic_csv")
 
 _FETCH_REQUIRED = {"generic_table": ("url", "index_name", "units"),
-                   "generic_json": ("url", "records_path", "fields")}
+                   "generic_json": ("url", "records_path", "fields"),
+                   "generic_csv": ("path", "columns", "units")}
 
 
 def validate_spec(spec: dict) -> list[str]:

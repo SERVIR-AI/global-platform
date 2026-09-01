@@ -2,6 +2,7 @@
 
   uv run python -m app.contrib.cli add <manifest.yml> [--dry-run]         # documents
   uv run python -m app.contrib.cli add-raster <manifest.yml> [--dry-run]  # raster layer
+  uv run python -m app.contrib.cli add-table <manifest.yml> [--dry-run]   # CSV table
 
 Prints results and exits non-zero if anything declined, so the command is
 honest in scripts too."""
@@ -16,6 +17,13 @@ from . import sources
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    if len(argv) >= 2 and argv[0] == "add-table":
+        import yaml
+        from . import tables
+        m = yaml.safe_load(open(argv[1], encoding="utf-8"))
+        out = tables.add(m, dry_run="--dry-run" in argv)
+        print(json.dumps(out, indent=2, default=str))
+        return 0 if out["status"] != "declined" else 1
     if len(argv) >= 2 and argv[0] == "add-raster":
         import yaml
         from . import rasters
