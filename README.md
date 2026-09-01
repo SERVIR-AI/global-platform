@@ -106,3 +106,30 @@ Both follow the same working style: survey the codebase first, then propose opti
 ## License
 
 Licensed under the `Eclipse Public License 2.0 (EPL-2.0)` license. See [LICENSE](LICENSE.md) for the full text.
+
+## Run it locally
+
+```bash
+git clone git@github.com:SERVIR-AI/global-platform.git && cd global-platform
+
+# backend (uv installs everything, including Python)
+cd apps/api && uv sync && cd ../..
+
+# web app + runbook (optional — skip for API-only)
+cd apps/web && npm install && npm run build && cd ../..
+
+# start
+cd apps/api
+GRP_WEB_DIST=$PWD/../web/dist GRP_PUBLIC_BASE=http://127.0.0.1:8000 \
+  uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Point any MCP client at `http://127.0.0.1:8000/mcp`; the runbook serves at
+`http://127.0.0.1:8000/runbook/`.
+
+**No `.env` is required to start.** Keyless, you get the platform map, all live
+feeds, and the complete risk-pack loop — deterministic geo evidence through the
+groundedness gate to a minted receipt. Add keys (copy `apps/api/.env.example`
+to `apps/api/.env`) to unlock the food-security corpus and the LLM drafting
+paths. Set `GRP_API_TOKEN` there to gate the tools like the deployed instance;
+unset, the server logs a warning and runs open — acceptable on a laptop only.
