@@ -71,8 +71,7 @@ def assemble(country: str | None = None, crop: str | None = None,
     except CorpusError as exc:
         return {"status": "declined", "note": str(exc)}
     gaps_cit = packs.gaps_citation(citations, gaps)
-    if gaps_cit:
-        citations = [*citations, gaps_cit]
+    citations = [*citations, gaps_cit]
     pack_body = {"pack": pack_id_name, "target": target, "focus": focus,
                  # FS keeps its historic top-level keys; other packs carry only
                  # `target` (the embed resolver reads pack.country/crop for FS)
@@ -102,6 +101,6 @@ def assemble(country: str | None = None, crop: str | None = None,
     return {"status": "ok", "pack_id": pack_id,
             "answer_status": loop.PACK_IS_NOT_AN_ANSWER,
             "next_step": loop.after_assemble(pack_id, pack_body["required_sections"],
-                                             gaps_citation_n=(gaps_cit or {}).get("n")),
+                                             gaps_citation_n=gaps_cit["n"]),
             **response,
             "your_next_output": loop.YOUR_NEXT_OUTPUT.format(pack_id=pack_id)}

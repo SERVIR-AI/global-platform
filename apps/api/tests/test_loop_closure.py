@@ -308,7 +308,9 @@ def test_declared_gaps_are_a_citable_pack_entry(risk_pack, pack, log):
     """Models kept writing honest what's-missing paragraphs the gate then blocked
     as uncited: gaps were content with no citable identity. They are now the pack's
     LAST citation, and the draft rules name it. A pack with NO gaps (FS kenya/maize
-    today) gets no such entry — an empty gaps citation would be noise."""
+    today) gets the entry too, stating that absence explicitly — a model honestly
+    writing "no identified gaps" was observed blocked for lack of anything to
+    cite, and undeclared absence must never read as completeness."""
     last = risk_pack["citations"][-1]
     log("OUTPUT", f"[{last['n']}] kind={last['kind']} retrieval={last['retrieval']}")
     assert risk_pack["gaps"], "fixture must declare gaps"
@@ -320,7 +322,9 @@ def test_declared_gaps_are_a_citable_pack_entry(risk_pack, pack, log):
     assert len(ns) == len(set(ns)) and last["n"] == max(ns)
     rules = " ".join(risk_pack["next_step"]["draft_rules"])
     assert f"[{last['n']}]" in rules                   # the drafter is told
-    assert not pack["gaps"] and pack["citations"][-1]["kind"] != "gaps"
+    fs_last = pack["citations"][-1]
+    assert not pack["gaps"] and fs_last["kind"] == "gaps"
+    assert "No evidence gaps were declared" in fs_last["text"]
 
 
 def test_a_gaps_only_missing_section_passes_the_gate(risk_pack, log):

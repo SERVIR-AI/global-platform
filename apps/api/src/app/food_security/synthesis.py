@@ -445,12 +445,19 @@ def synthesize(question, provider=None, model=None, calendar=None,
     # they establish the ocean state and nothing about that place. Letting them
     # clear the bar would let the engine answer "maize in Kenya" out of an ENSO
     # index alone, which is exactly the inference the use case forbids in Phase 1.
-    _CONTEXT_ONLY = ("calendar", "index")
+    _CONTEXT_ONLY = ("calendar", "index", "gaps")
     if not any(c["kind"] not in _CONTEXT_ONLY for c in citations):
         trace.append("evidence -> empty; declining without a synthesis call")
         return _declined(
             "No evidence available: " + "; ".join(gaps), trace=trace, usage=usage,
             stats=stats) | {"provider": provider, "model": model}
+
+    # Declared gaps (or their explicit absence) as a citable entry — appended
+    # AFTER the evidence bar so it can never carry a brief alone. Observed: the
+    # model honestly wrote "there are no identified gaps..." and the gate blocked
+    # it as uncited, costing a retry.
+    from ..mcp import packs as mcp_packs
+    citations = [*citations, mcp_packs.gaps_citation(citations, gaps)]
 
     asked_on = datetime.now(timezone.utc).strftime("%B %Y")
     user_msg = (
@@ -458,7 +465,8 @@ def synthesize(question, provider=None, model=None, calendar=None,
         f"Asked in: {asked_on} (state the season-timing caveat relative to this)\n"
         f"Parsed target: crop={parsed['crop'] or '?'}, country={parsed['country'] or '?'}, "
         f"focus={parsed['focus']}\n"
-        "Known gaps (must appear in What's missing): "
+        "Known gaps (must appear in What's missing, citing the declared-gaps "
+        "evidence entry): "
         + ("; ".join(gaps) if gaps else "none identified") + "\n\n"
         "Numbered evidence (the ONLY permissible sources):\n\n" + _render_pack(citations))
 
