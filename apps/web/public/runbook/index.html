@@ -744,14 +744,13 @@ Then tell me which platform URL your trust chrome resolves against.</code></pre>
         <td>nothing else; restart to register</td></tr>
   </table></div>
 
-  <p>All commands run from the repository root. Working sample configs for each type live in
-  <a href="samples/demo-document.yml">samples/demo-document.yml</a>,
-  <a href="samples/demo-feed-nino34.yml">samples/demo-feed-nino34.yml</a> and
-  <a href="samples/demo-table.yml">samples/demo-table.yml</a> (+
-  <a href="samples/demo-table.csv">its CSV</a>) — each verified against the live platform
-  and safe to demo: land it, query it, remove it.</p>
+  <p>All commands run from the repository root. Every type below links its own downloadable
+  sample under <a href="samples/">/runbook/samples/</a> — each one rehearsed against the live
+  platform (landed, queried, removed) before it went on this page, so the demo path is:
+  download, land, ask, remove.</p>
 
   <h3>A. A document (PDF, DOCX, TXT, MD) &rarr; the pack&rsquo;s corpus</h3>
+  <p><strong>Sample:</strong> <a href="samples/demo-document.yml">demo-document.yml</a> — a real Feb-2025 CPC PDF, ready to land.</p>
 <pre><code># manifest: a YAML list of entries under `sources:`
 sources:
   - pack: food-security
@@ -770,6 +769,7 @@ uv run --project apps/api python -m app.contrib.cli add manifest.yml</code></pre
   names its own contribution paths instead.</p>
 
   <h3>B. An API feed &rarr; a YAML file, zero code</h3>
+  <p><strong>Samples:</strong> <a href="samples/demo-feed-nino34.yml">demo-feed-nino34.yml</a> (text-series family, real NOAA index) · <a href="samples/demo-feed-json.yml">demo-feed-json.yml</a> (JSON API — live USGS earthquakes, dot-path mapping).</p>
 <pre><code># drop this in conf/feeds/&lt;dataset&gt;.yml and restart the server — that is the whole job
 dataset: nino34_sst
 title: Nino 3.4 SST anomaly (monthly)
@@ -794,6 +794,7 @@ fetch:
   returns those reasons rather than a silent absence.</p>
 
   <h3>C. Tabular data (CSV) &rarr; a citable platform-hosted series</h3>
+  <p><strong>Sample:</strong> <a href="samples/demo-table.yml">demo-table.yml</a> + <a href="samples/demo-table.csv">demo-table.csv</a> — fully offline-safe.</p>
 <pre><code>dataset: btb_station_maxtemp
 file: apps/web/public/runbook/samples/demo-table.csv
 title: Battambang station monthly max temperature (demonstration)
@@ -814,6 +815,7 @@ uv run --project apps/api python -m app.contrib.cli add-table manifest.yml</code
   change under its receipts.</p>
 
   <h3>D. A raster layer (GeoTIFF) &rarr; the hazard catalog</h3>
+  <p><strong>Sample:</strong> <a href="samples/demo-raster.yml">demo-raster.yml</a> + <a href="samples/demo-hazard.tif">demo-hazard.tif</a> (5&nbsp;KB demo GeoTIFF) — lands through the gate as-is.</p>
 <pre><code>layer: hazard_heatdays        # must be namespaced hazard_* or risk_*
 file: /path/to/heatdays.tif
 title: Extreme heat-day hazard
@@ -835,6 +837,7 @@ uv run --project apps/api python -m app.contrib.cli add-raster manifest.yml</cod
   contract.</p>
 
   <h3>E. A whole domain pack &mdash; step by step</h3>
+  <p><strong>Sample:</strong> <a href="samples/demo-pack.py">demo-pack.py</a> — the complete worked example below as a drop-in file: copy to <code>apps/api/src/app/packs_ext/</code>, run the doctor, restart. Verified live: advertised in capabilities, receipt minted, unsupported targets declined.</p>
   <p>A pack is one Python file. Everything else &mdash; the groundedness gate, receipts, the
   evidence panel, the auto-appended gaps citation, the execution trace &mdash; is the
   platform&rsquo;s job, not yours. Your file answers exactly three questions: <em>what does a
