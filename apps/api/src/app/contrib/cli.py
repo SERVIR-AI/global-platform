@@ -1,9 +1,10 @@
-"""CLI for source contributions.
+"""CLI for contributions.
 
-  uv run python -m app.contrib.cli add <manifest.yml> [--dry-run]
+  uv run python -m app.contrib.cli add <manifest.yml> [--dry-run]         # documents
+  uv run python -m app.contrib.cli add-raster <manifest.yml> [--dry-run]  # raster layer
 
-Prints one line per entry and exits non-zero if anything declined, so the
-command is honest in scripts too."""
+Prints results and exits non-zero if anything declined, so the command is
+honest in scripts too."""
 
 from __future__ import annotations
 
@@ -15,6 +16,13 @@ from . import sources
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    if len(argv) >= 2 and argv[0] == "add-raster":
+        import yaml
+        from . import rasters
+        m = yaml.safe_load(open(argv[1], encoding="utf-8"))
+        out = rasters.add(m, dry_run="--dry-run" in argv)
+        print(json.dumps(out, indent=2, default=str))
+        return 0 if out["status"] != "declined" else 1
     if not argv or argv[0] != "add" or len(argv) < 2:
         print(__doc__)
         return 2
