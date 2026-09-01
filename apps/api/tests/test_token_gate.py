@@ -69,3 +69,30 @@ def test_docs_disappear_when_the_gate_is_up(gated, log):
     for path in ("/docs", "/openapi.json"):
         assert gated.get(path).status_code in (401, 404)
     log("CHECK", "schema not served to anonymous callers")
+
+
+def test_the_web_root_is_gated_but_embeds_stay_open(gated, log):
+    """The app UI needs the token; the embed surface (root + ?embed=) and its
+    bundle stay public — an embed a consumer page cannot load is dead chrome."""
+    assert gated.get("/").status_code == 401
+    r = gated.get("/?embed=hazard_map&receipt_id=abc")
+    log("OUTPUT", f"root={401} embed={r.status_code}")
+    assert r.status_code != 401
+    assert gated.get("/assets/anything.js").status_code != 401   # 404, never 401
+    assert gated.get("/runbook/").status_code != 401
+
+
+def test_browser_bootstrap_sets_the_cookie_and_cookie_authorizes(gated, log):
+    r = gated.get("/?token=test-secret-token")
+    log("OUTPUT", f"bootstrap={r.status_code} cookie={'grp_token' in r.headers.get('set-cookie', '')}")
+    assert r.status_code != 401
+    assert "grp_token=test-secret-token" in r.headers.get("set-cookie", "")
+    assert "HttpOnly" in r.headers.get("set-cookie", "")
+    gated.cookies.clear()                          # jar isolation between cases
+    ok = gated.get("/api", cookies={"grp_token": "test-secret-token"})
+    assert ok.status_code == 200                   # same-origin API rides the cookie
+    gated.cookies.clear()
+    bad = gated.get("/api", cookies={"grp_token": "wrong"})
+    assert bad.status_code == 401
+    gated.cookies.clear()
+    assert gated.get("/?token=wrong").status_code == 401

@@ -98,29 +98,70 @@ class TokenGate:
         self.app, self.token = app, token.encode()
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope.get("type") == "http" and not self._authorized(scope):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        ok, set_cookie = self._authorized(scope)
+        if not ok:
             await JSONResponse(
                 {"status": "declined",
                  "note": "missing or invalid API token — send it as "
-                         "'Authorization: Bearer <token>'. The receipt resolver "
-                         "under /api/resolve/ needs no token."},
+                         "'Authorization: Bearer <token>' (browsers: open any "
+                         "page once as /?token=<token>). The receipt resolver "
+                         "under /api/resolve/ and embeds need no token."},
                 status_code=401,
             )(scope, receive, send)
             return
-        await self.app(scope, receive, send)
+        if not set_cookie:
+            await self.app(scope, receive, send)
+            return
 
-    def _authorized(self, scope: Scope) -> bool:
+        # A browser bootstrap (?token=... on a page URL): pin the session with a
+        # cookie so the SPA and its same-origin /api calls work without headers.
+        # Stopgap until OAuth — a URL-borne secret lands in logs and history,
+        # which is one of the reasons OAuth replaces this.
+        async def send_with_cookie(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.append((b"set-cookie",
+                                b"grp_token=" + self.token
+                                + b"; Path=/; HttpOnly; SameSite=Lax"))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_cookie)
+
+    # Static the WEB APP depends on and the embed surface itself: public. The
+    # embed is the ROOT path in ?embed= mode, so the discriminator is the query,
+    # not the path. /assets is the shared SPA bundle — serving it to anonymous
+    # callers reveals nothing the public embeds don't already use.
+    _PUBLIC_STATIC = ("/assets/", "/runbook/", "/favicon")
+
+    def _authorized(self, scope: Scope) -> tuple[bool, bool]:
+        """(authorized, should_set_cookie)."""
         path = scope.get("path", "")
-        if path.startswith(_PUBLIC_PREFIXES):
-            return True
-        if not path.startswith(("/api", "/mcp", "/docs", "/redoc", "/openapi.json")):
-            return True
+        query = (scope.get("query_string") or b"")
+        if path.startswith(_PUBLIC_PREFIXES) or path.startswith(self._PUBLIC_STATIC):
+            return True, False
+        if b"embed=" in query and not path.startswith(("/api", "/mcp")):
+            return True, False                     # the embed surface stays open
         # Compared as BYTES: a header carrying non-UTF-8 or non-ASCII must be a
         # 401, never a decode traceback turned into a 500.
         headers = {k.lower(): v for k, v in (scope.get("headers") or [])}
         presented = (headers.get(b"authorization", b"").removeprefix(b"Bearer ").strip()
                      or headers.get(b"x-api-key", b"").strip())
-        return bool(presented) and secrets.compare_digest(presented, self.token)
+        if presented and secrets.compare_digest(presented, self.token):
+            return True, False
+        cookies = headers.get(b"cookie", b"")
+        for part in cookies.split(b";"):
+            name, _, value = part.strip().partition(b"=")
+            if name == b"grp_token" and secrets.compare_digest(value.strip(), self.token):
+                return True, False
+        for part in query.split(b"&"):
+            name, _, value = part.partition(b"=")
+            if name == b"token" and secrets.compare_digest(value.strip(), self.token):
+                return True, True                  # bootstrap: pass + set cookie
+        return False, False
 
 
 @asynccontextmanager
