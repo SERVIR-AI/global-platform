@@ -250,6 +250,17 @@ FEEDS = {
     },
 }
 
+# Declarative rows (conf/feeds/*.yml) merge in beside the code rows — a feed of a
+# known shape is a YAML file, no Python. Invalid specs register as status
+# "invalid" with their reasons; collisions with code rows refuse loudly.
+def _load_declarative_feeds() -> None:
+    from ..config import get_settings
+    from ..contrib import feedspecs
+    feedspecs.merge_into(FEEDS, feedspecs.load_dir(get_settings().feeds_conf_dir))
+
+
+_load_declarative_feeds()
+
 
 # Every current feed belongs to the food-security pack; a row may override.
 for _spec in FEEDS.values():
@@ -338,6 +349,8 @@ def pack_manifest(pack_id: str = "food-security") -> dict:
                     "display_name": spec.get("display_name", pack_id),
                     "version": spec.get("version", "v0"),
                     "target": spec.get("target_doc", {}),
+                    **({"usage_notes": spec["usage_notes"]}
+                       if spec.get("usage_notes") else {}),
                     "note": "this pack registers no manifest — target params only"}
         try:
             return builder()

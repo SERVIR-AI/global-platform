@@ -1,0 +1,27 @@
+# DEMO: a new NOAA index feed with ZERO code. Copy this file into conf/feeds/,
+# restart the server, and `feeds_query {"dataset": "nino34_sst"}` serves it.
+dataset: nino34_sst
+title: Nino 3.4 SST anomaly (monthly)
+description: Monthly sea-surface temperature anomaly in the Nino 3.4 region —
+  the oceanic ENSO indicator the ONI's 3-month mean is built from.
+source: NOAA PSL
+validation: single-agency
+residency: external call-out
+cadence: monthly
+adapter: generic_table
+fetch:
+  url: https://psl.noaa.gov/data/correlation/nina34.anom.data
+  index_name: "Nino3.4"
+  units: degrees C anomaly
+  missing_below: -90
+  round: 2
+  bands:
+    - {max: -0.5, label: below La Nina threshold}
+    - {min: -0.5, max: 0.5, label: neutral}
+    - {min: 0.5, max: 1.5, label: above El Nino threshold}
+    - {min: 1.5, label: strong El Nino territory}
+params:
+  limit: months of series to return (default 12)
+usage_notes: Driver signal only. Monthly anomaly, not the official ONI 3-month
+  mean — cite enso_oni for the official index; never convert this into a local
+  rainfall or crop claim on its own.

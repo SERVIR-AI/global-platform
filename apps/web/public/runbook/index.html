@@ -151,6 +151,7 @@ footer{border-top:1px solid var(--rule);margin-top:3rem;padding:1.6rem 0;
   <h4>Practice</h4>
   <a href="#mistakes">Common mistakes</a>
   <a href="#recipes">Recipes</a>
+  <a href="#contribute">Adding sources</a>
   <a href="#trouble">Troubleshooting</a>
   <a href="#limits">Limits</a>
   <h4>Lookups</h4>
@@ -699,8 +700,164 @@ Then tell me which platform URL your trust chrome resolves against.</code></pre>
   origin attests nothing. It must say <code>http://10.1.30.110:8080</code>.</p>
 </section>
 
+<section id="contribute">
+  <h2><span class="num">14</span>Adding sources</h2>
+  <p class="lede">Every source type has a gated, one-command contribution path. The gate is the
+  same institution as the groundedness gate, pointed at contributions: full provenance or a
+  loud refusal that names <em>every</em> problem at once. Nothing lands half-described.</p>
+
+  <div class="note good">
+    <span class="label">The rules that hold everywhere</span>
+    <p>Required provenance always includes the publisher, a title, a date, and a validation
+    status — and the vocabulary is honest: <code>unvalidated</code> and <code>unstated</code>
+    are accepted, silence is not. Contributions never overwrite existing entries. Every
+    command takes <code>--dry-run</code>. Hand-authored config is never rewritten by code —
+    contributed rows land in machine-owned <code>*.contrib.yml</code> files, merged at load.</p>
+  </div>
+
+  <div class="note good">
+    <span class="label">usage_notes — the skill that travels with the source</span>
+    <p>Every contribution type and every pack accepts an optional
+    <code>usage_notes</code> field: a few contributor-authored lines the consuming
+    agent reads <em>at the moment of use</em> &mdash; &ldquo;single station, never
+    generalize to the province&rdquo;, &ldquo;analog years only, not current
+    status&rdquo;. Hard limit <strong>500 characters</strong>, enforced at the gate:
+    guidance is a hint, not a document &mdash; if it needs more room it belongs in
+    the corpus as a document source. Where it surfaces: feeds carry it on every
+    query response, documents show it beside their text in the evidence block,
+    rasters put it in the hazard passport, and packs return it with every
+    assembled evidence pack.</p>
+  </div>
+
+  <p>All commands run from the repository root. Working sample configs for each type live in
+  <a href="samples/demo-document.yml">samples/demo-document.yml</a>,
+  <a href="samples/demo-feed-nino34.yml">samples/demo-feed-nino34.yml</a> and
+  <a href="samples/demo-table.yml">samples/demo-table.yml</a> (+
+  <a href="samples/demo-table.csv">its CSV</a>) — each verified against the live platform
+  and safe to demo: land it, query it, remove it.</p>
+
+  <h3>A. A document (PDF, DOCX, TXT, MD) &rarr; the pack&rsquo;s corpus</h3>
+<pre><code># manifest: a YAML list of entries under `sources:`
+sources:
+  - pack: food-security
+    url: https://www.cpc.ncep.noaa.gov/products/analysis_monitoring/enso_disc_feb2025/ensodisc.pdf
+    source: NOAA CPC
+    title: ENSO Diagnostic Discussion Feb 2025
+    pub_date: 2025-02
+    temporal: forecast        # forecast | retrospective — gates what may be cited as an outlook
+    validation: single-agency # or: multi-agency-consensus | peer-reviewed | official-statistic | unvalidated
+
+# validate first, then land:
+uv run --project apps/api python -m app.contrib.cli add manifest.yml --dry-run
+uv run --project apps/api python -m app.contrib.cli add manifest.yml</code></pre>
+  <p>The original bytes are archived so the citation survives URL rot; re-running is
+  idempotent (&ldquo;provenance refreshed&rdquo;). A pack without a corpus (risk) declines and
+  names its own contribution paths instead.</p>
+
+  <h3>B. An API feed &rarr; a YAML file, zero code</h3>
+<pre><code># drop this in conf/feeds/&lt;dataset&gt;.yml and restart the server — that is the whole job
+dataset: nino34_sst
+title: Nino 3.4 SST anomaly (monthly)
+description: Monthly SST anomaly in the Nino 3.4 region.
+source: NOAA PSL
+validation: single-agency
+residency: external call-out
+cadence: monthly
+adapter: generic_table        # the NOAA year-x-12-months text family
+fetch:
+  url: https://psl.noaa.gov/data/correlation/nina34.anom.data
+  index_name: "Nino3.4"
+  units: degrees C anomaly
+  missing_below: -90          # sentinel for not-yet-published months
+  bands:                      # optional classification labels
+    - {min: 0.5, max: 1.5, label: above El Nino threshold}
+    - {min: 1.5, label: strong El Nino territory}</code></pre>
+  <p>Two generic adapters exist: <code>generic_table</code> (fixed-width year&times;12 text
+  series) and <code>generic_json</code> (dot-path record mapping). An API of a new shape needs
+  a developer and a code adapter &mdash; the spec validator says exactly that. Invalid specs
+  register visibly as <code>status: invalid</code> with every failure named; querying one
+  returns those reasons rather than a silent absence.</p>
+
+  <h3>C. Tabular data (CSV) &rarr; a citable platform-hosted series</h3>
+<pre><code>dataset: btb_station_maxtemp
+file: apps/web/public/runbook/samples/demo-table.csv
+title: Battambang station monthly max temperature (demonstration)
+description: SYNTHETIC DEMONSTRATION TABLE — not observed data.
+source: platform demonstration table (synthetic)
+validation: unvalidated
+license: CC0-1.0
+vintage: 2026-08
+cadence: monthly
+columns: {month: Month, max_temp_c: MaxTemp_C}   # output field -> CSV header
+units: degrees C
+as_of_field: month
+
+uv run --project apps/api python -m app.contrib.cli add-table manifest.yml</code></pre>
+  <p>The CSV is archived with its sha256 and served as a feed
+  (<code>residency: platform-hosted copy</code>). If the landed file is edited out-of-band the
+  feed <em>refuses to serve</em> until it is re-landed &mdash; a cited table cannot silently
+  change under its receipts.</p>
+
+  <h3>D. A raster layer (GeoTIFF) &rarr; the hazard catalog</h3>
+<pre><code>layer: hazard_heatdays        # must be namespaced hazard_* or risk_*
+file: /path/to/heatdays.tif
+title: Extreme heat-day hazard
+description: Heat severity class 0 (none) to 5 (extreme) per pixel.
+source: who produced it, derived from what
+license: CC-BY-4.0            # required; 'unstated' allowed, silence is not
+vintage: 2026-09
+legend: {1: Very Low, 2: Low, 3: Moderate, 4: High, 5: Very High}
+declared:                     # the CONTRACT the file is verified against
+  dtype: int16
+  valid_min: 0
+  valid_max: 5
+
+uv run --project apps/api python -m app.contrib.cli add-raster manifest.yml</code></pre>
+  <p>You declare the contract; the platform opens the file and checks reality against the
+  declaration (dtype, value range, nodata, CRS, pixel size) before anything is written. A
+  file that contradicts its declaration refuses and lands <em>nothing</em> &mdash; filenames
+  and source sheets lie about units, which is why observation is never allowed to write the
+  contract.</p>
+
+  <h3>E. A whole domain pack</h3>
+<pre><code>uv run --project apps/api python -m app.contrib.cli new-pack coastal-tides place
+# edit apps/api/src/app/packs_ext/coastal_tides.py — implement gather()
+uv run --project apps/api python -m app.contrib.cli doctor coastal-tides</code></pre>
+  <p>The scaffold passes the doctor unedited, so you start from working. The doctor lints the
+  citation contract (sequential numbering, quotable text, attribution, validation, retrieval
+  grades) and then dry-runs the <em>entire</em> governed loop &mdash; assemble, gate, receipt.
+  A pack that cannot mint a receipt is not a pack yet. On its first run against our own
+  flagship pack it found a citation that had shipped without a validation field for months;
+  that is what it is for.</p>
+
+  <h3>Removing a contribution</h3>
+<pre><code>uv run --project apps/api python -m app.contrib.cli remove-doc food-security &lt;doc-id&gt;
+uv run --project apps/api python -m app.contrib.cli remove-feed &lt;dataset&gt;
+uv run --project apps/api python -m app.contrib.cli remove-raster &lt;layer&gt;
+uv run --project apps/api python -m app.contrib.cli remove-pack &lt;pack-id&gt;</code></pre>
+  <div class="note gap">
+    <span class="label">Removal stops future use — it never rewrites history</span>
+    <p>Document raw archives are kept, table copies and raster files are retired aside, and
+    packs or receipts minted while a source was live remain replayable. Built-in sources
+    refuse removal: only contributions are removable from the command line.</p>
+  </div>
+
+  <div class="note good">
+    <span class="label">Five-minute demo, rehearsed end to end</span>
+    <p>1&nbsp;&mdash;&nbsp;pull <a href="samples/demo-feed-nino34.yml">the Nino&nbsp;3.4 sample</a>
+    into <code>conf/feeds/nino34_sst.yml</code> and restart. 2&nbsp;&mdash;&nbsp;in Claude
+    Desktop ask <em>&ldquo;What is the latest Nino 3.4 SST anomaly?&rdquo;</em> &mdash; live
+    NOAA data with a full passport, zero code written. 3&nbsp;&mdash;&nbsp;land
+    <a href="samples/demo-table.yml">the CSV sample</a> with <code>add-table</code>, restart,
+    and ask for it &mdash; note the answer repeats the synthetic-data caveat on its own.
+    4&nbsp;&mdash;&nbsp;<code>remove-feed</code> both and ask again: the platform declines by
+    name instead of pretending. Every step of this sequence was run against the live platform
+    before it went in this runbook.</p>
+  </div>
+</section>
+
 <section id="trouble">
-  <h2><span class="num">14</span>Troubleshooting</h2>
+  <h2><span class="num">15</span>Troubleshooting</h2>
   <p class="lede">Every entry here is a failure that actually happened, not a hypothetical.</p>
 
   <div class="tablewrap"><table>
@@ -742,7 +899,7 @@ ssh pgarg@10.1.30.110 'sudo journalctl -u grp.service -n 40 --no-pager'</code></
 </section>
 
 <section id="limits">
-  <h2><span class="num">15</span>Limits</h2>
+  <h2><span class="num">16</span>Limits</h2>
   <p class="lede">Stated plainly, because a platform about honesty that overclaims is worthless.</p>
 
   <h3>The gate checks that citations exist, not that they support the claim</h3>
@@ -769,7 +926,7 @@ ssh pgarg@10.1.30.110 'sudo journalctl -u grp.service -n 40 --no-pager'</code></
 </section>
 
 <section id="abbrev">
-  <h2><span class="num">16</span>Abbreviations</h2>
+  <h2><span class="num">17</span>Abbreviations</h2>
   <p class="lede">Everything shortened anywhere in this runbook, spelled out.</p>
 
   <h3>Protocol and platform</h3>
@@ -833,7 +990,7 @@ ssh pgarg@10.1.30.110 'sudo journalctl -u grp.service -n 40 --no-pager'</code></
 </section>
 
 <section id="glossary">
-  <h2><span class="num">17</span>Glossary</h2>
+  <h2><span class="num">18</span>Glossary</h2>
   <div class="tablewrap"><table>
     <thead><tr><th>Term</th><th>Meaning</th></tr></thead>
     <tbody>

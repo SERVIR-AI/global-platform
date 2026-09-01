@@ -73,13 +73,16 @@ class Settings(BaseSettings):
     traces_dir: Path = cache_dir / "traces"
     prompts_path: Path = _REPO_ROOT / "conf" / "prompts.yml"
     tiffs_config_path: Path = _REPO_ROOT / "conf" / "tiffs.yml"
+    tiffs_contrib_path: Path = _REPO_ROOT / "conf" / "tiffs.contrib.yml"
     raster_schema_path: Path = _REPO_ROOT / "conf" / "raster_schema.yml"
+    raster_schema_contrib_path: Path = _REPO_ROOT / "conf" / "raster_schema.contrib.yml"
     risk_l2_config_path: Path = _REPO_ROOT / "conf" / "risk_l2.yml"
 
     # --- Food security ---
     # Hub-adjustable crop calendars (the Call-2 ministry ask); per-request
     # overrides are cited in the brief as ADJUSTED.
     crop_calendar_path: Path = _REPO_ROOT / "conf" / "crop_calendar.yml"
+    feeds_conf_dir: Path = _REPO_ROOT / "conf" / "feeds"
 
     # --- Food security (GEOGLAM Crop Monitor) ---
     # The CMET Global_SHP FeatureServer: per-region crop-condition expert

@@ -144,6 +144,8 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
             f"Observed on this AOI clip: dtype {obs.get('dtype')}, range "
             f"{obs['sampled_min']:g}-{obs['sampled_max']:g} across "
             f"{obs.get('sampled_distinct')} distinct values (sampled).")
+    if meta.get("usage_notes"):
+        passport_bits.append(f"Contributor guidance: {meta['usage_notes']}")
     passport_bits.append("Legend: "
                          + "; ".join(f"{k}={v}" for k, v in sorted(legend.items())))
     # "checked" must mean CHECKED: compare declared vs observed, never co-print

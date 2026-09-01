@@ -12,7 +12,15 @@ from ...config import get_settings
 
 def _doc():
     with open(get_settings().raster_schema_path) as f:
-        return yaml.safe_load(f) or {}
+        doc = yaml.safe_load(f) or {}
+    try:
+        with open(get_settings().raster_schema_contrib_path) as f:
+            contrib = (yaml.safe_load(f) or {}).get("layers") or {}
+        layers = doc.setdefault("layers", {})
+        layers.update({k: v for k, v in contrib.items() if k not in layers})
+    except FileNotFoundError:
+        pass
+    return doc
 
 
 def schema_for(name):
