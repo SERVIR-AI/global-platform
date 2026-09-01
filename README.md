@@ -118,8 +118,11 @@ cd apps/api && uv sync && cd ../..
 # web app + runbook (optional — skip for API-only)
 cd apps/web && npm install && npm run build && cd ../..
 
-# start
+# minimal config: the auth gate is required, local or deployed
 cd apps/api
+echo "GRP_API_TOKEN=$(openssl rand -hex 32)" >> .env
+
+# start
 GRP_WEB_DIST=$PWD/../web/dist GRP_PUBLIC_BASE=http://127.0.0.1:8000 \
   uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
@@ -127,9 +130,11 @@ GRP_WEB_DIST=$PWD/../web/dist GRP_PUBLIC_BASE=http://127.0.0.1:8000 \
 Point any MCP client at `http://127.0.0.1:8000/mcp`; the runbook serves at
 `http://127.0.0.1:8000/runbook/`.
 
-**No `.env` is required to start.** Keyless, you get the platform map, all live
-feeds, and the complete risk-pack loop — deterministic geo evidence through the
-groundedness gate to a minted receipt. Add keys (copy `apps/api/.env.example`
-to `apps/api/.env`) to unlock the food-security corpus and the LLM drafting
-paths. Set `GRP_API_TOKEN` there to gate the tools like the deployed instance;
-unset, the server logs a warning and runs open — acceptable on a laptop only.
+**One `.env` line is required: `GRP_API_TOKEN`** — the server refuses to boot
+without it, local or deployed (an open instance may not exist). Clients send it
+as `Authorization: Bearer <token>`; the receipt resolver, embeds and runbook
+stay public by design. **No LLM keys are required**: keyless you still get the
+platform map, all live feeds, and the complete risk-pack loop — deterministic
+geo evidence through the groundedness gate to a minted receipt. Add provider
+keys (see `apps/api/.env.example`) to unlock the food-security corpus and the
+LLM drafting paths.

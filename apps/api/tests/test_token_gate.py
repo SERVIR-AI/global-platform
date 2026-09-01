@@ -10,7 +10,24 @@ from fastapi.testclient import TestClient
 def gated(monkeypatch):
     monkeypatch.setenv("GRP_API_TOKEN", "test-secret-token")
     from app.main import create_app
-    return TestClient(create_app())
+    c = TestClient(create_app())
+    # this file probes the gate itself: shed conftest's default auth header
+    c.headers.pop("Authorization", None)
+    return c
+
+
+def test_no_token_refuses_to_boot(monkeypatch, log):
+    """Local and deployed must match: an ungated instance may not exist."""
+    # import BEFORE scrubbing: app.main builds a module-level app on first
+    # import, which must succeed under the suite's armed test token
+    from app.main import create_app
+    monkeypatch.delenv("GRP_API_TOKEN", raising=False)
+    from app.config import get_settings
+    monkeypatch.setattr(get_settings(), "grp_api_token", None)
+    with pytest.raises(RuntimeError) as exc:
+        create_app()
+    log("OUTPUT", str(exc.value)[:80])
+    assert "openssl rand -hex 32" in str(exc.value)          # the fix ships in the error
 
 
 def test_tools_refuse_without_the_token(gated, log):

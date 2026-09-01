@@ -146,11 +146,14 @@ def create_app() -> FastAPI:
     # McpPathNormalize -> CORS -> TokenGate -> router. CORS must sit OUTSIDE the
     # gate or preflights get a bare 401 and no browser can ever reach a gated
     # endpoint cross-origin.
-    if token:
-        app.add_middleware(TokenGate, token=token)
-    else:
-        log.warning("GRP_API_TOKEN unset — tools are served WITHOUT authentication. "
-                    "Acceptable locally; deploy/entrypoint.sh refuses to start this way.")
+    if not token:
+        # Local and deployed must MATCH: an open instance is a config accident
+        # waiting to be port-forwarded, so it refuses to exist at all.
+        raise RuntimeError(
+            "GRP_API_TOKEN is required — the auth gate is not optional, local or "
+            "deployed. Generate one:  openssl rand -hex 32  and put it in "
+            "apps/api/.env (GRP_API_TOKEN=...) or the process environment.")
+    app.add_middleware(TokenGate, token=token)
 
     # A consuming app on ITS own origin must be able to resolve our receipts, so
     # '*' is a legitimate deployed value here. Credentials cannot ride a wildcard

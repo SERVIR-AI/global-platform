@@ -9,19 +9,32 @@ import os
 
 import pytest
 
-# Tests must not inherit the developer's .env token — the whole suite ran gated
-# the moment a real token landed there. Scrubbed at IMPORT time because module-
-# scoped client fixtures build the app before any function-scoped fixture runs.
-# Gate tests (test_token_gate.py) arm the gate explicitly per-test.
-os.environ.pop("GRP_API_TOKEN", None)
+# The gate is REQUIRED everywhere (create_app refuses to boot without a token),
+# so the suite runs GATED with a fixed test token, never the developer's .env
+# value. TestClient is taught to send it by default in one place — individual
+# tests stay oblivious; gate tests override explicitly to probe refusal paths.
+TEST_TOKEN = "test-gate-token"
+os.environ["GRP_API_TOKEN"] = TEST_TOKEN
 
 
-def _scrub_settings_token() -> None:
+def _pin_settings_token() -> None:
     from app.config import get_settings
-    get_settings().grp_api_token = None
+    get_settings().grp_api_token = TEST_TOKEN
 
 
-_scrub_settings_token()
+_pin_settings_token()
+
+from fastapi.testclient import TestClient as _TC  # noqa: E402
+
+_tc_init = _TC.__init__
+
+
+def _tc_init_with_token(self, *args, **kwargs):
+    _tc_init(self, *args, **kwargs)
+    self.headers.setdefault("Authorization", f"Bearer {TEST_TOKEN}")
+
+
+_TC.__init__ = _tc_init_with_token
 import rasterio
 from rasterio.transform import from_bounds
 
