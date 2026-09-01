@@ -729,6 +729,21 @@ Then tell me which platform URL your trust chrome resolves against.</code></pre>
     assembled evidence pack.</p>
   </div>
 
+  <div class="tablewrap"><table>
+    <tr><th>You add</th><th>Your input goes</th><th>The platform writes</th></tr>
+    <tr><td>Document</td><td>a manifest .yml anywhere (points at url or file)</td>
+        <td>corpus index + raw archive under <code>cache/corpora/&lt;pack&gt;/</code></td></tr>
+    <tr><td>API feed</td><td><code>conf/feeds/&lt;dataset&gt;.yml</code> — the file IS the feed</td>
+        <td>nothing else; restart to serve</td></tr>
+    <tr><td>CSV table</td><td>a manifest .yml anywhere (points at the CSV)</td>
+        <td>archived copy in <code>cache/tables/</code> + a feed row in <code>conf/feeds/</code></td></tr>
+    <tr><td>Raster</td><td>a manifest .yml anywhere (points at the GeoTIFF)</td>
+        <td>file into <code>cache/tiffs/</code>, rows into <code>conf/tiffs.contrib.yml</code>
+            + <code>conf/raster_schema.contrib.yml</code></td></tr>
+    <tr><td>Domain pack</td><td><code>apps/api/src/app/packs_ext/&lt;id&gt;.py</code> — the file IS the pack</td>
+        <td>nothing else; restart to register</td></tr>
+  </table></div>
+
   <p>All commands run from the repository root. Working sample configs for each type live in
   <a href="samples/demo-document.yml">samples/demo-document.yml</a>,
   <a href="samples/demo-feed-nino34.yml">samples/demo-feed-nino34.yml</a> and
@@ -819,16 +834,122 @@ uv run --project apps/api python -m app.contrib.cli add-raster manifest.yml</cod
   and source sheets lie about units, which is why observation is never allowed to write the
   contract.</p>
 
-  <h3>E. A whole domain pack</h3>
+  <h3>E. A whole domain pack &mdash; step by step</h3>
+  <p>A pack is one Python file. Everything else &mdash; the groundedness gate, receipts, the
+  evidence panel, the auto-appended gaps citation, the execution trace &mdash; is the
+  platform&rsquo;s job, not yours. Your file answers exactly three questions: <em>what does a
+  target look like</em> (the parameters a question resolves to), <em>what evidence exists for
+  one target</em> (your <code>gather()</code>), and <em>what section headers the answer must
+  use</em>. Budget: under an hour for a first working pack.</p>
+
+  <p><strong>Step 1 &mdash; scaffold.</strong> Pick an id and your target keys (the parameters
+  a consumer supplies):</p>
 <pre><code>uv run --project apps/api python -m app.contrib.cli new-pack coastal-tides place
-# edit apps/api/src/app/packs_ext/coastal_tides.py — implement gather()
-uv run --project apps/api python -m app.contrib.cli doctor coastal-tides</code></pre>
-  <p>The scaffold passes the doctor unedited, so you start from working. The doctor lints the
-  citation contract (sequential numbering, quotable text, attribution, validation, retrieval
-  grades) and then dry-runs the <em>entire</em> governed loop &mdash; assemble, gate, receipt.
-  A pack that cannot mint a receipt is not a pack yet. On its first run against our own
-  flagship pack it found a citation that had shipped without a validation field for months;
-  that is what it is for.</p>
+# -&gt; apps/api/src/app/packs_ext/coastal_tides.py   (the whole pack)</code></pre>
+  <p>The scaffold already passes the doctor and mints receipts with its demo evidence, so
+  every edit you make starts from a working state, not a blank page.</p>
+
+  <p><strong>Step 2 &mdash; understand the SPEC.</strong> The top of the generated file is a
+  dict the platform reads; each field has one job:</p>
+<pre><code>SPEC = {
+    "id": "coastal-tides",
+    "display_name": "Coastal Tides",       # shown in capabilities / manifests
+    "version": "v0",
+    "target_keys": ("place",),             # what a question must resolve to
+    "target_doc": {"place": "a coastal settlement name"},   # shown to consumers
+    "sections": lambda: ["## What the numbers show",        # the answer contract:
+                         "## Method and validation",        # the gate BLOCKS drafts
+                         "## What's missing and how to weigh it"],  # missing these
+    "corpus": None,                        # name one to accept document contributions
+    "default_focus": lambda t: " ".join(str(v) for v in t.values()),
+    "usage_notes": "Screening only — tide classes, not navigation guidance.",  # &le;500 chars
+    "gather": gather,                      # your function, below
+    "doctor_target": {"place": "demo-place"},   # a target gather() can serve for the dry-run
+}</code></pre>
+
+  <p><strong>Step 3 &mdash; implement <code>gather()</code>.</strong> Signature:
+  <code>gather(target, focus, trace, extras) -&gt; (citations, gaps, stats)</code>. This is
+  the only real work. A worked example that reads one platform feed and computes one number:</p>
+<pre><code>def gather(target, focus, trace, extras):
+    from app.mcp import feeds
+
+    place = target["place"]
+    trace.append(f"coastal-tides[{place}]")          # the assembly trace users see
+
+    # refuse what you do not serve — a governed decline, not an error
+    if place.lower() not in ("demo-place", "kep", "sihanoukville"):
+        raise ValueError(f"coastal-tides has no tide table for {place!r}")
+
+    soi = feeds.query("enso_soi", {"limit": 3})      # packs may read platform feeds
+    latest = soi["records"][-1]
+
+    citations = [
+        {   # EVERY number a drafter may state must be IN this text, literally —
+            # the gate scans citation text, so "1.7" in a series but not in the
+            # text is a number the model cannot legally write.
+            "n": 1, "kind": "index", "retrieval": "pulled-at-pack-time",
+            "source": soi["passport"]["source"],
+            "title": "Southern Oscillation Index, latest monthly",
+            "validation": soi["passport"]["validation"],
+            "url": "https://psl.noaa.gov/data/correlation/soi.data",
+            "text": (f"SOI for {latest['year']}-{latest['month']:02d}: "
+                     f"{latest['value']} standardized anomaly "
+                     f"({latest.get('classification', 'unclassified')})."),
+        },
+        {
+            "n": 2, "kind": "measurement", "retrieval": "computed-at-pack-time",
+            "source": "platform method registry",
+            "title": f"demo tide class for {place}",
+            "validation": "documented-method",
+            "text": f"Computed demo tide class for {place}: 2 of 5.",
+        },
+    ]
+    gaps = [
+        "no observed tide-gauge series is registered for this coastline",
+        "the tide class is a demonstration method, not a validated model",
+    ]
+    return citations, gaps, {"queries": None}</code></pre>
+  <p>The citation contract, spelled out: numbering is <code>1..n</code> with no gaps or
+  duplicates; every entry carries <code>kind</code>, <code>source</code>, <code>title</code>,
+  <code>text</code>, <code>validation</code>; <code>retrieval</code> is one of
+  <code>pulled-at-pack-time</code> (live value, different next month),
+  <code>computed-at-pack-time</code> (deterministic from named inputs),
+  <code>archived-document</code> (re-readable bytes), <code>config</code> (platform
+  configuration). Declare what is missing in <code>gaps</code> &mdash; the platform turns the
+  list into a citable evidence entry automatically, and an empty list becomes an explicit
+  &ldquo;no gaps declared&rdquo; statement. You never build the gaps citation yourself.</p>
+
+  <p><strong>Step 4 &mdash; run the doctor.</strong></p>
+<pre><code>uv run --project apps/api python -m app.contrib.cli doctor coastal-tides</code></pre>
+  <p>It checks the SPEC shape, lints every citation against the contract above, validates
+  <code>usage_notes</code> length, then dry-runs the <em>entire</em> governed loop with your
+  <code>doctor_target</code>: assemble &rarr; template draft &rarr; groundedness gate &rarr;
+  receipt. Every failure is reported at once with the exact defect
+  (&ldquo;citation [3]: missing 'validation'&rdquo;). A pack that cannot mint a receipt is
+  not a pack yet. On its first run against our own flagship pack the doctor found a citation
+  that had shipped without a validation field for months &mdash; that is what it is for.</p>
+
+  <p><strong>Step 5 &mdash; restart and use it.</strong> Restart the server; the pack
+  registers itself (droppable file, no registry edit). Then, from Claude Desktop or Claude
+  Code:</p>
+<pre><code># discovery — your pack appears in domain_packs with its usage_notes
+platform_capabilities
+
+# the full governed loop against YOUR pack
+"What do the coastal tides look like for Kep, and what's missing from that answer?"</code></pre>
+  <p>The consumer&rsquo;s model calls <code>assemble_pack(pack="coastal-tides",
+  place="Kep")</code>, drafts against your citations, publishes through the gate, and the
+  receipt + evidence panel render with zero pack-specific display code.</p>
+
+  <p><strong>Step 6 &mdash; optional wiring.</strong> Set <code>"corpus": "coastal-tides"</code>
+  and the document contribution path (section A) works for your pack immediately &mdash;
+  scientists can add PDFs your gather retrieves via <code>Corpus("coastal-tides").search()</code>.
+  Add a <code>"manifest"</code> builder for a richer <code>pack_manifest</code> entry. A broken
+  or colliding pack module never crashes the server &mdash; it registers the error visibly and
+  the doctor reports it.</p>
+
+  <p><strong>To remove:</strong> <code>remove-pack coastal-tides</code> (deletes the module;
+  built-ins refuse; receipts minted while it was live stay replayable).</p>
 
   <h3>Removing a contribution</h3>
 <pre><code>uv run --project apps/api python -m app.contrib.cli remove-doc food-security &lt;doc-id&gt;
