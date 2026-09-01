@@ -58,7 +58,8 @@ def citation(country: str, crop: str, asked_month: int,
                 "source": "Crop calendar (hub default, GEOGLAM/FAO-derived)",
                 "title": f"No crop calendar for {country or 'unspecified'} "
                          f"{crop or 'unspecified crop'}",
-                "validation": None, "url": _BASELINE_URL, "adjusted": None,
+                "validation": "declared-by-platform", "url": _BASELINE_URL,
+                "adjusted": None,
                 "text": (f"NO CROP CALENDAR APPLIES: {why}, so season timing cannot be "
                          "pinned to a planting or harvest window. Any timing statement "
                          "must be attributed to a dated source, not to a crop season.")}
@@ -74,6 +75,11 @@ def citation(country: str, crop: str, asked_month: int,
             "source": ("Requester-adjusted crop calendar" if adjusted
                        else "Crop calendar (hub default, GEOGLAM/FAO-derived)"),
             "title": f"{country} {crop} season windows",
-            "validation": None, "url": None if adjusted else _BASELINE_URL,
+            # a reader must know HOW this entry is validated: the hub default is
+            # platform configuration (GEOGLAM/FAO-derived, approximate); an
+            # override is the requester's own claim and says so
+            "validation": ("requester-adjusted-unvalidated" if adjusted
+                           else "hub-default-configuration"),
+            "url": None if adjusted else _BASELINE_URL,
             "adjusted": adjusted,
             "text": header + ": " + "; ".join(lines) + "."}

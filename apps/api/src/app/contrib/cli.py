@@ -3,6 +3,8 @@
   uv run python -m app.contrib.cli add <manifest.yml> [--dry-run]         # documents
   uv run python -m app.contrib.cli add-raster <manifest.yml> [--dry-run]  # raster layer
   uv run python -m app.contrib.cli add-table <manifest.yml> [--dry-run]   # CSV table
+  uv run python -m app.contrib.cli new-pack <id> [key1,key2]               # scaffold a pack
+  uv run python -m app.contrib.cli doctor <pack-id>                        # pack integrity
 
 Prints results and exits non-zero if anything declined, so the command is
 honest in scripts too."""
@@ -17,6 +19,20 @@ from . import sources
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    if len(argv) >= 2 and argv[0] == "new-pack":
+        from . import packdev
+        keys = tuple(argv[2].split(",")) if len(argv) > 2 else ("place",)
+        out = packdev.new_pack(argv[1], target_keys=keys)
+        print(json.dumps(out, indent=2))
+        return 0 if out["status"] != "declined" else 1
+    if len(argv) >= 2 and argv[0] == "doctor":
+        from . import packdev
+        out = packdev.doctor(argv[1])
+        for c in out["checks"]:
+            print(f"[{'ok' if c['ok'] else 'FAIL':>4}] {c['check']}"
+                  + (f" — {c['detail']}" if c.get("detail") else ""))
+        print(f"doctor: {out['status'].upper()} ({len(out['failures'])} failure(s))")
+        return 0 if out["status"] == "passed" else 1
     if len(argv) >= 2 and argv[0] == "add-table":
         import yaml
         from . import tables

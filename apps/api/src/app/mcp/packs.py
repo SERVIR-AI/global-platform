@@ -94,6 +94,7 @@ PACKS: dict[str, dict] = {
         "sections": _fs_sections,
         "corpus": "food-security",
         "default_focus": lambda t: f"{t.get('country', '')} {t.get('crop', '')}".strip(),
+        "doctor_target": {"country": "kenya", "crop": "maize"},
     },
     "risk": {
         "display_name": "Risk Platform",
@@ -106,8 +107,45 @@ PACKS: dict[str, dict] = {
         "corpus": None,
         "manifest": _risk_manifest,
         "default_focus": lambda t: f"{t.get('hazard', '')} exposure in {t.get('place', '')}".strip(),
+        "doctor_target": {"place": "battambang", "hazard": "flood"},
     },
 }
+
+# Load errors from dropped-in pack modules, surfaced by doctor and capabilities —
+# a broken contribution must be visible, never a silent absence or a dead server.
+EXT_ERRORS: dict[str, str] = {}
+
+
+def _load_ext_packs() -> None:
+    """Merge app.packs_ext.<id> modules (each exporting SPEC) into PACKS.
+    Contributed packs are droppable files, like declarative feeds. A module that
+    fails to import or collides records an error and is skipped."""
+    import importlib
+    import pkgutil
+
+    try:
+        from .. import packs_ext
+    except ImportError:
+        return
+    for info in pkgutil.iter_modules(packs_ext.__path__):
+        name = info.name
+        try:
+            mod = importlib.import_module(f"..packs_ext.{name}", __package__)
+            spec = getattr(mod, "SPEC", None)
+            if not isinstance(spec, dict):
+                EXT_ERRORS[name] = "module has no SPEC dict"
+                continue
+            pack_id = spec.get("id") or name
+            if pack_id in PACKS:
+                EXT_ERRORS[name] = (f"pack id {pack_id!r} collides with an existing "
+                                    "pack — contributed packs cannot shadow")
+                continue
+            PACKS[pack_id] = {k: v for k, v in spec.items() if k != "id"}
+        except Exception as exc:                    # never crash the server for one bad module
+            EXT_ERRORS[name] = f"{type(exc).__name__}: {exc}"
+
+
+_load_ext_packs()
 
 
 def available() -> list[str]:
