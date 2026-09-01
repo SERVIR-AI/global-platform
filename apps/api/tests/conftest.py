@@ -5,7 +5,23 @@ import json
 from types import SimpleNamespace
 
 import numpy as np
+import os
+
 import pytest
+
+# Tests must not inherit the developer's .env token — the whole suite ran gated
+# the moment a real token landed there. Scrubbed at IMPORT time because module-
+# scoped client fixtures build the app before any function-scoped fixture runs.
+# Gate tests (test_token_gate.py) arm the gate explicitly per-test.
+os.environ.pop("GRP_API_TOKEN", None)
+
+
+def _scrub_settings_token() -> None:
+    from app.config import get_settings
+    get_settings().grp_api_token = None
+
+
+_scrub_settings_token()
 import rasterio
 from rasterio.transform import from_bounds
 
