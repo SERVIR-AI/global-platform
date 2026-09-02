@@ -259,47 +259,98 @@ footer{border-top:1px solid var(--rule);margin-top:3rem;padding:1.6rem 0;
 
 <section id="connect">
   <h2><span class="num">04</span>Connect</h2>
-  <p class="lede">Three paths. Pick one. All require the SERVIR virtual private network (VPN),
-  because the server is not public.</p>
+  <p class="lede">Two things get you in: network access and the API token. Everything the
+  platform <em>publishes</em> — receipt links, embedded maps, this runbook — needs neither.</p>
 
-  <h3>No token needed</h3>
-  <p>Inside the virtual private network there is no API token: the network itself is the
-  perimeter, and everyone who can reach the address is a colleague. A shared secret added
-  friction without adding security, so it was removed. Per-user authentication (OAuth, with
-  organisation accounts) is planned for the day this server leaves the private network,
-  because that is the day it starts to matter.</p>
+  <h3>Before you start</h3>
+  <ul>
+    <li><strong>Network:</strong> the SERVIR VPN for <code>http://10.1.30.110:8080</code>.
+      (A public HTTPS name is provisioned and waiting on DNS; when it lands, the URL in every
+      config below becomes <code>https://platform.sig-gis.com/mcp</code>, the
+      <code>--allow-http</code> flag goes away, and the VPN requirement drops.)</li>
+    <li><strong>Token:</strong> ask the platform team. It arrives separately from these
+      instructions on purpose. Everywhere below, replace <code>YOUR_TOKEN_HERE</code> with it.
+      Requests without it get an honest <code>401</code> that repeats these rules.</li>
+    <li><strong>For Claude Desktop only:</strong> Node.js (LTS) installed —
+      <code>mcp-remote</code> runs via <code>npx</code>. Claude Code needs nothing extra.</li>
+  </ul>
 
-  <h3>A. Claude Code, the simplest path</h3>
-<pre><code>mkdir -p ~/servirplatform-test &amp;&amp; cd ~/servirplatform-test
-claude mcp add --transport http servirplatform http://10.1.30.110:8080/mcp
-claude</code></pre>
+  <h3>A. Claude Code — macOS / Linux and Windows alike</h3>
+  <p>Same two options on every platform. Either drop a <code>.mcp.json</code> in the folder
+  you'll work from:</p>
+<pre><code>{
+  "mcpServers": {
+    "servirplatform": {
+      "type": "http",
+      "url": "http://10.1.30.110:8080/mcp",
+      "headers": { "Authorization": "Bearer YOUR_TOKEN_HERE" }
+    }
+  }
+}</code></pre>
+  <p>&hellip;or register it once from the terminal (macOS/Linux shells and Windows
+  PowerShell take the identical command):</p>
+<pre><code>claude mcp add --transport http servirplatform http://10.1.30.110:8080/mcp \
+  --header "Authorization: Bearer YOUR_TOKEN_HERE"</code></pre>
   <div class="note gap">
     <span class="label">Do not do this</span>
-    <p>Never register the server with a filesystem path, for example
-    <code>claude mcp add servirplatform -- uv run --directory ...</code>. That writes a local path into your
-    global configuration, where it shadows the project setting for every other repository you open.
-    Register by URL.</p>
+    <p>Never register the server with a filesystem path
+    (<code>claude mcp add servirplatform -- uv run --directory ...</code>). That writes a local
+    path into your global configuration, where it shadows the project setting for every other
+    repository you open. Register by URL.</p>
   </div>
 
-  <h3>B. Claude Desktop</h3>
-  <p>Desktop cannot speak HTTP MCP directly, so <code>mcp-remote</code> bridges it. The
-  <code>--allow-http</code> flag is required, because the server is plain HTTP on a private address
-  and <code>mcp-remote</code> refuses non-localhost HTTP without it.</p>
+  <h3>B. Claude Desktop — macOS</h3>
+  <p>Edit the config (Settings &rarr; Developer &rarr; Edit Config, or directly at
+  <code>~/Library/Application&nbsp;Support/Claude/claude_desktop_config.json</code>), then
+  fully quit and reopen Desktop:</p>
 <pre><code>{
   "mcpServers": {
     "servirplatform": {
       "command": "npx",
       "args": ["-y", "mcp-remote", "http://10.1.30.110:8080/mcp",
-               "--allow-http"]
+               "--allow-http", "--header", "Authorization:${AUTH_HEADER}"],
+      "env": { "AUTH_HEADER": "Bearer YOUR_TOKEN_HERE" }
     }
   }
 }</code></pre>
+  <div class="note">
+    <span class="label">Why the env indirection</span>
+    <p>Desktop splits <code>args</code> entries on spaces, so <code>"Authorization: Bearer
+    ..."</code> written directly in the array silently breaks. The header's spacey half rides
+    an environment variable instead. <code>--allow-http</code> is required while the address
+    is plain HTTP on a private IP — <code>mcp-remote</code> refuses that combination without
+    it, correctly.</p>
+  </div>
 
-  <h3>C. Raw HTTP, no assistant</h3>
-  <p>Useful for checking the server itself. Responses arrive as server-sent events, which is what
-  the <code>sed</code> line strips.</p>
+  <h3>C. Claude Desktop — Windows</h3>
+  <p>Config lives at <code>%APPDATA%\Claude\claude_desktop_config.json</code>
+  (paste that into Explorer's address bar). Windows resolves <code>npx</code> most reliably
+  through <code>cmd</code>:</p>
+<pre><code>{
+  "mcpServers": {
+    "servirplatform": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "mcp-remote", "http://10.1.30.110:8080/mcp",
+               "--allow-http", "--header", "Authorization:${AUTH_HEADER}"],
+      "env": { "AUTH_HEADER": "Bearer YOUR_TOKEN_HERE" }
+    }
+  }
+}</code></pre>
+  <p>Everything else — the env indirection, the full restart after editing — is the same as
+  macOS. If Desktop reports it cannot find <code>npx</code>, install Node.js LTS from
+  nodejs.org and restart the machine so PATH updates reach Desktop.</p>
+
+  <h3>D. The web app in a browser</h3>
+  <p>Open the address with the token ONCE; it sets a session cookie and everything after
+  that — chat, panels, traces — just works:</p>
+<pre><code>http://10.1.30.110:8080/?token=YOUR_TOKEN_HERE</code></pre>
+
+  <h3>E. Raw HTTP, no assistant</h3>
+  <p>Useful for checking the server itself. Responses arrive as server-sent events, which is
+  what the <code>sed</code> line strips.</p>
 <pre><code>mcp() {
   curl -s -m 90 -X POST http://10.1.30.110:8080/mcp \
+    -H "Authorization: Bearer YOUR_TOKEN_HERE" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",
@@ -309,12 +360,19 @@ claude</code></pre>
 
 mcp platform_capabilities '{}'</code></pre>
 
+  <h3>What the token is, honestly</h3>
+  <p>An interim shared secret until OAuth lands: one value per server instance, compared
+  byte-for-byte, no per-user identity, revocation = rotation for everyone. The tools that
+  spend money sit behind it; the trust surfaces do not — the receipt resolver, archived
+  originals, embeds and this runbook stay public at every tier, because a receipt nobody
+  can resolve attests nothing.</p>
+
   <div class="note gap">
     <span class="label">Known limitation</span>
-    <p><strong>ChatGPT cannot connect at all</strong>, from any account. Its fetch originates at
-    OpenAI's servers, which are not on the VPN. Claude works only because <code>mcp-remote</code>
-    runs on your machine and inherits your network. A public HTTPS endpoint is the open item that
-    would change this.</p>
+    <p><strong>ChatGPT cannot connect yet</strong>, from any account: its fetch originates at
+    OpenAI's servers, which are neither on the VPN nor able to trust a bare-IP certificate.
+    That changes when the public DNS name lands — with the caveat that ChatGPT Plus/Pro
+    custom connectors are read-only; full function needs a Business/Enterprise workspace.</p>
   </div>
 </section>
 
