@@ -10,25 +10,47 @@ from typing import Any
 
 import os
 
-from mcp.server.fastmcp import FastMCP
-from mcp.server.transport_security import TransportSecuritySettings
+from fastmcp import FastMCP
 
 from . import (app_ui, assemble, compose, context, feeds, fetch, loop, publish,
                record, registry, resolve, ui, verify)
 
 
-def _transport_security() -> TransportSecuritySettings | None:
+def _transport_security() -> dict:
     """DNS-rebinding protection defends a LOCALHOST server from a browser being
     tricked into reaching it; behind a hosted proxy the Host is the public domain
-    and the default rejects every request (421). `*` disables it for that case."""
+    and the default rejects every request (421). `*` disables it for that case.
+
+    Returned as http_app()/run() KWARGS: the setting moved off the constructor when
+    the server moved onto fastmcp, so the caller that builds the ASGI app applies it."""
     hosts = os.environ.get("GRP_MCP_ALLOWED_HOSTS", "").strip()
     if not hosts:
-        return None
+        # "auto" and NOT the library default: fastmcp defaults host_origin_protection
+        # to False, which installs no guard at all, where the SDK this server used to
+        # run on defaulted to protection ON. "auto" restores that exactly — it checks
+        # Host and Origin when the server is bound to a loopback address (the case the
+        # protection is for) and stays out of the way otherwise (the hosted-proxy case).
+        return {"host_origin_protection": "auto"}
     if hosts == "*":
-        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+        return {"host_origin_protection": False}
     allowed = [h.strip() for h in hosts.split(",") if h.strip()]
-    return TransportSecuritySettings(
-        allowed_hosts=allowed, allowed_origins=[f"https://{h}" for h in allowed])
+    return {"host_origin_protection": True, "allowed_hosts": allowed,
+            "allowed_origins": [f"https://{h}" for h in allowed]}
+
+
+def _http_kwargs() -> dict:
+    """How this server behaves over HTTP, in ONE place.
+
+    Two entry points build their own transport — `uvicorn app.main:app` via
+    http_app(), and `python -m app.mcp.server --http` via run() — and these settings
+    are no longer constructor arguments that both would inherit. Stated twice they
+    could drift, and a Host-header rule that differs between the dev surface and the
+    deployed one is a 421 nobody can reproduce.
+
+    stateless_http: each tool call is self-contained, so there is no session to
+    terminate and nothing for a proxy to have to pin to one instance.
+    """
+    return {"stateless_http": True, **_transport_security()}
 
 # Orientation shown to a connecting LLM at initialize — so it isn't a headless
 # chicken. DESCRIBE the two consumption patterns; don't enforce (no mode switch).
@@ -91,28 +113,27 @@ for the (adjustable) crop calendar.
 If the user asks how to use this server, read the `servirplatform://how-to-use` resource (a \
 human-readable guide) — or run the `explain_platform` prompt — and answer from it."""
 
-# Host/port for the remote (streamable-http) transport. Remote is the faithful
-# build surface: consumers connect by URL, so no filesystem path leaks into a
-# client config for a coding agent to follow into our source (ARCHITECTURE §6).
-mcp = FastMCP("servirplatform",
-              instructions=INSTRUCTIONS,
-              host=os.environ.get("GRP_MCP_HOST", "127.0.0.1"),
-              port=int(os.environ.get("GRP_MCP_PORT", "8000")),
-              transport_security=_transport_security(),
-              stateless_http=True)  # each tool call is self-contained; no session to terminate
+# Host, port, transport security and statelessness are no longer constructor
+# arguments: they belong to whoever builds the ASGI app or runs the transport, so
+# they come from _http_kwargs() at that point. Transport settings are defined in main()
+# Remote is still the faithful build surface: consumers connect by URL, so no filesystem path leaks into
+# a client config for a coding agent to follow into our source (ARCHITECTURE §6).
+mcp = FastMCP("servirplatform", instructions=INSTRUCTIONS)
 
 
+# async because the surface accessors are coroutines: there is no sync way to ask
+# the server what it is serving, and asking IT rather than a list is the whole point.
 @mcp.tool()
-def platform_capabilities() -> dict:
+async def platform_capabilities() -> dict:
     """The platform map: which tools/prompts are live, the bones and their status,
     packs, sources with provenance, calendars, and DECLARED gaps. Bone status is
     derived from the live registry, so it never drifts. Call this first in a build
     session to scope honestly before writing code.
     """
     return registry.capabilities(
-        available_tools=[t.name for t in mcp._tool_manager.list_tools()],
-        available_prompts=[p.name for p in mcp._prompt_manager.list_prompts()],
-        available_resources=[str(r.uri) for r in mcp._resource_manager.list_resources()])
+        available_tools=[t.name for t in await mcp.list_tools()],
+        available_prompts=[p.name for p in await mcp.list_prompts()],
+        available_resources=[str(r.uri) for r in await mcp.list_resources()])
 
 
 @mcp.tool()
@@ -255,7 +276,7 @@ def compose_run(composition: str = "foodsecurity.brief", question: str = "",
 # a host that advertises io.modelcontextprotocol/ui fetches ui://servirplatform/evidence and
 # renders it in a sandboxed iframe beside the text. Hosts that do not understand
 # _meta ignore it, so the text answer is unchanged for everyone else.
-@mcp.tool(meta={"ui": {"resourceUri": app_ui.UI_URI}}, structured_output=True)
+@mcp.tool(meta={"ui": {"resourceUri": app_ui.UI_URI}})
 def record_receipt(pack_id: str | None = None, report_id: str | None = None,
                    receipt_id: str | None = None,
                    question: str | None = None) -> dict[str, Any]:
@@ -279,7 +300,7 @@ def record_receipt(pack_id: str | None = None, report_id: str | None = None,
 # run-time answer actually ENDS, so it is where a host that can render should get
 # the evidence view without the model having to ask for it.
 @mcp.tool(description=publish.describe(),
-          meta={"ui": {"resourceUri": app_ui.UI_URI}}, structured_output=True)
+          meta={"ui": {"resourceUri": app_ui.UI_URI}})
 def publish_answer(pack_id: str, draft: str,
                    question: str | None = None) -> dict[str, Any]:
     return publish.answer(pack_id=pack_id, draft=draft, question=question)
@@ -431,12 +452,19 @@ def explain_platform() -> str:
 
 
 def main() -> None:
-    """Default stdio (local dev). `--http` serves streamable-http on
+    """Default stdio (local dev). `--http` serves streamable HTTP on
     GRP_MCP_HOST:GRP_MCP_PORT/mcp — the faithful remote build surface."""
     import sys
     transport = "streamable-http" if "--http" in sys.argv else "stdio"
     os.environ["GRP_MCP_TRANSPORT"] = transport  # so capabilities reports it honestly
-    mcp.run(transport=transport)
+    if transport == "stdio":
+        mcp.run(transport="stdio")
+        return
+    # The transport is named "http" here; the env var keeps the protocol's own name.
+    mcp.run(transport="http",
+            host=os.environ.get("GRP_MCP_HOST", "127.0.0.1"),
+            port=int(os.environ.get("GRP_MCP_PORT", "8000")),
+            **_http_kwargs())
 
 
 if __name__ == "__main__":

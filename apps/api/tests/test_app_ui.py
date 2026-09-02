@@ -6,6 +6,7 @@ tool result. That is the point: it does not depend on the model choosing to draw
 something, which is what failed when we only asked in the instructions.
 """
 
+import asyncio
 import json
 
 from app.mcp import app_ui
@@ -35,7 +36,7 @@ def test_registered_with_the_mcp_app_mime_type(log):
 
 def test_the_resource_is_actually_on_the_server(log):
     from app.mcp.server import mcp
-    uris = [str(r.uri) for r in mcp._resource_manager.list_resources()]
+    uris = [str(r.uri) for r in asyncio.run(mcp.list_resources())]
     log("OUTPUT", str(uris))
     assert app_ui.UI_URI in uris
 

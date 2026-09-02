@@ -19,14 +19,13 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from mcp.server.fastmcp.server import StreamableHTTPASGIApp
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .api.routes import api_router
 from .config import get_settings
 from .mcp import store
-from .mcp.server import mcp
+from .mcp.server import _http_kwargs, mcp
 
 log = logging.getLogger(__name__)
 
@@ -125,9 +124,11 @@ class TokenGate:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    """The MCP session manager must be running or the transport answers nothing."""
+    """The MCP session manager must be running or the transport answers nothing.
+    Starlette does not run a MOUNTED app's lifespan, so the MCP app's own lifespan is
+    chained here rather than assumed."""
     store.init()
-    async with mcp.session_manager.run():
+    async with app.state.mcp_app.lifespan(app):
         yield
 
 
@@ -140,6 +141,14 @@ def create_app() -> FastAPI:
     # point of gating them, so the docs go away exactly when the gate goes up.
     docs = {} if not token else {"docs_url": None, "redoc_url": None, "openapi_url": None}
     app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=_lifespan, **docs)
+
+    # ONE MCP app, built here and carried on the app so the lifespan can reach it:
+    # http_app() builds a NEW session manager on every call, so the object mounted
+    # below has to be the same object _lifespan starts, or the mounted one is never
+    # started and every tool call meets a dead transport. path="/" because the mount
+    # supplies the "/mcp" prefix; the rest of how it behaves over HTTP is
+    # _http_kwargs(), shared with the standalone `--http` entry point.
+    app.state.mcp_app = mcp.http_app(path="/", **_http_kwargs())
 
     # Middleware nests in REVERSE of add order, so this yields
     # McpPathNormalize -> CORS -> TokenGate -> router. CORS must sit OUTSIDE the
@@ -170,10 +179,9 @@ def create_app() -> FastAPI:
     def api_root() -> dict:
         return {"service": settings.app_name, "mcp": "/mcp", "docs": "/docs"}
 
-    # Forces session-manager creation. The RAW ASGI app is mounted rather than
-    # FastMCP's Starlette wrapper so no inner router can redirect a tool call.
-    mcp.streamable_http_app()
-    app.mount("/mcp", StreamableHTTPASGIApp(mcp.session_manager))
+    # The MCP ASGI app, which carries the transport and (once configured) the auth
+    # middleware and discovery routes.
+    app.mount("/mcp", app.state.mcp_app)
 
     # Mounted LAST so /api and /mcp win; html=True serves index.html at "/".
     web_dist = Path(os.environ.get("GRP_WEB_DIST", ""))

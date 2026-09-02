@@ -7,6 +7,7 @@ ARCHITECTURE §2/§3 promise, previously true for feeds and compositions and fal
 for the loop itself.
 """
 
+import asyncio
 import pytest
 
 from app.mcp import assemble, packs, publish, record, store, verify
@@ -116,7 +117,7 @@ def test_legacy_packs_without_retrieval_still_classify(log):
 
 def test_every_pack_gets_a_manifest_resource(log):
     from app.mcp.server import mcp
-    uris = [str(r.uri) for r in mcp._resource_manager.list_resources()]
+    uris = [str(r.uri) for r in asyncio.run(mcp.list_resources())]
     log("OUTPUT", str([u for u in uris if "/pack/" in u]))
     for pid in packs.available():
         assert f"servirplatform://pack/{pid}" in uris

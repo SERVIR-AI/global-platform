@@ -19,8 +19,11 @@ dependencies = [
     "python-multipart>=0.0.9",
     "pypdf>=5.1.0",
     "python-docx>=1.1.2",
-    "mcp>=1.2",
+    # >=2: fastmcp 4 requires it, and mcp 2.x removed mcp.server.fastmcp.
+    # An unbounded floor here is what made a routine lock refresh able to break the app.
+    "mcp>=2.1",
     "google-auth>=2.35",
+    "fastmcp>=4.0.0",
 ]
 
 [dependency-groups]
