@@ -96,3 +96,12 @@ def test_browser_bootstrap_sets_the_cookie_and_cookie_authorizes(gated, log):
     assert bad.status_code == 401
     gated.cookies.clear()
     assert gated.get("/?token=wrong").status_code == 401
+
+
+def test_runbook_is_public_with_and_without_the_slash(gated, log):
+    """/runbook (no slash) hit the gate before StaticFiles could redirect —
+    the public docs page showed a token error to anyone typing the short URL."""
+    for path in ("/runbook", "/runbook/"):
+        r = gated.get(path, follow_redirects=False)
+        log("OUTPUT", f"{path} -> {r.status_code}")
+        assert r.status_code != 401

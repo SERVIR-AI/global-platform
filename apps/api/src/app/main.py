@@ -143,6 +143,9 @@ class TokenGate:
         query = (scope.get("query_string") or b"")
         if path.startswith(_PUBLIC_PREFIXES) or path.startswith(self._PUBLIC_STATIC):
             return True, False
+        if path == "/runbook":                     # the no-slash form 401'd before
+            return True, False                     # StaticFiles could redirect it
+
         if b"embed=" in query and not path.startswith(("/api", "/mcp")):
             return True, False                     # the embed surface stays open
         # Compared as BYTES: a header carrying non-UTF-8 or non-ASCII must be a
