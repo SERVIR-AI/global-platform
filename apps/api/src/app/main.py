@@ -24,7 +24,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .api.routes import api_router
 from .config import get_settings
-from .mcp import store
+from .mcp import auth, store
 from .mcp.server import _http_kwargs, mcp
 
 log = logging.getLogger(__name__)
@@ -174,6 +174,13 @@ def create_app() -> FastAPI:
     app.add_middleware(McpPathNormalize)
 
     app.include_router(api_router, prefix="/api")
+
+    # OAuth discovery, when it is switched on. These belong to the ORIGIN ROOT, not
+    # to the /mcp mount (see auth.well_known_routes), and they must be reachable with
+    # no credential: a client reads them precisely BECAUSE it has no token yet.
+    # TokenGate already lets them through, since it gates only /api, /mcp and /docs.
+    # Added before the static mount below so "/" cannot swallow them.
+    app.router.routes.extend(auth.well_known_routes())
 
     @app.get("/api")
     def api_root() -> dict:
