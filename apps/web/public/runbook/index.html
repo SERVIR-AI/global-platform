@@ -264,10 +264,10 @@ footer{border-top:1px solid var(--rule);margin-top:3rem;padding:1.6rem 0;
 
   <h3>Before you start</h3>
   <ul>
-    <li><strong>Network:</strong> the SERVIR VPN for <code>http://10.1.30.110:8080</code>.
-      (A public HTTPS name is provisioned and waiting on DNS; when it lands, the URL in every
-      config below becomes <code>https://platform.sig-gis.com/mcp</code>, the
-      <code>--allow-http</code> flag goes away, and the VPN requirement drops.)</li>
+    <li><strong>Network:</strong> none to speak of — the platform is public at
+      <code>https://servirplatform.sig-gis.com</code> with a valid certificate. (The SERVIR VPN
+      route <code>http://10.1.30.110:8080</code> still works from inside; if you use it, add
+      <code>--allow-http</code> to the Desktop configs below.)</li>
     <li><strong>Token:</strong> ask the platform team. It arrives separately from these
       instructions on purpose. Everywhere below, replace <code>YOUR_TOKEN_HERE</code> with it.
       Requests without it get an honest <code>401</code> that repeats these rules.</li>
@@ -282,14 +282,14 @@ footer{border-top:1px solid var(--rule);margin-top:3rem;padding:1.6rem 0;
   "mcpServers": {
     "servirplatform": {
       "type": "http",
-      "url": "http://10.1.30.110:8080/mcp",
+      "url": "https://servirplatform.sig-gis.com/mcp",
       "headers": { "Authorization": "Bearer YOUR_TOKEN_HERE" }
     }
   }
 }</code></pre>
   <p>&hellip;or register it once from the terminal (macOS/Linux shells and Windows
   PowerShell take the identical command):</p>
-<pre><code>claude mcp add --transport http servirplatform http://10.1.30.110:8080/mcp \
+<pre><code>claude mcp add --transport http servirplatform https://servirplatform.sig-gis.com/mcp \
   --header "Authorization: Bearer YOUR_TOKEN_HERE"</code></pre>
   <div class="note gap">
     <span class="label">Do not do this</span>
@@ -307,8 +307,8 @@ footer{border-top:1px solid var(--rule);margin-top:3rem;padding:1.6rem 0;
   "mcpServers": {
     "servirplatform": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "http://10.1.30.110:8080/mcp",
-               "--allow-http", "--header", "Authorization:${AUTH_HEADER}"],
+      "args": ["-y", "mcp-remote", "https://servirplatform.sig-gis.com/mcp",
+               "--header", "Authorization:${AUTH_HEADER}"],
       "env": { "AUTH_HEADER": "Bearer YOUR_TOKEN_HERE" }
     }
   }
@@ -318,8 +318,8 @@ footer{border-top:1px solid var(--rule);margin-top:3rem;padding:1.6rem 0;
     <p>Desktop splits <code>args</code> entries on spaces, so <code>"Authorization: Bearer
     ..."</code> written directly in the array silently breaks. The header's spacey half rides
     an environment variable instead. <code>--allow-http</code> is required while the address
-    is plain HTTP on a private IP — <code>mcp-remote</code> refuses that combination without
-    it, correctly.</p>
+    is plain HTTP on a private IP — <code>mcp-remote</code> refuses plain HTTP to a
+    non-localhost address without it, correctly. The public HTTPS URL needs no flag.</p>
   </div>
 
   <h3>C. Claude Desktop — Windows</h3>
@@ -330,8 +330,8 @@ footer{border-top:1px solid var(--rule);margin-top:3rem;padding:1.6rem 0;
   "mcpServers": {
     "servirplatform": {
       "command": "cmd",
-      "args": ["/c", "npx", "-y", "mcp-remote", "http://10.1.30.110:8080/mcp",
-               "--allow-http", "--header", "Authorization:${AUTH_HEADER}"],
+      "args": ["/c", "npx", "-y", "mcp-remote", "https://servirplatform.sig-gis.com/mcp",
+               "--header", "Authorization:${AUTH_HEADER}"],
       "env": { "AUTH_HEADER": "Bearer YOUR_TOKEN_HERE" }
     }
   }
@@ -343,13 +343,13 @@ footer{border-top:1px solid var(--rule);margin-top:3rem;padding:1.6rem 0;
   <h3>D. The web app in a browser</h3>
   <p>Open the address with the token ONCE; it sets a session cookie and everything after
   that — chat, panels, traces — just works:</p>
-<pre><code>http://10.1.30.110:8080/?token=YOUR_TOKEN_HERE</code></pre>
+<pre><code>https://servirplatform.sig-gis.com/?token=YOUR_TOKEN_HERE</code></pre>
 
   <h3>E. Raw HTTP, no assistant</h3>
   <p>Useful for checking the server itself. Responses arrive as server-sent events, which is
   what the <code>sed</code> line strips.</p>
 <pre><code>mcp() {
-  curl -s -m 90 -X POST http://10.1.30.110:8080/mcp \
+  curl -s -m 90 -X POST https://servirplatform.sig-gis.com/mcp \
     -H "Authorization: Bearer YOUR_TOKEN_HERE" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
@@ -369,10 +369,9 @@ mcp platform_capabilities '{}'</code></pre>
 
   <div class="note gap">
     <span class="label">Known limitation</span>
-    <p><strong>ChatGPT cannot connect yet</strong>, from any account: its fetch originates at
-    OpenAI's servers, which are neither on the VPN nor able to trust a bare-IP certificate.
-    That changes when the public DNS name lands — with the caveat that ChatGPT Plus/Pro
-    custom connectors are read-only; full function needs a Business/Enterprise workspace.</p>
+    <p><strong>ChatGPT</strong> can now reach the public endpoint as a custom connector —
+    with the caveat that Plus/Pro custom connectors are read-only (no receipt minting);
+    full function needs a Business/Enterprise workspace.</p>
   </div>
 </section>
 
