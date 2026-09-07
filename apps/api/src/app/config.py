@@ -160,10 +160,14 @@ class Settings(BaseSettings):
     price_in: float = 0.0
     price_out: float = 0.0
 
-    # --- OAuth Settings ---
-    grp_authkit_domain: str = "https://welcoming-splendor-62-staging.authkit.app/"
-    grp_public_url: str = "http://127.0.0.1:8001"
-    grp_oauth_enabled: str | int = "true"
+    # --- OAuth (mcp/auth.py) ---
+    # Off and empty by default: the provider and the origin are per deployment, and
+    # a default naming a real tenant would switch OAuth on for everyone who never
+    # set it. Local values live in apps/api/.env.
+    grp_oauth_enabled: bool = False
+    grp_authkit_domain: str = ""
+    grp_public_url: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

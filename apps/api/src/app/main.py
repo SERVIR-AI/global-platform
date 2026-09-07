@@ -25,7 +25,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from .api.routes import api_router
 from .config import get_settings
 from .mcp import auth, store
-from .mcp.server import _http_kwargs, mcp
+from .mcp.server import _http_transport, mcp
 
 log = logging.getLogger(__name__)
 
@@ -79,9 +79,8 @@ class StaticOrNotFound:
             await JSONResponse(
                 {"error": "not_found",
                  "error_description": (
-                     f"no endpoint at {scope.get('path')!r} — this server does not "
-                     "implement OAuth. The MCP transport is POST /mcp with an "
-                     "'Authorization: Bearer <token>' header; the REST twin is under /api."),
+                     f"no endpoint at {scope.get('path')!r} — the MCP transport is "
+                     "POST /mcp; the REST twin is under /api."),
                  "mcp": "/mcp"},
                 status_code=404,
             )(scope, receive, send)
@@ -89,12 +88,17 @@ class StaticOrNotFound:
         await self.static(scope, receive, send)
 
 
+# Everything the shared token guards when nothing else does.
+_GATED_PREFIXES = ("/api", "/mcp", "/docs", "/redoc", "/openapi.json")
+
+
 class TokenGate:
     """Bearer/X-API-Key gate over the tools. Raw ASGI rather than
     BaseHTTPMiddleware so the MCP transport keeps streaming."""
 
-    def __init__(self, app: ASGIApp, token: str) -> None:
-        self.app, self.token = app, token.encode()
+    def __init__(self, app: ASGIApp, token: str,
+                 gated: tuple[str, ...] = _GATED_PREFIXES) -> None:
+        self.app, self.token, self.gated = app, token.encode(), gated
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope.get("type") == "http" and not self._authorized(scope):
@@ -112,7 +116,7 @@ class TokenGate:
         path = scope.get("path", "")
         if path.startswith(_PUBLIC_PREFIXES):
             return True
-        if not path.startswith(("/api", "/mcp", "/docs", "/redoc", "/openapi.json")):
+        if not path.startswith(self.gated):
             return True
         # Compared as BYTES: a header carrying non-UTF-8 or non-ASCII must be a
         # 401, never a decode traceback turned into a 500.
@@ -146,16 +150,22 @@ def create_app() -> FastAPI:
     # http_app() builds a NEW session manager on every call, so the object mounted
     # below has to be the same object _lifespan starts, or the mounted one is never
     # started and every tool call meets a dead transport. path="/" because the mount
-    # supplies the "/mcp" prefix; the rest of how it behaves over HTTP is
-    # _http_kwargs(), shared with the standalone `--http` entry point.
-    app.state.mcp_app = mcp.http_app(path="/", **_http_kwargs())
+    # supplies the "/mcp" prefix; the rest of how it behaves over HTTP, and the auth
+    # provider it enforces, is _http_transport(), shared with the standalone `--http`
+    # entry point.
+    app.state.mcp_app = mcp.http_app(path="/", **_http_transport())
 
     # Middleware nests in REVERSE of add order, so this yields
     # McpPathNormalize -> CORS -> TokenGate -> router. CORS must sit OUTSIDE the
     # gate or preflights get a bare 401 and no browser can ever reach a gated
     # endpoint cross-origin.
     if token:
-        app.add_middleware(TokenGate, token=token)
+        # /mcp comes off this gate when OAuth holds it. This gate's 401 carries no
+        # WWW-Authenticate header, so a client that met it here would be refused
+        # with no way to learn where to log in, and the browser would never open.
+        gated = (_GATED_PREFIXES if mcp.auth is None
+                 else tuple(p for p in _GATED_PREFIXES if p != "/mcp"))
+        app.add_middleware(TokenGate, token=token, gated=gated)
     else:
         log.warning("GRP_API_TOKEN unset — tools are served WITHOUT authentication. "
                     "Acceptable locally; deploy/entrypoint.sh refuses to start this way.")
@@ -180,7 +190,7 @@ def create_app() -> FastAPI:
     # no credential: a client reads them precisely BECAUSE it has no token yet.
     # TokenGate already lets them through, since it gates only /api, /mcp and /docs.
     # Added before the static mount below so "/" cannot swallow them.
-    app.router.routes.extend(auth.well_known_routes())
+    app.router.routes.extend(auth.well_known_routes(mcp.auth))
 
     @app.get("/api")
     def api_root() -> dict:

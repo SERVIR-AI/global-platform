@@ -1,39 +1,34 @@
 """OAuth 2.1 against a managed identity provider (WorkOS AuthKit).
 
 This server is a RESOURCE SERVER and nothing more. It never sees a password, never
-stores a user, never issues a token. It publishes where to log in, and (once
-enforcement is on) verifies the signature of the token it is handed against the
-provider's public keys. That is why no WorkOS API key or client secret belongs in
-this environment: there is nothing here to authenticate AS.
+stores a user, never issues a token. It publishes where to log in, and verifies the
+signature of the token it is handed against the provider's public keys. That is why
+no WorkOS API key or client secret belongs in this environment: there is nothing
+here to authenticate AS.
 
-Configuration is read from the environment rather than from Settings, matching the
-other serving-layer switches (GRP_API_TOKEN, GRP_MCP_ALLOWED_HOSTS) which are set per
-deployment rather than per developer:
+    GRP_OAUTH_ENABLED=1                          the master switch
+    GRP_PUBLIC_URL=https://<host>                the origin clients reach
+    GRP_AUTHKIT_DOMAIN=https://<x>.authkit.app   the AuthKit instance
 
-    GRP_OAUTH_ENABLED=1                              the master switch
-    GRP_PUBLIC_URL=https://<host>                     the origin clients reach
-    GRP_AUTHKIT_DOMAIN=https://<x>.authkit.app        the AuthKit instance
-    GRP_OAUTH_REQUIRED_SCOPES=a,b                     optional, empty means none
-
-Unset GRP_OAUTH_ENABLED and every function here returns nothing, so the server
-behaves exactly as it did before any of this existed.
+With the switch off, provider() returns None and the server behaves exactly as it
+did before any of this existed.
 """
 
 from __future__ import annotations
 
-import os
+from typing import TYPE_CHECKING
 
 from starlette.routing import Route
-from ..config import Settings, get_settings
 
-# The path the MCP transport is mounted at. The discovery document has to name the
-# endpoint exactly, path included, so this is not decoration: it becomes the
-# `resource` identifier and the audience AuthKit stamps into the token.
+from ..config import get_settings
+
+if TYPE_CHECKING:
+    from fastmcp.server.auth.auth import RemoteAuthProvider
+
+# Where the MCP transport answers. The discovery document has to name the endpoint
+# exactly, path included, so this is not decoration: it becomes the `resource`
+# identifier and the audience AuthKit stamps into the token.
 MCP_PATH = "/mcp"
-
-
-def enabled(settings: Settings) -> bool:
-    return settings.grp_oauth_enabled.strip() not in ("", "0", "false")
 
 
 def provider():
@@ -45,7 +40,7 @@ def provider():
     to explain it.
     """
     settings = get_settings()
-    if not enabled(settings):
+    if not settings.grp_oauth_enabled:
         return None
     domain = settings.grp_authkit_domain.strip()
     public_url = settings.grp_public_url.strip()
@@ -57,30 +52,48 @@ def provider():
             f"GRP_OAUTH_ENABLED is set but {' and '.join(missing)} is not. "
             "Set it, or unset GRP_OAUTH_ENABLED to serve without OAuth.")
 
-    # Imported here so a server with OAuth off never pays for it.
+    # Imported here, and the subclass defined here with it, so a server with OAuth off
+    # never pays the import.
     from fastmcp.server.auth.providers.workos import AuthKitProvider
 
-    scopes = [s.strip() for s in
-              os.environ.get("GRP_OAUTH_REQUIRED_SCOPES", "").split(",") if s.strip()]
-    # base_url is the ORIGIN; the mount path is passed separately wherever it is
-    # needed, so the provider derives resource = <origin><MCP_PATH> itself.
-    return AuthKitProvider(authkit_domain=domain, base_url=public_url,
-                           required_scopes=scopes or None)
+    class ResourceServer(AuthKitProvider):
+        """AuthKit, told where this server actually answers and what to call AuthKit.
+
+        Both corrections belong to the PROVIDER rather than to one call site, because
+        two entry points build a transport from it and each would otherwise need its
+        own copy.
+        """
+
+        def __init__(self, **kwargs) -> None:
+            super().__init__(**kwargs)
+            # Held as the plain string. AnyHttpUrl stringifies a pathless URL with a
+            # trailing slash, and the client compares this against the authorization
+            # server's published `issuer` with `!=` (RFC 8414); AuthKit publishes it
+            # without one.
+            self.authorization_servers = [self.authkit_domain]
+
+        def _get_resource_url(self, path: str | None = None):
+            # The transport is built with path="/" and mounted at MCP_PATH, so it
+            # works out its own address as the bare origin and cannot see the prefix.
+            # MCP_PATH is the public address either way, so the caller's idea of the
+            # path is ignored. This one value becomes the token audience, the
+            # `resource` in the discovery document, and the URL inside every 401.
+            return super()._get_resource_url(MCP_PATH)
+
+    return ResourceServer(authkit_domain=domain, base_url=public_url)
 
 
-def well_known_routes() -> list[Route]:
+def well_known_routes(provider: RemoteAuthProvider | None) -> list[Route]:
     """The discovery documents, to be served from the ORIGIN ROOT.
 
     RFC 9728 puts protected-resource metadata at
     /.well-known/oauth-protected-resource<resource path>, at the root of the origin.
     The MCP app is mounted under /mcp, so routes carried by that app would land at
-    /mcp/.well-known/..., where no client looks. These therefore ride on the outer
-    FastAPI app instead.
+    /mcp/.well-known/..., where no client looks. These ride on the outer app instead.
 
-    Two documents come back:
-      /.well-known/oauth-protected-resource/mcp   who we are and who issues our tokens
-      /.well-known/oauth-authorization-server     AuthKit's own metadata, forwarded,
-                                                  for clients that ask us rather than it
+    Two documents come back: who we are and who issues our tokens, and AuthKit's own
+    metadata forwarded verbatim for clients that ask us rather than it.
     """
-    p = provider()
-    return list(p.get_well_known_routes(mcp_path=MCP_PATH)) if p else []
+    if provider is None:
+        return []
+    return list(provider.get_well_known_routes(mcp_path=MCP_PATH))

@@ -12,8 +12,8 @@ import os
 
 from fastmcp import FastMCP
 
-from . import (app_ui, assemble, compose, context, feeds, fetch, loop, publish,
-               record, registry, resolve, ui, verify)
+from . import (app_ui, assemble, auth, compose, context, feeds, fetch, loop,
+               publish, record, registry, resolve, ui, verify)
 
 
 def _transport_security() -> dict:
@@ -38,18 +38,25 @@ def _transport_security() -> dict:
             "allowed_origins": [f"https://{h}" for h in allowed]}
 
 
-def _http_kwargs() -> dict:
-    """How this server behaves over HTTP, in ONE place.
+def _http_transport() -> dict:
+    """Everything that must be true before a transport is built, in ONE place, plus
+    the kwargs to build it with.
 
-    Two entry points build their own transport — `uvicorn app.main:app` via
-    http_app(), and `python -m app.mcp.server --http` via run() — and these settings
-    are no longer constructor arguments that both would inherit. Stated twice they
-    could drift, and a Host-header rule that differs between the dev surface and the
-    deployed one is a 421 nobody can reproduce.
+    Two entry points build their own — `uvicorn app.main:app` via http_app(), and
+    `python -m app.mcp.server --http` via run() — and none of this is a constructor
+    argument both would inherit. Stated twice it drifts: a Host-header rule that
+    differs between the dev surface and the deployed one is a 421 nobody can
+    reproduce, and an entry point that serves the tools with OAuth configured but no
+    provider attached is a security control that silently does nothing.
+
+    Attaching the provider is what wires OAuth into the transport, and it has to
+    happen before the transport is built — which it does, because this call is
+    evaluated to produce the arguments that build it.
 
     stateless_http: each tool call is self-contained, so there is no session to
     terminate and nothing for a proxy to have to pin to one instance.
     """
+    mcp.auth = auth.provider()
     return {"stateless_http": True, **_transport_security()}
 
 # Orientation shown to a connecting LLM at initialize — so it isn't a headless
@@ -115,7 +122,7 @@ human-readable guide) — or run the `explain_platform` prompt — and answer fr
 
 # Host, port, transport security and statelessness are no longer constructor
 # arguments: they belong to whoever builds the ASGI app or runs the transport, so
-# they come from _http_kwargs() at that point. Transport settings are defined in main()
+# they come from _http_transport() at that point.
 # Remote is still the faithful build surface: consumers connect by URL, so no filesystem path leaks into
 # a client config for a coding agent to follow into our source (ARCHITECTURE §6).
 mcp = FastMCP("servirplatform", instructions=INSTRUCTIONS)
@@ -464,7 +471,7 @@ def main() -> None:
     mcp.run(transport="http",
             host=os.environ.get("GRP_MCP_HOST", "127.0.0.1"),
             port=int(os.environ.get("GRP_MCP_PORT", "8000")),
-            **_http_kwargs())
+            **_http_transport())
 
 
 if __name__ == "__main__":
