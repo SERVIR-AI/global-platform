@@ -3,13 +3,12 @@
     uv run python scripts/mcp_check.py                       # http://127.0.0.1:8001
     uv run python scripts/mcp_check.py http://127.0.0.1:8001
 
-Companion to scripts/mcp_call.py, which drives the server over stdio. This one
-exercises what only exists over HTTP: the anonymous refusal on /mcp, the OAuth
-discovery documents and the 401 that points a client at them. Those are headers
-and well-known paths, so pytest cannot see most of it and a browser cannot POST
-to it.
+Drives the server over HTTP: the anonymous refusal on /mcp, the OAuth discovery
+documents and the 401 that points a client at them. Companion to
+scripts/mcp_call.py, which drives the server over stdio.
 
-A check tagged PENDING is a to-do; a check tagged FAIL is a regression. Exit status is 0 when nothing is FAIL.
+A check tagged PENDING is a to-do; a check tagged FAIL is a regression. Exit
+status is 0 when nothing is FAIL.
 """
 
 import json
@@ -63,9 +62,9 @@ def main() -> None:
               pending="this server does not enforce OAuth")
 
     # --- OAuth discovery, which is what lets a client log a user in ------------
-    # Only these two. The bare /.well-known/oauth-protected-resource is NOT served:
-    # RFC 9728 puts the document at the well-known prefix plus the resource path, and
-    # a spec-compliant client is pointed at it by the WWW-Authenticate header anyway.
+    # Only these two. The bare /.well-known/oauth-protected-resource is not
+    # served: RFC 9728 puts the document under the well-known prefix plus the
+    # resource path, and a client is pointed at it by the 401's header anyway.
     for path in ("/.well-known/oauth-protected-resource/mcp",
                  "/.well-known/oauth-authorization-server"):
         r = requests.get(f"{base}{path}", timeout=TIMEOUT)

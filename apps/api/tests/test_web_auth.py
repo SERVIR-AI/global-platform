@@ -2,7 +2,7 @@
 login sends the visitor to AuthKit with PKCE, a good callback makes a session,
 and a bad one is refused.
 
-AuthKit itself is stubbed at the two network functions (_token_request,
+AuthKit is stubbed at the two network functions (_token_request,
 _userinfo_request); the flow under test is our side of the handshake.
 """
 from __future__ import annotations
@@ -32,7 +32,7 @@ PROFILE = {"sub": "usr_test", "email": "test@example.com"}
 
 @pytest.fixture
 def app(monkeypatch):
-    """An app with web login configured, AuthKit's network calls stubbed."""
+    """An app with web login configured and AuthKit's network calls stubbed."""
     settings = get_settings()
     monkeypatch.setattr(settings, "grp_oauth_enabled", True)
     monkeypatch.setattr(settings, "grp_authkit_domain", AUTHKIT)
@@ -62,7 +62,7 @@ def _authorize(app, client) -> str:
 
 
 def test_not_mounted_without_a_client_id(monkeypatch):
-    """MCP-only configuration: no login routes exist, nothing else changes."""
+    """Without a client id no login routes exist."""
     settings = get_settings()
     monkeypatch.setattr(settings, "grp_oauth_enabled", False)
     monkeypatch.setattr(settings, "grp_authkit_client_id", CLIENT)
@@ -121,12 +121,10 @@ def test_logout_ends_the_session(app):
 
 
 def test_the_home_page_is_the_api_root_when_no_web_dist(monkeypatch):
-    """The page a finished login lands on ("/") must answer.
-
-    Path("").is_dir() is True (an empty path is the current directory), so an
-    unset GRP_WEB_DIST used to mount the working directory as static files and
-    404 at "/". Empty must mean "no web build": serve the JSON home instead.
-    """
+    """The page a finished login lands on ("/") must answer. An unset
+    GRP_WEB_DIST must mean "no web build": Path("").is_dir() is True, so an
+    unset value used to mount the working directory as static files and 404 at
+    "/". Empty must serve the JSON home instead."""
     monkeypatch.delenv("GRP_WEB_DIST", raising=False)
     settings = get_settings()
     monkeypatch.setattr(settings, "grp_oauth_enabled", False)
@@ -154,14 +152,13 @@ def test_an_expired_session_refreshes_its_token(app, monkeypatch):
     assert session.expires_at > time()
 
 
-# --- the session gate (the commit after the login routes) ------------------
+# --- the session gate -----------------------------------------------------
 
 
 def test_gate_serves_the_public_shell_but_gates_the_data(app):
-    """With web login on, the SPA shell at "/" is public (it carries no data —
-    an anonymous visitor must be able to reach the signed-out landing page),
-    while the /api data, the MCP transport's own gate and the login routes stay
-    as they are."""
+    """With web login on, the SPA shell at "/" is public (it carries no data, and
+    an anonymous visitor must be able to reach the signed-out landing page); /api
+    data, the MCP transport's own gate and the login routes stay as they are."""
     a = app()
     with TestClient(a, follow_redirects=False) as client:
         # The SPA shell renders for an anonymous visitor (the frontend then
@@ -205,7 +202,7 @@ def test_gate_lets_a_session_through(app):
         assert client.get("/api").status_code == 200
 
 
-# --- backend additions that make the frontend possible -----------------------
+# --- the web UI's /auth surface -------------------------------------------
 
 
 def test_auth_me_reports_the_session(app):

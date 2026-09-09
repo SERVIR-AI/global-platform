@@ -31,20 +31,19 @@ from . import web_auth
 
 log = logging.getLogger(__name__)
 
-# Paths that never ask for a login, by design. 
-# Everything else is gated by the web login (SessionGate) or the MCP transport's
-# own OAuth. The SPA host itself ("/") is also public-by-design — its shell and
-# signed-out landing page carry no data — and is exempted in SessionGate below;
-# embeds live at that host, so they are covered by the same exemption.
+# Paths that never ask for a login. Everything else is gated by the web login
+# (SessionGate) or the MCP transport's own OAuth. The SPA host at "/" is exempt
+# in SessionGate below: its shell and signed-out landing page carry no data, and
+# embeds live at that host.
 _PUBLIC_PREFIXES = (
     "/api/health",
     "/api/resolve/",
     "/api/food-security/rag/document/",
-    # The hazard_map embed's raster option: an embed a consumer cannot load is
-    # dead chrome, same argument as the resolver itself.
+    # Raster tiles: the hazard_map embed's raster option must load for anonymous
+    # visitors, like the resolver it rides on.
     "/api/raster/",
-    # The built web app's static code and favicon: public so an embedded page
-    # (and any anonymous visitor) can load the UI; the data it calls stays gated.
+    # The web app's static code and favicon: the UI is public, the data it
+    # calls is not.
     "/assets/",
     "/favicon.ico",
 )
@@ -96,11 +95,10 @@ class StaticOrNotFound:
         await self.static(scope, receive, send)
 
 
-# Paths under /mcp, /auth/* and /.well-known/* always pass the gate: /mcp has
-# its own transport-level OAuth, and the others are how a login is started and
-# discovered, so they must be reachable with no session. _PUBLIC_PREFIXES, the
-# SPA host at "/" and the SPA's static assets are the public-by-design
-# exceptions.
+# /mcp, /auth/* and /.well-known/* always pass the gate: /mcp has its own
+# transport-level OAuth, and /auth/* and /.well-known/* are how a login is
+# started and discovered. _PUBLIC_PREFIXES, the SPA host at "/" and /assets/*
+# are the public-by-design exceptions.
 
 
 def _header(scope: Scope, name: bytes) -> bytes:
@@ -111,15 +109,13 @@ def _header(scope: Scope, name: bytes) -> bytes:
 
 
 class SessionGate:
-    """The standard app's gate: everything except the always-public set, /mcp
-    (the transport's own OAuth enforces that), the /auth/* and /.well-known/*
-    routes a login needs and the SPA host at "/" requires a session cookie.
-    The SPA host (embeds included) is public like its /assets/*: the shell and
-    the signed-out landing page render for anyone — the UI code is not the
-    secret, the /api data is, and it stays gated.
+    """Requires a session cookie for everything except the public set: the
+    always-open prefixes and SPA assets above, /mcp (the transport's own OAuth),
+    /auth/* and /.well-known/* (how a login starts), and the SPA host at "/",
+    whose shell and signed-out landing page carry no data.
 
     Raw ASGI, so the MCP transport keeps streaming. Gated UI paths (GET/HEAD)
-    are sent to /auth/login; /api and anything else gets a 401.
+    redirect to /auth/login; /api and everything else gets a 401.
     """
 
     def __init__(self, app: ASGIApp, web_auth) -> None:
@@ -145,8 +141,7 @@ class SessionGate:
             return True
         method = scope.get("method")
         # The SPA host: anonymous GETs render the shell and its signed-out
-        # landing page (the embed host is "/" too, so it needs no separate
-        # rule); only the data behind it, under /api, stays gated.
+        # landing page; only the /api data behind it stays gated.
         if method in ("GET", "HEAD") and path in ("/", "/index.html"):
             return True
         sid = self._session_cookie(scope)
@@ -180,9 +175,9 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=_lifespan)
 
-    # Standard-app login (web_auth.py): built only when the OAuth switch AND a
-    # client id are configured, so an MCP-only deployment is untouched. The gate
-    # below and the /auth routes later both key off this one instance.
+    # Standard-app login (web_auth.py): built only when the OAuth switch and a
+    # client id are set, so an MCP-only deployment is untouched. The gate below
+    # and the /auth routes key off this same instance.
     if settings.grp_oauth_enabled and settings.grp_authkit_client_id.strip():
         app.state.web_auth = web_auth.WebAuth(
             authkit_domain=settings.grp_authkit_domain,
@@ -191,23 +186,19 @@ def create_app() -> FastAPI:
     else:
         app.state.web_auth = None
 
-    # ONE MCP app, built here and carried on the app so the lifespan can reach it:
-    # http_app() builds a NEW session manager on every call, so the object mounted
-    # below has to be the same object _lifespan starts, or the mounted one is never
-    # started and every tool call meets a dead transport. path="/" because the mount
-    # supplies the "/mcp" prefix; the rest of how it behaves over HTTP, and the auth
-    # provider it enforces, is _http_transport(), shared with the standalone `--http`
-    # entry point.
+    # ONE MCP app, carried on the app so the lifespan can reach it: http_app()
+    # builds a new session manager per call, so the mounted object must be the
+    # one _lifespan starts. path="/" because the mount supplies the "/mcp"
+    # prefix; the rest of its HTTP behaviour and its auth provider come from
+    # _http_transport(), shared with the standalone `--http` entry point.
     app.state.mcp_app = mcp.http_app(path="/", **_http_transport())
 
-    # Middleware nests in REVERSE of add order, so this yields
-    # McpPathNormalize -> CORS -> <auth gate> -> router. CORS must sit OUTSIDE
-    # the gate or preflights get a bare 401 and no browser can ever reach a gated
-    # endpoint cross-origin.
+    # Middleware nests in reverse of add order: McpPathNormalize -> CORS ->
+    # <auth gate> -> router. CORS must sit outside the gate, or preflights get a
+    # bare 401 and no cross-origin browser can reach a gated endpoint.
     if app.state.web_auth is not None:
-        # The standard app is gated by the web login. /mcp stays with the
-        # transport's own OAuth enforcement (never gate it here), and /auth/* and
-        # /.well-known/* stay open because a client reads them precisely BECAUSE
+        # /mcp stays with the transport's own OAuth (never gate it here); /auth/*
+        # and /.well-known/* stay open because a client reads them precisely when
         # it has no session yet.
         app.add_middleware(SessionGate, web_auth=app.state.web_auth)
     else:
@@ -230,31 +221,28 @@ def create_app() -> FastAPI:
 
     app.include_router(api_router, prefix="/api")
 
-    # The login routes, built above whenever web auth is configured. Added before
-    # the "/" mount below so a static catch-all cannot swallow /auth/*, and they
-    # must stay reachable without a session (they are how one is obtained).
+    # The login routes, built above whenever web auth is configured. Added
+    # before the "/" mount below so a static catch-all cannot swallow /auth/*,
+    # and they must stay reachable without a session.
     if app.state.web_auth is not None:
         app.state.web_auth.add_routes(app)
 
-    # OAuth discovery, when it is switched on. These belong to the ORIGIN ROOT, not
-    # to the /mcp mount (see auth.well_known_routes), and they must be reachable with
-    # no credential: a client reads them because it has no login yet.
-    # The session gate passes them for the same reason. Added before the static
-    # mount below so "/" cannot swallow them.
+    # OAuth discovery, when the switch is on. These belong to the ORIGIN ROOT,
+    # not the /mcp mount (see auth.well_known_routes), and must be reachable with
+    # no credential. Added before the static mount so "/" cannot swallow them.
     app.router.routes.extend(auth.well_known_routes(mcp.auth))
 
     @app.get("/api")
     def api_root() -> dict:
         return {"service": settings.app_name, "mcp": "/mcp", "docs": "/docs"}
 
-    # The MCP ASGI app, which carries the transport and (once configured) the auth
-    # middleware and discovery routes.
+    # The MCP ASGI app: the transport plus (once configured) its auth middleware
+    # and discovery routes.
     app.mount("/mcp", app.state.mcp_app)
 
     # Mounted LAST so /api and /mcp win; html=True serves index.html at "/".
-    # An EMPTY GRP_WEB_DIST must mean "no web build": Path("") resolves to the
-    # current directory, whose is_dir() is True — mounting that as static would
-    # hide this home route behind 404s (and serve the repo itself).
+    # An empty GRP_WEB_DIST must mean "no web build": Path("") is the current
+    # directory and is_dir() is True, so it would mount the repo as static files.
     web_dist = os.environ.get("GRP_WEB_DIST", "").strip()
     if web_dist and Path(web_dist).is_dir():
         app.mount("/", StaticOrNotFound(app, StaticFiles(directory=web_dist, html=True)),

@@ -39,19 +39,13 @@ def _transport_security() -> dict:
 
 
 def _http_transport() -> dict:
-    """Everything that must be true before a transport is built, in ONE place, plus
-    the kwargs to build it with.
+    """The kwargs to build an HTTP transport with, plus the precondition that
+    must hold before one is built (the OAuth provider is attached here).
 
-    Two entry points build their own — `uvicorn app.main:app` via http_app(), and
-    `python -m app.mcp.server --http` via run() — and none of this is a constructor
-    argument both would inherit. Stated twice it drifts: a Host-header rule that
-    differs between the dev surface and the deployed one is a 421 nobody can
-    reproduce, and an entry point that serves the tools with OAuth configured but no
-    provider attached is a security control that silently does nothing.
-
-    Attaching the provider is what wires OAuth into the transport, and it has to
-    happen before the transport is built — which it does, because this call is
-    evaluated to produce the arguments that build it.
+    Two entry points build their own transport — `uvicorn app.main:app` via
+    http_app(), and `python -m app.mcp.server --http` via run() — and none of
+    this is a constructor argument both would inherit. One shared builder keeps
+    the Host-header rule and the OAuth provider identical on both surfaces.
 
     stateless_http: each tool call is self-contained, so there is no session to
     terminate and nothing for a proxy to have to pin to one instance.

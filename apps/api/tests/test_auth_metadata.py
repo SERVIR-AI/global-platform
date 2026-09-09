@@ -1,8 +1,8 @@
-"""OAuth 2.1 on the MCP transport: what the server refuses, what it publishes, and
-what stays open regardless.
+"""OAuth 2.1 on the MCP transport: what the server refuses, what it publishes,
+and what stays open regardless.
 
-Each test builds its own app with its own settings, because the switch is read once
-at startup and the defaults in config.py deliberately name no provider.
+Each test builds its own app with its own settings; the switch is read once at
+startup and the config defaults name no provider.
 """
 from __future__ import annotations
 
@@ -28,9 +28,8 @@ ACCEPT = {"Accept": "application/json, text/event-stream"}
 
 @pytest.fixture
 def server(monkeypatch):
-    """Start an app with OAuth on or off. (No client id: web login is off, so the
-    session gate is not added and the standard app stays open — this module tests
-    the MCP transport.)"""
+    """Start an app with OAuth on or off. Web login is off (no client id), so the
+    session gate is not added and this module tests the MCP transport only."""
     @contextmanager
     def _server(*, oauth: bool):
         settings = get_settings()
@@ -57,7 +56,7 @@ def oauth_settings(monkeypatch):
 
 
 def test_the_switch_off_leaves_the_transport_exactly_as_it_was(server):
-    """Off means off: anonymous callers still get the tools and nothing is published."""
+    """With OAuth off, anonymous callers get the tools and nothing is published."""
     with server(oauth=False) as client:
         listed = client.post("/mcp", json=LIST_TOOLS, headers=ACCEPT)
         assert listed.status_code == 200
@@ -65,9 +64,8 @@ def test_the_switch_off_leaves_the_transport_exactly_as_it_was(server):
 
 
 def test_anonymous_is_refused_and_told_where_to_log_in(server):
-    """A 401 whose WWW-Authenticate names a document that does not resolve is worse
-    than no 401 at all, so follow the pointer — and it must point at the resource-
-    path document, the one RFC 9728 puts the metadata under."""
+    """The 401 carries a WWW-Authenticate pointer to the RFC 9728 resource-path
+    document, and that document resolves."""
     with server(oauth=True) as client:
         refused = client.post("/mcp", json=LIST_TOOLS, headers=ACCEPT)
         assert refused.status_code == 401
@@ -82,28 +80,25 @@ def test_anonymous_is_refused_and_told_where_to_log_in(server):
 
 
 def test_the_token_checker_and_the_metadata_agree_on_our_name(server):
-    """The audience the transport verifies and the resource the document advertises
-    are the same name, and that name is the MOUNT-FUL one, <origin>/mcp — never the
-    bare origin the transport is literally built at (main.py mounts it with path="/").
-    ResourceServer pins the resource URL to MCP_PATH at the provider, so this holds
-    whatever order the transport and the discovery routes are built in."""
+    """The audited name is the mount-ful <origin>/mcp (ResourceServer pins the
+    resource URL to MCP_PATH), whichever order the transport and the discovery
+    routes are built in."""
     with server(oauth=True) as client:
         assert str(mcp.auth.token_verifier.audience) == RESOURCE
         assert client.get(DOC_PATH).json()["resource"] == RESOURCE
 
 
 def test_the_advertised_issuer_carries_no_trailing_slash(server):
-    """The client compares this against the provider's published issuer with `!=`,
-    and AuthKit publishes it bare. One character kills the login."""
+    """The advertised authorization server must equal AuthKit's issuer exactly;
+    the client compares them with `!=` and AuthKit publishes no trailing slash."""
     with server(oauth=True) as client:
         assert client.get(DOC_PATH).json()["authorization_servers"] == [AUTHKIT]
 
 
 def test_the_document_lives_under_the_resource_path_only(server):
-    """RFC 9728 puts the document at the well-known prefix plus the resource path,
-    and the 401 points there. The bare /.well-known/oauth-protected-resource would
-    describe the origin ROOT, which this server does not protect, so it is not
-    served: no document may advertise a resource the transport does not check."""
+    """Metadata lives under the resource path only; the bare well-known document
+    is not served because it would describe the origin root, which the transport
+    does not protect."""
     with server(oauth=True) as client:
         under_resource = client.get(DOC_PATH)
         assert under_resource.status_code == 200
@@ -112,9 +107,8 @@ def test_the_document_lives_under_the_resource_path_only(server):
 
 
 def test_mcp_oauth_does_not_gate_the_standard_app_without_web_login(server):
-    """MCP-only OAuth (no web client id) leaves the standard app open: the session
-    gate is added only when the web login is configured, and /mcp stays on the
-    transport's own gate either way."""
+    """Without a web client id the standard app is open: the session gate is added
+    only when web login is configured, and /mcp stays on its own gate either way."""
     with server(oauth=True) as client:
         refused = client.post("/mcp", json=LIST_TOOLS, headers=ACCEPT)
         assert refused.status_code == 401
@@ -124,16 +118,15 @@ def test_mcp_oauth_does_not_gate_the_standard_app_without_web_login(server):
 
 
 def test_the_resolver_stays_public_with_oauth_on(server):
-    """A receipt nobody can resolve attests nothing. 404 is a pass for an id that
-    does not exist: the route answered without asking for a credential."""
+    """The public API set answers without a credential. 404 is a pass for an id
+    that does not exist: the route answered without asking for one."""
     with server(oauth=True) as client:
         assert client.get("/api/health").status_code == 200
         assert client.get("/api/resolve/receipt/0000000000000000").status_code in (200, 404)
 
 
 def test_oauth_without_a_provider_refuses_to_start(monkeypatch):
-    """Half-configured would publish discovery documents pointing nowhere, and every
-    client would fail at the login step."""
+    """The switch on without a domain raises at startup."""
     settings = get_settings()
     monkeypatch.setattr(settings, "grp_oauth_enabled", True)
     monkeypatch.setattr(settings, "grp_authkit_domain", "")
@@ -143,14 +136,9 @@ def test_oauth_without_a_provider_refuses_to_start(monkeypatch):
 
 
 def test_a_good_token_gets_in_and_every_wrong_one_does_not(server):
-    """A verifier that refuses everything is indistinguishable from a working one
-    until something valid gets through, so mint four tokens and check all four.
-
-    Only the KEYS are swapped, for a local pair, because the real JWKS is a network
-    fetch. The issuer and audience being checked are the ones the server configured.
-    The wrong-audience token carries <origin>/, the bare-origin form of the resource
-    URL: the audience is pinned to the mount-ful name, so the bare-origin form must
-    be refused."""
+    """One good and three invalid tokens: wrong issuer, the bare-origin audience,
+    and a forgery. Only the keys are swapped (for a local pair) — the real JWKS is
+    a network fetch — and the issuer/audience checked are the configured ones."""
     signer, forger = RSAKeyPair.generate(), RSAKeyPair.generate()
     with server(oauth=True) as client:
         mcp.auth.token_verifier.public_key = signer.public_key
@@ -168,17 +156,10 @@ def test_a_good_token_gets_in_and_every_wrong_one_does_not(server):
 
 
 def test_the_standalone_http_entry_point_enforces_and_publishes_the_same_document(oauth_settings):
-    """`python -m app.mcp.server --http` builds its own transport from
-    _http_transport(), the same builder uvicorn's path uses. Attach the provider
-    anywhere else and the switch is inert on whichever entry point was missed, which
-    serves every tool to anyone who finds the port.
-
-    The standalone serves discovery from routes the transport itself embeds — there
-    is no outer app to mount corrected ones — so the document it publishes must be
-    the same corrected one the FastAPI surface serves: bare authorization-server URL
-    and the mount-ful resource. The library's own document carries the trailing
-    slash, which a client compares against AuthKit's bare issuer with `!=` and dies
-    on before a browser opens."""
+    """The standalone `--http` entry point builds from the same _http_transport()
+    as uvicorn's path, so it enforces OAuth and publishes the same corrected
+    document (bare authorization-server URL, mount-ful resource) from the routes
+    the transport embeds."""
     mcp.auth = None
     standalone = mcp.http_app(**_http_transport())   # what run(transport="http") builds
     assert mcp.auth is not None

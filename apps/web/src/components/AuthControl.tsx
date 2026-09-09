@@ -2,11 +2,9 @@ import { useAuth } from '@/hooks/useAuth';
 import { ChevronDown, LogOut, Repeat } from 'lucide-react';
 import { FC } from 'react';
 
-/**
- * The AppBar's right-hand account control. Hidden while the who-am-I probe is
- * loading and when web login is off; shows a Sign in button when signed out and
- * the email with a Sign out / Switch account menu when signed in.
- */
+/** The AppBar's right-hand account control: hidden while the probe is loading
+ * and when web login is off; a Sign in button when signed out; the email with a
+ * Sign out / Switch account menu when signed in. */
 const AuthControl: FC = () => {
   const { status, user, login, logout, switchAccount } = useAuth();
 
@@ -24,8 +22,8 @@ const AuthControl: FC = () => {
     );
   }
 
-  // The daisyUI dropdown opens while the trigger has focus and closes when it
-  // loses it (see src/components/Inputs/Dropdown.tsx for the same pattern).
+  // Focus-driven daisyUI dropdown (as in components/Inputs/Dropdown.tsx);
+  // closing blur() collapses it.
   const close = () => (document.activeElement as HTMLElement | null)?.blur();
 
   return (

@@ -1,18 +1,14 @@
-"""Login for the STANDARD app (web UI + REST) through AuthKit hosted login.
+"""Standard-app login (web UI + REST) through AuthKit hosted login.
 
 Here the server is an OAuth CLIENT, not a resource server: it sends people to
 AuthKit's hosted page, receives them back with a one-time code, exchanges it for
-tokens, and keeps a browser session. `mcp/auth.py` is the other role (resource
-server) and talks to the same AuthKit domain; the two do not share code.
+tokens, and keeps a browser session. (`mcp/auth.py` is the other role, a
+resource server, and talks to the same AuthKit domain.)
 
-Activated only when the OAuth master switch AND a client id are configured
-(grp_oauth_enabled + grp_authkit_client_id). The client is a PKCE public client
-— there is deliberately no client secret. With either unset, no routes are
-mounted and the app behaves exactly as it did before any of this.
-
-All AuthKit interaction lives HERE behind a small surface — issue a login URL,
-handle a callback code, read/end a session — so the gate (a later commit) and
-any future swap (managed sessions, M2M tokens) touch only this module.
+Mounted only when the OAuth master switch and a client id are configured
+(grp_oauth_enabled + grp_authkit_client_id). All AuthKit interaction lives here
+behind a small surface — issue a login URL, handle a callback code, read/end a
+session.
 """
 
 from __future__ import annotations
@@ -34,12 +30,11 @@ log = logging.getLogger(__name__)
 
 # The scopes the login asks for. offline_access is what makes a refresh token
 # come back, so the session can renew itself instead of dying with the access
-# token. App-specific scopes are deliberately absent.
+# token.
 SCOPE = "openid profile email offline_access"
 
 SESSION_COOKIE = "grp_session"
-# How long a half-finished login (state + PKCE verifier) is kept before it can
-# no longer complete. Longer than a human needs to click through AuthKit.
+# How long a half-finished login (state + PKCE verifier) stays valid.
 _LOGIN_TTL = 900
 
 _HTTP_TIMEOUT = 15
@@ -103,10 +98,8 @@ class Session:
 class SessionStore:
     """In-memory sessions.
 
-    Correct because the deployment runs exactly ONE instance. A redeploy wipes
-    them, so everyone is logged out on deploy; persisting them (or moving to
-    WorkOS managed sessions) is the upgrade path, and it swaps in behind this
-    class.
+    Correct because the deployment runs a single instance. A redeploy wipes
+    every session.
     """
 
     def __init__(self) -> None:
@@ -137,9 +130,8 @@ class WebAuth:
                  client_id: str) -> None:
         self._domain = authkit_domain.rstrip("/")
         self._client_id = client_id
-        # Secure cookies only when the public URL is https: the same image runs
-        # over http locally and https behind Cloud Run, and a Secure cookie set
-        # on http would silently never be sent back.
+        # Secure cookies only when the public URL is https — a Secure cookie
+        # set over plain http is never sent back.
         self._secure_cookie = public_url.startswith("https://")
         self._redirect_uri = f"{public_url.rstrip('/')}/auth/callback"
         self._authorize_url = f"{self._domain}/oauth2/authorize"
@@ -162,8 +154,7 @@ class WebAuth:
     def me(self, request: Request):
         """Who this request is, for the web UI: 200 with the session's sub/email,
         or 401 when there is no session. Sits under /auth/* so the gate lets
-        anonymous callers reach it — this endpoint makes the signed-in decision
-        itself."""
+        anonymous callers reach it."""
         session = self.get_session(request)
         if session is None:
             return JSONResponse({"detail": "login required"}, status_code=401)

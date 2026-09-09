@@ -14,14 +14,12 @@ import { useEffect } from 'react';
 
 /**
  * The app's auth state: who `/auth/me` says the request is, plus the auth
- * actions. A plain TanStack Query hook — nothing outside React reads or mutates
- * auth state, so there is no store behind it. The 401 handler registered on
- * mount only navigates (back to login); it never touches the query.
+ * actions. A TanStack Query hook (no store): nothing outside React reads or
+ * mutates auth state, and the 401 handler registered on mount only navigates.
  *
  * Auth state changes only via a full-page round-trip (login/logout/switch
- * account all location.assign), so the who-am-I probe runs once on mount and
- * the SPA reloads into a fresh answer — nothing here ever needs a background
- * refetch.
+ * account all location.assign), so the probe runs once on mount and the SPA
+ * reloads into a fresh answer.
  */
 export const useAuth = () => {
   const query = useQuery({
@@ -32,7 +30,7 @@ export const useAuth = () => {
   });
 
   useEffect(() => {
-    // Session expiry on a gated /api call → start a login (see lib/auth.ts).
+    // Session expiry on a gated /api call starts a login (lib/auth.ts).
     const unsubscribe = initUnauthorizedHandling();
     // A login round-trip that landed on '/' puts the user back where they were.
     restoreReturnTo();

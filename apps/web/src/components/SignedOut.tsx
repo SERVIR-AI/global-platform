@@ -2,8 +2,8 @@ import { useAuth } from '@/hooks/useAuth';
 import { TrafficCone } from 'lucide-react';
 import { FC } from 'react';
 
-/** Shown by App when the who-am-I probe says the visitor is signed out: one
- * explanation and one action, and no auto-redirect on load. */
+/** Shown by App when the probe says the visitor is signed out: one explanation
+ * and one action, no auto-redirect on load. */
 const SignedOut: FC = () => {
   const { login } = useAuth();
 
