@@ -197,12 +197,3 @@ def test_gate_lets_a_session_through(app):
         client.cookies.set(SESSION_COOKIE, sid)
         assert client.get("/").status_code == 200
         assert client.get("/api").status_code == 200
-
-
-def test_gate_accepts_the_shared_token_during_transition(app, monkeypatch):
-    monkeypatch.setenv("GRP_API_TOKEN", "transition-token")
-    with TestClient(app()) as client:
-        headers = {"Authorization": "Bearer transition-token"}
-        assert client.get("/api", headers=headers).status_code == 200
-        assert client.get("/api", headers={"Authorization": "Bearer nope"}).status_code == 401
-        assert client.get("/api").status_code == 401

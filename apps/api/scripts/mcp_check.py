@@ -2,18 +2,17 @@
 
     uv run python scripts/mcp_check.py                       # http://127.0.0.1:8001
     uv run python scripts/mcp_check.py http://127.0.0.1:8001
-    GRP_API_TOKEN=... uv run python scripts/mcp_check.py https://<service-url>
 
 Companion to scripts/mcp_call.py, which drives the server over stdio. This one
-exercises what only exists over HTTP: the token gate, the OAuth discovery documents
-and the 401 that points a client at them. Those are headers and well-known paths, so
-pytest cannot see most of it and a browser cannot POST to it.
+exercises what only exists over HTTP: the anonymous refusal on /mcp, the OAuth
+discovery documents and the 401 that points a client at them. Those are headers
+and well-known paths, so pytest cannot see most of it and a browser cannot POST
+to it.
 
 A check tagged PENDING is a to-do; a check tagged FAIL is a regression. Exit status is 0 when nothing is FAIL.
 """
 
 import json
-import os
 import sys
 
 import requests
@@ -46,20 +45,9 @@ def post_mcp(base: str, headers: dict) -> requests.Response:
                          data=json.dumps(CALL), timeout=TIMEOUT)
 
 
-def tool_count(response: requests.Response) -> int:
-    """Tools in a tools/list reply, whether it came back as JSON or as one SSE frame."""
-    body = response.text
-    if "text/event-stream" in response.headers.get("content-type", ""):
-        body = next((ln[5:] for ln in body.splitlines() if ln.startswith("data:")), "")
-    try:
-        return len(json.loads(body)["result"]["tools"])
-    except (ValueError, KeyError, TypeError):
-        return 0
-
 
 def main() -> None:
     base = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8001").rstrip("/")
-    token = os.environ.get("GRP_API_TOKEN", "").strip()
     print(f"\nservirplatform surface check   {base}\n")
 
     # --- the tools, and how they are gated -------------------------------------
@@ -73,16 +61,6 @@ def main() -> None:
         check("the 401 points at the discovery document",
               "resource_metadata=" in www, www[:60] or "no WWW-Authenticate header",
               pending="this server does not enforce OAuth")
-
-    if token:
-        ok = post_mcp(base, {"Authorization": f"Bearer {token}"})
-        n = tool_count(ok)
-        check("service token is accepted on /mcp", ok.ok and n > 0,
-              f"{ok.status_code}, {n} tools")
-        bad = post_mcp(base, {"Authorization": "Bearer not-the-token"})
-        check("a wrong token is refused", bad.status_code == 401, f"{bad.status_code}")
-    else:
-        print("  ....  GRP_API_TOKEN unset, skipping the service-token checks")
 
     # --- OAuth discovery, which is what lets a client log a user in ------------
     # Only these two. The bare /.well-known/oauth-protected-resource is NOT served:

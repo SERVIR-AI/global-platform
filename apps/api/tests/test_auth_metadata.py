@@ -28,14 +28,16 @@ ACCEPT = {"Accept": "application/json, text/event-stream"}
 
 @pytest.fixture
 def server(monkeypatch):
-    """Start an app with OAuth on or off, and with or without the shared token."""
+    """Start an app with OAuth on or off. (No client id: web login is off, so the
+    session gate is not added and the standard app stays open — this module tests
+    the MCP transport.)"""
     @contextmanager
-    def _server(*, oauth: bool, token: str = ""):
+    def _server(*, oauth: bool):
         settings = get_settings()
         monkeypatch.setattr(settings, "grp_oauth_enabled", oauth)
         monkeypatch.setattr(settings, "grp_authkit_domain", AUTHKIT if oauth else "")
         monkeypatch.setattr(settings, "grp_public_url", ORIGIN if oauth else "")
-        monkeypatch.setenv("GRP_API_TOKEN", token)
+        monkeypatch.setattr(settings, "grp_authkit_client_id", "")
         with TestClient(create_app()) as client:
             yield client
 
@@ -109,24 +111,22 @@ def test_the_document_lives_under_the_resource_path_only(server):
         assert client.get("/.well-known/oauth-protected-resource").status_code == 404
 
 
-def test_the_shared_token_gate_leaves_mcp_to_oauth(server):
-    """With both credentials configured the gate must answer first for /api and not
-    at all for /mcp, or the client gets a bare 401 it cannot act on."""
-    with server(oauth=True, token="s3cret") as client:
+def test_mcp_oauth_does_not_gate_the_standard_app_without_web_login(server):
+    """MCP-only OAuth (no web client id) leaves the standard app open: the session
+    gate is added only when the web login is configured, and /mcp stays on the
+    transport's own gate either way."""
+    with server(oauth=True) as client:
         refused = client.post("/mcp", json=LIST_TOOLS, headers=ACCEPT)
         assert refused.status_code == 401
         assert "resource_metadata=" in refused.headers["WWW-Authenticate"]
-
-        gated = client.get("/api")
-        assert gated.status_code == 401
-        assert "WWW-Authenticate" not in gated.headers
-        assert client.get("/api", headers={"Authorization": "Bearer s3cret"}).status_code == 200
+        assert client.get("/api").status_code == 200
+        assert client.get("/api/health").status_code == 200
 
 
 def test_the_resolver_stays_public_with_oauth_on(server):
     """A receipt nobody can resolve attests nothing. 404 is a pass for an id that
     does not exist: the route answered without asking for a credential."""
-    with server(oauth=True, token="s3cret") as client:
+    with server(oauth=True) as client:
         assert client.get("/api/health").status_code == 200
         assert client.get("/api/resolve/receipt/0000000000000000").status_code in (200, 404)
 

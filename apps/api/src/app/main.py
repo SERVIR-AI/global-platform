@@ -13,7 +13,6 @@ from __future__ import annotations
 import anyio
 import logging
 import os
-import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote
@@ -32,9 +31,10 @@ from . import web_auth
 
 log = logging.getLogger(__name__)
 
-# Reachable WITHOUT a token, by design: a receipt nobody can resolve attests
+# Reachable with NO login, by design: a receipt nobody can resolve attests
 # nothing, so the resolver and the evidence it points at stay open at every
-# tier. The token gates the TOOLS, which cost money to run.
+# tier. Everything else is gated by the web login (SessionGate) or the MCP
+# transport's own OAuth.
 _PUBLIC_PREFIXES = (
     "/api/health",
     "/api/resolve/",
@@ -91,42 +91,8 @@ class StaticOrNotFound:
         await self.static(scope, receive, send)
 
 
-# Everything the shared token guards when nothing else does.
-_GATED_PREFIXES = ("/api", "/mcp", "/docs", "/redoc", "/openapi.json")
-
-
-class TokenGate:
-    """Bearer/X-API-Key gate over the tools. Raw ASGI rather than
-    BaseHTTPMiddleware so the MCP transport keeps streaming."""
-
-    def __init__(self, app: ASGIApp, token: str,
-                 gated: tuple[str, ...] = _GATED_PREFIXES) -> None:
-        self.app, self.token, self.gated = app, token.encode(), gated
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope.get("type") == "http" and not self._authorized(scope):
-            await JSONResponse(
-                {"status": "declined",
-                 "note": "missing or invalid API token — send it as "
-                         "'Authorization: Bearer <token>'. The receipt resolver "
-                         "under /api/resolve/ needs no token."},
-                status_code=401,
-            )(scope, receive, send)
-            return
-        await self.app(scope, receive, send)
-
-    def _authorized(self, scope: Scope) -> bool:
-        path = scope.get("path", "")
-        if path.startswith(_PUBLIC_PREFIXES):
-            return True
-        if not path.startswith(self.gated):
-            return True
-        # Compared as BYTES: a header carrying non-UTF-8 or non-ASCII must be a
-        # 401, never a decode traceback turned into a 500.
-        headers = {k.lower(): v for k, v in (scope.get("headers") or [])}
-        presented = (headers.get(b"authorization", b"").removeprefix(b"Bearer ").strip()
-                     or headers.get(b"x-api-key", b"").strip())
-        return bool(presented) and secrets.compare_digest(presented, self.token)
+# Everything under /mcp, /auth/* and /.well-known/* is exempt from the gate by
+# rule; _PUBLIC_PREFIXES above is exempt by policy.
 
 
 def _header(scope: Scope, name: bytes) -> bytes:
@@ -137,19 +103,16 @@ def _header(scope: Scope, name: bytes) -> bytes:
 
 
 class SessionGate:
-    """The standard app's gate once web login is on.
+    """The standard app's gate: everything except the always-public set, /mcp
+    (the transport's own OAuth enforces that) and the /auth/* and /.well-known/*
+    routes a login needs requires a session cookie.
 
-    Everything except the always-public set, /mcp (the transport's own OAuth
-    enforces that) and the /auth/* and /.well-known/* routes a login needs
-    requires a session cookie.
-
-    Raw ASGI, like TokenGate, so the MCP transport keeps streaming. UI paths
-    (GET/HEAD) are sent to /auth/login; /api and anything else gets a 401.
+    Raw ASGI, so the MCP transport keeps streaming. UI paths (GET/HEAD) are
+    sent to /auth/login; /api and anything else gets a 401.
     """
 
-    def __init__(self, app: ASGIApp, web_auth, token: str | None) -> None:
+    def __init__(self, app: ASGIApp, web_auth) -> None:
         self.app, self._web_auth = app, web_auth
-        self._token = token.encode() if token else None
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope.get("type") == "http" and not await self._authorized(scope):
@@ -169,8 +132,6 @@ class SessionGate:
             return True
         if path.startswith(("/mcp", "/auth/", "/.well-known/")):
             return True
-        if self._token and self._token_matches(scope):
-            return True
         sid = self._session_cookie(scope)
         if not sid:
             return False
@@ -184,12 +145,6 @@ class SessionGate:
             if part.startswith(web_auth.SESSION_COOKIE + "="):
                 return part.split("=", 1)[1] or None
         return None
-
-    def _token_matches(self, scope: Scope) -> bool:
-        headers = {k.lower(): v for k, v in (scope.get("headers") or [])}
-        presented = (headers.get(b"authorization", b"").removeprefix(b"Bearer ").strip()
-                     or headers.get(b"x-api-key", b"").strip())
-        return bool(presented) and secrets.compare_digest(presented, self._token)
 
 
 @asynccontextmanager
@@ -205,12 +160,8 @@ async def _lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     """Build the app: CORS, the /api router, the /mcp transport, and the web app."""
     settings = get_settings()
-    token = os.environ.get("GRP_API_TOKEN", "").strip()
 
-    # Publishing the schema of gated endpoints to anonymous callers defeats the
-    # point of gating them, so the docs go away exactly when the gate goes up.
-    docs = {} if not token else {"docs_url": None, "redoc_url": None, "openapi_url": None}
-    app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=_lifespan, **docs)
+    app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=_lifespan)
 
     # Standard-app login (web_auth.py): built only when the OAuth switch AND a
     # client id are configured, so an MCP-only deployment is untouched. The gate
@@ -240,20 +191,12 @@ def create_app() -> FastAPI:
         # The standard app is gated by the web login. /mcp stays with the
         # transport's own OAuth enforcement (never gate it here), and /auth/* and
         # /.well-known/* stay open because a client reads them precisely BECAUSE
-        # it has no session yet. The shared token is still accepted on this gate
-        # during the transition; it is retired in its own commit.
-        app.add_middleware(SessionGate, web_auth=app.state.web_auth,
-                           token=token or None)
-    elif token:
-        # /mcp comes off this gate when OAuth holds it. This gate's 401 carries no
-        # WWW-Authenticate header, so a client that met it here would be refused
-        # with no way to learn where to log in, and the browser would never open.
-        gated = (_GATED_PREFIXES if mcp.auth is None
-                 else tuple(p for p in _GATED_PREFIXES if p != "/mcp"))
-        app.add_middleware(TokenGate, token=token, gated=gated)
+        # it has no session yet.
+        app.add_middleware(SessionGate, web_auth=app.state.web_auth)
     else:
-        log.warning("GRP_API_TOKEN unset — tools are served WITHOUT authentication. "
-                    "Acceptable locally; deploy/entrypoint.sh refuses to start this way.")
+        log.warning("web login off — the standard app is served WITHOUT "
+                    "authentication. Acceptable locally; deploy/entrypoint.sh "
+                    "refuses to start without the OAuth settings.")
 
     # A consuming app on ITS own origin must be able to resolve our receipts, so
     # '*' is a legitimate deployed value here. Credentials cannot ride a wildcard
@@ -278,9 +221,9 @@ def create_app() -> FastAPI:
 
     # OAuth discovery, when it is switched on. These belong to the ORIGIN ROOT, not
     # to the /mcp mount (see auth.well_known_routes), and they must be reachable with
-    # no credential: a client reads them precisely BECAUSE it has no token yet.
-    # TokenGate already lets them through, since it gates only /api, /mcp and /docs.
-    # Added before the static mount below so "/" cannot swallow them.
+    # no credential: a client reads them because it has no login yet.
+    # The session gate passes them for the same reason. Added before the static
+    # mount below so "/" cannot swallow them.
     app.router.routes.extend(auth.well_known_routes(mcp.auth))
 
     @app.get("/api")
