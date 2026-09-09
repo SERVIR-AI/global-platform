@@ -229,3 +229,16 @@ def test_login_forwards_prompt_to_authkit(app):
         r = client.get("/auth/login?prompt=login")
         q = parse_qs(urlparse(r.headers["location"]).query)
         assert q["prompt"] == ["login"]
+
+
+def test_gate_leaves_public_embeds_and_assets_open(app):
+    """An anonymous visitor can load the embed host and the SPA's static code
+    (they ride the public prefix list like the resolver); only /api data and the
+    plain app shell stay gated."""
+    with TestClient(app(), follow_redirects=False) as client:
+        embed = client.get("/?embed=provenance_graph&receipt_id=1")
+        assert embed.status_code not in (302, 401)           # public: renders
+        for url in ("/assets/index-abc123.js", "/favicon.ico"):
+            assert client.get(url).status_code not in (302, 401)   # public list
+        assert client.get("/").status_code == 302            # plain app still gated
+        assert client.get("/api/chat").status_code == 401    # data still gated
