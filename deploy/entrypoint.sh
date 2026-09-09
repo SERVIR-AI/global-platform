@@ -1,19 +1,37 @@
 #!/bin/sh
 # Restore the receipt institution, then serve under continuous replication.
 #
-# FAILS CLOSED on both counts. An unauthenticated public MCP server and a server
-# whose receipts silently die on redeploy are the two ways this deployment can be
-# quietly wrong, so neither is reachable by forgetting an env var — each needs an
-# explicit opt-out you have to type on purpose.
+# FAILS CLOSED on both counts. An unauthenticated public server and a server
+# whose receipts silently die on redeploy are the two ways this deployment can
+# be quietly wrong, so neither is reachable by forgetting an env var — each
+# needs an explicit opt-out you have to type on purpose.
 set -eu
 
 DB="${GRP_DB_PATH:-/app/cache/mcp/grp.db}"
 mkdir -p "$(dirname "$DB")"
 
-if [ -z "${GRP_API_TOKEN:-}" ] && [ "${GRP_ALLOW_ANONYMOUS:-}" != "1" ]; then
-  echo "FATAL: GRP_API_TOKEN unset — the tools would be open to the internet." >&2
-  echo "       Set it, or set GRP_ALLOW_ANONYMOUS=1 to serve without a gate." >&2
+# FAILS CLOSED: the only ways to serve are OAuth on (AuthKit) or the explicit
+# anonymous opt-out. A half-configured provider would publish discovery
+# documents pointing nowhere and refuse every login, so when OAuth is on every
+# value it needs must be present.
+if [ "${GRP_OAUTH_ENABLED:-0}" != "1" ] && [ "${GRP_ALLOW_ANONYMOUS:-}" != "1" ]; then
+  echo "FATAL: authentication is off — set GRP_OAUTH_ENABLED=1 (with the AuthKit" >&2
+  echo "       settings below), or set GRP_ALLOW_ANONYMOUS=1 to serve with no gate." >&2
   exit 1
+fi
+if [ "${GRP_OAUTH_ENABLED:-0}" = "1" ]; then
+  if [ -z "${GRP_AUTHKIT_DOMAIN:-}" ]; then
+    echo "FATAL: GRP_OAUTH_ENABLED=1 but GRP_AUTHKIT_DOMAIN is unset." >&2
+    exit 1
+  fi
+  if [ -z "${GRP_PUBLIC_URL:-}" ]; then
+    echo "FATAL: GRP_OAUTH_ENABLED=1 but GRP_PUBLIC_URL is unset." >&2
+    exit 1
+  fi
+  if [ -z "${GRP_AUTHKIT_CLIENT_ID:-}" ]; then
+    echo "FATAL: GRP_OAUTH_ENABLED=1 but GRP_AUTHKIT_CLIENT_ID is unset." >&2
+    exit 1
+  fi
 fi
 
 if [ -z "${LITESTREAM_BUCKET:-}" ]; then

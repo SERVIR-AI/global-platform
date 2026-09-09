@@ -89,7 +89,10 @@ def main() -> int:
     print(f"URL:    https://{repo_id.replace('/', '-').lower()}.hf.space")
     print("\nSet these as Space secrets (Settings -> Variables and secrets):")
     print("  OPENAI_API_KEY              (embeddings)")
-    print("  GRP_API_TOKEN               (gates /mcp; the resolver stays public)")
+    print("  GRP_OAUTH_ENABLED=1          (AuthKit is the gate)")
+    print("  GRP_AUTHKIT_DOMAIN           (e.g. https://you.authkit.app)")
+    print("  GRP_PUBLIC_URL               (the Space URL, no trailing slash)")
+    print("  GRP_AUTHKIT_CLIENT_ID        (web-login OAuth client)")
     print("  GRP_ALLOW_EPHEMERAL_RECEIPTS=1   (acknowledges receipts do not persist here)")
     return 0
 

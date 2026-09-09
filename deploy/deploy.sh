@@ -16,7 +16,17 @@ SERVICE="${SERVICE:-servirplatform}"
 BUCKET="${BUCKET:-${PROJECT}-servirplatform-receipts}"
 EMBED_MODEL="${EMBED_MODEL:-gemini-embedding-001}"
 
-: "${GRP_API_TOKEN:?set GRP_API_TOKEN=<a long random string> — this gates the tools}"
+: "${GRP_OAUTH_ENABLED:-0}"
+if [ "${GRP_OAUTH_ENABLED:-0}" != "1" ] && [ "${GRP_ALLOW_ANONYMOUS:-}" != "1" ]; then
+  echo "Refusing to deploy: authentication is off. Set GRP_OAUTH_ENABLED=1 (with" >&2
+  echo "the AuthKit settings below) or GRP_ALLOW_ANONYMOUS=1 to deploy with no gate." >&2
+  exit 1
+fi
+if [ "${GRP_OAUTH_ENABLED:-0}" = "1" ]; then
+  : "${GRP_AUTHKIT_DOMAIN:?set GRP_AUTHKIT_DOMAIN=<authkit domain> — the login server}"
+  : "${GRP_PUBLIC_URL:?set GRP_PUBLIC_URL=<service url, no trailing slash> — must match an AuthKit-registered origin}"
+  : "${GRP_AUTHKIT_CLIENT_ID:?set GRP_AUTHKIT_CLIENT_ID=<web-login OAuth client id>}"
+fi
 
 PROJNUM=$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')
 RUNTIME_SA="${RUNTIME_SA:-${PROJNUM}-compute@developer.gserviceaccount.com}"
@@ -52,7 +62,7 @@ gcloud run deploy "$SERVICE" \
   --cpu=1 \
   --memory=2Gi \
   --timeout=300 \
-  --set-env-vars="LITESTREAM_BUCKET=${BUCKET},GRP_API_TOKEN=${GRP_API_TOKEN},EMBEDDING_PROVIDER=vertex,EMBEDDING_MODEL=${EMBED_MODEL},VERTEX_PROJECT=${PROJECT},VERTEX_LOCATION=${REGION},GRP_MCP_ALLOWED_HOSTS=*,CORS_ORIGINS=*"
+  --set-env-vars="LITESTREAM_BUCKET=${BUCKET},GRP_OAUTH_ENABLED=${GRP_OAUTH_ENABLED:-0},GRP_PUBLIC_URL=${GRP_PUBLIC_URL:-},GRP_AUTHKIT_DOMAIN=${GRP_AUTHKIT_DOMAIN:-},GRP_AUTHKIT_CLIENT_ID=${GRP_AUTHKIT_CLIENT_ID:-},EMBEDDING_PROVIDER=vertex,EMBEDDING_MODEL=${EMBED_MODEL},VERTEX_PROJECT=${PROJECT},VERTEX_LOCATION=${REGION},GRP_MCP_ALLOWED_HOSTS=*,CORS_ORIGINS=*"
 
 URL=$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" \
         --format='value(status.url)')
@@ -61,16 +71,20 @@ cat <<EOF
 
 Deployed: ${URL}
 
-  MCP endpoint   ${URL}/mcp          (needs the bearer token)
-  Receipt        ${URL}/api/resolve/receipt/<id>   (public, by design)
-  Embed host     ${URL}/?embed=provenance_graph&receipt_id=<id>
+  Standard app  ${URL}        (sign in with AuthKit)
+  MCP endpoint  ${URL}/mcp    (OAuth: the client logs the user in)
+  Receipt       ${URL}/api/resolve/receipt/<id>   (public, by design)
+  Embed host    ${URL}/?embed=provenance_graph&receipt_id=<id>
 
-Connect a client:
-  claude mcp add --transport http servirplatform ${URL}/mcp --header "Authorization: Bearer \$GRP_API_TOKEN"
+Connect an MCP client (browser login; no secret to paste):
+  claude mcp add --transport http servirplatform ${URL}/mcp
 
 Reminders:
-  - --allow-unauthenticated is Cloud Run's IAM, not ours: MCP clients cannot do
-    GCP IAM, so the bearer token is the actual gate.
+  - --allow-unauthenticated is Cloud Run's IAM, not ours: the AuthKit login is
+    the real gate (the MCP transport and the web app's session gate).
+  - Register ${URL} in the WorkOS dashboard first: the /auth/callback redirect
+    URI and the ${URL}/mcp resource indicator must exist or logins fail with a
+    redirect/audience mismatch.
   - --max-instances=1 is required, not tuning. See the note at the top.
   - --no-cpu-throttling keeps litestream replicating between requests.
 EOF
