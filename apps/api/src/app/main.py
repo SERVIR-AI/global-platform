@@ -216,11 +216,8 @@ def create_app() -> FastAPI:
     app.mount("/mcp", app.state.mcp_app)
 
     # Mounted LAST so /api and /mcp win; html=True serves index.html at "/".
-    # An EMPTY GRP_WEB_DIST must mean "no web build": Path("") resolves to the
-    # current directory, whose is_dir() is True — mounting that as static would
-    # hide this home route behind 404s (and serve the repo itself).
-    web_dist = os.environ.get("GRP_WEB_DIST", "").strip()
-    if web_dist and Path(web_dist).is_dir():
+    web_dist = Path(os.environ.get("GRP_WEB_DIST", ""))
+    if web_dist.is_dir():
         app.mount("/", StaticOrNotFound(app, StaticFiles(directory=web_dist, html=True)),
                   name="web")
     else:
