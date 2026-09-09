@@ -25,7 +25,10 @@ export class ApiError extends Error {
 // proxies to the backend in dev (see vite.config.ts). Set VITE_API_BASE_URL to
 // point at a cross-origin API (e.g. in production). Trailing slash is trimmed so
 // `${API_BASE_URL}/api/...` never doubles up.
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
+//
+// The base is also the auth origin: auth.ts routes /auth/login, /auth/logout and
+// /auth/me against the same URL, because the login session lives on the backend.
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '');
 
 /**
  * Resolve a possibly-relative API path (e.g. a `hazard_layer.raster_url`
@@ -35,11 +38,31 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, ''
 export const resolveApiUrl = (path: string): string =>
   /^https?:\/\//i.test(path) ? path : `${API_BASE_URL}${path.startsWith('/') ? '' : '/'}${path}`;
 
+// Hook called when a gated /api call comes back 401 (an expired/missing
+// session). Registered once by the app's auth bootstrap (initUnauthorizedHandling
+// in lib/auth.ts) to start a login; the who-am-I probe never goes through this
+// module, so it cannot trigger the redirect itself.
+let onUnauthorized: (() => void) | undefined;
+
+/** Register the handler invoked when a gated /api call returns 401. Returns an
+ * unsubscribe (a no-op if the handler has since been replaced). */
+export const setUnauthorizedHandler = (handler: (() => void) | null): (() => void) => {
+  onUnauthorized = handler ?? undefined;
+  return () => {
+    if (onUnauthorized === handler) onUnauthorized = undefined;
+  };
+};
+
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
+    credentials: 'include', // required when the API is cross-origin (auth-on dev); harmless same-origin
     headers: { 'Content-Type': 'application/json', ...init?.headers },
   });
+
+  // Session expiry: notify the auth handler before the caller sees the error,
+  // so an expired session sends the user back through login.
+  if (res.status === 401) onUnauthorized?.();
 
   const body = res.status === 204 ? null : await res.json().catch(() => null);
   if (!res.ok) throw new ApiError(res.status, body);
@@ -91,7 +114,13 @@ export const uploadTiff = async (
   form: FormData,
   signal?: AbortSignal,
 ): Promise<TiffUploadResponse> => {
-  const res = await fetch(`${API_BASE_URL}/api/tiffs`, { method: 'POST', body: form, signal });
+  const res = await fetch(`${API_BASE_URL}/api/tiffs`, {
+    method: 'POST',
+    body: form,
+    signal,
+    credentials: 'include',
+  });
+  if (res.status === 401) onUnauthorized?.();
   const body = await res.json().catch(() => null);
   if (!res.ok) throw new ApiError(res.status, body);
   return body as TiffUploadResponse;
