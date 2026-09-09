@@ -160,13 +160,18 @@ class Settings(BaseSettings):
     price_in: float = 0.0
     price_out: float = 0.0
 
-    # --- OAuth (mcp/auth.py) ---
+    # --- OAuth (mcp/auth.py, web_auth.py) ---
     # Off and empty by default: the provider and the origin are per deployment, and
     # a default naming a real tenant would switch OAuth on for everyone who never
     # set it. Local values live in apps/api/.env.
     grp_oauth_enabled: bool = False
     grp_authkit_domain: str = ""
     grp_public_url: str = ""
+    # The OAuth client this server acts as when logging people into the standard
+    # app (web_auth.py): the Connect OAuth application's client id. A PKCE public
+    # client — there is deliberately no secret. Empty means the login routes are
+    # not mounted even when grp_oauth_enabled is on (an MCP-only deployment).
+    grp_authkit_client_id: str = ""
 
 
 @lru_cache

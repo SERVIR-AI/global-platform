@@ -26,6 +26,7 @@ from .api.routes import api_router
 from .config import get_settings
 from .mcp import auth, store
 from .mcp.server import _http_transport, mcp
+from . import web_auth
 
 log = logging.getLogger(__name__)
 
@@ -185,6 +186,20 @@ def create_app() -> FastAPI:
 
     app.include_router(api_router, prefix="/api")
 
+    # Standard-app login through AuthKit (web_auth.py)
+    # Mounted only when the OAuth switch is on AND a client id is configured, so an MCP-only deployment
+    # is unaffected. Added before the "/" mount below so a static catch-all
+    # cannot swallow /auth/*. These paths are not in TokenGate's gated list, so
+    # the login stays reachable while the shared token still guards /api.
+    if settings.grp_oauth_enabled and settings.grp_authkit_client_id.strip():
+        app.state.web_auth = web_auth.WebAuth(
+            authkit_domain=settings.grp_authkit_domain,
+            public_url=settings.grp_public_url,
+            client_id=settings.grp_authkit_client_id)
+        app.state.web_auth.add_routes(app)
+    else:
+        app.state.web_auth = None
+
     # OAuth discovery, when it is switched on. These belong to the ORIGIN ROOT, not
     # to the /mcp mount (see auth.well_known_routes), and they must be reachable with
     # no credential: a client reads them precisely BECAUSE it has no token yet.
@@ -201,8 +216,11 @@ def create_app() -> FastAPI:
     app.mount("/mcp", app.state.mcp_app)
 
     # Mounted LAST so /api and /mcp win; html=True serves index.html at "/".
-    web_dist = Path(os.environ.get("GRP_WEB_DIST", ""))
-    if web_dist.is_dir():
+    # An EMPTY GRP_WEB_DIST must mean "no web build": Path("") resolves to the
+    # current directory, whose is_dir() is True — mounting that as static would
+    # hide this home route behind 404s (and serve the repo itself).
+    web_dist = os.environ.get("GRP_WEB_DIST", "").strip()
+    if web_dist and Path(web_dist).is_dir():
         app.mount("/", StaticOrNotFound(app, StaticFiles(directory=web_dist, html=True)),
                   name="web")
     else:
