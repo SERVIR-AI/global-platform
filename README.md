@@ -74,37 +74,168 @@ cd apps/web && npm install && npm run dev   # http://localhost:5173
 
 Vite proxies `/api` to the backend on `:8001`, so the UI works with no CORS setup.
 
-Locally the API runs with authentication **off** by default — nothing asks for a
-login. Enabling AuthKit is per-deployment: set `GRP_OAUTH_ENABLED=1` plus
-`GRP_PUBLIC_URL`, `GRP_AUTHKIT_DOMAIN` and `GRP_AUTHKIT_CLIENT_ID` in
-`apps/api/.env`; the standard app then requires a login and the MCP transport
-refuses anonymous tool calls.
+Both run with authentication **off** by default — no login is asked for, and the
+MCP transport serves anonymous tool calls. Enabling AuthKit is per-deployment;
+see [Access & authentication](#access--authentication), which also covers the
+auth-on local-dev shapes.
 
 ## Access & authentication
 
-Authentication is AuthKit (OAuth 2.1), switched on per deployment. Off (the
-default) means the whole app is open — how local dev and the test suite run.
+Authentication is AuthKit (OAuth 2.1), switched on **per deployment**. With it
+off (the default), the whole platform is open and anonymous — how local dev and
+the test suite run. With it on, visitors sign in to the web app, and MCP
+clients authenticate against the same AuthKit accounts.
 
 ### For end users
 
-Access is granted by whoever runs the deployment — you'll be invited or
-whitelisted with the email you sign in with. One account opens both surfaces.
+Access is granted by whoever runs the deployment: you are invited by email, and
+only invited emails can create an account (Sign-up is off).
 
-- **The standard app** — open the URL you were given. You're sent to the AuthKit
-  login page (or asked to set up your account if invited), and after signing in
-  you're in. Receipt links, health checks and map tiles are public by design and
-  need no sign-in.
-- **The MCP tools (Claude Code)** — register the endpoint you were given; no
-  secret is pasted anywhere:
-  ```bash
-  claude mcp add --transport http servirplatform https://<deployment-url>/mcp
-  ```
-  First use opens your browser for the same AuthKit sign-in; after that the
-  client authenticates itself. To re-test the login later:
-  `claude mcp logout servirplatform` then `claude mcp login servirplatform`.
-- **Switch accounts** — log out, then use a private/incognito window or clear
-  cookies/site data for the site *and* its AuthKit domain, then sign in as the
-  other account. (A logout button in the web UI is planned.)
+**The web platform.** Open the URL you were given.
+
+1. The page shows a public **Sign in to continue** screen — click **Sign in**.
+2. AuthKit opens in the same tab. The first time, set up your account with the
+   invited email (via the invitation link); later, sign in with your password,
+   Google, or your organization's SSO.
+3. You land back on the platform, signed in. Your email shows in the bar
+   top-right; that menu has **Sign out** and **Switch account**.
+
+Receipt links, health checks, map tiles and public embeds need no sign-in. If
+you cannot get in (expired invitation, forgotten password), ask the operator to
+resend the invitation or reset the password.
+
+**Claude Code (terminal).** One command, nothing to paste:
+
+```bash
+claude mcp add --transport http servirplatform https://<deployment-url>/mcp
+```
+
+The first tool call opens your browser for the same AuthKit sign-in; afterwards
+the client authenticates itself. Useful commands:
+
+```bash
+claude mcp list                                          # servers + auth state
+claude mcp logout servirplatform && claude mcp login servirplatform   # re-test login
+claude mcp remove servirplatform                         # disconnect
+```
+
+**Claude Desktop.** Add the MCP server by URL — Settings → Developer → MCP
+servers → **Add MCP server**, entering `https://<deployment-url>/mcp` — or add
+it to `claude_desktop_config.json` under `mcpServers`:
+
+```json
+{
+  "mcpServers": { 
+    "servirplatform": { 
+      "type": "http", "url": "https://<deployment-url>/mcp" 
+    } 
+  }
+}
+```
+
+The first tool call opens your browser for the same AuthKit sign-in. To sign in
+as someone else, sign out of Claude Desktop (or remove and re-add the server)
+and go through the login again.
+
+**Signing out vs switching accounts.** In the web app, **Sign out** ends the
+app's session and lands on the public page; AuthKit's own session survives, so a
+fresh **Sign in** resumes in one click. **Switch account** forces the AuthKit
+login screen instead. Sessions are per browser profile — two people on one
+machine should use separate profiles.
+
+### For operators: enabling and configuring a deployment
+
+#### Environment variables
+
+Set them in `apps/api/.env` for local runs (the app reads that file) or in the
+deployed service's environment. All are listed in `apps/api/.env.example`.
+
+| Variable | Meaning |
+| --- | --- |
+| `GRP_OAUTH_ENABLED=1` | Master switch. With it on, the MCP transport requires OAuth; with a client id also set, web login is mounted and the app is gated. Unset = open. |
+| `GRP_PUBLIC_URL` | The origin clients reach. Load-bearing: it becomes the `/auth/callback` origin **and** the MCP token audience, so it must equal the origin registered in WorkOS or logins fail with a redirect/audience mismatch. |
+| `GRP_AUTHKIT_DOMAIN` | The AuthKit tenant domain (e.g. `https://<tenant>.authkit.app`). |
+| `GRP_AUTHKIT_CLIENT_ID` | The Connect OAuth application's client id — the web login client (PKCE public client, no secret). Empty = MCP-only: no login routes, app open. |
+| `GRP_ALLOW_ANONYMOUS=1` | Deploy-only escape hatch: lets the container boot with auth off. Never set in normal operation. |
+| `WORKOS_API_KEY` | Admin-only, **local** secret for the script used to add, revoke, or refresh email invitations; never set on the deployed service. |
+
+#### The two WorkOS application objects
+
+AuthKit settings are per environment (staging and production are separate), so
+repeat this in each. Two different "application" objects exist in the dashboard
+and are NOT linked — each governs a different flow:
+
+| Object | Where | What it is for | Settings that live here |
+| --- | --- | --- | --- |
+| **Connect → OAuth application** | Connect → Applications | The OAuth client *your raw login flow* uses | **Client ID** → `GRP_AUTHKIT_CLIENT_ID`; **Redirect URI** `https://<public_url>/auth/callback` |
+| **AuthKit → default application** | AuthKit → Applications | The environment's app object; hosted-UI flows that carry no OAuth redirect (invitation acceptance, password resets) | You set the redirect URI that your browser redirects to following login here — otherwise, accepted invites end on AuthKit's broken `/default-redirect` page |
+
+Environment checklist (per staging/prod):
+
+1. **Authentication → Sign up**: off. Only invited emails can create accounts (the whitelist).
+2. **Connect → OAuth application**: copy the client id into `GRP_AUTHKIT_CLIENT_ID`; set the redirect URI `https://<public_url>/auth/callback`.
+3. **AuthKit → default application**: add `https://<public_url>/` and mark it **default** (hosted invite-accept and password-reset flows land there).
+4. **Connect → Configuration**: the MCP **resource indicator** `https://<public_url>/mcp` and the DCR toggle, for the MCP transport.
+
+The golden rule: `GRP_PUBLIC_URL` must equal the origin registered on both
+objects and in the resource indicator.
+
+#### Changing the deployment URL
+
+Moving a deployment to a new origin touches the same value in five places.
+Change `GRP_PUBLIC_URL` and re-deploy, then update the three WorkOS
+registrations (same environment) to the new origin:
+
+- Connect → Applications → the OAuth application → **Redirect URI**: `https://<new-url>/auth/callback` (its Client ID does not change).
+- AuthKit → Applications → the default application → add `https://<new-url>/` and mark it **default**.
+- Connect → Configuration → the MCP **resource indicator**: `https://<new-url>/mcp`.
+
+A mismatch shows up as a login that bounces, or an MCP client refused with an
+audience error.
+
+#### Enabling and disabling auth
+
+- **Enable:** set `GRP_OAUTH_ENABLED=1` and, for web login, `GRP_AUTHKIT_CLIENT_ID`
+  (plus the domain and public URL). The deployment scripts
+  (`deploy/entrypoint.sh`, `deploy/deploy.sh`) refuse to start or deploy
+  otherwise.
+- **Disable (roll back to open):** unset `GRP_OAUTH_ENABLED`; to drop web login
+  alone, unset `GRP_AUTHKIT_CLIENT_ID`. The auth routes are not mounted,
+  `/auth/me` answers 404, and the app serves open — the local and test default.
+  The container's fail-closed check is bypassed only by the explicit
+  `GRP_ALLOW_ANONYMOUS=1`.
+
+#### Managing users (add / remove)
+
+With Sign-up off, an **invitation is the whitelist**: only an invited email can
+create an account. Accepting an invitation proves the inbox, so a first-time
+sign-up with the invited email is auto-verified (no separate email OTP) while
+the invitation is fresh; resending restarts that window.
+
+To invite someone to your application and not your organization, this is the process: **Dashboard:** Users (in the sidebar) → Invites → create an invite → leave the
+organization unset, set the user role as "**Member**". 
+
+A script also exists to individually or batch add, revoke, or refresh email invites:
+
+```bash
+cd apps/api
+uv run python scripts/manage_workos_users.py add alice@example.com --file more.csv
+uv run python scripts/manage_workos_users.py refresh alice@example.com
+uv run python scripts/manage_workos_users.py revoke bob@example.com
+uv run python scripts/manage_workos_users.py list
+```
+
+- `add` sends a new invitation; 
+- `refresh` resends a pending one (or adds one if none is pending); 
+- `revoke` withdraws a pending invitation; 
+- `list` shows pending/accepted/revoked. Emails come as arguments or a `--file` (one per line, or a CSV with an `email` column);
+- `--dry-run` previews without calling WorkOS.
+
+> The script needs `WORKOS_API_KEY=sk_...` in `apps/api/.env` — from **Developer
+→ API keys** in the *same environment* whose users you manage (a staging key
+manages staging users). The key is a local admin secret; never deploy it.
+**Removing someone who already accepted** is done in the dashboard (Users),
+not the script: `revoke` only withdraws a still-pending invitation.
 
 ### For developers: where the auth lives
 
@@ -115,39 +246,78 @@ The server plays two roles, each with its own small module:
    A `ResourceServer(AuthKitProvider)` subclass pins the audience to
    `<GRP_PUBLIC_URL>/mcp` and holds the AuthKit domain as a plain string (no
    trailing-slash normalization), so the token audience, the discovery document
-   and the 401 challenge all agree. Verification is against AuthKit's keys at
+   and the 401 challenge all agree. Keys are fetched from
    `<GRP_AUTHKIT_DOMAIN>/oauth2/jwks`.
 2. **OAuth client for the standard app** — `apps/api/src/app/web_auth.py`. It
    sends people to AuthKit and keeps a browser session: an authorization-code +
    PKCE flow (public client, no secret) with an in-memory session store behind
    an HttpOnly `grp_session` cookie, refreshing the access token while alive.
 
-**The gates** — `apps/api/src/app/main.py` wires it up in `create_app()`:
-`SessionGate` guards everything except the always-public prefixes (`/api/health`,
-`/api/resolve/*`, `/api/raster/*`, `/api/food-security/rag/document/*`), the
-`/mcp` mount (its own gate), and `/auth/*` + `/.well-known/*` (how a login is
-started and discovered). UI paths redirect to `/auth/login`; `/api` answers 401.
+**What is gated, and how.** With web login on, `SessionGate`
+(`apps/api/src/app/main.py`) wraps the app. Always open: the public API set
+(`/api/health`, `/api/resolve/*`, `/api/raster/*`,
+`/api/food-security/rag/document/*`), the SPA's static code and host
+(`/assets/*`, `/favicon.ico`, `/` — the shell and its signed-out landing page
+carry no data), `/auth/*` and `/.well-known/*` (how a login starts), and `/mcp`
+(which has its own transport-level OAuth). Gated: `/api` data answers
+`401 {"detail":"login required"}`; other UI paths redirect to
+`/auth/login?next=…`. The MCP transport independently refuses anonymous calls
+with a `401` + `WWW-Authenticate` pointing at its discovery document.
 
-**Configuration** — `apps/api/src/app/config.py`:
-`GRP_OAUTH_ENABLED`, `GRP_AUTHKIT_DOMAIN`, `GRP_PUBLIC_URL`,
-`GRP_AUTHKIT_CLIENT_ID`. `GRP_PUBLIC_URL` is load-bearing: it becomes the
-`/auth/callback` origin **and** the MCP audience, so it must match what is
-registered in the WorkOS dashboard (the redirect URI and the resource indicator
-for `/mcp`) or logins fail with a redirect/audience mismatch. The deployment
-scripts (`deploy/entrypoint.sh`, `deploy/deploy.sh`) fail closed unless those
-values are present.
+**How the web UI decides.** On load the SPA probes `GET /auth/me`: `200` →
+signed in; `401` → signed out (renders the landing page); `404` (routes not
+mounted) → auth off (renders normally, no auth chrome). Auth state lives in a
+`useAuth` hook (`apps/web/src/hooks/useAuth.ts`) over a single auth module
+(`apps/web/src/lib/auth.ts`); `/api` calls send `credentials: 'include'`, and a
+`401` from one starts a fresh login.
+
+**Running without auth.** The commands in [Run](#run) already are: the app only
+gates when the env vars above are set. Local test commands:
+
+```bash
+GRP_OAUTH_ENABLED=0 GRP_AUTHKIT_CLIENT_ID= uv run pytest   # backend tests (auth must be off)
+cd apps/web && npm test                                    # frontend tests (auth helpers)
+```
+
+**Auth-on local development.** The login round-trip and the `grp_session`
+cookie live on the backend origin — `GRP_PUBLIC_URL` (default
+`http://127.0.0.1:8001`) decides that host, not `VITE_API_BASE_URL`. Two shapes:
+
+- **Same-origin (simplest).** Build the frontend and let the backend serve it:
+  `cd apps/web && npm run build`, then run the backend with
+  `GRP_WEB_DIST=apps/web/dist` and browse `http://127.0.0.1:8001`. Identical to
+  production.
+- **Vite dev (cross-origin).** Set the `VITE_API_BASE_URL` in [the frontend's .env file.](apps/web/.env.example) to the backend url, eg: 
+  `VITE_API_BASE_URL=http://127.0.0.1:8001`. Both sides must be `127.0.0.1`
+  (never mix in `localhost`): the cookie is host-scoped to 127.0.0.1, and CORS
+  already allows the Vite origin.
+
+Either shape needs the backend origin registered in WorkOS for local testing:
+add `http://127.0.0.1:8001/auth/callback` as a redirect URI and
+`http://127.0.0.1:8001/` as the default redirect on the environment's
+applications (see the operator section above). This is because OAuth is a managed service here.
 
 **Design constraints to keep** — no WorkOS API key or client secret on the
 server (the web login client is a PKCE public client; MCP clients self-register
-via DCR). Auth tests live in `apps/api/tests/test_web_auth.py` and
-`test_auth_metadata.py` and must run with `GRP_OAUTH_ENABLED=0
-GRP_AUTHKIT_CLIENT_ID=` (the switch off), because with it on the app is gated.
+via DCR). The frontend keeps no provider values either: `/auth/*` and the
+session live on the backend only.
 
 ## Test
 
+Backend (fast suite; stubs, no network — must run with auth off, the default):
+
 ```bash
-uv run pytest                                  # fast suite (stubs, no network)
-GRP_RUN_SLOW=1 uv run pytest                   # + slow real-data / Drive tests
+GRP_OAUTH_ENABLED=0 GRP_AUTHKIT_CLIENT_ID= uv run pytest   # with it on, the app is gated
+GRP_RUN_SLOW=1 uv run pytest                               # + slow real-data / Drive tests
+```
+
+Frontend (auth helpers unit tests, then lint and build):
+
+```bash
+cd apps/web
+npm test
+npm run lint
+npm run build
 ```
 
 ## More
@@ -156,3 +326,4 @@ GRP_RUN_SLOW=1 uv run pytest                   # + slow real-data / Drive tests
 - [`apps/api/API_EXAMPLES.md`](apps/api/API_EXAMPLES.md) — the `/api/chat` request/response contract (frontend source of truth).
 - [`apps/api/DEMO.md`](apps/api/DEMO.md) — an exhaustive set of example queries.
 - [`SOURCE_DATA_APPROACH.md`](SOURCE_DATA_APPROACH.md) — the four-layer risk model and design rationale.
+- [`apps/web/README.md`](apps/web/README.md) — the frontend: dev server, how it talks to the API.
