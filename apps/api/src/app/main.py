@@ -10,16 +10,18 @@ against the platform same-origin and CORS never enters the picture.
 
 from __future__ import annotations
 
+import anyio
 import logging
 import os
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, RedirectResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .api.routes import api_router
@@ -127,6 +129,69 @@ class TokenGate:
         return bool(presented) and secrets.compare_digest(presented, self.token)
 
 
+def _header(scope: Scope, name: bytes) -> bytes:
+    for k, v in scope.get("headers") or []:
+        if k == name:
+            return v
+    return b""
+
+
+class SessionGate:
+    """The standard app's gate once web login is on.
+
+    Everything except the always-public set, /mcp (the transport's own OAuth
+    enforces that) and the /auth/* and /.well-known/* routes a login needs
+    requires a session cookie.
+
+    Raw ASGI, like TokenGate, so the MCP transport keeps streaming. UI paths
+    (GET/HEAD) are sent to /auth/login; /api and anything else gets a 401.
+    """
+
+    def __init__(self, app: ASGIApp, web_auth, token: str | None) -> None:
+        self.app, self._web_auth = app, web_auth
+        self._token = token.encode() if token else None
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope.get("type") == "http" and not await self._authorized(scope):
+            path = scope.get("path", "")
+            if scope.get("method") in ("GET", "HEAD") and not path.startswith("/api"):
+                location = f"/auth/login?next={quote(path)}"
+                await RedirectResponse(location, status_code=302)(scope, receive, send)
+            else:
+                await JSONResponse({"detail": "login required"},
+                                   status_code=401)(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+    async def _authorized(self, scope: Scope) -> bool:
+        path = scope.get("path", "")
+        if path.startswith(_PUBLIC_PREFIXES):
+            return True
+        if path.startswith(("/mcp", "/auth/", "/.well-known/")):
+            return True
+        if self._token and self._token_matches(scope):
+            return True
+        sid = self._session_cookie(scope)
+        if not sid:
+            return False
+        # session_for may refresh via AuthKit; keep the event loop free.
+        return await anyio.to_thread.run_sync(self._web_auth.session_for, sid) is not None
+
+    def _session_cookie(self, scope: Scope) -> str | None:
+        raw = _header(scope, b"cookie").decode("latin-1")
+        for part in raw.split(";"):
+            part = part.strip()
+            if part.startswith(web_auth.SESSION_COOKIE + "="):
+                return part.split("=", 1)[1] or None
+        return None
+
+    def _token_matches(self, scope: Scope) -> bool:
+        headers = {k.lower(): v for k, v in (scope.get("headers") or [])}
+        presented = (headers.get(b"authorization", b"").removeprefix(b"Bearer ").strip()
+                     or headers.get(b"x-api-key", b"").strip())
+        return bool(presented) and secrets.compare_digest(presented, self._token)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     """The MCP session manager must be running or the transport answers nothing.
@@ -147,6 +212,17 @@ def create_app() -> FastAPI:
     docs = {} if not token else {"docs_url": None, "redoc_url": None, "openapi_url": None}
     app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=_lifespan, **docs)
 
+    # Standard-app login (web_auth.py): built only when the OAuth switch AND a
+    # client id are configured, so an MCP-only deployment is untouched. The gate
+    # below and the /auth routes later both key off this one instance.
+    if settings.grp_oauth_enabled and settings.grp_authkit_client_id.strip():
+        app.state.web_auth = web_auth.WebAuth(
+            authkit_domain=settings.grp_authkit_domain,
+            public_url=settings.grp_public_url,
+            client_id=settings.grp_authkit_client_id)
+    else:
+        app.state.web_auth = None
+
     # ONE MCP app, built here and carried on the app so the lifespan can reach it:
     # http_app() builds a NEW session manager on every call, so the object mounted
     # below has to be the same object _lifespan starts, or the mounted one is never
@@ -157,10 +233,18 @@ def create_app() -> FastAPI:
     app.state.mcp_app = mcp.http_app(path="/", **_http_transport())
 
     # Middleware nests in REVERSE of add order, so this yields
-    # McpPathNormalize -> CORS -> TokenGate -> router. CORS must sit OUTSIDE the
-    # gate or preflights get a bare 401 and no browser can ever reach a gated
+    # McpPathNormalize -> CORS -> <auth gate> -> router. CORS must sit OUTSIDE
+    # the gate or preflights get a bare 401 and no browser can ever reach a gated
     # endpoint cross-origin.
-    if token:
+    if app.state.web_auth is not None:
+        # The standard app is gated by the web login. /mcp stays with the
+        # transport's own OAuth enforcement (never gate it here), and /auth/* and
+        # /.well-known/* stay open because a client reads them precisely BECAUSE
+        # it has no session yet. The shared token is still accepted on this gate
+        # during the transition; it is retired in its own commit.
+        app.add_middleware(SessionGate, web_auth=app.state.web_auth,
+                           token=token or None)
+    elif token:
         # /mcp comes off this gate when OAuth holds it. This gate's 401 carries no
         # WWW-Authenticate header, so a client that met it here would be refused
         # with no way to learn where to log in, and the browser would never open.
@@ -186,19 +270,11 @@ def create_app() -> FastAPI:
 
     app.include_router(api_router, prefix="/api")
 
-    # Standard-app login through AuthKit (web_auth.py)
-    # Mounted only when the OAuth switch is on AND a client id is configured, so an MCP-only deployment
-    # is unaffected. Added before the "/" mount below so a static catch-all
-    # cannot swallow /auth/*. These paths are not in TokenGate's gated list, so
-    # the login stays reachable while the shared token still guards /api.
-    if settings.grp_oauth_enabled and settings.grp_authkit_client_id.strip():
-        app.state.web_auth = web_auth.WebAuth(
-            authkit_domain=settings.grp_authkit_domain,
-            public_url=settings.grp_public_url,
-            client_id=settings.grp_authkit_client_id)
+    # The login routes, built above whenever web auth is configured. Added before
+    # the "/" mount below so a static catch-all cannot swallow /auth/*, and they
+    # must stay reachable without a session (they are how one is obtained).
+    if app.state.web_auth is not None:
         app.state.web_auth.add_routes(app)
-    else:
-        app.state.web_auth = None
 
     # OAuth discovery, when it is switched on. These belong to the ORIGIN ROOT, not
     # to the /mcp mount (see auth.well_known_routes), and they must be reachable with

@@ -152,3 +152,57 @@ def test_an_expired_session_refreshes_its_token(app, monkeypatch):
     assert session is not None
     assert session.access_token == "new"
     assert session.expires_at > time()
+
+
+# --- the session gate (the commit after the login routes) ------------------
+
+
+def test_gate_refuses_anonymous_standard_app_access(app):
+    """With web login on, the standard app is gated but the public set, the MCP
+    transport's own gate and the login routes stay reachable."""
+    a = app()
+    with TestClient(a, follow_redirects=False) as client:
+        # UI page -> off to the login page, remembering where we were headed.
+        r = client.get("/")
+        assert r.status_code == 302
+        assert r.headers["location"].startswith("/auth/login?next=")
+        # REST -> a clean 401, not a redirect a program cannot follow.
+        r = client.get("/api")
+        assert r.status_code == 401
+        assert r.json() == {"detail": "login required"}
+        # The always-public set and the login routes are untouched.
+        assert client.get("/api/health").status_code == 200
+        assert client.get("/api/resolve/receipt/0000000000000000").status_code == 404
+        assert client.get("/.well-known/oauth-protected-resource/mcp").status_code == 200
+        assert client.get("/auth/login").status_code == 302
+        # /mcp belongs to the transport's OAuth gate, not this one.
+        mcp_call = client.post(
+            "/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            headers={"Accept": "application/json, text/event-stream"})
+        assert mcp_call.status_code == 401
+        assert "resource_metadata=" in mcp_call.headers.get("WWW-Authenticate", "")
+
+
+def test_gate_lets_a_session_through(app):
+    a = app()
+    web_auth = a.state.web_auth
+    sid = "s1"
+    web_auth.sessions.put(sid, Session(access_token="at", refresh_token="rt",
+                                       expires_at=time() + 3600,
+                                       sub="usr_test", email="t@e.com"))
+    with TestClient(a, follow_redirects=False) as client:
+        r = client.get("/")
+        assert r.status_code == 302                # no cookie yet: off to login
+        assert "/auth/login" in r.headers["location"]
+        client.cookies.set(SESSION_COOKIE, sid)
+        assert client.get("/").status_code == 200
+        assert client.get("/api").status_code == 200
+
+
+def test_gate_accepts_the_shared_token_during_transition(app, monkeypatch):
+    monkeypatch.setenv("GRP_API_TOKEN", "transition-token")
+    with TestClient(app()) as client:
+        headers = {"Authorization": "Bearer transition-token"}
+        assert client.get("/api", headers=headers).status_code == 200
+        assert client.get("/api", headers={"Authorization": "Bearer nope"}).status_code == 401
+        assert client.get("/api").status_code == 401

@@ -236,21 +236,31 @@ class WebAuth:
 
     # -- what a request is worth ---------------------------------------------
 
+    def session_for(self, sid: str) -> Session | None:
+        """The session with this id, refreshed if needed, or None.
+
+        Used by the gate (which reads the cookie itself, being raw ASGI) and by
+        get_session(); nothing else should touch the store directly.
+        """
+        session = self.sessions.get(sid)
+        if session is None:
+            return None
+        if session.expired:
+            if self._maybe_refresh(session):
+                self.sessions.put(sid, session)  # refresh updated the record in place
+            else:
+                self.sessions.delete(sid)
+                return None
+        return session
+
     def get_session(self, request: Request) -> Session | None:
-        """The session behind this request's cookie, refreshing it if needed.
+        """The session behind this request's cookie, refreshed if needed.
 
         Used by logout today and by the gate that gates the app in the next
         commit; nothing else in the app should read the cookie directly.
         """
         sid = request.cookies.get(SESSION_COOKIE)
-        if not sid:
-            return None
-        session = self.sessions.get(sid)
-        if session is None:
-            return None
-        if session.expired and self._maybe_refresh(session):
-            self.sessions.put(sid, session)  # refresh updated the record in place
-        return session if not session.expired else None
+        return self.session_for(sid) if sid else None
 
     def _maybe_refresh(self, session: Session) -> bool:
         """Use the refresh token to renew an expired session. False if it cannot."""
