@@ -33,7 +33,9 @@ log = logging.getLogger(__name__)
 
 # Paths that never ask for a login, by design. 
 # Everything else is gated by the web login (SessionGate) or the MCP transport's
-# own OAuth. Except for public embeds: `/?embeds=...`
+# own OAuth. The SPA host itself ("/") is also public-by-design — its shell and
+# signed-out landing page carry no data — and is exempted in SessionGate below;
+# embeds live at that host, so they are covered by the same exemption.
 _PUBLIC_PREFIXES = (
     "/api/health",
     "/api/resolve/",
@@ -97,7 +99,8 @@ class StaticOrNotFound:
 # Paths under /mcp, /auth/* and /.well-known/* always pass the gate: /mcp has
 # its own transport-level OAuth, and the others are how a login is started and
 # discovered, so they must be reachable with no session. _PUBLIC_PREFIXES, the
-# embed host and the SPA's static assets are the public-by-design exceptions.
+# SPA host at "/" and the SPA's static assets are the public-by-design
+# exceptions.
 
 
 def _header(scope: Scope, name: bytes) -> bytes:
@@ -109,14 +112,14 @@ def _header(scope: Scope, name: bytes) -> bytes:
 
 class SessionGate:
     """The standard app's gate: everything except the always-public set, /mcp
-    (the transport's own OAuth enforces that) and the /auth/* and /.well-known/*
-    routes a login needs requires a session cookie. The embed host
-    (/?embed=...) and the SPA's static assets are public too: an embed a
-    consumer cannot load is dead chrome, and the UI code is not the secret —
-    the /api data is, and it stays gated.
+    (the transport's own OAuth enforces that), the /auth/* and /.well-known/*
+    routes a login needs and the SPA host at "/" requires a session cookie.
+    The SPA host (embeds included) is public like its /assets/*: the shell and
+    the signed-out landing page render for anyone — the UI code is not the
+    secret, the /api data is, and it stays gated.
 
-    Raw ASGI, so the MCP transport keeps streaming. UI paths (GET/HEAD) are
-    sent to /auth/login; /api and anything else gets a 401.
+    Raw ASGI, so the MCP transport keeps streaming. Gated UI paths (GET/HEAD)
+    are sent to /auth/login; /api and anything else gets a 401.
     """
 
     def __init__(self, app: ASGIApp, web_auth) -> None:
@@ -141,23 +144,16 @@ class SessionGate:
         if path.startswith(("/mcp", "/auth/", "/.well-known/")):
             return True
         method = scope.get("method")
-        if method in ("GET", "HEAD") and self._public_embed_host(path, scope):
+        # The SPA host: anonymous GETs render the shell and its signed-out
+        # landing page (the embed host is "/" too, so it needs no separate
+        # rule); only the data behind it, under /api, stays gated.
+        if method in ("GET", "HEAD") and path in ("/", "/index.html"):
             return True
         sid = self._session_cookie(scope)
         if not sid:
             return False
         # session_for may refresh via AuthKit; keep the event loop free.
         return await anyio.to_thread.run_sync(self._web_auth.session_for, sid) is not None
-
-    def _public_embed_host(self, path: str, scope: Scope) -> bool:
-        """The embed host: the SPA at /?embed=<component>&receipt_id=<id>.
-
-        This is the one public surface that cannot be a path prefix: it shares
-        the app's root ("/"), so it is public only when the query asks for an
-        embed."""
-        if path in ("/", "/index.html") and b"embed=" in (scope.get("query_string") or b""):
-            return True
-        return False
 
     def _session_cookie(self, scope: Scope) -> str | None:
         raw = _header(scope, b"cookie").decode("latin-1")

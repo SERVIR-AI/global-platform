@@ -6,6 +6,9 @@ import type { ChatRequest } from '@/types/chat';
  */
 export const queryKeys = {
   health: () => ['health'] as const,
+  auth: {
+    me: () => ['auth', 'me'] as const,
+  },
   chat: {
     all: () => ['chat'] as const,
     thread: (threadId: string) => ['chat', 'thread', threadId] as const,

@@ -58,27 +58,35 @@ export const login = (returnTo?: string): void => {
   window.location.assign(authUrl(`/auth/login?next=${encodeURIComponent(target)}`));
 };
 
-/**
- * End the session and land on the SPA root. The POST's 302 body is never read;
- * the redirect back is done client-side so the page reloads signed-out.
- */
-export const logout = async (): Promise<void> => {
+/** POST /auth/logout to end the local session server-side, then drop client
+ * auth state. Never throws (backend unreachable: the navigation that follows
+ * still happens). The 302 body is never read. */
+const endLocalSession = async (): Promise<void> => {
   await fetch(authUrl('/auth/logout'), { method: 'POST', credentials: 'include' }).catch(
-    () => undefined, // backend unreachable: navigating away is still the right move
+    () => undefined,
   );
   clearReturnTo();
+};
+
+/**
+ * Sign out: end the local session and land on the SPA root, which renders its
+ * signed-out state (the landing page) — the gate serves "/" to anonymous
+ * visitors, so there is no bounce through AuthKit and no silent re-login. A
+ * fresh login from there is an explicit choice.
+ */
+export const logout = async (): Promise<void> => {
+  await endLocalSession();
   window.location.assign('/');
 };
 
 /**
  * Sign in as a different account: end this session, then go straight to the
- * AuthKit login screen (prompt=login, forwarded by the backend) instead of
- * landing on '/' first. Logout's own redirect below is superseded by the second
- * one — both run before the browser starts navigating.
+ * AuthKit login screen (prompt=login, forwarded by the backend) so a warm
+ * session cannot silently resume the old account.
  */
 export const switchAccount = async (): Promise<void> => {
   const target = currentPath();
-  await logout();
+  await endLocalSession();
   saveReturnTo(target);
   window.location.assign(authUrl(`/auth/login?next=${encodeURIComponent(target)}&prompt=login`));
 };

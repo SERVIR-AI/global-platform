@@ -157,13 +157,19 @@ def test_an_expired_session_refreshes_its_token(app, monkeypatch):
 # --- the session gate (the commit after the login routes) ------------------
 
 
-def test_gate_refuses_anonymous_standard_app_access(app):
-    """With web login on, the standard app is gated but the public set, the MCP
-    transport's own gate and the login routes stay reachable."""
+def test_gate_serves_the_public_shell_but_gates_the_data(app):
+    """With web login on, the SPA shell at "/" is public (it carries no data —
+    an anonymous visitor must be able to reach the signed-out landing page),
+    while the /api data, the MCP transport's own gate and the login routes stay
+    as they are."""
     a = app()
     with TestClient(a, follow_redirects=False) as client:
-        # UI page -> off to the login page, remembering where we were headed.
-        r = client.get("/")
+        # The SPA shell renders for an anonymous visitor (the frontend then
+        # shows its signed-out state once /auth/me answers 401).
+        assert client.get("/").status_code == 200
+        # Any other UI path an anonymous visitor asks for still goes to the
+        # login page, remembering where they were headed.
+        r = client.get("/docs")
         assert r.status_code == 302
         assert r.headers["location"].startswith("/auth/login?next=")
         # REST -> a clean 401, not a redirect a program cannot follow.
@@ -191,9 +197,9 @@ def test_gate_lets_a_session_through(app):
                                        expires_at=time() + 3600,
                                        sub="usr_test", email="t@e.com"))
     with TestClient(a, follow_redirects=False) as client:
-        r = client.get("/")
-        assert r.status_code == 302                # no cookie yet: off to login
-        assert "/auth/login" in r.headers["location"]
+        # The shell is public and the API is not; a session opens both.
+        assert client.get("/").status_code == 200
+        assert client.get("/api").status_code == 401
         client.cookies.set(SESSION_COOKIE, sid)
         assert client.get("/").status_code == 200
         assert client.get("/api").status_code == 200
@@ -232,13 +238,12 @@ def test_login_forwards_prompt_to_authkit(app):
 
 
 def test_gate_leaves_public_embeds_and_assets_open(app):
-    """An anonymous visitor can load the embed host and the SPA's static code
-    (they ride the public prefix list like the resolver); only /api data and the
-    plain app shell stay gated."""
+    """An anonymous visitor can load the SPA host (embeds and the signed-out
+    landing page both live at "/"), its static code and the public API set;
+    only /api data stays gated."""
     with TestClient(app(), follow_redirects=False) as client:
         embed = client.get("/?embed=provenance_graph&receipt_id=1")
         assert embed.status_code not in (302, 401)           # public: renders
-        for url in ("/assets/index-abc123.js", "/favicon.ico"):
-            assert client.get(url).status_code not in (302, 401)   # public list
-        assert client.get("/").status_code == 302            # plain app still gated
+        for url in ("/assets/index-abc123.js", "/favicon.ico", "/", "/index.html"):
+            assert client.get(url).status_code not in (302, 401)   # public surfaces
         assert client.get("/api/chat").status_code == 401    # data still gated
