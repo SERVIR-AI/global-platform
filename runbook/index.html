@@ -258,20 +258,21 @@ footer{border-top:1px solid var(--rule);margin-top:3rem;padding:1.6rem 0;
 
 <section id="connect">
   <h2><span class="num">04</span>Connect</h2>
-  <p class="lede">Three paths. Pick one. All require the SERVIR virtual private network (VPN),
-  because the server is not public.</p>
+  <p class="lede">Three paths. Pick one. The transport is OAuth-protected: a client that connects
+  opens your browser for a SERVIR (AuthKit) sign-in, and nothing is pasted anywhere.</p>
 
-  <h3>No token needed</h3>
-  <p>Inside the virtual private network there is no API token: the network itself is the
-  perimeter, and everyone who can reach the address is a colleague. A shared secret added
-  friction without adding security, so it was removed. Per-user authentication (OAuth, with
-  organisation accounts) is planned for the day this server leaves the private network,
-  because that is the day it starts to matter.</p>
+  <h3>Sign-in, not shared secrets</h3>
+  <p>Anonymous tool calls are refused with an OAuth challenge. Access is an invited SERVIR
+  account; the client runs the browser sign-in for you and then authenticates itself, and an
+  account that should no longer have access can be revoked.</p>
 
   <h3>A. Claude Code, the simplest path</h3>
 <pre><code>mkdir -p ~/servirplatform-test &amp;&amp; cd ~/servirplatform-test
 claude mcp add --transport http servirplatform http://10.1.30.110:8080/mcp
 claude</code></pre>
+  <p>The first tool call opens your browser for the sign-in; the client stores the session and
+  authenticates itself afterwards. Re-test the login with <code>claude mcp logout</code> followed
+  by <code>claude mcp login</code>.</p>
   <div class="note gap">
     <span class="label">Do not do this</span>
     <p>Never register the server with a filesystem path, for example
@@ -281,9 +282,10 @@ claude</code></pre>
   </div>
 
   <h3>B. Claude Desktop</h3>
-  <p>Desktop cannot speak HTTP MCP directly, so <code>mcp-remote</code> bridges it. The
-  <code>--allow-http</code> flag is required, because the server is plain HTTP on a private address
-  and <code>mcp-remote</code> refuses non-localhost HTTP without it.</p>
+  <p>Add the server by URL (Settings → Developer → MCP servers), entering
+  <code>http://10.1.30.110:8080/mcp</code>; the first tool call opens the browser sign-in. Desktop
+  versions that cannot reach an HTTP endpoint directly can bridge through
+  <code>mcp-remote</code> instead:</p>
 <pre><code>{
   "mcpServers": {
     "servirplatform": {
@@ -295,25 +297,23 @@ claude</code></pre>
 }</code></pre>
 
   <h3>C. Raw HTTP, no assistant</h3>
-  <p>Useful for checking the server itself. Responses arrive as server-sent events, which is what
-  the <code>sed</code> line strips.</p>
-<pre><code>mcp() {
-  curl -s -m 90 -X POST http://10.1.30.110:8080/mcp \
-    -H "Content-Type: application/json" \
-    -H "Accept: application/json, text/event-stream" \
-    -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",
-         \"params\":{\"name\":\"$1\",\"arguments\":$2}}" \
-    | sed -n 's/^data: //p'
-}
-
-mcp platform_capabilities '{}'</code></pre>
+  <p>A raw tool call needs the access token of a signed-in client. What is public lets you check
+  the transport itself: health answers, and an anonymous <code>POST /mcp</code> is refused with a
+  <code>401</code> whose <code>WWW-Authenticate</code> header points at the OAuth discovery
+  document.</p>
+<pre><code>curl -s http://10.1.30.110:8080/api/health
+curl -s -i -X POST http://10.1.30.110:8080/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'</code></pre>
 
   <div class="note gap">
     <span class="label">Known limitation</span>
-    <p><strong>ChatGPT cannot connect at all</strong>, from any account. Its fetch originates at
-    OpenAI's servers, which are not on the VPN. Claude works only because <code>mcp-remote</code>
-    runs on your machine and inherits your network. A public HTTPS endpoint is the open item that
-    would change this.</p>
+    <p><strong>ChatGPT cannot connect yet</strong>, from any account. Its connector fetches from
+    OpenAI's servers, which reach only public addresses. HTTPS is implemented but has not been
+    tested end to end; until this endpoint is public and that path is verified, ChatGPT stays
+    unconnectable. Claude connects because its client runs on your machine and inherits your
+    network.</p>
   </div>
 </section>
 
@@ -328,11 +328,13 @@ through verify_groundedness, and mint a receipt. Then show me:
  - what the pack declares it is MISSING, and why
  - anything the server refused to answer, quoted verbatim</code></pre>
 
-  <h3>Or, with no assistant at all</h3>
-  <p>One call runs the entire loop server-side and returns all three identifiers together. This is
-  the fastest way to get a real receipt to test against.</p>
-<pre><code>mcp compose_run '{"composition":"foodsecurity.brief",
-                  "question":"El Nino outlook for maize in Kenya"}'</code></pre>
+  <h3>Or, in one call, no drafting on your side</h3>
+  <p><code>compose_run</code> runs the whole loop server-side and returns all three identifiers
+  together — the fastest way to get a real receipt. It is a tool call, so it needs the signed-in
+  session from section 04; paste this to your connected assistant:</p>
+<pre><code>Using only the servirplatform MCP server, call compose_run with the
+composition "foodsecurity.brief" and the question "El Nino outlook for
+maize in Kenya", then give me the receipt id.</code></pre>
 
   <h3>What you should see</h3>
   <ul>
@@ -706,20 +708,20 @@ Then tell me which platform URL your trust chrome resolves against.</code></pre>
   <div class="tablewrap"><table>
     <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
     <tbody>
-      <tr><td>Connection times out, nothing responds</td><td>Not on the VPN.</td>
-          <td>Connect to the SERVIR VPN. The address is private.</td></tr>
-      <tr><td><code>401</code>, "missing or invalid API token"</td><td>You are connecting to an old build or a gated deployment.</td>
-          <td>The private-network server runs without a token. If you see this, the server was redeployed gated — ask in the channel.</td></tr>
+      <tr><td>Connection times out, nothing responds</td><td>The server is unreachable from your network.</td>
+          <td>The address is private; check you can reach <code>http://10.1.30.110:8080</code> at all.</td></tr>
+      <tr><td><code>401</code> on <code>/mcp</code></td><td>The transport is OAuth-protected and the call is anonymous or stale.</td>
+          <td>Expected before sign-in: your client opens the browser. A <code>401</code> after sign-in means the session expired — run the login again.</td></tr>
       <tr><td>Client dies with "Invalid OAuth error response"</td>
-          <td>The client probed for authentication endpoints and could not parse the 404.</td>
-          <td>Fixed server-side, so 404s now match the expected shape and clients fall back to bearer authentication. Update your client if you still see it.</td></tr>
+          <td>The client probed a discovery path that answered with an unparseable 404 (an old build, or a URL that is not the <code>/mcp</code> endpoint).</td>
+          <td>The discovery documents now answer at <code>/.well-known/...</code>. Update the client and check the registered URL ends in <code>/mcp</code>.</td></tr>
       <tr><td><code>mcp-remote</code> refuses to start</td><td>Plain HTTP on a non-localhost address.</td>
-          <td>Add <code>--allow-http</code>.</td></tr>
+          <td>Add <code>--allow-http</code> (only needed on the mcp-remote bridge path).</td></tr>
       <tr><td><code>405 Method Not Allowed</code></td><td>You posted to a path that is not <code>/mcp</code>.</td>
-          <td>The transport is <code>POST /mcp</code>. The web interface lives under <code>/api</code>.</td></tr>
+          <td>The transport is <code>POST /mcp</code>. The web app is served at <code>/</code>, its data under <code>/api</code>.</td></tr>
       <tr><td><code>/docs</code> returns 404</td>
-          <td>Expected on gated deployments only. Ungated (the current setup), <code>/docs</code> works.</td>
-          <td>Publishing the schema of gated endpoints to anonymous callers would defeat the gate.</td></tr>
+          <td>Gated deployments hide <code>/docs</code>; ungated ones serve it.</td>
+          <td>Publishing the schema of gated endpoints to anonymous callers would defeat the gate. Use the OAuth-protected tool list instead.</td></tr>
       <tr><td>Every search declines as irrelevant</td>
           <td>The document library was indexed with a different model than the one configured.</td>
           <td>The relevance floor is specific to the model. The provider and the library must match.</td></tr>
@@ -759,9 +761,11 @@ ssh pgarg@10.1.30.110 'sudo journalctl -u grp.service -n 40 --no-pager'</code></
   particular place. The platform treats them as context, not evidence, and will not answer a
   country-specific question from them alone.</p>
 
-  <h3>Not public</h3>
-  <p>VPN only, plain HTTP, no authentication inside the perimeter. There is no per-user attribution and no per-hub
-  revocation. A public HTTPS endpoint is the open blocker.</p>
+  <h3>Private address, authenticated access</h3>
+  <p>The endpoint is a private address, and access is authenticated: the MCP transport and the web
+  app refuse anonymous calls until a client signs in with an invited SERVIR account, and an
+  account can be revoked. HTTPS is implemented but has not been tested end to end; the open item
+  is serving this instance on a public HTTPS address.</p>
 
   <h3>Deliberately not built</h3>
   <p>No end-user portal, no marketplace. The platform serves tools and governance. The assistant and
@@ -778,10 +782,10 @@ ssh pgarg@10.1.30.110 'sudo journalctl -u grp.service -n 40 --no-pager'</code></
     <tbody>
       <tr><td>MCP</td><td><a href="https://modelcontextprotocol.io">Model Context Protocol</a></td><td>The open standard this server speaks.</td></tr>
       <tr><td>SERVIR</td><td><a href="https://servirglobal.net">SERVIR</a></td><td>A joint NASA and USAID programme. Not an acronym; Spanish for "to serve".</td></tr>
-      <tr><td>VPN</td><td>Virtual Private Network</td><td>Required to reach the server.</td></tr>
+      <tr><td>VPN</td><td>Virtual Private Network</td><td>The private address sits behind one; your client still needs a route to it.</td></tr>
       <tr><td>API</td><td>Application Programming Interface</td><td></td></tr>
-      <tr><td>HTTP / HTTPS</td><td>Hypertext Transfer Protocol, Secure</td><td>The server is currently plain HTTP.</td></tr>
-      <tr><td>TLS</td><td>Transport Layer Security</td><td>What HTTPS uses. Not yet in place here.</td></tr>
+      <tr><td>HTTP / HTTPS</td><td>Hypertext Transfer Protocol, Secure</td><td>The endpoint is plain HTTP. HTTPS is implemented but not yet tested end to end.</td></tr>
+      <tr><td>TLS</td><td>Transport Layer Security</td><td>What HTTPS uses. In place on the implemented HTTPS path, not yet tested end to end.</td></tr>
       <tr><td>CORS</td><td>Cross-Origin Resource Sharing</td><td>Browser rule governing which sites may call the platform.</td></tr>
       <tr><td>JSON</td><td>JavaScript Object Notation</td><td>The response format.</td></tr>
     </tbody>
@@ -842,7 +846,7 @@ ssh pgarg@10.1.30.110 'sudo journalctl -u grp.service -n 40 --no-pager'</code></
       <tr><td><strong>Evidence pack</strong></td><td>The numbered bundle of sources assembled for one question, plus its declared gaps.</td></tr>
       <tr><td><strong>Passport</strong></td><td>The provenance record travelling with every source: who, when, how vetted, where from.</td></tr>
       <tr><td><strong>Declared gap</strong></td><td>A dataset registered as unavailable, with a written reason. Visible, not hidden.</td></tr>
-      <tr><td><strong>Receipt</strong></td><td>The durable artifact tying question to pack to verdict. Resolvable without a token.</td></tr>
+      <tr><td><strong>Receipt</strong></td><td>The durable artifact tying question to pack to verdict. Resolvable without signing in.</td></tr>
       <tr><td><strong>Claim scope</strong></td><td>The receipt's own statement of what it does and does not attest.</td></tr>
       <tr><td><strong>Trust chrome</strong></td><td>Interface elements showing an answer's verdict, re-resolved live from the platform rather than frozen into the page.</td></tr>
       <tr><td><strong>Plume</strong></td><td>The spread of many forecast models' predictions, shown together.</td></tr>
@@ -854,7 +858,7 @@ ssh pgarg@10.1.30.110 'sudo journalctl -u grp.service -n 40 --no-pager'</code></
 
 <footer>
   <p>SERVIR Global Platform, MCP Server Runbook. Endpoint
-  <code>http://10.1.30.110:8080/mcp</code>, reachable on the VPN only.</p>
+  <code>http://10.1.30.110:8080/mcp</code>.</p>
   <p>Everything here was verified against the running server. If something does not match what you
   see, the runbook is wrong. Please report it.</p>
 </footer>
