@@ -103,9 +103,10 @@ class Session:
 class SessionStore:
     """In-memory sessions.
 
-    The deployment runs exactly ONE instance, so a process-local dict is
-    correct. A redeploy logs everyone out — accepted for now; swapping this
-    store for a persistent one is the documented cheap upgrade.
+    Correct because the deployment runs exactly ONE instance. A redeploy wipes
+    them, so everyone is logged out on deploy; persisting them (or moving to
+    WorkOS managed sessions) is the upgrade path, and it swaps in behind this
+    class.
     """
 
     def __init__(self) -> None:
@@ -256,8 +257,8 @@ class WebAuth:
     def get_session(self, request: Request) -> Session | None:
         """The session behind this request's cookie, refreshed if needed.
 
-        Used by logout today and by the gate that gates the app in the next
-        commit; nothing else in the app should read the cookie directly.
+        Used by logout and the session gate; nothing else reads the cookie
+        directly.
         """
         sid = request.cookies.get(SESSION_COOKIE)
         return self.session_for(sid) if sid else None

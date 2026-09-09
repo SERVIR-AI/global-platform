@@ -91,8 +91,10 @@ class StaticOrNotFound:
         await self.static(scope, receive, send)
 
 
-# Everything under /mcp, /auth/* and /.well-known/* is exempt from the gate by
-# rule; _PUBLIC_PREFIXES above is exempt by policy.
+# Paths under /mcp, /auth/* and /.well-known/* always pass the gate: /mcp has
+# its own transport-level OAuth, and the others are how a login is started and
+# discovered, so they must be reachable with no session. _PUBLIC_PREFIXES are
+# the only gated-looking paths exempted by policy.
 
 
 def _header(scope: Scope, name: bytes) -> bytes:
@@ -195,8 +197,8 @@ def create_app() -> FastAPI:
         app.add_middleware(SessionGate, web_auth=app.state.web_auth)
     else:
         log.warning("web login off — the standard app is served WITHOUT "
-                    "authentication. Acceptable locally; deploy/entrypoint.sh "
-                    "refuses to start without the OAuth settings.")
+                    "authentication. Acceptable locally; the deployment refuses "
+                    "to boot this way unless GRP_ALLOW_ANONYMOUS=1.")
 
     # A consuming app on ITS own origin must be able to resolve our receipts, so
     # '*' is a legitimate deployed value here. Credentials cannot ride a wildcard

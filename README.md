@@ -74,6 +74,75 @@ cd apps/web && npm install && npm run dev   # http://localhost:5173
 
 Vite proxies `/api` to the backend on `:8001`, so the UI works with no CORS setup.
 
+Locally the API runs with authentication **off** by default — nothing asks for a
+login. Enabling AuthKit is per-deployment: set `GRP_OAUTH_ENABLED=1` plus
+`GRP_PUBLIC_URL`, `GRP_AUTHKIT_DOMAIN` and `GRP_AUTHKIT_CLIENT_ID` in
+`apps/api/.env`; the standard app then requires a login and the MCP transport
+refuses anonymous tool calls.
+
+## Access & authentication
+
+Authentication is AuthKit (OAuth 2.1), switched on per deployment. Off (the
+default) means the whole app is open — how local dev and the test suite run.
+
+### For end users
+
+Access is granted by whoever runs the deployment — you'll be invited or
+whitelisted with the email you sign in with. One account opens both surfaces.
+
+- **The standard app** — open the URL you were given. You're sent to the AuthKit
+  login page (or asked to set up your account if invited), and after signing in
+  you're in. Receipt links, health checks and map tiles are public by design and
+  need no sign-in.
+- **The MCP tools (Claude Code)** — register the endpoint you were given; no
+  secret is pasted anywhere:
+  ```bash
+  claude mcp add --transport http servirplatform https://<deployment-url>/mcp
+  ```
+  First use opens your browser for the same AuthKit sign-in; after that the
+  client authenticates itself. To re-test the login later:
+  `claude mcp logout servirplatform` then `claude mcp login servirplatform`.
+- **Switch accounts** — log out, then use a private/incognito window or clear
+  cookies/site data for the site *and* its AuthKit domain, then sign in as the
+  other account. (A logout button in the web UI is planned.)
+
+### For developers: where the auth lives
+
+The server plays two roles, each with its own small module:
+
+1. **Resource server for `/mcp`** — `apps/api/src/app/mcp/auth.py`. It never
+   issues tokens; it publishes discovery and verifies the JWTs clients bring.
+   A `ResourceServer(AuthKitProvider)` subclass pins the audience to
+   `<GRP_PUBLIC_URL>/mcp` and holds the AuthKit domain as a plain string (no
+   trailing-slash normalization), so the token audience, the discovery document
+   and the 401 challenge all agree. Verification is against AuthKit's keys at
+   `<GRP_AUTHKIT_DOMAIN>/oauth2/jwks`.
+2. **OAuth client for the standard app** — `apps/api/src/app/web_auth.py`. It
+   sends people to AuthKit and keeps a browser session: an authorization-code +
+   PKCE flow (public client, no secret) with an in-memory session store behind
+   an HttpOnly `grp_session` cookie, refreshing the access token while alive.
+
+**The gates** — `apps/api/src/app/main.py` wires it up in `create_app()`:
+`SessionGate` guards everything except the always-public prefixes (`/api/health`,
+`/api/resolve/*`, `/api/raster/*`, `/api/food-security/rag/document/*`), the
+`/mcp` mount (its own gate), and `/auth/*` + `/.well-known/*` (how a login is
+started and discovered). UI paths redirect to `/auth/login`; `/api` answers 401.
+
+**Configuration** — `apps/api/src/app/config.py`:
+`GRP_OAUTH_ENABLED`, `GRP_AUTHKIT_DOMAIN`, `GRP_PUBLIC_URL`,
+`GRP_AUTHKIT_CLIENT_ID`. `GRP_PUBLIC_URL` is load-bearing: it becomes the
+`/auth/callback` origin **and** the MCP audience, so it must match what is
+registered in the WorkOS dashboard (the redirect URI and the resource indicator
+for `/mcp`) or logins fail with a redirect/audience mismatch. The deployment
+scripts (`deploy/entrypoint.sh`, `deploy/deploy.sh`) fail closed unless those
+values are present.
+
+**Design constraints to keep** — no WorkOS API key or client secret on the
+server (the web login client is a PKCE public client; MCP clients self-register
+via DCR). Auth tests live in `apps/api/tests/test_web_auth.py` and
+`test_auth_metadata.py` and must run with `GRP_OAUTH_ENABLED=0
+GRP_AUTHKIT_CLIENT_ID=` (the switch off), because with it on the app is gated.
+
 ## Test
 
 ```bash
