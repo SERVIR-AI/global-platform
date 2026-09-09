@@ -157,9 +157,23 @@ class WebAuth:
         app.add_api_route("/auth/login", self.login, methods=["GET"])
         app.add_api_route("/auth/callback", self.callback, methods=["GET"])
         app.add_api_route("/auth/logout", self.logout, methods=["POST"])
+        app.add_api_route("/auth/me", self.me, methods=["GET"])
+
+    def me(self, request: Request):
+        """Who this request is, for the web UI: 200 with the session's sub/email,
+        or 401 when there is no session. Sits under /auth/* so the gate lets
+        anonymous callers reach it — this endpoint makes the signed-in decision
+        itself."""
+        session = self.get_session(request)
+        if session is None:
+            return JSONResponse({"detail": "login required"}, status_code=401)
+        return {"sub": session.sub, "email": session.email}
 
     def login(self, request: Request) -> RedirectResponse:
-        """Send the visitor to AuthKit's hosted login."""
+        """Send the visitor to AuthKit's hosted login.
+
+        A `prompt` query param (e.g. prompt=login to force the login screen even
+        when AuthKit remembers the visitor) is forwarded to AuthKit."""
         verifier, challenge = _pkce_pair()
         state = secrets.token_urlsafe(24)
         next_path = request.query_params.get("next", "/")
@@ -167,7 +181,7 @@ class WebAuth:
             next_path = "/"
         with self._lock:
             self._pending[state] = (verifier, time.time() + _LOGIN_TTL, next_path)
-        url = f"{self._authorize_url}?{urlencode({
+        url_params = {
             'response_type': 'code',
             'client_id': self._client_id,
             'redirect_uri': self._redirect_uri,
@@ -175,7 +189,11 @@ class WebAuth:
             'state': state,
             'code_challenge': challenge,
             'code_challenge_method': 'S256',
-        })}"
+        }
+        prompt = request.query_params.get("prompt")
+        if prompt:
+            url_params['prompt'] = prompt
+        url = f"{self._authorize_url}?{urlencode(url_params)}"
         return RedirectResponse(url, status_code=302)
 
     def callback(self, request: Request):

@@ -197,3 +197,35 @@ def test_gate_lets_a_session_through(app):
         client.cookies.set(SESSION_COOKIE, sid)
         assert client.get("/").status_code == 200
         assert client.get("/api").status_code == 200
+
+
+# --- backend additions that make the frontend possible -----------------------
+
+
+def test_auth_me_reports_the_session(app):
+    a = app()
+    web_auth = a.state.web_auth
+    sid = "s1"
+    web_auth.sessions.put(sid, Session(access_token="at", refresh_token="rt",
+                                       expires_at=time() + 3600,
+                                       sub="usr_test", email="t@e.com"))
+    with TestClient(a) as client:
+        assert client.get("/auth/me").status_code == 401     # anonymous
+        client.cookies.set(SESSION_COOKIE, sid)
+        r = client.get("/auth/me")
+        assert r.status_code == 200
+        assert r.json() == {"sub": "usr_test", "email": "t@e.com"}
+
+
+def test_auth_me_is_404_when_web_login_is_off(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "grp_oauth_enabled", False)
+    with TestClient(create_app()) as client:
+        assert client.get("/auth/me").status_code == 404     # routes not mounted
+
+
+def test_login_forwards_prompt_to_authkit(app):
+    with TestClient(app(), follow_redirects=False) as client:
+        r = client.get("/auth/login?prompt=login")
+        q = parse_qs(urlparse(r.headers["location"]).query)
+        assert q["prompt"] == ["login"]
