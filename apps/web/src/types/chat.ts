@@ -1,5 +1,6 @@
 import type { Feature, FeatureCollection, Point, Polygon } from 'geojson';
 import type Layer from 'ol/layer/Layer';
+import type { TraceEnvelope } from './trace';
 
 export type ChatProvider = 'claude' | 'gemini' | 'openai';
 
@@ -151,6 +152,13 @@ export interface ChatResponse {
   usage?: Usage | null;
   /** Step-by-step narration; present only when the request set verbose=true. */
   trace?: string[] | null;
+  /**
+   * The per-turn trace envelope: the header plus the ordered per-step events. The only
+   * trace on the wire, and present unconditionally, not gated by `verbose`. Best-effort —
+   * absent if assembly or persistence failed, which never affects the answer.
+   * Rendered by `components/Trace`; see `lib/trace/README.md`.
+   */
+  trace_envelope?: TraceEnvelope | null;
   /**
    * When the agent is asking the user to choose (exposure vs precomputed-risk L1 vs
    * recomputed-risk L2), the options to render as buttons. Clicking one sends its

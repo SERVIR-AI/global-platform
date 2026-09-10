@@ -1,0 +1,13 @@
+# DEMO: contribute a real archival document to the food-security corpus.
+# Feb 2025 CPC ENSO discussion — real, stable URL, not in the seed corpus.
+sources:
+  - pack: food-security
+    url: https://www.cpc.ncep.noaa.gov/products/analysis_monitoring/enso_disc_feb2025/ensodisc.pdf
+    source: NOAA CPC
+    title: ENSO Diagnostic Discussion Feb 2025
+    pub_date: 2025-02
+    temporal: forecast
+    validation: single-agency
+    doc_type: enso-status
+    usage_notes: Archival 2025 discussion — use for analog comparison only, never
+      as the current ENSO status; cite the enso_discussion feed for that.

@@ -46,6 +46,10 @@ COPY apps/api/src ./apps/api/src
 COPY conf ./conf
 COPY cache/rag ./cache/rag
 COPY deploy ./deploy
+# The platform SERVES trace-emit/trace-visualize as MCP resources — without this
+# the deployed server declines them as not installed.
+COPY .claude/skills/trace-emit ./.claude/skills/trace-emit
+COPY .claude/skills/trace-visualize ./.claude/skills/trace-visualize
 COPY --from=web /w/dist ./web
 # Some hosts (Hugging Face Spaces) run the container as a non-root uid, so the
 # receipts dir has to be writable by whoever ends up owning the process.
@@ -60,7 +64,8 @@ ENV PYTHONPATH=/app/apps/api/src \
     # Behind a hosted proxy the Host header is the service's public domain.
     # WITHOUT this, FastMCP auto-enables its localhost-only DNS-rebinding check
     # and answers 421 to every single tool call. Narrow it to the concrete
-    # hostname once the URL is known; the token gate is the real access control.
+    # hostname once the URL is known; the OAuth transport gate is the real
+    # access control.
     GRP_MCP_ALLOWED_HOSTS=*
 
 EXPOSE 8080

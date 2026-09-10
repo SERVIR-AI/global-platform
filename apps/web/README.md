@@ -26,5 +26,15 @@ modes, every geo field, the exposure/risk choice flow) and `POST /api/tiffs` (th
 upload) — is documented in **`apps/api/API_EXAMPLES.md`**, the single source of truth.
 `src/lib/api.ts` (`postChat`, `uploadTiff`) and `src/types/chat.ts` mirror it.
 
+## Trace & observability
+
+Every chat response carries a `trace_envelope` — a structured, per-step record of how the
+answer was produced. It's rendered per turn by `src/components/Trace`, on top of the pure
+selector layer in `src/lib/trace`.
+
+**`src/lib/trace/README.md` is the reference**: what each field means to an end user, the
+audience split, how missing data must be rendered, and how to rebuild the visualization in
+a different shape without re-reading the backend.
+
 > Deploying the SPA on a different origin and calling the API directly? Add that origin to
 > the backend's `CORS_ORIGINS` (`apps/api/.env.example`).

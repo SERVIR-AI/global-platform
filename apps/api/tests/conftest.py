@@ -5,7 +5,16 @@ import json
 from types import SimpleNamespace
 
 import numpy as np
+import os
+
 import pytest
+
+# OAuth must be OFF for the bulk of the suite: with GRP_OAUTH_ENABLED=1 (and a
+# client id) the app mounts the SessionGate and every gated /api call 401s. The
+# developer's .env may enable it, so scrub it here rather than depend on it.
+# Tests that exercise OAuth build their own apps with explicit settings.
+os.environ["GRP_OAUTH_ENABLED"] = "0"
+os.environ.pop("GRP_AUTHKIT_CLIENT_ID", None)
 import rasterio
 from rasterio.transform import from_bounds
 

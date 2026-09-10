@@ -1,0 +1,20 @@
+# Contributed raster rows — machine-owned; written by the
+# contribution gate. Hand-edit conf/tiffs.yml, never this.
+hazard_heatdays:
+  local_path: tiffs/hazard_heatdays.tif
+  title: Extreme heat-day hazard (demonstration)
+  description: 'Single-band heat-hazard raster over the Battambang area. Each pixel
+    holds a heat severity class 0 (none) to 5 (extreme). SYNTHETIC DEMONSTRATION LAYER
+    produced to exercise the contribution gate — not a scientific product.
+
+    '
+  legend:
+    1: Very Low
+    2: Low
+    3: Moderate
+    4: High
+    5: Very High
+  source: platform demonstration layer (synthetic, generated 2026-09-01)
+  license: CC0-1.0
+  vintage: 2026-09
+  contributed: true

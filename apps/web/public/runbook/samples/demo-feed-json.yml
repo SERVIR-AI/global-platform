@@ -1,0 +1,22 @@
+# DEMO: a JSON API as a feed — generic_json maps records with dot-paths.
+# USGS live earthquake feed: real, keyless, stable.
+dataset: usgs_quakes_daily
+title: USGS earthquakes, magnitude 2.5+ (past day)
+description: Live global earthquake list from the USGS GeoJSON feed.
+source: USGS
+validation: single-agency
+residency: external call-out
+cadence: continuous
+adapter: generic_json
+fetch:
+  url: https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson
+  records_path: features
+  fields:
+    magnitude: properties.mag
+    place: properties.place
+    time_ms: properties.time
+params:
+  limit: records to return (default 12)
+usage_notes: Global list, most recent first. Magnitudes are USGS-reviewed
+  progressively — very recent events may be revised. Not a Southeast Asia
+  filter; filter by place text before regional claims.

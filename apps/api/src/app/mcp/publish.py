@@ -17,6 +17,9 @@ exactly as they were for callers that want the steps separately.
 
 from __future__ import annotations
 
+import time
+from datetime import datetime, timezone
+
 from . import loop, record, store, verify
 
 
@@ -99,10 +102,59 @@ def _coarse(gj, tol: float):
     return gj
 
 
+def _loop_trace(pack: dict, publish_started: datetime,
+                verify_ms: float, record_ms: float, receipt_id: str | None) -> dict:
+    """The platform's own execution trace for this answer — the governed loop's
+    counterpart to the web app's per-turn trace envelope. It attests ONLY what the
+    platform executed: the gather, the gate, the mint. The drafting step between
+    them runs in the consumer's assistant, so it is declared as unobserved rather
+    than silently omitted — the boundary is the trust story, not a gap in it."""
+    cits = pack.get("citations", [])
+    grades: dict = {}
+    for c in cits:
+        grades[record._retrieval(c)] = grades.get(record._retrieval(c), 0) + 1
+    graded = ", ".join(f"{n} {g.replace('-at-pack-time', ' at pack time')}"
+                       for g, n in sorted(grades.items())) or "none"
+    ex = pack.get("exec") or {}
+    steps = [{"step": "assemble", "tool": "assemble_pack",
+              "duration_ms": ex.get("gather_ms"), "at": ex.get("assembled_at"),
+              "summary": (f"{len(cits)} citations gathered ({graded}) · "
+                          f"{len(pack.get('gaps', []))} declared gap(s)"),
+              "detail": list(pack.get("trace") or [])}]
+    draft_step = {"step": "draft", "tool": None, "duration_ms": None,
+                  "outside_platform": True,
+                  "summary": ("drafted by the consumer's own assistant — the platform "
+                              "does not execute or observe this step; it attests only "
+                              "the hash of the text that came back")}
+    if ex.get("assembled_at"):
+        try:
+            t0 = datetime.fromisoformat(ex["assembled_at"])
+            draft_step["elapsed_ms"] = round(
+                (publish_started - t0).total_seconds() * 1000, 1)
+        except ValueError:
+            pass
+    steps.append(draft_step)
+    steps.append({"step": "verify", "tool": "publish_answer",
+                  "duration_ms": verify_ms,
+                  "summary": (f"groundedness gate: every [n] resolved against the "
+                              f"pack, {len(pack.get('required_sections', []))} "
+                              "required sections enforced — passed")})
+    steps.append({"step": "record", "tool": "publish_answer",
+                  "duration_ms": record_ms,
+                  "summary": (f"receipt {receipt_id} minted — replayable and "
+                              "publicly resolvable")})
+    return {"steps": steps,
+            "note": ("platform execution only — timings cover what ran here; the "
+                     "draft step is the consumer's and is declared, not measured")}
+
+
 def answer(pack_id: str, draft: str, question: str | None = None) -> dict:
     """Gate then receipt. A blocked draft returns its failures and NO receipt —
     the caller must fix and call again, which is the gate doing its job."""
+    publish_started = datetime.now(timezone.utc)
+    t_v = time.perf_counter()
     v = verify.groundedness(draft, pack_id)
+    verify_ms = round((time.perf_counter() - t_v) * 1000, 1)
     if v.get("status") != "ok":
         return v                                   # unknown pack — already explained
 
@@ -121,7 +173,9 @@ def answer(pack_id: str, draft: str, question: str | None = None) -> dict:
                 "next_step": loop.after_verify(pack_id, v["report_id"], False,
                                                v["failures"])}
 
+    t_r = time.perf_counter()
     r = record.record(pack_id=pack_id, report_id=v["report_id"], question=question)
+    record_ms = round((time.perf_counter() - t_r) * 1000, 1)
     if r.get("status") != "ok":
         return r
     # The receipt already carries its own forward edge (show it via ui_embed), so
@@ -130,6 +184,8 @@ def answer(pack_id: str, draft: str, question: str | None = None) -> dict:
             # The gated text comes BACK to the caller: a model that publishes and
             # then has nothing to restate answers with a bare embed and two lines.
             "insight": _insight(pack_id, draft),
+            "trace": _loop_trace(store.load_pack(pack_id) or {}, publish_started,
+                                 verify_ms, record_ms, r.get("receipt_id")),
             "report_id": v["report_id"], "draft_sha256": v["draft_sha256"],
             "evidence_tier": v["evidence_tier"],
             "numbers_unverified_recorded": v["numbers_unverified_recorded"],

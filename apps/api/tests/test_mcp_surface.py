@@ -43,7 +43,9 @@ def test_resources_cover_the_app_the_guide_and_every_pack(log):
     """One manifest per PACKS row, plus the MCP App and the human guide."""
     uris = {str(r.uri) for r in asyncio.run(mcp.list_resources())}
     log("OUTPUT", str(sorted(uris)))
-    expected = {UI_URI, "servirplatform://how-to-use"} | {
+    expected = {UI_URI, "servirplatform://how-to-use",
+                "servirplatform://skill/trace-emit",
+                "servirplatform://skill/trace-visualize"} | {
         f"servirplatform://pack/{pid}" for pid in packs.available()}
     log("CHECK", "a new pack row would have to appear here too")
     assert uris == expected

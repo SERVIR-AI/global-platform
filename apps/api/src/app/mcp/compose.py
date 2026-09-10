@@ -27,10 +27,19 @@ def _run_foodsecurity_brief(question, override, override_country, override_crop,
                                 calendar_target=(override_country, override_crop))
 
 
+def _run_risk_brief(question, override, override_country, override_crop,
+                    provider, model) -> dict:
+    """Runner for `risk.brief`. The calendar override params are food-security
+    concepts and are ignored here — a risk target has no crop calendar."""
+    from ..risk import synthesis as risk_synthesis
+    return risk_synthesis.synthesize(question, provider=provider, model=model)
+
+
 # name -> runner. A composition needs BOTH a metadata entry (registry.COMPOSITIONS,
 # for capabilities) and a runner here; a metadata entry without one is declined as
 # not-implemented rather than silently running someone else's pipeline.
-_RUNNERS = {"foodsecurity.brief": _run_foodsecurity_brief}
+_RUNNERS = {"foodsecurity.brief": _run_foodsecurity_brief,
+            "risk.brief": _run_risk_brief}
 
 
 def run(composition: str = "foodsecurity.brief", question: str = "",
@@ -68,12 +77,19 @@ def run(composition: str = "foodsecurity.brief", question: str = "",
 
     parsed, stats = out.get("parsed") or {}, out.get("evidence") or {}
     brief = out.get("brief") or ""
+    # The output contract comes from the RUNNER (each domain owns its sections);
+    # the FS constant is only the fallback for the historic FS runner shape.
+    sections = out.get("required_sections") or list(synthesis.SECTIONS)
+    viz = stats.pop("viz", None) if isinstance(stats, dict) else None
     pack_id = store.save_pack({
         "country": parsed.get("country"), "crop": parsed.get("crop"),
         "focus": parsed.get("focus"), "citations": citations,
         "gaps": out.get("gaps") or [], "queries": stats.get("queries"),
-        "required_sections": list(synthesis.SECTIONS), "stats": stats,
-        "trace": out.get("trace"), "composition": composition})
+        "required_sections": sections, "stats": stats,
+        "trace": out.get("trace"), "composition": composition,
+        **({"pack": out["pack"]} if out.get("pack") else {}),
+        **({"target": out["target"]} if out.get("target") else {}),
+        **({"viz": viz} if viz is not None else {})})
     grounded = out.get("grounded") or {}
     digest = hashlib.sha256(brief.encode("utf-8")).hexdigest()
     report_id = store.save_report({

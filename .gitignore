@@ -20,7 +20,6 @@ venv/
 .DS_Store
 .idea/
 .vscode/
-.claude
 
 # local data cache (OSM + downloaded/clipped tifs) — fetched at runtime
 cache/

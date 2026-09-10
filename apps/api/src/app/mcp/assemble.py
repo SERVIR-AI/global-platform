@@ -7,6 +7,9 @@ Declared gaps are content, not omissions.
 
 from __future__ import annotations
 
+import time
+from datetime import datetime, timezone
+
 from ..llm import MissingAPIKey
 from ..rag.store import CorpusError
 from . import context, loop, packs, store
@@ -47,6 +50,7 @@ def assemble(country: str | None = None, crop: str | None = None,
     trace: list[str] = []
     extras = {"override": override, "override_country": override_country,
               "override_crop": override_crop, "min_severity": min_severity}
+    t_gather = time.perf_counter()
     try:
         citations, gaps, stats = spec["gather"](target, focus, trace, extras)
     except MissingAPIKey as exc:
@@ -66,6 +70,8 @@ def assemble(country: str | None = None, crop: str | None = None,
                         "gap — retrying later may succeed."}
     except CorpusError as exc:
         return {"status": "declined", "note": str(exc)}
+    gaps_cit = packs.gaps_citation(citations, gaps)
+    citations = [*citations, gaps_cit]
     pack_body = {"pack": pack_id_name, "target": target, "focus": focus,
                  # FS keeps its historic top-level keys; other packs carry only
                  # `target` (the embed resolver reads pack.country/crop for FS)
@@ -77,7 +83,10 @@ def assemble(country: str | None = None, crop: str | None = None,
                  # PACK ROW — the contract is pack data, not imported code
                  "required_sections": list(spec["sections"]()),
                  "stats": {k: v for k, v in stats.items() if k != "queries"},
-                 "trace": trace}
+                 "trace": trace,
+                 # execution provenance for the loop trace publish_answer surfaces
+                 "exec": {"assembled_at": datetime.now(timezone.utc).isoformat(),
+                          "gather_ms": round((time.perf_counter() - t_gather) * 1000, 1)}}
     if stats.get("viz") is not None:                # a pack may carry embed data
         pack_body["viz"] = stats["viz"]
         pack_body["stats"].pop("viz", None)
@@ -90,7 +99,11 @@ def assemble(country: str | None = None, crop: str | None = None,
         response["viz_recorded"] = ("map payload recorded with the pack — rendered "
                                     "by the hazard_map embed for this receipt")
     return {"status": "ok", "pack_id": pack_id,
+            # pack-level contributor guidance, read at the moment of use
+            **({"usage_notes": spec["usage_notes"]}
+               if spec.get("usage_notes") else {}),
             "answer_status": loop.PACK_IS_NOT_AN_ANSWER,
-            "next_step": loop.after_assemble(pack_id, pack_body["required_sections"]),
+            "next_step": loop.after_assemble(pack_id, pack_body["required_sections"],
+                                             gaps_citation_n=gaps_cit["n"]),
             **response,
             "your_next_output": loop.YOUR_NEXT_OUTPUT.format(pack_id=pack_id)}

@@ -250,6 +250,17 @@ FEEDS = {
     },
 }
 
+# Declarative rows (conf/feeds/*.yml) merge in beside the code rows — a feed of a
+# known shape is a YAML file, no Python. Invalid specs register as status
+# "invalid" with their reasons; collisions with code rows refuse loudly.
+def _load_declarative_feeds() -> None:
+    from ..config import get_settings
+    from ..contrib import feedspecs
+    feedspecs.merge_into(FEEDS, feedspecs.load_dir(get_settings().feeds_conf_dir))
+
+
+_load_declarative_feeds()
+
 
 # Every current feed belongs to the food-security pack; a row may override.
 for _spec in FEEDS.values():
@@ -269,6 +280,19 @@ COMPOSITIONS = {
                 "platform's configured providers, NOT your own credentials. To use "
                 "YOUR model, run the loop instead: assemble_pack -> you draft -> "
                 "verify_groundedness (same evidence, same gate, same receipt)."),
+        "for": ("consumers with no model credentials or no place to run code "
+                "(dashboards, cron, REST) — the accompanied path"),
+    },
+    "risk.brief": {
+        "description": "Question -> governed 4-section cited hazard-exposure "
+                       "brief for a place x hazard: deterministic geo evidence "
+                       "assembled, drafted, groundedness-gated, receipt minted.",
+        "params": ["question", "provider?", "model?"],
+        "runs_llm_server_side": True,
+        "llm": ("the PLATFORM's model and key; the LLM only parses the target and "
+                "phrases the brief — every number is computed deterministically. "
+                "To use YOUR model, run the loop instead: assemble_pack(pack="
+                "'risk', place=..., hazard=...) -> you draft -> publish_answer."),
         "for": ("consumers with no model credentials or no place to run code "
                 "(dashboards, cron, REST) — the accompanied path"),
     },
@@ -325,6 +349,8 @@ def pack_manifest(pack_id: str = "food-security") -> dict:
                     "display_name": spec.get("display_name", pack_id),
                     "version": spec.get("version", "v0"),
                     "target": spec.get("target_doc", {}),
+                    **({"usage_notes": spec["usage_notes"]}
+                       if spec.get("usage_notes") else {}),
                     "note": "this pack registers no manifest — target params only"}
         try:
             return builder()
@@ -420,6 +446,11 @@ def _design_language() -> dict:
                          "served. It is a maintained copy, not the live design file.")}
 
 
+def _skills_available() -> list[str]:
+    from . import skills
+    return skills.available()
+
+
 def capabilities(available_tools=None, available_prompts=None,
                  available_resources=None) -> dict:
     """The honest platform map. Bone status + the tool/prompt/resource lists are
@@ -433,11 +464,34 @@ def capabilities(available_tools=None, available_prompts=None,
                    "transport": os.environ.get("GRP_MCP_TRANSPORT", "stdio")},
         "contract": CONTRACT,
         "usage": {"instructions": "delivered to the LLM at connect (initialize)",
+                  "skills": {n: f"servirplatform://skill/{n}" for n in _skills_available()},
                   "prompts": prompts,  # user-selectable in the host menu (build vs run)
                   "resources": resources,  # human-readable guides (e.g. servirplatform://how-to-use)
                   "modes": ["build-time: build a reusable app on the tools",
                             "run-time: answer one question now"]},
         "tools_available": tools,
+        # Payload-carried on purpose: connect-time INSTRUCTIONS lose to whatever
+        # rides the tool results (measured — render_with was honored to the letter
+        # in the same builds that ignored an instructions-only observability rule).
+        # A builder reads THIS payload at build time, so the requirement lands here.
+        "builder_requirements": {
+            "note": ("requirements for anything you BUILD on these tools (a script, "
+                     "an app, a page) — part of the capability contract, not advice; "
+                     "a build that skips one ships unfinished"),
+            "observability": {
+                "rule": ("instrument your build: every run must emit its own "
+                         "execution trace — a trace_id, per-step duration_ms, a "
+                         "one-line summary per step, and token usage for any step "
+                         "that calls a model"),
+                **({"read_first": "servirplatform://skill/trace-emit"}
+                   if "trace-emit" in _skills_available() else {}),
+                "surface": ("publish_answer returns `trace` — the platform's own "
+                            "loop execution (assemble/draft/verify/record). Show it "
+                            "in what you build; do not swallow it"),
+                "prove": ("a finished build includes one real captured trace from "
+                          "a real run"),
+            },
+        },
         # registry rows invoked via compose_run — not tools, so the count stays flat
         "compositions": {k: v for k, v in COMPOSITIONS.items()},
         # registry rows queried via feeds_query — dataset is a parameter

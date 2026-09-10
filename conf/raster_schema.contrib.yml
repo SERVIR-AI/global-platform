@@ -1,0 +1,8 @@
+# Contributed raster contracts — machine-owned.
+layers:
+  hazard_heatdays:
+    dtype: int16
+    valid_min: 0
+    valid_max: 5
+    nodata: null
+    role: hazard

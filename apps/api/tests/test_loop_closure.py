@@ -147,6 +147,26 @@ def test_publish_gates_and_receipts_in_one_call(pack, log):
     assert out["render_with"]["provenance"]["tool"] == "ui_embed"
 
 
+def test_publish_carries_the_platform_execution_trace(pack, log):
+    """A published answer says HOW the loop ran, not only what it produced: the
+    gather is timed on the pack, the gate and mint are timed at publish, and the
+    consumer's drafting step is DECLARED as outside the platform rather than
+    silently missing — the attestation boundary is stated, not implied."""
+    out = publish.answer(pack["pack_id"], _passing_draft(pack), question="q")
+    t = out["trace"]
+    names = [st["step"] for st in t["steps"]]
+    log("OUTPUT", f"steps={names}")
+    assert names == ["assemble", "draft", "verify", "record"]
+    by = {st["step"]: st for st in t["steps"]}
+    assert by["assemble"]["duration_ms"] is not None          # timed at gather
+    assert by["assemble"]["detail"]                           # assembly trace strings
+    assert by["draft"]["outside_platform"] is True
+    assert by["draft"]["duration_ms"] is None                 # declared, not measured
+    assert by["verify"]["duration_ms"] >= 0
+    assert by["record"]["duration_ms"] >= 0
+    assert out["receipt_id"] in by["record"]["summary"]
+
+
 def test_publish_mints_NO_receipt_for_a_blocked_draft(pack, log):
     """The composite must not become a way around the gate. A real model hit this
     in UAT: its first draft was blocked, it fixed it, the second passed."""
@@ -275,3 +295,48 @@ def test_the_panel_is_capability_gated_analytics(log):
     assert "mean" in html and "vs prev" in html  # stats strip
     # degradation is stated, not silent
     assert "host does not proxy tool calls" in html
+
+
+@pytest.fixture(scope="module")
+def risk_pack():
+    """The risk pack always DECLARES gaps (no corpus, no vintages...) — the pack
+    where the citable-gaps contract is always exercised."""
+    return assemble.assemble(pack="risk", place="battambang", hazard="flood")
+
+
+def test_declared_gaps_are_a_citable_pack_entry(risk_pack, pack, log):
+    """Models kept writing honest what's-missing paragraphs the gate then blocked
+    as uncited: gaps were content with no citable identity. They are now the pack's
+    LAST citation, and the draft rules name it. A pack with NO gaps (FS kenya/maize
+    today) gets the entry too, stating that absence explicitly — a model honestly
+    writing "no identified gaps" was observed blocked for lack of anything to
+    cite, and undeclared absence must never read as completeness."""
+    last = risk_pack["citations"][-1]
+    log("OUTPUT", f"[{last['n']}] kind={last['kind']} retrieval={last['retrieval']}")
+    assert risk_pack["gaps"], "fixture must declare gaps"
+    assert last["kind"] == "gaps"
+    assert last["retrieval"] == "config"
+    for g in risk_pack["gaps"]:
+        assert g in last["text"]                       # gaps verbatim -> number-scan
+    ns = [c["n"] for c in risk_pack["citations"]]
+    assert len(ns) == len(set(ns)) and last["n"] == max(ns)
+    rules = " ".join(risk_pack["next_step"]["draft_rules"])
+    assert f"[{last['n']}]" in rules                   # the drafter is told
+    fs_last = pack["citations"][-1]
+    assert not pack["gaps"] and fs_last["kind"] == "gaps"
+    assert "No evidence gaps were declared" in fs_last["text"]
+
+
+def test_a_gaps_only_missing_section_passes_the_gate(risk_pack, log):
+    """The acceptance case for citable gaps: a draft whose what's-missing paragraph
+    cites ONLY the gaps entry must pass — this exact draft was blocked before."""
+    gaps_n = risk_pack["citations"][-1]["n"]
+    parts = []
+    for s in risk_pack["required_sections"]:
+        if "missing" in s.lower():
+            parts.append(f"{s}\n\nThe pack itself declares what is absent [{gaps_n}].")
+        else:
+            parts.append(f"{s}\n\nEvidence for this section is cited here [1].")
+    v = verify.groundedness("\n\n".join(parts), risk_pack["pack_id"])
+    log("OUTPUT", f"passed={v['passed']} failures={v['failures']}")
+    assert v["passed"] is True

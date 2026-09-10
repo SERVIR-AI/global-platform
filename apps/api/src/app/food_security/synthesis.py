@@ -310,6 +310,7 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
             "doc_id": h["doc_id"], "chunk_id": h["id"],
             "archived_copy": (f"/api/food-security/rag/document/{h['doc_id']}"
                               if corpus.raw_path(h["doc_id"]) else None),
+            "usage_notes": m.get("usage_notes"),
             "text": h["text"]})
     cond, gap = _conditions_citation(crop, country, trace)
     if cond:
@@ -351,10 +352,16 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
 def _render_pack(citations):
     """The numbered evidence block: documents via the source_block seam (E3),
     the conditions feed in the same shape."""
+    def _text(c):
+        t = (f"[temporal={c['temporal']}] {c['text']}"
+             if c.get("temporal") else c["text"])
+        # contributor guidance rides WITH the evidence, where the drafter reads it
+        if c.get("usage_notes"):
+            t = f"[contributor guidance: {c['usage_notes']}] {t}"
+        return t
     doc_like = [{"metadata": {k: c.get(k) for k in
                               ("source", "title", "pub_date", "validation", "url")},
-                 "text": (f"[temporal={c['temporal']}] {c['text']}"
-                          if c.get("temporal") else c["text"])}
+                 "text": _text(c)}
                 for c in citations]
     return source_block(doc_like)
 
@@ -445,12 +452,19 @@ def synthesize(question, provider=None, model=None, calendar=None,
     # they establish the ocean state and nothing about that place. Letting them
     # clear the bar would let the engine answer "maize in Kenya" out of an ENSO
     # index alone, which is exactly the inference the use case forbids in Phase 1.
-    _CONTEXT_ONLY = ("calendar", "index")
+    _CONTEXT_ONLY = ("calendar", "index", "gaps")
     if not any(c["kind"] not in _CONTEXT_ONLY for c in citations):
         trace.append("evidence -> empty; declining without a synthesis call")
         return _declined(
             "No evidence available: " + "; ".join(gaps), trace=trace, usage=usage,
             stats=stats) | {"provider": provider, "model": model}
+
+    # Declared gaps (or their explicit absence) as a citable entry — appended
+    # AFTER the evidence bar so it can never carry a brief alone. Observed: the
+    # model honestly wrote "there are no identified gaps..." and the gate blocked
+    # it as uncited, costing a retry.
+    from ..mcp import packs as mcp_packs
+    citations = [*citations, mcp_packs.gaps_citation(citations, gaps)]
 
     asked_on = datetime.now(timezone.utc).strftime("%B %Y")
     user_msg = (
@@ -458,7 +472,8 @@ def synthesize(question, provider=None, model=None, calendar=None,
         f"Asked in: {asked_on} (state the season-timing caveat relative to this)\n"
         f"Parsed target: crop={parsed['crop'] or '?'}, country={parsed['country'] or '?'}, "
         f"focus={parsed['focus']}\n"
-        "Known gaps (must appear in What's missing): "
+        "Known gaps (must appear in What's missing, citing the declared-gaps "
+        "evidence entry): "
         + ("; ".join(gaps) if gaps else "none identified") + "\n\n"
         "Numbered evidence (the ONLY permissible sources):\n\n" + _render_pack(citations))
 

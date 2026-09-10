@@ -74,8 +74,10 @@ def _risk_manifest() -> dict:
             "no risk corpus", "raster vintages/licences unrecorded",
             "BYOD uploads are session-scoped and cannot enter a pack",
         ],
-        "compositions": {"risk.brief": "declared gap — runner not implemented; "
-                                        "use the assemble -> publish_answer loop"},
+        "compositions": {"risk.brief": "available via compose_run — the platform "
+                                        "LLM parses, drafts and gates server-side; "
+                                        "or run the assemble -> publish_answer "
+                                        "loop with your own model"},
     }
 
 
@@ -92,6 +94,7 @@ PACKS: dict[str, dict] = {
         "sections": _fs_sections,
         "corpus": "food-security",
         "default_focus": lambda t: f"{t.get('country', '')} {t.get('crop', '')}".strip(),
+        "doctor_target": {"country": "kenya", "crop": "maize"},
     },
     "risk": {
         "display_name": "Risk Platform",
@@ -104,8 +107,45 @@ PACKS: dict[str, dict] = {
         "corpus": None,
         "manifest": _risk_manifest,
         "default_focus": lambda t: f"{t.get('hazard', '')} exposure in {t.get('place', '')}".strip(),
+        "doctor_target": {"place": "battambang", "hazard": "flood"},
     },
 }
+
+# Load errors from dropped-in pack modules, surfaced by doctor and capabilities —
+# a broken contribution must be visible, never a silent absence or a dead server.
+EXT_ERRORS: dict[str, str] = {}
+
+
+def _load_ext_packs() -> None:
+    """Merge app.packs_ext.<id> modules (each exporting SPEC) into PACKS.
+    Contributed packs are droppable files, like declarative feeds. A module that
+    fails to import or collides records an error and is skipped."""
+    import importlib
+    import pkgutil
+
+    try:
+        from .. import packs_ext
+    except ImportError:
+        return
+    for info in pkgutil.iter_modules(packs_ext.__path__):
+        name = info.name
+        try:
+            mod = importlib.import_module(f"..packs_ext.{name}", __package__)
+            spec = getattr(mod, "SPEC", None)
+            if not isinstance(spec, dict):
+                EXT_ERRORS[name] = "module has no SPEC dict"
+                continue
+            pack_id = spec.get("id") or name
+            if pack_id in PACKS:
+                EXT_ERRORS[name] = (f"pack id {pack_id!r} collides with an existing "
+                                    "pack — contributed packs cannot shadow")
+                continue
+            PACKS[pack_id] = {k: v for k, v in spec.items() if k != "id"}
+        except Exception as exc:                    # never crash the server for one bad module
+            EXT_ERRORS[name] = f"{type(exc).__name__}: {exc}"
+
+
+_load_ext_packs()
 
 
 def available() -> list[str]:
@@ -140,3 +180,24 @@ def build_target(pack_id: str, params: dict) -> tuple[dict | None, str | None]:
         return None, (f"pack {pack_id!r} needs {', '.join(missing)} "
                       f"(target params: {', '.join(spec['target_keys'])})")
     return target, None
+
+
+def gaps_citation(citations: list, gaps: list) -> dict:
+    """Declared gaps as the pack's LAST numbered citation, so the what's-missing
+    section has something real to cite. Models kept writing honest gap paragraphs
+    the gate then blocked as uncited — the pack declared gaps as content but gave
+    them no citable identity. ALWAYS present: a zero-gap pack still needs the
+    entry, because "no gaps were identified" is itself a declaration a model will
+    honestly write (observed blocking an FS draft) — and absence of declared gaps
+    must never read as proof of completeness. Any numbers inside a gap statement
+    ride the citation text, so the number-scan can verify them like any other
+    evidence."""
+    n = max((int(c.get("n") or 0) for c in citations), default=0) + 1
+    text = ("Declared gaps in this evidence pack: "
+            + " ".join(f"({i}) {g}" for i, g in enumerate(gaps, 1))
+            if gaps else
+            "No evidence gaps were declared at assembly time for this pack's "
+            "scope. Absence of declared gaps is not a completeness guarantee.")
+    return {"n": n, "kind": "gaps", "source": "platform pack assembly",
+            "title": "declared evidence gaps", "text": text,
+            "validation": "declared-by-platform", "retrieval": "config"}

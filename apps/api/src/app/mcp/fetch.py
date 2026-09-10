@@ -28,6 +28,7 @@ def _passport(metadata: dict, doc_id: str, archived: bool) -> dict:
         "residency": "platform-hosted",
         "authority": "not-yet-certified (Phase-3 regime)",
         "source_url": metadata.get("url"),
+        "usage_notes": metadata.get("usage_notes"),
         "archived_copy": f"/api/food-security/rag/document/{doc_id}" if archived else None,
         "doc_id": doc_id,
     }

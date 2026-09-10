@@ -321,7 +321,9 @@ def test_calendar_flows_into_the_evidence_pack_and_prompt(brief_env):
         calendar=[{"season": "Long rains", "planting": [4, 6], "harvest": [9, 11]}])
     assert out["declined"] is False
     cal_cite = next(c for c in out["citations"] if c["kind"] == "calendar")
-    assert cal_cite["adjusted"] is True and cal_cite["n"] == len(out["citations"])
+    # the always-on gaps entry now follows the calendar as the final citation
+    assert cal_cite["adjusted"] is True and cal_cite["n"] == len(out["citations"]) - 1
+    assert out["citations"][-1]["kind"] == "gaps"
     assert out["evidence"]["calendar"] == "adjusted"
     assert "ADJUSTED by the requester" in stub.seen[-1][-1]["content"]
 

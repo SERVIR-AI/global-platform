@@ -168,10 +168,13 @@ class WebAuth:
         verifier, challenge = _pkce_pair()
         state = secrets.token_urlsafe(24)
         next_path = request.query_params.get("next", "/")
-        if not next_path.startswith("/") or next_path.startswith("//"):
+        if not next_path.startswith("/") or next_path.startswith(("//", "/\\")):
             next_path = "/"
         with self._lock:
-            self._pending[state] = (verifier, time.time() + _LOGIN_TTL, next_path)
+            now = time.time()
+            for s in [s for s, (_, exp, _) in self._pending.items() if exp < now]:
+                self._pending.pop(s, None)
+            self._pending[state] = (verifier, now + _LOGIN_TTL, next_path)
         url_params = {
             'response_type': 'code',
             'client_id': self._client_id,
@@ -222,7 +225,7 @@ class WebAuth:
         session = Session(
             access_token=tokens["access_token"],
             refresh_token=tokens.get("refresh_token"),
-            expires_at=time.time() + int(tokens.get("expires_in", 3600)),
+            expires_at=time.time() + int(tokens.get("expires_in") or 3600),
             sub=profile.get("sub"),
             email=profile.get("email"),
         )
@@ -287,5 +290,5 @@ class WebAuth:
             return False
         session.access_token = tokens["access_token"]
         session.refresh_token = tokens.get("refresh_token") or session.refresh_token
-        session.expires_at = time.time() + int(tokens.get("expires_in", 3600))
+        session.expires_at = time.time() + int(tokens.get("expires_in") or 3600)
         return True

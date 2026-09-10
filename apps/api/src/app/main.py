@@ -45,6 +45,8 @@ _PUBLIC_PREFIXES = (
     # The web app's static code and favicon: the UI is public, the data it
     # calls is not.
     "/assets/",
+    # The public runbook: documentation that must load for anonymous visitors.
+    "/runbook/",
     "/favicon.ico",
 )
 
@@ -136,6 +138,10 @@ class SessionGate:
     async def _authorized(self, scope: Scope) -> bool:
         path = scope.get("path", "")
         if path.startswith(_PUBLIC_PREFIXES):
+            return True
+        # The no-slash form must be public too, or StaticFiles never gets to
+        # redirect it to /runbook/.
+        if path == "/runbook":
             return True
         if path.startswith(("/mcp", "/auth/", "/.well-known/")):
             return True

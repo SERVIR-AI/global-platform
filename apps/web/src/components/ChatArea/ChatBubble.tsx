@@ -5,6 +5,7 @@ import { FC, useMemo } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { BriefSources, CopyBriefButton, DeclineCard, GroundedStrip, jumpToCitation } from './Brief';
+import TracePanel from '../Trace/TracePanel';
 import ChatMapLayer from './ChatMapLayer';
 
 // Tailwind's preflight strips default margins/list styling, so map the elements
@@ -98,7 +99,6 @@ const ChatBubble: FC<{ chatItem: ChatItem }> = ({ chatItem }) => {
   const message = itemMessage(chatItem);
   const isUser = message.role === 'user';
   const date = getChatItemDate(chatItem);
-  const trace = (chatItem as { trace?: string[] | null }).trace;
   const choices = (chatItem as { choices?: ChatChoice[] | null }).choices;
 
   // Food-security brief fields (absent on risk turns).
@@ -178,18 +178,7 @@ const ChatBubble: FC<{ chatItem: ChatItem }> = ({ chatItem }) => {
         {chatItem.layers.map((layer, index) => (
           <ChatMapLayer key={index} layer={layer} />
         ))}
-        {!isUser && trace && trace.length > 0 && (
-          <details className="text-xs text-base-content/70">
-            <summary className="cursor-pointer select-none font-medium">
-              how it works — dev trace ({trace.length} steps)
-            </summary>
-            {/* Dev-facing: the run as recorded, shown verbatim as JSON (not prose).
-                Dark box + light text so it's legible on the light chat surface. */}
-            <pre className="mt-1 max-w-2xl overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-900 p-3 font-mono text-[0.7rem] leading-relaxed text-zinc-100">
-              {JSON.stringify(trace, null, 2)}
-            </pre>
-          </details>
-        )}
+        {!isUser && <TracePanel item={chatItem} />}
         {date && (
           <span className={cn('text-zinc-400 text-xs', isUser ? 'self-end' : undefined)}>
             {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

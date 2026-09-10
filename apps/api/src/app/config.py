@@ -73,13 +73,16 @@ class Settings(BaseSettings):
     traces_dir: Path = cache_dir / "traces"
     prompts_path: Path = _REPO_ROOT / "conf" / "prompts.yml"
     tiffs_config_path: Path = _REPO_ROOT / "conf" / "tiffs.yml"
+    tiffs_contrib_path: Path = _REPO_ROOT / "conf" / "tiffs.contrib.yml"
     raster_schema_path: Path = _REPO_ROOT / "conf" / "raster_schema.yml"
+    raster_schema_contrib_path: Path = _REPO_ROOT / "conf" / "raster_schema.contrib.yml"
     risk_l2_config_path: Path = _REPO_ROOT / "conf" / "risk_l2.yml"
 
     # --- Food security ---
     # Hub-adjustable crop calendars (the Call-2 ministry ask); per-request
     # overrides are cited in the brief as ADJUSTED.
     crop_calendar_path: Path = _REPO_ROOT / "conf" / "crop_calendar.yml"
+    feeds_conf_dir: Path = _REPO_ROOT / "conf" / "feeds"
 
     # --- Food security (GEOGLAM Crop Monitor) ---
     # The CMET Global_SHP FeatureServer: per-region crop-condition expert
@@ -159,6 +162,11 @@ class Settings(BaseSettings):
     # USD per million tokens, for the per-query cost line in the trace. 0 = unpriced.
     price_in: float = 0.0
     price_out: float = 0.0
+
+    # Whether trace events carry the full text of the prompts sent to the model. Off keeps
+    # the shape — one entry per message, with its role — and nulls every body, so the trace
+    # still reports how many messages were sent without carrying their contents.
+    trace_prompts: bool = True
 
     # --- OAuth (mcp/auth.py, web_auth.py) ---
     # Off and empty by default; provider values are per-deployment.

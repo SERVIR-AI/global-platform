@@ -17,6 +17,8 @@ Monorepo, managed with [uv](https://docs.astral.sh/uv/) (backend) and npm (front
 └── pyproject.toml   # uv workspace root
 ```
 
+> Source code was migrated here separately
+
 ## How it answers a question
 
 ```
@@ -320,6 +322,19 @@ npm run lint
 npm run build
 ```
 
+## Tracing skills
+
+Two paired Claude Code skills live in [`.claude/skills/`](.claude/skills/) for adding and viewing execution traces — a step-by-step record of what the agent actually did to produce an answer, not just the final result. To load these skills in, either restart your Claude Code session or run the `/reload-skills` command
+
+| Skill | What it does |
+| --- | --- |
+| [`trace-emit`](.claude/skills/trace-emit/SKILL.md) | Instruments a backend so every response can carry a structured trace: which steps ran, how long each took, which external services/caches were hit, and what each step decided (including LLM token/cost detail). |
+| [`trace-visualize`](.claude/skills/trace-visualize/SKILL.md) | Turns a trace a backend already emits into something readable — a step list, timeline, flow diagram, CLI output, or printable report. |
+
+`trace-visualize` depends on `trace-emit` — you can't render a trace that isn't being produced yet, so the two are always run in that order, never in the same pass.
+
+Both follow the same working style: survey the codebase first, then propose options (capture scope, delivery surface, view shape) with a recommendation and pause for approval at a few key checkpoints, then build one real, working slice before instrumenting or rendering the rest.
+
 ## More
 
 - [`apps/api/README.md`](apps/api/README.md) — backend architecture, the graph, the module map.
@@ -327,3 +342,39 @@ npm run build
 - [`apps/api/DEMO.md`](apps/api/DEMO.md) — an exhaustive set of example queries.
 - [`SOURCE_DATA_APPROACH.md`](SOURCE_DATA_APPROACH.md) — the four-layer risk model and design rationale.
 - [`apps/web/README.md`](apps/web/README.md) — the frontend: dev server, how it talks to the API.
+
+## License
+
+Licensed under the `Eclipse Public License 2.0 (EPL-2.0)` license. See [LICENSE](LICENSE.md) for the full text.
+
+## Run it locally
+
+```bash
+git clone git@github.com:SERVIR-AI/global-platform.git && cd global-platform
+
+# backend (uv installs everything, including Python)
+cd apps/api && uv sync && cd ../..
+
+# web app + runbook (optional — skip for API-only)
+cd apps/web && npm install && npm run build && cd ../..
+
+# minimal config: nothing is required for local dev — the app runs open
+# (or set GRP_OAUTH_ENABLED=1 with the AuthKit settings to gate it)
+cd apps/api
+
+# start
+GRP_WEB_DIST=$PWD/../web/dist GRP_PUBLIC_BASE=http://127.0.0.1:8000 \
+  uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Point any MCP client at `http://127.0.0.1:8000/mcp`; the runbook serves at
+`http://127.0.0.1:8000/runbook/`.
+
+**Local dev runs open by default** — set `GRP_OAUTH_ENABLED=1` (with the AuthKit
+settings in `apps/api/.env.example`) to gate the app behind a SERVIR login; the
+deployed entrypoint refuses to boot without OAuth on or an explicit
+`GRP_ALLOW_ANONYMOUS=1`. **No LLM keys are required**: keyless you still get the
+platform map, all live feeds, and the complete risk-pack loop — deterministic
+geo evidence through the groundedness gate to a minted receipt. Add provider
+keys (see `apps/api/.env.example`) to unlock the food-security corpus and the
+LLM drafting paths.

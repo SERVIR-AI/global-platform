@@ -8,8 +8,18 @@ from ...config import get_settings
 
 
 def catalog():
+    """Hand-authored rows + contributed rows (conf/tiffs.contrib.yml — machine-
+    owned, written only by the contribution gate; contrib cannot shadow)."""
     with open(get_settings().tiffs_config_path) as f:
-        return yaml.safe_load(f)
+        cat = yaml.safe_load(f) or {}
+    contrib_path = get_settings().tiffs_contrib_path
+    try:
+        with open(contrib_path) as f:
+            contrib = yaml.safe_load(f) or {}
+        cat.update({k: v for k, v in contrib.items() if k not in cat})
+    except FileNotFoundError:
+        pass
+    return cat
 
 
 def entry(layer):
