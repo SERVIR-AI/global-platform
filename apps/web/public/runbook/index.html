@@ -126,7 +126,7 @@ footer{border-top:1px solid var(--rule);margin-top:3rem;padding:1.6rem 0;
   <div class="top-inner">
     <h1 class="brand"><small>SERVIR Global Platform</small>MCP Server Runbook</h1>
     <div style="display:flex;gap:.7rem;align-items:center">
-      <span class="endpoint">http://10.1.30.110:8080/mcp</span>
+      <span class="endpoint">https://servirplatform.sig-gis.com/mcp</span>
       <button class="toggle" id="tt">theme</button>
     </div>
   </div>
@@ -259,7 +259,7 @@ footer{border-top:1px solid var(--rule);margin-top:3rem;padding:1.6rem 0;
 
 <section id="connect">
   <h2><span class="num">04</span>Connect</h2>
-  <p class="lede">Three paths. Pick one. The transport is OAuth-protected: a client that connects
+  <p class="lede">Pick your path. The transport is OAuth-protected: a client that connects
   opens your browser for a SERVIR (AuthKit) sign-in, and nothing is pasted anywhere.</p>
 
   <h3>Sign-in, not shared secrets</h3>
@@ -270,13 +270,15 @@ footer{border-top:1px solid var(--rule);margin-top:3rem;padding:1.6rem 0;
   <h3>Before you start</h3>
   <ul>
     <li><strong>Network:</strong> the platform is public at
-      <code>https://servirplatform.sig-gis.com</code> with a valid certificate. (The SERVIR VPN
-      route <code>http://10.1.30.110:8080</code> still works from inside; if you use it, add
-      <code>--allow-http</code> to the Desktop configs below.)</li>
+      <code>https://servirplatform.sig-gis.com</code> with a valid certificate. No VPN is
+      needed. (The SERVIR VPN route <code>http://10.1.30.110:8080</code> still works from
+      inside; path C below covers it.)</li>
     <li><strong>Access:</strong> an invited SERVIR account. The client opens the browser
-      sign-in for you; no token or secret is pasted anywhere.</li>
-    <li><strong>For Claude Desktop only:</strong> Node.js (LTS) installed —
-      <code>mcp-remote</code> runs via <code>npx</code>. Claude Code needs nothing extra.</li>
+      sign-in for you; no token, config file or secret is pasted anywhere. If the sign-in page
+      says <em>This account does not exist</em>, you have not been invited yet — ask the platform
+      team.</li>
+    <li><strong>Nothing to install.</strong> Claude Code and Claude Desktop both speak to the
+      public address directly. Node.js is only needed for the VPN bridge in path C.</li>
   </ul>
 
   <h3>A. Claude Code, the simplest path</h3>
@@ -284,8 +286,11 @@ footer{border-top:1px solid var(--rule);margin-top:3rem;padding:1.6rem 0;
 claude mcp add --transport http servirplatform https://servirplatform.sig-gis.com/mcp
 claude</code></pre>
   <p>The first tool call opens your browser for the sign-in; the client stores the session and
-  authenticates itself afterwards. Re-test the login with <code>claude mcp logout</code> followed
-  by <code>claude mcp login</code>.</p>
+  authenticates itself afterwards. Until then <code>claude mcp list</code> shows the server as
+  <em>Needs authentication</em>, which is expected. To sign in ahead of the first call, or to
+  re-test the login, run these in a terminal (the login needs an interactive terminal):</p>
+<pre><code>claude mcp logout servirplatform
+claude mcp login servirplatform</code></pre>
 
   <div class="note gap">
     <span class="label">Do not do this</span>
@@ -295,16 +300,52 @@ claude</code></pre>
     repository you open. Register by URL.</p>
   </div>
 
-  <h3>B. Claude Desktop — macOS</h3>
-  <p>Add the server by URL (Settings &rarr; Developer &rarr; MCP servers); the first tool call
-  opens the browser sign-in. Desktop versions that cannot reach an HTTP endpoint directly can
-  bridge through <code>mcp-remote</code> instead:</p>
+  <h3>B. Claude Desktop — macOS and Windows</h3>
+  <p>Desktop adds the server through its Connectors screen. No config file, no token, no
+  Node.js.</p>
+  <ol>
+    <li>Open <strong>Settings &rarr; Connectors &rarr; Add custom connector</strong>.</li>
+    <li>Name: <code>servirplatform</code>. URL:
+      <code>https://servirplatform.sig-gis.com/mcp</code>. Click <strong>Add</strong>.</li>
+    <li>Desktop inspects the address and fills in what it found. Keep it: Authentication
+      <em>Always required</em>, OAuth client <em>Register one automatically</em>, no headers.
+      Click <strong>Continue</strong>.</li>
+    <li>Your browser opens the SERVIR sign-in (AuthKit). Sign in with your invited email. If the
+      browser already holds a SERVIR session it may skip straight through without asking for a
+      password; that is normal.</li>
+    <li>The connector shows <strong>Connected</strong>. Start a new chat, enable
+      <code>servirplatform</code> in the tools menu, and try
+      <em>What can the servirplatform do?</em> followed by
+      <em>How many hospitals are in the flood zone in Battambang?</em></li>
+  </ol>
+  <div class="note">
+    <span class="label">HTTPS only</span>
+    <p>The Connectors screen refuses any address that does not start with
+    <code>https://</code>, so the VPN route cannot be added here. Use the public address, or
+    bridge the VPN route through <code>mcp-remote</code> as in path C.</p>
+  </div>
 
+  <h3>C. Claude Desktop over the VPN route (fallback)</h3>
+  <p>Only if you must stay on <code>http://10.1.30.110:8080</code>. Install Node.js LTS from
+  nodejs.org, then put this in Desktop's config file and fully restart Desktop. The browser
+  sign-in is the same; <code>mcp-remote</code> runs it for you.</p>
+  <p>macOS: <code>~/Library/Application Support/Claude/claude_desktop_config.json</code></p>
 <pre><code>{
   "mcpServers": {
     "servirplatform": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "https://servirplatform.sig-gis.com/mcp"]
+      "args": ["-y", "mcp-remote", "http://10.1.30.110:8080/mcp", "--allow-http"]
+    }
+  }
+}</code></pre>
+  <p>Windows: <code>%APPDATA%\Claude\claude_desktop_config.json</code> (paste that into
+  Explorer's address bar). Windows resolves <code>npx</code> most reliably through
+  <code>cmd</code>:</p>
+<pre><code>{
+  "mcpServers": {
+    "servirplatform": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "mcp-remote", "http://10.1.30.110:8080/mcp", "--allow-http"]
     }
   }
 }</code></pre>
@@ -312,24 +353,9 @@ claude</code></pre>
     <span class="label">Plain HTTP on the VPN route</span>
     <p><code>--allow-http</code> is required while the address is plain HTTP on a private IP —
     <code>mcp-remote</code> refuses plain HTTP to a non-localhost address without it, correctly.
-    The public HTTPS URL needs no flag.</p>
+    If Desktop reports it cannot find <code>npx</code>, install Node.js LTS and restart the
+    machine so PATH updates reach Desktop.</p>
   </div>
-
-  <h3>C. Claude Desktop — Windows</h3>
-  <p>Config lives at <code>%APPDATA%\Claude\claude_desktop_config.json</code>
-  (paste that into Explorer's address bar). Windows resolves <code>npx</code> most reliably
-  through <code>cmd</code>:</p>
-<pre><code>{
-  "mcpServers": {
-    "servirplatform": {
-      "command": "cmd",
-      "args": ["/c", "npx", "-y", "mcp-remote", "https://servirplatform.sig-gis.com/mcp"]
-    }
-  }
-}</code></pre>
-  <p>Everything else — the full restart after editing — is the same as macOS. If Desktop reports
-  it cannot find <code>npx</code>, install Node.js LTS from nodejs.org and restart the machine so
-  PATH updates reach Desktop.</p>
 
   <h3>D. The web app in a browser</h3>
   <p>Open the address and sign in with your SERVIR account; a session cookie keeps everything
@@ -388,7 +414,7 @@ maize in Kenya", then give me the receipt id.</code></pre>
     <li>A brief in four fixed sections, every paragraph carrying a <code>[n]</code> citation.</li>
     <li>Roughly 18 numbered sources: archived documents plus six live climate feeds.</li>
     <li>A receipt identifier, and a URL beginning
-    <code>http://10.1.30.110:8080/api/resolve/receipt/</code>.</li>
+    <code>https://servirplatform.sig-gis.com/api/resolve/receipt/</code>.</li>
   </ul>
 
   <div class="note good">
@@ -745,7 +771,7 @@ for both data and design.
 
 Then tell me which platform URL your trust chrome resolves against.</code></pre>
   <p>That last line is the real test. An application that resolves verdicts against <em>its own</em>
-  origin attests nothing. It must say <code>http://10.1.30.110:8080</code>.</p>
+  origin attests nothing. It must say <code>https://servirplatform.sig-gis.com</code>.</p>
 </section>
 
 <section id="contribute">
@@ -1036,7 +1062,11 @@ uv run --project apps/api python -m app.contrib.cli remove-pack &lt;pack-id&gt;<
     <thead><tr><th>Symptom</th><th>Cause</th><th>Fix</th></tr></thead>
     <tbody>
       <tr><td>Connection times out, nothing responds</td><td>The server is unreachable from your network.</td>
-          <td>The address is private; check you can reach <code>http://10.1.30.110:8080</code> at all.</td></tr>
+          <td>Check <code>https://servirplatform.sig-gis.com/api/health</code> in a browser. The VPN route <code>http://10.1.30.110:8080</code> is private and needs the SERVIR VPN.</td></tr>
+      <tr><td>Sign-in page says "This account does not exist"</td><td>Access is invite-only and your email has not been invited.</td>
+          <td>Ask the platform team for an invite, then sign in again. Nothing on your side is misconfigured.</td></tr>
+      <tr><td>Desktop connector refuses the address: "URL must start with https"</td><td>The Connectors screen accepts HTTPS only.</td>
+          <td>Use <code>https://servirplatform.sig-gis.com/mcp</code>. The VPN route only works through the <code>mcp-remote</code> bridge (Connect, path C).</td></tr>
       <tr><td><code>401</code> on <code>/mcp</code></td><td>The transport is OAuth-protected and the call is anonymous or stale.</td>
           <td>Expected before sign-in: your client opens the browser. A <code>401</code> after sign-in means the session expired — run the login again.</td></tr>
       <tr><td>Client dies with "Invalid OAuth error response"</td>
@@ -1065,7 +1095,7 @@ uv run --project apps/api python -m app.contrib.cli remove-pack &lt;pack-id&gt;<
   </table></div>
 
   <h3>Check the server itself</h3>
-<pre><code>curl -s -o /dev/null -w "health: %{http_code}\n" http://10.1.30.110:8080/api/health
+<pre><code>curl -s -o /dev/null -w "health: %{http_code}\n" https://servirplatform.sig-gis.com/api/health
 ssh pgarg@10.1.30.110 'systemctl is-active grp.service'
 ssh pgarg@10.1.30.110 'sudo journalctl -u grp.service -n 40 --no-pager'</code></pre>
 </section>
@@ -1109,9 +1139,9 @@ ssh pgarg@10.1.30.110 'sudo journalctl -u grp.service -n 40 --no-pager'</code></
     <tbody>
       <tr><td>MCP</td><td><a href="https://modelcontextprotocol.io">Model Context Protocol</a></td><td>The open standard this server speaks.</td></tr>
       <tr><td>SERVIR</td><td><a href="https://servirglobal.net">SERVIR</a></td><td>A joint NASA and USAID programme. Not an acronym; Spanish for "to serve".</td></tr>
-      <tr><td>VPN</td><td>Virtual Private Network</td><td>The private address sits behind one; your client still needs a route to it.</td></tr>
+      <tr><td>VPN</td><td>Virtual Private Network</td><td>Optional. The public address needs none; only the fallback route <code>10.1.30.110</code> sits behind it.</td></tr>
       <tr><td>API</td><td>Application Programming Interface</td><td></td></tr>
-      <tr><td>HTTP / HTTPS</td><td>Hypertext Transfer Protocol, Secure</td><td>The endpoint is plain HTTP. HTTPS is implemented but not yet tested end to end.</td></tr>
+      <tr><td>HTTP / HTTPS</td><td>Hypertext Transfer Protocol, Secure</td><td>The public endpoint is HTTPS with a valid certificate. Only the VPN route is plain HTTP.</td></tr>
       <tr><td>TLS</td><td>Transport Layer Security</td><td>What HTTPS uses. In place on the implemented HTTPS path, not yet tested end to end.</td></tr>
       <tr><td>CORS</td><td>Cross-Origin Resource Sharing</td><td>Browser rule governing which sites may call the platform.</td></tr>
       <tr><td>JSON</td><td>JavaScript Object Notation</td><td>The response format.</td></tr>
@@ -1185,7 +1215,7 @@ ssh pgarg@10.1.30.110 'sudo journalctl -u grp.service -n 40 --no-pager'</code></
 
 <footer>
   <p>SERVIR Global Platform, MCP Server Runbook. Endpoint
-  <code>http://10.1.30.110:8080/mcp</code>.</p>
+  <code>https://servirplatform.sig-gis.com/mcp</code>.</p>
   <p>Everything here was verified against the running server. If something does not match what you
   see, the runbook is wrong. Please report it.</p>
 </footer>
