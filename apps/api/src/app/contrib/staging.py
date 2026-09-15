@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from ..mcp import store
 from . import fetch_policy, identity, sources
 
-KINDS = ("document", "table", "feed")  # rasters follow (X4.5)
+KINDS = ("document", "table", "feed", "raster")
 STATUSES = ("pending", "approved", "rejected", "withdrawn", "failed")
 PENDING_CAP = 20               # open contributions per contributor
 HOURLY_CAP = 30                # submissions per contributor per hour
@@ -363,6 +363,14 @@ def _ensure_staged_loaded() -> None:
         ds = (rec.get("preview") or {}).get("dataset")
         if row and ds and ds not in STAGED_FEEDS:
             STAGED_FEEDS[ds] = row
+    try:
+        rasters = store.list_contributions(status="pending", kind="raster")
+    except Exception:
+        return
+    for rec in rasters:
+        pv = rec.get("preview") or {}
+        if pv.get("layer") and pv.get("entry") and pv["layer"] not in STAGED_RASTERS:
+            STAGED_RASTERS[pv["layer"]] = {"entry": pv["entry"], "contract": pv.get("contract") or {}}
 
 
 def visible_staged_feed(dataset: str) -> dict | None:
@@ -515,6 +523,182 @@ def _retire_feed(rec: dict) -> dict:
     return {"removed": removed, "note": "nothing was written to disk for a staged feed"}
 
 
+# --------------------------------------------------------------------------- rasters
+
+RASTER_FIELDS = {
+    "required": {
+        "layer": "namespaced name, hazard_<name> or risk_<name>, e.g. hazard_heatdays",
+        "url": "where the platform can fetch the GeoTIFF (public host; up to the size cap)",
+        "title": "what the layer is",
+        "description": "what a pixel value means and how the layer was produced",
+        "source": "who produced it, derived from what",
+        "license": "e.g. CC-BY-4.0, or 'unstated' (silence is not accepted)",
+        "vintage": "when the layer was produced, YYYY-MM",
+        "legend": "mapping class number -> label, e.g. {1: Very Low, ..., 5: Very High}",
+        "declared": "the CONTRACT the file is verified against: {dtype, valid_min, valid_max, "
+                    "nodata?} — say what the file IS; the platform checks it before staging",
+    },
+    "optional": {
+        "usage_notes": "a few lines the consuming analyst reads in the hazard passport (max 500 chars)",
+    },
+}
+_RASTER_KNOWN = set(RASTER_FIELDS["required"]) | set(RASTER_FIELDS["optional"])
+
+# Staged layers live here (and in the contribution records), never in the
+# contrib catalog files; graph/geo/tiffs.py and schema.py overlay them for the
+# caller who may see them.
+STAGED_RASTERS: dict[str, dict] = {}
+
+
+def _validate_raster(manifest) -> list[str]:
+    from . import rasters
+    if not isinstance(manifest, dict):
+        return ["manifest must be a mapping of provenance fields"]
+    m = dict(manifest)
+    problems = []
+    if m.pop("file", None):
+        problems.append("'file' is not accepted over the MCP — the platform cannot read "
+                        "your disk; give a url it can fetch")
+    if not m.get("url"):
+        problems.append("missing required field 'url'")
+    base = {k: v for k, v in m.items() if k != "url"}
+    problems += [f for f in rasters.validate_manifest({**base, "file": "-"})
+                 if not f.startswith("file ")]
+    unknown = set(m) - _RASTER_KNOWN
+    if unknown:
+        problems.append(f"unknown fields {sorted(unknown)} — every field is provenance")
+    if m.get("url"):
+        problems += fetch_policy.check_url(m["url"])
+    return problems
+
+
+def _purge_clips(layer: str) -> int:
+    """Per-place clips are cached by layer NAME; a layer that changes identity
+    (staged, landed, retired, removed) must not be served from an old clip."""
+    from ..config import get_settings
+    settings = get_settings()
+    n = 0
+    for clip in settings.cache_dir.glob(f"*/{layer}.tif"):
+        if clip.parent.resolve() == settings.tiffs_dir.resolve():
+            continue
+        try:
+            clip.unlink()
+            n += 1
+        except OSError:
+            pass
+    return n
+
+
+def _raster_taken(layer: str) -> str | None:
+    from ..graph.geo import tiffs
+    _ensure_staged_loaded()
+    if layer in tiffs.catalog(include_staged=False) or layer in STAGED_RASTERS:
+        return f"layer {layer!r} is already in the catalog — contributions add layers, they do not overwrite them"
+    return None
+
+
+def _prepare_raster(m: dict) -> dict:
+    import os
+    import tempfile
+    from ..config import get_settings
+    from . import rasters
+    taken = _raster_taken(m["layer"])
+    if taken:
+        raise Declined(taken)
+    try:
+        raw, _ = fetch_policy.fetch(m["url"])
+    except fetch_policy.FetchRefused as exc:
+        raise Declined(str(exc)) from None
+    except Exception as exc:
+        raise Declined(f"could not fetch {m['url']}: {type(exc).__name__}: {exc}") from None
+    tiffs_dir = get_settings().tiffs_dir
+    tiffs_dir.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix="staged-tmp-", suffix=".tif", dir=tiffs_dir)
+    with os.fdopen(fd, "wb") as f:
+        f.write(raw)
+    base = {k: v for k, v in m.items() if k != "url"}
+    out = rasters.add({**base, "file": tmp}, dry_run=True)
+    if out["status"] == "declined":
+        os.unlink(tmp)
+        raise Declined("; ".join(out["failures"]))
+    return {"tmp": tmp, "observed": out.get("observed")}
+
+
+def _stage_raster(rec: dict, prepared: dict) -> dict:
+    import os
+    from ..config import get_settings
+    m = rec["manifest"]
+    layer, cid = m["layer"], rec["contribution_id"]
+    dest = get_settings().tiffs_dir / f"staged-{cid}.tif"
+    os.replace(prepared["tmp"], dest)
+    entry = {"local_path": f"tiffs/staged-{cid}.tif", "title": m["title"],
+             "description": m["description"], "legend": m["legend"], "source": m["source"],
+             "license": m["license"], "vintage": m["vintage"],
+             **({"usage_notes": m["usage_notes"]} if m.get("usage_notes") else {}),
+             "contributed": True, "staged_by": rec["contributor_id"], "contribution_id": cid,
+             "contributor_label": rec["contributor_label"]}
+    contract = {**m["declared"], "role": "hazard" if layer.startswith("hazard_") else "risk"}
+    _ensure_staged_loaded()
+    STAGED_RASTERS[layer] = {"entry": entry, "contract": contract}
+    _purge_clips(layer)
+    short = layer.split("_", 1)[1] if "_" in layer else layer
+    return {"layer": layer, "observed": prepared["observed"], "staged_file": str(dest),
+            "entry": entry, "contract": contract,
+            "how_to_test": (f"assemble_pack(pack='risk', place=<a place the layer covers>, "
+                            f"hazard={short!r}) — only you and reviewers can use it until it "
+                            "is approved; the pack's hazard passport shows the contract check")}
+
+
+def _land_raster(rec: dict) -> dict:
+    import os
+    from . import rasters
+    m, preview = rec["manifest"], rec["preview"]
+    manifest = {**{k: v for k, v in m.items() if k != "url"}, "file": preview["staged_file"]}
+    _ensure_staged_loaded()
+    STAGED_RASTERS.pop(m["layer"], None)          # so the gate's own taken-check sees the catalog only
+    out = rasters.add(manifest)
+    if out["status"] == "declined":
+        STAGED_RASTERS[m["layer"]] = {"entry": preview["entry"], "contract": preview["contract"]}
+        raise Declined("; ".join(out["failures"]))
+    try:
+        os.unlink(preview["staged_file"])
+    except OSError:
+        pass
+    _purge_clips(m["layer"])
+    return {"layer": out["layer"], "file": out["file"], "verified": out["verified"],
+            "passport": out["passport"]}
+
+
+def _retire_raster(rec: dict) -> dict:
+    from pathlib import Path
+    preview = rec.get("preview") or {}
+    layer = preview.get("layer", "")
+    _ensure_staged_loaded()
+    STAGED_RASTERS.pop(layer, None)
+    _purge_clips(layer)
+    path = Path(preview.get("staged_file") or "")
+    if path.is_file():
+        retired = path.with_suffix(".tif.retired")
+        path.rename(retired)
+        return {"removed": True, "staged_file": f"moved aside to {retired.name}", "note": _HISTORY}
+    return {"removed": False, "note": "no staged file remains"}
+
+
+def visible_staged_rasters() -> dict:
+    """{layer: catalog entry} for the staged layers the current caller may see."""
+    _ensure_staged_loaded()
+    caller = identity.current()
+    return {layer: row["entry"] for layer, row in STAGED_RASTERS.items()
+            if caller.may_see(row["entry"].get("staged_by"))}
+
+
+def visible_staged_contracts() -> dict:
+    _ensure_staged_loaded()
+    caller = identity.current()
+    return {layer: row["contract"] for layer, row in STAGED_RASTERS.items()
+            if caller.may_see(row["entry"].get("staged_by"))}
+
+
 _KINDS = {
     "document": {"validate": _validate_document, "prepare": _prepare_document,
                  "stage": _stage_document, "land": _land_document,
@@ -528,6 +712,10 @@ _KINDS = {
              "stage": _stage_feed, "land": _land_feed, "retire": _retire_feed,
              "fields": FEED_FIELDS,
              "title": lambda m: f"{m.get('title') or 'untitled feed'} ({m.get('dataset')})"},
+    "raster": {"validate": _validate_raster, "prepare": _prepare_raster,
+               "stage": _stage_raster, "land": _land_raster, "retire": _retire_raster,
+               "fields": RASTER_FIELDS,
+               "title": lambda m: f"{m.get('title') or 'untitled layer'} ({m.get('layer')})"},
 }
 
 
@@ -734,5 +922,7 @@ def describe_submit() -> str:
               "dataset name must be new. A staged table or feed is queried with "
               "feeds_query(dataset) like any feed and appears under `staged_feeds` in "
               "platform_capabilities for its owner. A feed is test-queried once before it is "
-              "staged, so a wrong index name or dead URL is refused with the adapter's reason."]
+              "staged, so a wrong index name or dead URL is refused with the adapter's reason. "
+              "A raster is fetched and verified against its declared contract before staging; "
+              "staged, it is a hazard the risk pack can assemble against for its owner."]
     return "\n".join(lines)

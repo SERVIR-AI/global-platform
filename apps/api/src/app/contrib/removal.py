@@ -89,6 +89,8 @@ def remove_raster(layer: str) -> dict:
     sch_path.write_text("# Contributed raster contracts — machine-owned.\n"
                         + yaml.safe_dump(sch, sort_keys=False, allow_unicode=True))
     out = {"catalog_row": "removed", "declared_contract": "removed"}
+    from .staging import _purge_clips
+    out["clips_purged"] = _purge_clips(layer)   # never serve an old clip under a reused name
     tif = Path(settings.tiffs_dir) / f"{layer}.tif"
     if tif.is_file():
         retired = tif.with_suffix(".tif.retired")

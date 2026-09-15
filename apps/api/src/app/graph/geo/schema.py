@@ -20,6 +20,13 @@ def _doc():
         layers.update({k: v for k, v in contrib.items() if k not in layers})
     except FileNotFoundError:
         pass
+    try:                                        # staged contracts, caller-scoped
+        from ...contrib import staging
+        layers = doc.setdefault("layers", {})
+        layers.update({k: v for k, v in staging.visible_staged_contracts().items()
+                       if k not in layers})
+    except Exception:
+        pass
     return doc
 
 

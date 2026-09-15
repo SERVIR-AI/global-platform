@@ -7,9 +7,11 @@ import yaml
 from ...config import get_settings
 
 
-def catalog():
+def catalog(include_staged: bool = True):
     """Hand-authored rows + contributed rows (conf/tiffs.contrib.yml — machine-
-    owned, written only by the contribution gate; contrib cannot shadow)."""
+    owned, written only by the contribution gate; contrib cannot shadow) + the
+    STAGED layers the current caller may see (contrib/staging.py: a contributor
+    previews their own layer; nobody else sees it until approval)."""
     with open(get_settings().tiffs_config_path) as f:
         cat = yaml.safe_load(f) or {}
     contrib_path = get_settings().tiffs_contrib_path
@@ -19,6 +21,12 @@ def catalog():
         cat.update({k: v for k, v in contrib.items() if k not in cat})
     except FileNotFoundError:
         pass
+    if include_staged:
+        try:
+            from ...contrib import staging
+            cat.update({k: v for k, v in staging.visible_staged_rasters().items() if k not in cat})
+        except Exception:                       # the catalog never fails on staging
+            pass
     return cat
 
 

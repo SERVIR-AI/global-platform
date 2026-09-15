@@ -172,6 +172,8 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
         "n": n, "kind": "hazard_layer", "retrieval": "computed-at-pack-time",
         "source": meta.get("source") or ("ADPC" if hz == "hazard_flood" else "catalog (unattributed)"),
         "title": meta.get("title", hz), "validation": validation,
+        **({"staged_by": meta["staged_by"], "contribution_id": meta.get("contribution_id")}
+           if meta.get("staged_by") else {}),
         "text": " ".join(passport_bits),
     })
 
