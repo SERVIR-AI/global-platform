@@ -7,10 +7,12 @@ Resolution order:
      else the id. Email is NOT guaranteed in an AuthKit access token, so the id
      is what reviewer lists and ownership checks are keyed on; the label is for
      humans.
-  2. OAuth off (local development only): the `X-GRP-Dev-Identity` request header,
-     so two local sandboxes can play contributor and reviewer. Never honoured when
-     OAuth is on — a header is not a credential.
+  2. OAuth off on a DEV BOX (not an open deployment, see GRP_ALLOW_ANONYMOUS):
+     the `X-GRP-Dev-Identity` request header, so two local sandboxes can play
+     contributor and reviewer. Never honoured when OAuth is on or the deployment
+     is open — a header is not a credential.
   3. No header either: `local-dev`, the single operator of a local box.
+  4. Anything else (OAuth on but no token, an open deployment): `anonymous`.
 
 Reviewer = an id or label listed in GRP_REVIEWERS. When that list is empty and
 OAuth is off, `local-dev` reviews (there is nobody else on a local box). When
@@ -87,17 +89,18 @@ def _is_reviewer(cid: str, label: str, source: str) -> bool:
 def resolve() -> Caller:
     """Resolve the caller from the request in flight (never cached)."""
     settings = get_settings()
+    dev_box = not settings.grp_oauth_enabled and not settings.grp_allow_anonymous
     tok = _from_token()
     if tok:
         cid, label = tok
         source = "token"
-    elif not settings.grp_oauth_enabled:
+    elif dev_box:
         dev = _from_dev_header()
         cid = label = dev or LOCAL_DEV
         source = "dev-header" if dev else "local-dev"
     else:
-        # OAuth on and no token: the transport refuses such calls before they
-        # reach a tool; this branch only serves non-MCP paths (REST, background).
+        # OAuth on and no token (REST paths, background work), or an OPEN
+        # deployment: nobody in particular. Never a reviewer, never an owner.
         cid = label = "anonymous"
         source = "anonymous"
     return Caller(cid, label, _is_reviewer(cid, label, source), source)

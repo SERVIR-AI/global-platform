@@ -189,6 +189,8 @@ def record(pack_id: str | None = None, report_id: str | None = None,
         "queries": pack.get("queries"), "gaps": pack.get("gaps"),
         "claim_scope": _claim_scope(pack),
         "minted_at": datetime.now(timezone.utc).isoformat(),
+        **({"staged_by": pack["staged_by"], "staged_note": pack.get("staged_note")}
+           if pack.get("staged_by") else {}),
     }
     rid = store.save_receipt(receipt)
     return {"status": "ok", "receipt_id": rid,

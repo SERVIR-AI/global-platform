@@ -201,7 +201,7 @@ class Corpus:
         os.replace(tmp, target)
 
     def ingest(self, text: str, metadata: dict, raw: bytes | None = None,
-               filename: str | None = None) -> dict:
+               filename: str | None = None, replace_staged: bool = False) -> dict:
         """Idempotent per document text; same text with different metadata updates
         provenance in place and reports metadata_updated. When `raw` is given, the
         exact original bytes are archived so every citation stays auditable even
@@ -216,6 +216,22 @@ class Corpus:
                 self._archive_raw(doc_id, raw, filename)  # backfills on re-ingest too
             existing = [c for c in self._chunks if c["doc_id"] == doc_id]
             if existing:
+                # Staged-contribution rules, decided HERE under the lock on fresh
+                # state (contrib/staging.py): a staged ingest never re-tags a
+                # public document or another contributor's preview, and an
+                # untagged re-ingest never publishes a preview by accident —
+                # only approval (replace_staged=True) drops the tag.
+                old_meta = existing[0]["metadata"]
+                if metadata.get("staged_by"):
+                    if not old_meta.get("staged_by"):
+                        raise CorpusError(f"doc_id {doc_id} is already in the library — "
+                                          "refusing to stage over a public document")
+                    if old_meta["staged_by"] != metadata["staged_by"]:
+                        raise CorpusError(f"doc_id {doc_id} is staged by another "
+                                          "contributor — refusing to re-tag it")
+                elif old_meta.get("staged_by") and not replace_staged:
+                    metadata = {**metadata, "staged_by": old_meta["staged_by"],
+                                "contribution_id": old_meta.get("contribution_id")}
                 out = {"doc_id": doc_id, "chunks": len(existing), "already_ingested": True}
                 if existing[0]["metadata"] != metadata:
                     for c in existing:

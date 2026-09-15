@@ -107,6 +107,9 @@ def _prepare_document(m: dict) -> dict:
                            f"doc_id {doc_id} — nothing to contribute")
         if owner != identity.current().id:
             raise Declined("this document is already staged by another contributor")
+        raise Declined(f"you already staged this document as contribution "
+                       f"{existing['metadata'].get('contribution_id')} — withdraw it "
+                       "first, or wait for the review")
     return {"raw": raw, "fname": fname, "text": text, "doc_id": doc_id, "corpus": corpus}
 
 
@@ -139,7 +142,10 @@ def _land_document(rec: dict) -> dict:
         fname = m.get("filename") or fname
     text = docloader.extract_text(raw, fname)
     meta = _document_meta(m)
-    out = corpus.ingest(text, meta, raw=raw, filename=fname)
+    out = corpus.ingest(text, meta, raw=raw, filename=fname, replace_staged=True)
+    if out["doc_id"] != doc_id:
+        raise Declined(f"re-extraction produced doc_id {out['doc_id']}, not the staged "
+                       f"{doc_id} — the archive no longer matches the preview; reject and resubmit")
     return {"doc_id": out["doc_id"], "chunks": out["chunks"], "corpus": corpus.name,
             "passport": meta}
 
@@ -501,6 +507,9 @@ def review_list(caller: identity.Caller | None = None, status_filter: str = "pen
     caller = caller or identity.current()
     if not caller.is_reviewer:
         return _not_reviewer(caller)
+    if status_filter not in (*STATUSES, "all"):
+        return {"status": "declined",
+                "note": f"unknown filter {status_filter!r} — one of {', '.join(STATUSES)}, all"}
     rows = store.list_contributions(status=None if status_filter == "all" else status_filter)
     return {"status": "ok", "filter": status_filter, "contributions": [_public(r) for r in rows]}
 

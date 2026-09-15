@@ -290,6 +290,24 @@ def rag_documents() -> dict:
     return {"corpus": _CORPUS, "documents": len(items), "items": items}
 
 
+def _refuse_unless_visible(corpus: Corpus, doc_id: str) -> None:
+    """The staged-contribution visibility rule on the ARCHIVE path too: a staged
+    original is served to its contributor and reviewers; a rejected or withdrawn
+    preview (index rows gone, raw kept for replay) only to them as well."""
+    from ..contrib import identity
+    found = corpus.find(doc_id)
+    if found is not None:
+        if not identity.visible(found["metadata"]):
+            raise HTTPException(status_code=404, detail="unknown doc_id")
+        return
+    from ..mcp import store
+    rec = next((r for r in store.list_contributions(kind="document")
+                if (r.get("preview") or {}).get("doc_id") == doc_id), None)
+    if rec and rec.get("status") != "approved" \
+            and not identity.current().may_see(rec.get("contributor_id")):
+        raise HTTPException(status_code=404, detail="unknown doc_id")
+
+
 @router.get("/rag/document/{doc_id}")
 def rag_document(doc_id: str):
     """Serve the archived original — the exact bytes the cited text was extracted
@@ -297,6 +315,7 @@ def rag_document(doc_id: str):
     if not re.fullmatch(r"[0-9a-f]{16}", doc_id):
         raise HTTPException(status_code=404, detail="unknown doc_id")
     corpus = Corpus(_CORPUS)
+    _refuse_unless_visible(corpus, doc_id)
     path = corpus.raw_path(doc_id)
     if path is None:
         known = any(d["doc_id"] == doc_id for d in corpus.documents())

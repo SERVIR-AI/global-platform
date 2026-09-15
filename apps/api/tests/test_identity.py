@@ -83,3 +83,14 @@ def test_settings_parse_reviewer_lists(log):
     assert Settings._split_reviewers('["a@x.org"]') == ["a@x.org"]
     assert Settings._split_reviewers(["kept"]) == ["kept"]
     log("OUTPUT", "comma list and JSON array both parse")
+
+
+def test_open_deployment_never_trusts_the_header_and_has_no_local_reviewer(settings, monkeypatch, log):
+    monkeypatch.setattr(identity, "_from_token", lambda: None)
+    monkeypatch.setattr(identity, "_from_dev_header", lambda: "spoof@hub.test")
+    monkeypatch.setattr(settings, "grp_allow_anonymous", True)
+    c = identity.resolve()
+    log("OUTPUT", f"open deployment -> {c}")
+    assert c.id == "anonymous" and c.source == "anonymous" and not c.is_reviewer
+    monkeypatch.setattr(identity, "_from_dev_header", lambda: None)
+    assert not identity.resolve().is_reviewer

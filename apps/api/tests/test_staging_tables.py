@@ -34,7 +34,7 @@ def env(monkeypatch, tmp_path):
 
 
 def _manifest(**over):
-    d = {"dataset": "sangkae_river_stage", "title": "Sangkae River monthly stage (SYNTHETIC)",
+    d = {"dataset": "x43_river_stage", "title": "Sangkae River monthly stage (SYNTHETIC)",
          "description": "SYNTHETIC demonstration series for one imaginary gauge.",
          "source": "hub hydrologist demonstration series (synthetic)",
          "validation": "unvalidated", "license": "CC0-1.0", "vintage": "2026-09",
@@ -45,7 +45,7 @@ def _manifest(**over):
     return d
 
 
-def _query_as(caller, ds="sangkae_river_stage"):
+def _query_as(caller, ds="x43_river_stage"):
     tok = identity.bind(caller)
     try:
         return feeds.query(ds, {"limit": 12})
@@ -80,14 +80,14 @@ def test_staged_table_serves_owner_and_reviewer_only(env, log):
     other = _query_as(OTHER)
     log("OUTPUT", f"other -> {other['status']}: {other['note']}")
     assert other["status"] == "declined" and "unknown dataset" in other["note"]
-    assert "sangkae_river_stage" not in other["available"]
+    assert "x43_river_stage" not in other["available"]
     assert _query_as(REVIEWER)["status"] == "ok"
     tok = identity.bind(OWNER)
     try:
         caps = registry.capabilities()
     finally:
         identity.unbind(tok)
-    assert "sangkae_river_stage" in caps["staged_feeds"] and "sangkae_river_stage" not in caps["feeds"]
+    assert "x43_river_stage" in caps["staged_feeds"] and "x43_river_stage" not in caps["feeds"]
     tok = identity.bind(OTHER)
     try:
         assert registry.capabilities()["staged_feeds"] == {}
@@ -100,10 +100,10 @@ def test_approval_lands_a_platform_feed_without_restart(env, log):
     ok = staging.approve(out["contribution_id"], REVIEWER, "checked")
     log("OUTPUT", f"{ok['status']} landing={ok['landing']['feed_row']}")
     assert ok["status"] == "approved"
-    row_file = env / "feeds" / "sangkae_river_stage.yml"
+    row_file = env / "feeds" / "x43_river_stage.yml"
     assert row_file.is_file() and yaml.safe_load(row_file.read_text())["contributed"] is True
-    assert "sangkae_river_stage" in registry.FEEDS and registry.FEEDS["sangkae_river_stage"]["declarative"]
-    assert "sangkae_river_stage" not in staging.STAGED_FEEDS
+    assert "x43_river_stage" in registry.FEEDS and registry.FEEDS["x43_river_stage"]["declarative"]
+    assert "x43_river_stage" not in staging.STAGED_FEEDS
     assert not list((env / "tables" / "staged").glob("*.csv"))
     everyone = _query_as(OTHER)
     assert everyone["status"] == "ok" and "staged" not in everyone["passport"]
@@ -117,7 +117,7 @@ def test_rejection_retires_the_staged_copy(env, log):
     assert rej["status"] == "rejected" and rej["retired"]["removed"]
     assert list((env / "tables" / "staged").glob("*.retired")) and not list((env / "tables" / "staged").glob("*.csv"))
     assert _query_as(OWNER)["status"] == "declined"
-    assert not (env / "feeds" / "sangkae_river_stage.yml").exists()
+    assert not (env / "feeds" / "x43_river_stage.yml").exists()
 
 
 def test_staged_rows_survive_a_restart(env, log):
@@ -139,8 +139,8 @@ def test_remove_feed_refuses_shipped_rows_unless_forced(env, log):
     assert removal.remove_feed("enso_soi", force=True)["status"] == "removed" and not shipped.exists()
     out = staging.submit("table", _manifest(), OWNER)
     staging.approve(out["contribution_id"], REVIEWER)
-    gone = removal.remove_feed("sangkae_river_stage")
-    assert gone["status"] == "removed" and not (env / "feeds" / "sangkae_river_stage.yml").exists()
+    gone = removal.remove_feed("x43_river_stage")
+    assert gone["status"] == "removed" and not (env / "feeds" / "x43_river_stage.yml").exists()
 
 
 def test_reload_drops_stale_rows_and_never_collides(env, log):

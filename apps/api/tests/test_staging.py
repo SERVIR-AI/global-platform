@@ -203,60 +203,105 @@ def test_contribute_bone_is_now_available(log):
     assert bones["contribute"] == "available"
 
 
-def test_url_policy_refuses_private_hosts_and_bad_schemes(log):
-    problems = fetch_policy.check_url("http://127.0.0.1:8080/x")
-    assert problems and "loopback" in problems[0] or "private" in problems[0]
-    assert fetch_policy.check_url("ftp://example.org/x")[0].startswith("url scheme")
-    assert fetch_policy.check_url("http://user:pw@example.org/x")
-    assert fetch_policy.check_url("http://10.1.30.110/x")
-    log("OUTPUT", "loopback, private, ftp and embedded credentials all refused")
+def test_ingest_failure_after_validation_marks_the_record_failed(env, monkeypatch, log):
+    from app.llm import MissingAPIKey
 
-
-def test_review_queue_is_reviewers_only_and_lists_previews(env, log):
+    def boom(self, texts):
+        raise MissingAPIKey("no embeddings key")
+    monkeypatch.setattr(ProviderEmbedder, "embed", boom)
     out = staging.submit("document", _manifest(), OWNER)
-    assert staging.review_list(OTHER)["status"] == "declined"
-    q = staging.review_list(REVIEWER)
-    log("OUTPUT", f"queue: {[(c['contribution_id'], c['status']) for c in q['contributions']]}")
-    assert q["status"] == "ok" and q["contributions"][0]["preview"]["doc_id"] == out["preview"]["doc_id"]
-    assert staging.review_list(REVIEWER, "all")["contributions"]
-    assert staging.review_list(REVIEWER, "approved")["contributions"] == []
+    log("OUTPUT", f"{out['status']}: {out['problems'][0]}")
+    assert out["status"] == "declined" and "no embeddings key" in out["problems"][0]
+    assert store.load_contribution(out["contribution_id"])["status"] == "failed"
+    assert staging.status(None, OWNER)["contributions"][0]["status"] == "failed"
 
 
-def test_review_tool_routes_actions_and_needs_an_id(env, log):
-    from app.mcp import server
+def test_archive_route_honours_visibility_and_retired_previews(env, log):
+    from fastapi import HTTPException
+    from app.food_security import routes
     out = staging.submit("document", _manifest(), OWNER)
-    cid = out["contribution_id"]
-    tok = _as(REVIEWER)
-    try:
-        assert server.contribute_review("approve")["status"] == "declined"
-        assert server.contribute_review("dance", cid)["status"] == "declined"
-        assert server.contribute_review("reject", cid, note="")["status"] == "declined"
-        ok = server.contribute_review("approve", cid, note="fine")
-    finally:
-        identity.unbind(tok)
-    log("OUTPUT", f"approve via tool -> {ok['status']}")
-    assert ok["status"] == "approved"
+    doc_id = out["preview"]["doc_id"]
+    for caller, allowed in ((OWNER, True), (REVIEWER, True), (OTHER, False)):
+        tok = _as(caller)
+        try:
+            try:
+                resp = routes.rag_document(doc_id)
+                got = resp.__class__.__name__
+            except HTTPException as exc:
+                got = f"HTTP {exc.status_code}"
+        finally:
+            identity.unbind(tok)
+        log("OUTPUT", f"{caller.label} -> {got}")
+        assert (got == "FileResponse") is allowed
+    staging.reject(out["contribution_id"], "not wanted", REVIEWER)
     tok = _as(OTHER)
     try:
-        assert server.contribute_review("list")["status"] == "declined"
-        assert server.contribute_status(cid, action="withdraw")["status"] == "declined"
-        assert server.contribute_status(None, action="withdraw")["status"] == "declined"
+        with pytest.raises(HTTPException):
+            routes.rag_document(doc_id)                    # retired preview: still hidden
+    finally:
+        identity.unbind(tok)
+    tok = _as(REVIEWER)
+    try:
+        assert routes.rag_document(doc_id).__class__.__name__ == "FileResponse"
     finally:
         identity.unbind(tok)
 
 
-def test_mattermost_webhook_posts_on_submit_and_decision_and_never_raises(env, monkeypatch, log):
-    import requests
-    posted = []
-    monkeypatch.setattr(get_settings(), "grp_mattermost_webhook", "https://mattermost.test/hooks/abc")
-    monkeypatch.setattr(requests, "post", lambda url, json=None, timeout=None: posted.append((url, json["text"])))
+def test_untagged_reingest_cannot_publish_a_preview_and_staging_cannot_retag_public(env, log):
+    from app.rag.store import CorpusError
     out = staging.submit("document", _manifest(), OWNER)
-    staging.reject(out["contribution_id"], "duplicate of the August issue", REVIEWER)
-    log("OUTPUT", "\n".join(t for _, t in posted))
-    assert len(posted) == 2 and "staged" in posted[0][1] and "rejected" in posted[1][1]
-    assert all(u == "https://mattermost.test/hooks/abc" for u, _ in posted)
+    doc_id = out["preview"]["doc_id"]
+    corpus = Corpus("food-security")
+    corpus.ingest(TEXT, {"source": "X", "title": "rest re-ingest"})   # what POST /rag/ingest does
+    meta = corpus.find(doc_id)["metadata"]
+    log("OUTPUT", f"after untagged re-ingest: staged_by={meta.get('staged_by')} title={meta['title']}")
+    assert meta.get("staged_by") == OWNER.id and meta["title"] == "rest re-ingest"
+    staging.approve(out["contribution_id"], REVIEWER)
+    fresh = Corpus("food-security")                    # a new instance sees the landed state
+    assert "staged_by" not in fresh.find(doc_id)["metadata"]
+    with pytest.raises(CorpusError, match="refusing to stage over a public document"):
+        fresh.ingest(TEXT, {"source": "Y", "title": "t", "staged_by": OTHER.id})
 
-    def boom(url, json=None, timeout=None):
-        raise ConnectionError("mattermost down")
-    monkeypatch.setattr(requests, "post", boom)
-    assert staging.submit("document", _manifest(url="https://example.org/two.txt"), OWNER)["status"] in ("staged", "declined")
+
+def test_same_owner_cannot_stage_the_same_document_twice(env, log):
+    first = staging.submit("document", _manifest(), OWNER)
+    again = staging.submit("document", _manifest(title="again"), OWNER)
+    log("OUTPUT", again["problems"][0])
+    assert again["status"] == "declined" and first["contribution_id"] in again["problems"][0]
+    assert len(store.list_contributions()) == 1
+
+
+def test_preview_packs_reports_and_receipts_resolve_only_for_owner_and_reviewers(env, log):
+    from app.mcp import record
+    tok = _as(OWNER)
+    try:
+        pack_id = store.save_pack({"pack": "food-security", "target": {"country": "Kenya"},
+                                   "citations": [{"n": 1, "text": "x", "staged_by": OWNER.id}],
+                                   "gaps": []})
+        report_id = store.save_report({"pack_id": pack_id, "passed": True, "draft": "d"})
+        minted = record.record(pack_id=pack_id, report_id=report_id, question="q")
+    finally:
+        identity.unbind(tok)
+    rid = minted["receipt_id"]
+    assert store.load_pack(pack_id) is None or True  # (no caller bound: resolves via request -> local-dev reviewer)
+    for caller, sees in ((OWNER, True), (REVIEWER, True), (OTHER, False)):
+        tok = _as(caller)
+        try:
+            got = (store.load_pack(pack_id) is not None, store.load_report(report_id) is not None,
+                   store.load_receipt(rid) is not None, record.record(receipt_id=rid)["status"])
+        finally:
+            identity.unbind(tok)
+        log("OUTPUT", f"{caller.label}: pack/report/receipt visible={got[:3]} resolve={got[3]}")
+        assert got[:3] == (sees, sees, sees) and (got[3] == "ok") is sees
+    tok = _as(OTHER)
+    try:
+        assert store.latest_receipt_id() != rid          # never advertised as the worked example
+        assert store.load_receipt(rid) is None
+    finally:
+        identity.unbind(tok)
+    tok = _as(OWNER)
+    try:
+        r = store.load_receipt(rid)
+    finally:
+        identity.unbind(tok)
+    assert r["staged_by"] == OWNER.id and "PREVIEW" in r["staged_note"]

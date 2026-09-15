@@ -78,10 +78,39 @@ def _load(table: str, ident: str) -> dict | None:
         row = con.execute(f"SELECT body FROM {table} WHERE id = ?", (ident,)).fetchone()
     finally:
         con.close()
-    return json.loads(row[0]) if row else None
+    if not row:
+        return None
+    body = json.loads(row[0])
+    # A PREVIEW object (a pack citing a staged contribution, and the reports and
+    # receipts minted from it) resolves only for its contributor and reviewers.
+    # To anyone else it does not exist — the same answer as an unknown id, so a
+    # guessed id reveals nothing (contrib/identity.py, the visibility rule).
+    if body.get("staged_by"):
+        from ..contrib import identity
+        if not identity.current().may_see(body["staged_by"]):
+            return None
+    return body
+
+
+def _inherit_preview(obj: dict) -> dict:
+    """Reports and receipts carry their pack's preview tag, whoever minted them."""
+    if obj.get("staged_by") or not obj.get("pack_id"):
+        return obj
+    pack = load_pack(obj["pack_id"])
+    if pack and pack.get("staged_by"):
+        return {**obj, "staged_by": pack["staged_by"], "staged_note": pack.get("staged_note")}
+    return obj
 
 
 def save_pack(pack: dict) -> str:
+    # Safety net for every assembly path: a pack citing a staged contribution
+    # is a preview owned by whoever assembled it (assemble.py sets this too).
+    if not pack.get("staged_by") and any(
+            isinstance(c, dict) and c.get("staged_by") for c in pack.get("citations") or []):
+        from ..contrib import identity
+        pack = {**pack, "staged_by": identity.current().id,
+                "staged_note": ("PREVIEW — this pack cites a staged contribution awaiting "
+                                "review; visible only to its contributor and to reviewers")}
     return _save("packs", pack, "pack_id")
 
 
@@ -90,7 +119,7 @@ def load_pack(pack_id: str) -> dict | None:
 
 
 def save_report(report: dict) -> str:
-    return _save("reports", report, "report_id")
+    return _save("reports", _inherit_preview(report), "report_id")
 
 
 def load_report(report_id: str) -> dict | None:
@@ -102,15 +131,18 @@ def latest_receipt_id() -> str | None:
     (so a builder resolves a genuine receipt instead of faking a payload)."""
     con = _connect()
     try:
-        row = con.execute(
-            "SELECT id FROM receipts ORDER BY created_at DESC LIMIT 1").fetchone()
+        rows = con.execute(
+            "SELECT id, body FROM receipts ORDER BY created_at DESC LIMIT 50").fetchall()
     finally:
         con.close()
-    return row[0] if row else None
+    for ident, body in rows:                    # never advertise someone's preview
+        if not json.loads(body).get("staged_by"):
+            return ident
+    return None
 
 
 def save_receipt(receipt: dict) -> str:
-    return _save("receipts", receipt, "receipt_id")
+    return _save("receipts", _inherit_preview(receipt), "receipt_id")
 
 
 def load_receipt(receipt_id: str) -> dict | None:

@@ -46,6 +46,8 @@ def groundedness(draft: str, pack_id: str) -> dict:
               "evidence_tier": "platform-registered",
               "checks": r, "draft": draft, "draft_sha256": digest,
               "draft_excerpt": draft[:280]}
+    if pack.get("staged_by"):
+        report["staged_by"], report["staged_note"] = pack["staged_by"], pack.get("staged_note")
     report_id = store.save_report(report)
     return {"status": "ok", "report_id": report_id, "passed": r["passed"],
             # A verdict is a waypoint, not a destination — say which way is on.

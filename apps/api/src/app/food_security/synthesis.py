@@ -311,6 +311,10 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
             "archived_copy": (f"/api/food-security/rag/document/{h['doc_id']}"
                               if corpus.raw_path(h["doc_id"]) else None),
             "usage_notes": m.get("usage_notes"),
+            # a preview citation says so, so the pack, report and receipt built
+            # on it inherit the contributor's visibility (contrib/staging.py)
+            **({"staged_by": m["staged_by"], "contribution_id": m.get("contribution_id")}
+               if m.get("staged_by") else {}),
             "text": h["text"]})
     cond, gap = _conditions_citation(crop, country, trace)
     if cond:

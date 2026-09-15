@@ -90,6 +90,16 @@ def assemble(country: str | None = None, crop: str | None = None,
     if stats.get("viz") is not None:                # a pack may carry embed data
         pack_body["viz"] = stats["viz"]
         pack_body["stats"].pop("viz", None)
+    if any(c.get("staged_by") for c in citations):
+        # A pack resting on a staged contribution is that contributor's PREVIEW:
+        # it, and every report and receipt minted from it, stay visible only to
+        # them and to reviewers (store.py gates the loads; identity.py decides).
+        from ..contrib import identity
+        pack_body["staged_by"] = identity.current().id
+        pack_body["staged_note"] = ("PREVIEW — this pack cites a staged contribution "
+                                    "awaiting review; it is visible only to its "
+                                    "contributor and to reviewers and is not a platform "
+                                    "answer until the contribution is approved")
     pack_id = store.save_pack(pack_body)
     # The viz payload is PERSISTED for the embed resolver, never returned inline:
     # 850 KB of hazard polygons in a tool result is 850 KB in the consumer LLM's

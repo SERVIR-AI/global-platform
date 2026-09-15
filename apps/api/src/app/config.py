@@ -194,6 +194,12 @@ class Settings(BaseSettings):
             return json.loads(v)
         return [o.strip() for o in v.split(",") if o.strip()]
 
+    # An OPEN deployment (deploy/entrypoint.sh's GRP_ALLOW_ANONYMOUS escape): OAuth
+    # off but reachable by strangers. Then nobody is "the local operator": callers
+    # resolve to anonymous, the dev-identity header is ignored, and nothing is
+    # reviewable over the MCP until GRP_REVIEWERS names someone.
+    grp_allow_anonymous: bool = False
+
     # Largest file a contribution may fetch from a URL (bytes). The server sits
     # on a shared network: fetches are also refused for private addresses
     # (contrib/fetch_policy.py), independent of this cap.
