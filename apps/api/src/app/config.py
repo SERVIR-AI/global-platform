@@ -178,6 +178,29 @@ class Settings(BaseSettings):
     # login routes are not mounted even with grp_oauth_enabled on.
     grp_authkit_client_id: str = ""
 
+    # --- Contributions over MCP (contrib/identity.py, contrib/staging.py) ---
+    # Reviewers: identities (OAuth subject ids or emails) allowed to approve or
+    # reject staged contributions. Empty + OAuth off = the local operator reviews.
+    # Comma list or JSON array; NoDecode for the same reason as cors_origins.
+    grp_reviewers: Annotated[list[str], NoDecode] = Field(default=[])
+
+    @field_validator("grp_reviewers", mode="before")
+    @classmethod
+    def _split_reviewers(cls, v):
+        if not isinstance(v, str):
+            return v
+        v = v.strip()
+        if v.startswith("["):
+            return json.loads(v)
+        return [o.strip() for o in v.split(",") if o.strip()]
+
+    # Largest file a contribution may fetch from a URL (bytes). The server sits
+    # on a shared network: fetches are also refused for private addresses
+    # (contrib/fetch_policy.py), independent of this cap.
+    grp_contrib_max_bytes: int = 50 * 1024 * 1024
+    # Optional Mattermost incoming-webhook URL; unset = no notifications.
+    grp_mattermost_webhook: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
