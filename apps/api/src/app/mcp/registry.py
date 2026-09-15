@@ -267,6 +267,18 @@ for _spec in FEEDS.values():
     _spec.setdefault("pack", "food-security")
 
 
+def reload_declarative_feeds() -> list[str]:
+    """Re-read conf/feeds/*.yml into the live registry without a restart — what
+    an approved contribution needs. Rows carrying `declarative` are dropped first:
+    re-merging over them would register every existing row as a collision."""
+    for name in [k for k, v in FEEDS.items() if v.get("declarative")]:
+        del FEEDS[name]
+    _load_declarative_feeds()
+    for spec in FEEDS.values():
+        spec.setdefault("pack", "food-security")
+    return sorted(k for k, v in FEEDS.items() if v.get("declarative"))
+
+
 # Compositions are REGISTRY ROWS invoked through the one `compose_run` tool — so a
 # new pack/composition adds zero tools (the count discipline, ARCHITECTURE §2).
 COMPOSITIONS = {
@@ -451,6 +463,14 @@ def _skills_available() -> list[str]:
     return skills.available()
 
 
+def _staged_feeds() -> dict:
+    try:
+        from ..contrib import staging
+        return staging.staged_feeds_for_caller()
+    except Exception:                       # the map never crashes on staging
+        return {}
+
+
 def capabilities(available_tools=None, available_prompts=None,
                  available_resources=None) -> dict:
     """The honest platform map. Bone status + the tool/prompt/resource lists are
@@ -496,6 +516,9 @@ def capabilities(available_tools=None, available_prompts=None,
         "compositions": {k: v for k, v in COMPOSITIONS.items()},
         # registry rows queried via feeds_query — dataset is a parameter
         "feeds": {k: v for k, v in FEEDS.items()},
+        # the caller's own staged contributions (reviewers: all) — queryable by
+        # them alone until approved; never a platform feed to anyone else
+        "staged_feeds": _staged_feeds(),
         "bones": _bones(set(tools)),
         # NB two different things are called "pack": a DOMAIN PACK (below) is the
         # versioned bundle of sources/calendars/composition — there is one per

@@ -155,7 +155,8 @@ def test_a_live_document_cannot_be_contributed_again(env, log):
     again = staging.submit("document", _manifest(title="same bytes, new title"), OTHER)
     log("OUTPUT", again["problems"][0])
     assert again["status"] == "declined" and "already in the food-security library" in again["problems"][0]
-    assert store.load_contribution(again["contribution_id"])["status"] == "failed"
+    assert "contribution_id" not in again                      # refused before anything was stored
+    assert len(store.list_contributions()) == 1
 
 
 def test_someone_elses_staged_document_is_declined_without_revealing_it(env, log):

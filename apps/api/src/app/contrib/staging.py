@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from ..mcp import store
 from . import fetch_policy, identity, sources
 
-KINDS = ("document",)          # tables, feeds and rasters follow (X4.3-X4.5)
+KINDS = ("document", "table")  # feeds and rasters follow (X4.4-X4.5)
 STATUSES = ("pending", "approved", "rejected", "withdrawn", "failed")
 PENDING_CAP = 20               # open contributions per contributor
 HOURLY_CAP = 30                # submissions per contributor per hour
@@ -80,10 +80,9 @@ def _document_meta(m: dict) -> dict:
     return meta
 
 
-def _stage_document(rec: dict) -> dict:
-    """Fetch, extract, ingest with the staged tag. Raises Declined."""
+def _prepare_document(m: dict) -> dict:
+    """Fetch, extract, duplicate-check — BEFORE anything is stored. Raises Declined."""
     from ..rag import docloader
-    m = rec["manifest"]
     corpus, why = sources._corpus_for(m["pack"])
     if corpus is None:
         raise Declined(why)
@@ -106,11 +105,17 @@ def _stage_document(rec: dict) -> dict:
         if not owner:
             raise Declined(f"this document is already in the {corpus.name} library as "
                            f"doc_id {doc_id} — nothing to contribute")
-        if owner != rec["contributor_id"]:
+        if owner != identity.current().id:
             raise Declined("this document is already staged by another contributor")
-    meta = _document_meta(m) | {"staged_by": rec["contributor_id"],
-                                "contribution_id": rec["contribution_id"]}
-    out = corpus.ingest(text, meta, raw=raw, filename=fname)
+    return {"raw": raw, "fname": fname, "text": text, "doc_id": doc_id, "corpus": corpus}
+
+
+def _stage_document(rec: dict, prepared: dict) -> dict:
+    """Ingest with the staged tag; the record exists, so its id rides the metadata."""
+    corpus = prepared["corpus"]
+    meta = _document_meta(rec["manifest"]) | {"staged_by": rec["contributor_id"],
+                                              "contribution_id": rec["contribution_id"]}
+    out = corpus.ingest(prepared["text"], meta, raw=prepared["raw"], filename=prepared["fname"])
     return {"doc_id": out["doc_id"], "chunks": out["chunks"], "corpus": corpus.name,
             "passport": meta,
             "how_to_test": (f"ask a question the document should answer, or call "
@@ -154,11 +159,234 @@ def _retire_document(rec: dict) -> dict:
             "raw_archive_kept": out.get("raw_archive_kept", False), "note": _HISTORY}
 
 
+# --------------------------------------------------------------------------- tables
+
+TABLE_FIELDS = {
+    "required": {
+        "dataset": "snake_case identifier, e.g. sangkae_river_stage (becomes the feed name)",
+        "title": "what the table is",
+        "description": "what it holds, how it was produced, and any caveat (say SYNTHETIC if it is)",
+        "source": "who produced it (agency, station network, or 'hub demonstration series')",
+        "validation": "multi-agency-consensus | peer-reviewed | single-agency | "
+                      "official-statistic | unvalidated",
+        "license": "e.g. CC-BY-4.0, CC0-1.0, or 'unstated' (silence is not accepted)",
+        "vintage": "when the data was produced, YYYY-MM",
+        "cadence": "monthly | daily | annual | irregular",
+        "columns": "mapping output field -> CSV column header, e.g. {month: Month, stage_m: Stage_m}",
+        "units": "units of the numeric columns, in words",
+    },
+    "optional": {
+        "csv_text": "the CSV content itself, header row first — for tables pasted into the "
+                    "conversation (up to 200 KB); give this OR url",
+        "url": "where the platform can fetch the CSV instead of csv_text (public host)",
+        "as_of_field": "the output field holding the row date, so the feed reports as_of",
+        "usage_notes": "a few lines the consuming analyst reads on every query (max 500 chars)",
+    },
+}
+CSV_TEXT_CAP = 200 * 1024
+
+# Staged feed rows live here — never in conf/feeds/ — and are rebuilt from the
+# contribution records on first use after a restart. feeds.query and
+# capabilities consult them through the visibility rule.
+STAGED_FEEDS: dict[str, dict] = {}
+_STAGED_LOADED = False
+
+
+def _staged_dir():
+    from ..config import get_settings
+    d = get_settings().cache_dir / "tables" / "staged"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _validate_table(manifest) -> list[str]:
+    if not isinstance(manifest, dict):
+        return ["manifest must be a mapping of provenance fields"]
+    m = dict(manifest)
+    problems = []
+    if m.pop("file", None):
+        problems.append("'file' is not accepted over the MCP — the platform cannot read "
+                        "your disk; paste the table as csv_text or give a url")
+    has_text, has_url = bool(str(m.get("csv_text") or "").strip()), bool(m.get("url"))
+    if not (has_text or has_url):
+        problems.append("give the table as csv_text (header row first) or a url to fetch it")
+    if has_text and has_url:
+        problems.append("give csv_text OR url, not both")
+    if has_text and len(m["csv_text"].encode()) > CSV_TEXT_CAP:
+        problems.append(f"csv_text is larger than {CSV_TEXT_CAP // 1024} KB — give a url instead")
+    if has_url:
+        problems += fetch_policy.check_url(m["url"])
+    from . import tables
+    base = {k: v for k, v in m.items() if k not in ("csv_text", "url")}
+    problems += [f for f in tables.validate_manifest({**base, "file": "-"})
+                 if not f.startswith("file ")]        # a fetched file is checked in prepare()
+    unknown = set(base) - set(tables.REQUIRED) - {"as_of_field", "usage_notes"}
+    if unknown:
+        problems.append(f"unknown fields {sorted(unknown)} — every field is provenance")
+    if has_text and isinstance(m.get("columns"), dict):   # pasted: check the header now
+        import csv
+        import io
+        try:
+            header = next(csv.reader(io.StringIO(m["csv_text"].lstrip("\ufeff"))))
+        except StopIteration:
+            header = []
+        missing = [c for c in m["columns"].values() if c not in header]
+        if missing:
+            problems.append(f"CSV header {header} is missing mapped column(s) {missing}")
+    return problems
+
+
+def _table_name_taken(ds: str) -> str | None:
+    from ..config import get_settings
+    from ..mcp import registry
+    _ensure_staged_loaded()
+    if ds in registry.FEEDS or (get_settings().feeds_conf_dir / f"{ds}.yml").exists():
+        return f"dataset name {ds!r} is already a platform feed — pick another name"
+    if ds in STAGED_FEEDS:
+        return f"dataset name {ds!r} is already staged — pick another name"
+    return None
+
+
+def _prepare_table(m: dict) -> dict:
+    """Get the bytes, check the header against the mapping, check the name."""
+    import os
+    import tempfile
+    from . import tables
+    taken = _table_name_taken(m["dataset"])
+    if taken:
+        raise Declined(taken)
+    if str(m.get("csv_text") or "").strip():
+        raw = m["csv_text"].encode("utf-8")
+    else:
+        try:
+            raw, _ = fetch_policy.fetch(m["url"])
+        except fetch_policy.FetchRefused as exc:
+            raise Declined(str(exc)) from None
+        except Exception as exc:
+            raise Declined(f"could not fetch {m['url']}: {type(exc).__name__}: {exc}") from None
+    fd, tmp = tempfile.mkstemp(prefix="staging-", suffix=".csv", dir=_staged_dir())
+    with os.fdopen(fd, "wb") as f:
+        f.write(raw)
+    base = {k: v for k, v in m.items() if k not in ("csv_text", "url")}
+    problems = tables.validate_manifest({**base, "file": tmp})
+    if problems:
+        os.unlink(tmp)
+        raise Declined("; ".join(problems))
+    return {"tmp": tmp, "sha256": hashlib.sha256(raw).hexdigest(), "base": base,
+            "rows": max(0, raw.decode("utf-8-sig").count("\n") - (0 if raw.endswith(b"\n") else -1) - 1)}
+
+
+def _table_row(rec: dict, path: str, sha256: str) -> dict:
+    """The registry row a staged table serves through — the same shape tables.add
+    writes, pointed at the staged copy and tagged with its owner."""
+    m = rec["manifest"]
+    return {"title": m["title"], "description": m["description"], "source": m["source"],
+            "validation": m["validation"], "residency": "platform-hosted copy (staged)",
+            "cadence": m["cadence"], "adapter": "generic_csv", "license": m["license"],
+            "vintage": m["vintage"], "status": "available",
+            "fetch": {"path": path, "sha256": sha256, "columns": m["columns"],
+                      "units": m["units"],
+                      **({"as_of_field": m["as_of_field"]} if m.get("as_of_field") else {})},
+            "params": {"limit": "rows of series to return (default 12)"},
+            **({"usage_notes": m["usage_notes"]} if m.get("usage_notes") else {}),
+            "pack": "food-security",
+            "staged_by": rec["contributor_id"], "contribution_id": rec["contribution_id"],
+            "contributor_label": rec["contributor_label"]}
+
+
+def _stage_table(rec: dict, prepared: dict) -> dict:
+    import os
+    ds = rec["manifest"]["dataset"]
+    dest = _staged_dir() / f"{rec['contribution_id']}.csv"
+    os.replace(prepared["tmp"], dest)
+    row = _table_row(rec, str(dest), prepared["sha256"])
+    _ensure_staged_loaded()
+    STAGED_FEEDS[ds] = row
+    return {"dataset": ds, "rows": prepared["rows"], "sha256": prepared["sha256"],
+            "staged_copy": str(dest), "row": row,
+            "how_to_test": (f"call feeds_query(dataset={ds!r}) — only you and reviewers get "
+                            "it until it is approved; then it is a platform feed for everyone")}
+
+
+def _land_table(rec: dict) -> dict:
+    from ..mcp import registry
+    from . import tables
+    preview = rec["preview"]
+    manifest = {**{k: v for k, v in rec["manifest"].items() if k not in ("csv_text", "url")},
+                "file": preview["staged_copy"]}
+    out = tables.add(manifest)
+    if out["status"] == "declined":
+        raise Declined("; ".join(out["failures"]))
+    registry.reload_declarative_feeds()
+    _ensure_staged_loaded()
+    STAGED_FEEDS.pop(preview["dataset"], None)
+    try:
+        import os
+        os.unlink(preview["staged_copy"])            # the landed copy is the archive now
+    except OSError:
+        pass
+    return {k: out[k] for k in ("dataset", "rows", "sha256", "archived", "feed_row", "passport")}
+
+
+def _retire_table(rec: dict) -> dict:
+    from pathlib import Path
+    preview = rec.get("preview") or {}
+    _ensure_staged_loaded()
+    STAGED_FEEDS.pop(preview.get("dataset", ""), None)
+    path = Path(preview.get("staged_copy") or "")
+    if path.is_file():
+        retired = path.with_suffix(".retired")
+        path.rename(retired)
+        return {"removed": True, "staged_copy": f"moved aside to {retired.name}", "note": _HISTORY}
+    return {"removed": False, "note": "no staged copy remains"}
+
+
+def _ensure_staged_loaded() -> None:
+    """Rebuild the staged feed rows from pending records after a restart."""
+    global _STAGED_LOADED
+    if _STAGED_LOADED:
+        return
+    _STAGED_LOADED = True
+    try:
+        pending = store.list_contributions(status="pending", kind="table")
+    except Exception:
+        return
+    for rec in pending:
+        row = (rec.get("preview") or {}).get("row")
+        ds = (rec.get("preview") or {}).get("dataset")
+        if row and ds and ds not in STAGED_FEEDS:
+            STAGED_FEEDS[ds] = row
+
+
+def visible_staged_feed(dataset: str) -> dict | None:
+    """The staged row for `dataset` if the current caller may see it, else None
+    (an invisible staged feed is indistinguishable from an unknown one)."""
+    _ensure_staged_loaded()
+    row = STAGED_FEEDS.get(dataset)
+    if row is None or not identity.current().may_see(row.get("staged_by")):
+        return None
+    return row
+
+
+def staged_feeds_for_caller() -> dict:
+    """What capabilities shows: the caller's own staged feeds (reviewers: all)."""
+    _ensure_staged_loaded()
+    caller = identity.current()
+    return {ds: {"title": row.get("title"), "contribution_id": row.get("contribution_id"),
+                 "contributor": row.get("contributor_label"), "status": "staged — awaiting review",
+                 "usage_notes": row.get("usage_notes")}
+            for ds, row in STAGED_FEEDS.items() if caller.may_see(row.get("staged_by"))}
+
+
 _KINDS = {
-    "document": {"validate": _validate_document, "stage": _stage_document,
-                 "land": _land_document, "retire": _retire_document,
-                 "fields": DOCUMENT_FIELDS,
+    "document": {"validate": _validate_document, "prepare": _prepare_document,
+                 "stage": _stage_document, "land": _land_document,
+                 "retire": _retire_document, "fields": DOCUMENT_FIELDS,
                  "title": lambda m: str(m.get("title") or "untitled document")},
+    "table": {"validate": _validate_table, "prepare": _prepare_table,
+              "stage": _stage_table, "land": _land_table, "retire": _retire_table,
+              "fields": TABLE_FIELDS,
+              "title": lambda m: f"{m.get('title') or 'untitled table'} ({m.get('dataset')})"},
 }
 
 
@@ -212,17 +440,25 @@ def submit(kind: str, manifest: dict, caller: identity.Caller | None = None) -> 
     caps = _caps(caller)
     if caps:
         return {"status": "declined", "kind": kind, "problems": caps}
-    rec = {"kind": kind, "status": "pending", "manifest": dict(manifest),
-           "title": spec["title"](manifest),
-           "contributor_id": caller.id, "contributor_label": caller.label}
-    ident = store.save_contribution(rec)
-    rec = store.load_contribution(ident)
+    token = identity.bind(caller)
     try:
-        preview = spec["stage"](rec)
-    except Declined as exc:
-        store.update_contribution(ident, {"status": "failed", "problems": [str(exc)]})
-        return {"status": "declined", "kind": kind, "contribution_id": ident,
-                "problems": [str(exc)]}
+        try:
+            prepared = spec["prepare"](manifest)      # fetches and checks; stores nothing
+        except Declined as exc:
+            return {"status": "declined", "kind": kind, "problems": [str(exc)]}
+        rec = {"kind": kind, "status": "pending", "manifest": dict(manifest),
+               "title": spec["title"](manifest),
+               "contributor_id": caller.id, "contributor_label": caller.label}
+        ident = store.save_contribution(rec)
+        rec = store.load_contribution(ident)
+        try:
+            preview = spec["stage"](rec, prepared)
+        except Exception as exc:                      # the record stays, marked, for audit
+            store.update_contribution(ident, {"status": "failed", "problems": [str(exc)]})
+            return {"status": "declined", "kind": kind, "contribution_id": ident,
+                    "problems": [f"staging failed: {type(exc).__name__}: {exc}"]}
+    finally:
+        identity.unbind(token)
     rec = store.update_contribution(ident, {"preview": preview})
     _notify(f"New {kind} contribution staged by {caller.label}: "
             f"{rec['title']} (id {ident}) — awaiting review")
@@ -349,5 +585,7 @@ def describe_submit() -> str:
               "then shows status pending in contribute_status until a reviewer decides) or "
               "{status: declined, problems: [...]} naming every problem at once — fix them all "
               "and resubmit. Rules: contributions never overwrite an existing source; a "
-              "document already in the library is declined by its doc_id."]
+              "document already in the library is declined by its doc_id; a table's dataset "
+              "name must be new. A staged table is queried with feeds_query(dataset) like any "
+              "feed and appears under `staged_feeds` in platform_capabilities for its owner."]
     return "\n".join(lines)

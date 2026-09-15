@@ -96,7 +96,10 @@ def add(manifest: dict, dry_run: bool = False) -> dict:
                          if manifest.get("as_of_field") else {})},
             "params": {"limit": "rows of series to return (default 12)"},
             **({"usage_notes": manifest["usage_notes"]}
-               if manifest.get("usage_notes") else {})}
+               if manifest.get("usage_notes") else {}),
+            # The marker remove-feed keys on: only rows the gate wrote are
+            # removable without --force; shipped feeds are code changes.
+            "contributed": True}
     feed_yml.parent.mkdir(parents=True, exist_ok=True)
     feed_yml.write_text(yaml.safe_dump(spec, sort_keys=False, allow_unicode=True))
     return {"status": "landed", "dataset": ds, "rows": n_rows, "sha256": digest,

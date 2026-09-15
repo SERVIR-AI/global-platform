@@ -6,7 +6,7 @@
   uv run python -m app.contrib.cli new-pack <id> [key1,key2]               # scaffold a pack
   uv run python -m app.contrib.cli doctor <pack-id>                        # pack integrity
   uv run python -m app.contrib.cli remove-doc <pack-id> <doc-id>
-  uv run python -m app.contrib.cli remove-feed <dataset>   # declarative rows + landed tables
+  uv run python -m app.contrib.cli remove-feed <dataset> [--force]  # contributed rows; --force for hand-dropped
   uv run python -m app.contrib.cli remove-raster <layer>   # contributed layers only
   uv run python -m app.contrib.cli remove-pack <pack-id>   # contributed packs only
   uv run python -m app.contrib.cli review list [pending|approved|rejected|all]
@@ -47,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     if argv and argv[0].startswith("remove-"):
         from . import removal
         fn = {"remove-doc": lambda: removal.remove_doc(argv[1], argv[2]),
-              "remove-feed": lambda: removal.remove_feed(argv[1]),
+              "remove-feed": lambda: removal.remove_feed(argv[1], force="--force" in argv),
               "remove-raster": lambda: removal.remove_raster(argv[1]),
               "remove-pack": lambda: removal.remove_pack(argv[1])}.get(argv[0])
         if fn is None or len(argv) < (3 if argv[0] == "remove-doc" else 2):

@@ -33,9 +33,12 @@ def remove_doc(pack_id: str, doc_id: str) -> dict:
     return {"status": "removed", **out, "note": _HISTORY}
 
 
-def remove_feed(dataset: str) -> dict:
-    """Remove a DECLARATIVE feed row (and, for landed tables, the archived copy
-    moves aside rather than vanishing). Code-row feeds are code changes."""
+def remove_feed(dataset: str, force: bool = False) -> dict:
+    """Remove a CONTRIBUTED feed row (and, for landed tables, the archived copy
+    moves aside rather than vanishing). Rows the contribution gate did not write
+    — shipped feeds, hand-dropped files — refuse unless `force`: a shipped feed
+    is a code change, and deleting one from the command line once took the
+    platform's own SOI feed with it."""
     from ..config import get_settings
     yml = Path(get_settings().feeds_conf_dir) / f"{dataset}.yml"
     if not yml.is_file():
@@ -43,6 +46,12 @@ def remove_feed(dataset: str) -> dict:
                 "failures": [f"no declarative row {yml.name} — built-in feeds are "
                              "code and are removed by a code change"]}
     spec = yaml.safe_load(yml.read_text()) or {}
+    if not spec.get("contributed") and not force:
+        return {"status": "declined",
+                "failures": [f"{yml.name} was not landed by the contribution gate (no "
+                             "'contributed: true' marker) — it is a shipped or hand-dropped "
+                             "feed. Remove a shipped feed as a code change; if you dropped "
+                             "the file yourself, pass --force"]}
     removed = {"feed_row": str(yml)}
     path = (spec.get("fetch") or {}).get("path")
     if path and Path(path).is_file():                  # a landed table's copy

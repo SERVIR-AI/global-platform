@@ -404,6 +404,11 @@ def query(dataset: str, params: dict | None = None) -> dict:
     params = params or {}
     spec = registry.FEEDS.get(dataset)
     if spec is None:
+        # A staged contribution serves ONLY to its owner and reviewers; to anyone
+        # else it is simply unknown (contrib/staging.py, the visibility rule).
+        from ..contrib import staging
+        spec = staging.visible_staged_feed(dataset)
+    if spec is None:
         return {"status": "declined", "note": f"unknown dataset {dataset!r}",
                 "available": sorted(k for k, v in registry.FEEDS.items()
                                     if v.get("status") == "available")}
@@ -429,6 +434,10 @@ def query(dataset: str, params: dict | None = None) -> dict:
                 # gap widens as an event intensifies). Unstated, that reads as an error.
                 "sst_basis": spec.get("sst_basis"),
                 "query": res.get("query_receipt"), "stale_data": res.get("stale_data")}
+    if spec.get("staged_by"):
+        passport["staged"] = {"contribution_id": spec.get("contribution_id"),
+                              "note": ("STAGED — a contribution awaiting review; served only "
+                                       "to its contributor and to reviewers until approved")}
     out = {"dataset": dataset, "as_of": res.get("as_of"), "count": res.get("count"),
            "summary": res.get("summary"), "records": res.get("records"),
            "passport": passport}
