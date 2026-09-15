@@ -421,6 +421,15 @@ def query(dataset: str, params: dict | None = None) -> dict:
     if adapter is None:
         return {"status": "declined", "dataset": dataset,
                 "note": f"{dataset} is registered but has no adapter (not implemented)"}
+    if spec.get("contributed") or spec.get("staged_by"):
+        # A contributed upstream is re-checked on every read: the address the
+        # contributor named must still be a public one (contrib/fetch_policy.py).
+        from ..contrib import fetch_policy
+        url = (spec.get("fetch") or {}).get("url")
+        problems = fetch_policy.check_url(url) if url else []
+        if problems:
+            return {"status": "declined", "dataset": dataset,
+                    "note": f"{dataset}: upstream refused by the fetch policy — " + "; ".join(problems)}
     try:
         res = adapter(params, spec)   # adapters get their own registry row
     except FeedDecline as exc:

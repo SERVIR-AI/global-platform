@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from ..mcp import store
 from . import fetch_policy, identity, sources
 
-KINDS = ("document", "table")  # feeds and rasters follow (X4.4-X4.5)
+KINDS = ("document", "table", "feed")  # rasters follow (X4.5)
 STATUSES = ("pending", "approved", "rejected", "withdrawn", "failed")
 PENDING_CAP = 20               # open contributions per contributor
 HOURLY_CAP = 30                # submissions per contributor per hour
@@ -354,7 +354,8 @@ def _ensure_staged_loaded() -> None:
         return
     _STAGED_LOADED = True
     try:
-        pending = store.list_contributions(status="pending", kind="table")
+        pending = (store.list_contributions(status="pending", kind="table")
+                   + store.list_contributions(status="pending", kind="feed"))
     except Exception:
         return
     for rec in pending:
@@ -384,6 +385,132 @@ def staged_feeds_for_caller() -> dict:
             for ds, row in STAGED_FEEDS.items() if caller.may_see(row.get("staged_by"))}
 
 
+# --------------------------------------------------------------------------- feeds
+
+FEED_FIELDS = {
+    "required": {
+        "dataset": "snake_case identifier, e.g. nino12_sst (becomes the feed name)",
+        "title": "what the feed is, e.g. Nino 1+2 SST anomaly (monthly)",
+        "description": "what it measures and where it comes from",
+        "source": "publisher, e.g. NOAA PSL",
+        "validation": "multi-agency-consensus | peer-reviewed | single-agency | "
+                      "official-statistic | unvalidated",
+        "residency": "external call-out (the platform reads the upstream at query time)",
+        "cadence": "monthly | daily | annual | irregular",
+        "adapter": "generic_table (NOAA year-by-12-months text series) | generic_json "
+                   "(a JSON API with a record list)",
+        "fetch": "adapter settings — generic_table: {url, index_name, units, missing_below?, "
+                 "bands?: [{min?, max?, label}]}; generic_json: {url, records_path (dot path "
+                 "to the record list), fields (output field -> dot path in a record)}",
+    },
+    "optional": {
+        "usage_notes": "a few lines the consuming analyst reads on every query (max 500 chars)",
+        "license": "upstream licence, e.g. public-domain (US government), or 'unstated'",
+        "vintage": "version or date of the upstream product, if it has one",
+        "sst_basis": "for SST-based indices: the dataset the anomalies rest on (ERSSTv5, OISST)",
+    },
+}
+_FEED_ADAPTERS = ("generic_table", "generic_json")
+_FEED_KNOWN = set(FEED_FIELDS["required"]) | set(FEED_FIELDS["optional"])
+
+
+def _validate_feed(manifest) -> list[str]:
+    from . import feedspecs
+    if not isinstance(manifest, dict):
+        return ["manifest must be a mapping of feed settings"]
+    m = dict(manifest)
+    problems = []
+    if m.pop("file", None) or (isinstance(m.get("fetch"), dict) and m["fetch"].get("path")):
+        problems.append("a feed reads an upstream URL; for a file you have, contribute it as a "
+                        "table (kind table, csv_text or url)")
+    if m.get("adapter") and m["adapter"] not in _FEED_ADAPTERS:
+        problems.append(f"adapter must be one of {_FEED_ADAPTERS} over the MCP "
+                        "(generic_csv is what a table contribution produces)")
+    problems += [f for f in feedspecs.validate_spec(m)
+                 if not f.startswith("adapter must be one of")]     # reported above
+    unknown = set(m) - _FEED_KNOWN
+    if unknown:
+        problems.append(f"unknown fields {sorted(unknown)} — every field is provenance")
+    url = (m.get("fetch") or {}).get("url") if isinstance(m.get("fetch"), dict) else None
+    if url:
+        problems += fetch_policy.check_url(url)
+    return problems
+
+
+def _feed_row(rec: dict) -> dict:
+    m = rec["manifest"]
+    row = {k: v for k, v in m.items() if k != "dataset"}
+    row.update({"status": "available", "pack": "food-security",
+                "staged_by": rec["contributor_id"], "contribution_id": rec["contribution_id"],
+                "contributor_label": rec["contributor_label"]})
+    return row
+
+
+def _prepare_feed(m: dict) -> dict:
+    """The spec must actually answer before it is staged: one live query through
+    the adapter, so a wrong index name or a dead URL is refused, not staged."""
+    from ..mcp import feeds
+    taken = _table_name_taken(m["dataset"])
+    if taken:
+        raise Declined(taken)
+    adapter = feeds.ADAPTERS.get(m["adapter"])
+    if adapter is None:
+        raise Declined(f"no adapter named {m['adapter']!r}")
+    probe = {k: v for k, v in m.items() if k != "dataset"}
+    try:
+        res = adapter({}, probe)
+    except feeds.FeedDecline as exc:
+        raise Declined(f"the feed did not answer through {m['adapter']}: {exc.note}") from None
+    except Exception as exc:
+        raise Declined(f"the feed did not answer through {m['adapter']}: "
+                       f"{type(exc).__name__}: {exc}") from None
+    if not res.get("records"):
+        raise Declined("the feed answered but returned no records — check fetch settings")
+    return {"sample": {"as_of": res.get("as_of"), "count": res.get("count"),
+                       "summary": res.get("summary"), "last": res["records"][-1]}}
+
+
+def _stage_feed(rec: dict, prepared: dict) -> dict:
+    ds = rec["manifest"]["dataset"]
+    _ensure_staged_loaded()
+    STAGED_FEEDS[ds] = _feed_row(rec)
+    return {"dataset": ds, "sample": prepared["sample"], "row": STAGED_FEEDS[ds],
+            "how_to_test": (f"call feeds_query(dataset={ds!r}) — only you and reviewers get it "
+                            "until it is approved; then it is a platform feed for everyone")}
+
+
+def _land_feed(rec: dict) -> dict:
+    import yaml
+    from ..config import get_settings
+    from ..mcp import registry
+    m = rec["manifest"]
+    url = (m.get("fetch") or {}).get("url")
+    problems = fetch_policy.check_url(url) if url else []
+    if problems:
+        raise Declined("; ".join(problems))
+    taken = _table_name_taken(m["dataset"]) if m["dataset"] not in STAGED_FEEDS else None
+    if taken:
+        raise Declined(taken)
+    spec = {**m, "contributed": True}
+    path = get_settings().feeds_conf_dir / f"{m['dataset']}.yml"
+    if path.exists():
+        raise Declined(f"{path.name} already exists — contributions never overwrite")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(spec, sort_keys=False, allow_unicode=True))
+    registry.reload_declarative_feeds()
+    _ensure_staged_loaded()
+    STAGED_FEEDS.pop(m["dataset"], None)
+    return {"dataset": m["dataset"], "feed_row": str(path),
+            "passport": {k: m.get(k) for k in ("source", "validation", "residency", "cadence")}}
+
+
+def _retire_feed(rec: dict) -> dict:
+    _ensure_staged_loaded()
+    ds = (rec.get("preview") or {}).get("dataset", "")
+    removed = STAGED_FEEDS.pop(ds, None) is not None
+    return {"removed": removed, "note": "nothing was written to disk for a staged feed"}
+
+
 _KINDS = {
     "document": {"validate": _validate_document, "prepare": _prepare_document,
                  "stage": _stage_document, "land": _land_document,
@@ -393,6 +520,10 @@ _KINDS = {
               "stage": _stage_table, "land": _land_table, "retire": _retire_table,
               "fields": TABLE_FIELDS,
               "title": lambda m: f"{m.get('title') or 'untitled table'} ({m.get('dataset')})"},
+    "feed": {"validate": _validate_feed, "prepare": _prepare_feed,
+             "stage": _stage_feed, "land": _land_feed, "retire": _retire_feed,
+             "fields": FEED_FIELDS,
+             "title": lambda m: f"{m.get('title') or 'untitled feed'} ({m.get('dataset')})"},
 }
 
 
@@ -577,9 +708,10 @@ def describe_submit() -> str:
     lines = ["Contribute a source to the platform from this conversation — no server access, "
              "no config files. The submission is validated against the same gate the "
              "platform's own contribution commands use; a clean one is STAGED: stored for "
-             "review and immediately visible to you (and to reviewers) in every query, so "
-             "you can test exactly what an analyst will see. It goes live for everyone only "
-             "when a reviewer approves it.",
+             "review and served to you (and to reviewers) on every query path — search, "
+             "inventory, feeds, evidence packs — under the same relevance ranking as any other "
+             "source, so you test exactly what an analyst will see. It goes live for everyone "
+             "only when a reviewer approves it.",
              "",
              "kind: one of " + ", ".join(KINDS) + ".",
              "manifest: the provenance fields for that kind. Ask the contributor for anything "
@@ -594,7 +726,9 @@ def describe_submit() -> str:
               "then shows status pending in contribute_status until a reviewer decides) or "
               "{status: declined, problems: [...]} naming every problem at once — fix them all "
               "and resubmit. Rules: contributions never overwrite an existing source; a "
-              "document already in the library is declined by its doc_id; a table's dataset "
-              "name must be new. A staged table is queried with feeds_query(dataset) like any "
-              "feed and appears under `staged_feeds` in platform_capabilities for its owner."]
+              "document already in the library is declined by its doc_id; a table's or feed's "
+              "dataset name must be new. A staged table or feed is queried with "
+              "feeds_query(dataset) like any feed and appears under `staged_feeds` in "
+              "platform_capabilities for its owner. A feed is test-queried once before it is "
+              "staged, so a wrong index name or dead URL is refused with the adapter's reason."]
     return "\n".join(lines)
