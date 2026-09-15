@@ -209,3 +209,53 @@ def test_url_policy_refuses_private_hosts_and_bad_schemes(log):
     assert fetch_policy.check_url("http://user:pw@example.org/x")
     assert fetch_policy.check_url("http://10.1.30.110/x")
     log("OUTPUT", "loopback, private, ftp and embedded credentials all refused")
+
+
+def test_review_queue_is_reviewers_only_and_lists_previews(env, log):
+    out = staging.submit("document", _manifest(), OWNER)
+    assert staging.review_list(OTHER)["status"] == "declined"
+    q = staging.review_list(REVIEWER)
+    log("OUTPUT", f"queue: {[(c['contribution_id'], c['status']) for c in q['contributions']]}")
+    assert q["status"] == "ok" and q["contributions"][0]["preview"]["doc_id"] == out["preview"]["doc_id"]
+    assert staging.review_list(REVIEWER, "all")["contributions"]
+    assert staging.review_list(REVIEWER, "approved")["contributions"] == []
+
+
+def test_review_tool_routes_actions_and_needs_an_id(env, log):
+    from app.mcp import server
+    out = staging.submit("document", _manifest(), OWNER)
+    cid = out["contribution_id"]
+    tok = _as(REVIEWER)
+    try:
+        assert server.contribute_review("approve")["status"] == "declined"
+        assert server.contribute_review("dance", cid)["status"] == "declined"
+        assert server.contribute_review("reject", cid, note="")["status"] == "declined"
+        ok = server.contribute_review("approve", cid, note="fine")
+    finally:
+        identity.unbind(tok)
+    log("OUTPUT", f"approve via tool -> {ok['status']}")
+    assert ok["status"] == "approved"
+    tok = _as(OTHER)
+    try:
+        assert server.contribute_review("list")["status"] == "declined"
+        assert server.contribute_status(cid, action="withdraw")["status"] == "declined"
+        assert server.contribute_status(None, action="withdraw")["status"] == "declined"
+    finally:
+        identity.unbind(tok)
+
+
+def test_mattermost_webhook_posts_on_submit_and_decision_and_never_raises(env, monkeypatch, log):
+    import requests
+    posted = []
+    monkeypatch.setattr(get_settings(), "grp_mattermost_webhook", "https://mattermost.test/hooks/abc")
+    monkeypatch.setattr(requests, "post", lambda url, json=None, timeout=None: posted.append((url, json["text"])))
+    out = staging.submit("document", _manifest(), OWNER)
+    staging.reject(out["contribution_id"], "duplicate of the August issue", REVIEWER)
+    log("OUTPUT", "\n".join(t for _, t in posted))
+    assert len(posted) == 2 and "staged" in posted[0][1] and "rejected" in posted[1][1]
+    assert all(u == "https://mattermost.test/hooks/abc" for u, _ in posted)
+
+    def boom(url, json=None, timeout=None):
+        raise ConnectionError("mattermost down")
+    monkeypatch.setattr(requests, "post", boom)
+    assert staging.submit("document", _manifest(url="https://example.org/two.txt"), OWNER)["status"] in ("staged", "declined")

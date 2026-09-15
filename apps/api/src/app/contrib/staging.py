@@ -345,7 +345,8 @@ def describe_submit() -> str:
         lines.append(f"\n{kind} — required: " + "; ".join(f"{k} ({v})" for k, v in fields["required"].items()))
         lines.append(f"{kind} — optional: " + "; ".join(f"{k} ({v})" for k, v in fields["optional"].items()))
     lines += ["",
-              "Returns {status: staged, contribution_id, preview{doc_id,...}, next} or "
+              "Returns {status: staged, contribution_id, preview{doc_id,...}, next} (the record "
+              "then shows status pending in contribute_status until a reviewer decides) or "
               "{status: declined, problems: [...]} naming every problem at once — fix them all "
               "and resubmit. Rules: contributions never overwrite an existing source; a "
               "document already in the library is declined by its doc_id."]

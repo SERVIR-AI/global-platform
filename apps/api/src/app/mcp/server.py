@@ -368,6 +368,30 @@ def contribute_status(contribution_id: str | None = None, action: str = "show") 
 
 
 @mcp.tool()
+def contribute_review(action: str = "list", contribution_id: str | None = None,
+                      note: str | None = None, status_filter: str = "pending") -> dict:
+    """The review queue — reviewers only (GRP_REVIEWERS); anyone else is declined.
+
+    action="list": contributions with the given status_filter (pending | approved |
+    rejected | withdrawn | failed | all), each with its preview so you can test it
+    exactly as the contributor did before deciding. action="approve" with a
+    contribution_id (optional note): lands it for everyone through the same gate.
+    action="reject" with a contribution_id and a note the contributor can act on:
+    removes the preview, keeps the record and the note. Returns {status, ...}; on a
+    decline `note` says why.
+    """
+    if action == "list":
+        return _staging.review_list(status_filter=status_filter)
+    if not contribution_id:
+        return {"status": "declined", "note": f"{action} needs a contribution_id"}
+    if action == "approve":
+        return _staging.approve(contribution_id, note=note)
+    if action == "reject":
+        return _staging.reject(contribution_id, note or "")
+    return {"status": "declined", "note": f"unknown action {action!r} — list, approve or reject"}
+
+
+@mcp.tool()
 def corpus_document(doc_id: str | None = None) -> dict:
     """Trace a passage back to its source document.
 
