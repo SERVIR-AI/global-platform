@@ -38,6 +38,13 @@ def _connect() -> sqlite3.Connection:
     for t in _TABLES:
         con.execute(f"CREATE TABLE IF NOT EXISTS {t} "
                     "(id TEXT PRIMARY KEY, created_at TEXT NOT NULL, body TEXT NOT NULL)")
+    # Contributions are the one MUTABLE row type (pending -> approved/rejected/
+    # withdrawn), so they get their own shape with the columns a review queue
+    # filters on; the full record still rides `body` like everything else.
+    con.execute("CREATE TABLE IF NOT EXISTS contributions "
+                "(id TEXT PRIMARY KEY, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, "
+                "status TEXT NOT NULL, kind TEXT NOT NULL, contributor_id TEXT NOT NULL, "
+                "body TEXT NOT NULL)")
     return con
 
 
@@ -108,3 +115,81 @@ def save_receipt(receipt: dict) -> str:
 
 def load_receipt(receipt_id: str) -> dict | None:
     return _load("receipts", receipt_id)
+
+
+# --- contributions (contrib/staging.py) ---------------------------------------
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def save_contribution(obj: dict) -> str:
+    """Insert a new contribution record; returns its id (also written into body)."""
+    body = json.dumps(obj, sort_keys=True, default=str)
+    ident = hashlib.sha256(body.encode() + os.urandom(8)).hexdigest()[:16]
+    now = _now()
+    stored = {**obj, "contribution_id": ident, "created_at": now, "updated_at": now}
+    con = _connect()
+    try:
+        with con:
+            con.execute(
+                "INSERT INTO contributions(id, created_at, updated_at, status, kind, "
+                "contributor_id, body) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (ident, now, now, obj["status"], obj["kind"], obj["contributor_id"],
+                 json.dumps(stored, default=str)))
+    finally:
+        con.close()
+    return ident
+
+
+def update_contribution(ident: str, changes: dict) -> dict | None:
+    """Merge `changes` into the record (status/kind/contributor_id columns follow)."""
+    cur = load_contribution(ident)
+    if cur is None:
+        return None
+    merged = {**cur, **changes, "updated_at": _now()}
+    con = _connect()
+    try:
+        with con:
+            con.execute(
+                "UPDATE contributions SET updated_at = ?, status = ?, kind = ?, "
+                "contributor_id = ?, body = ? WHERE id = ?",
+                (merged["updated_at"], merged["status"], merged["kind"],
+                 merged["contributor_id"], json.dumps(merged, default=str), ident))
+    finally:
+        con.close()
+    return merged
+
+
+def load_contribution(ident: str) -> dict | None:
+    if not ident or not _ID.fullmatch(ident):
+        return None
+    con = _connect()
+    try:
+        row = con.execute("SELECT body FROM contributions WHERE id = ?", (ident,)).fetchone()
+    finally:
+        con.close()
+    return json.loads(row[0]) if row else None
+
+
+def list_contributions(status: str | None = None, contributor_id: str | None = None,
+                       kind: str | None = None, since: str | None = None) -> list[dict]:
+    """Newest first. Filters are AND-ed; None means any."""
+    where, args = [], []
+    for col, val in (("status", status), ("contributor_id", contributor_id), ("kind", kind)):
+        if val:
+            where.append(f"{col} = ?")
+            args.append(val)
+    if since:
+        where.append("created_at >= ?")
+        args.append(since)
+    sql = "SELECT body FROM contributions"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY created_at DESC"
+    con = _connect()
+    try:
+        rows = con.execute(sql, args).fetchall()
+    finally:
+        con.close()
+    return [json.loads(r[0]) for r in rows]

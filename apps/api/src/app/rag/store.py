@@ -61,6 +61,15 @@ def _chunk(text: str, target: int = 1800) -> list[str]:
     return chunks
 
 
+def _visible(meta: dict) -> bool:
+    """The staged-contribution visibility rule, applied before any ranking so a
+    staged document can never leak through a score. Unstaged metadata is public."""
+    if not (meta or {}).get("staged_by"):
+        return True
+    from ..contrib import identity
+    return identity.visible(meta)
+
+
 def _matches(meta: dict, filters: dict) -> bool:
     """Case-insensitive: scalars by equality, list fields by intersection;
     empty filter values are ignored."""
@@ -253,7 +262,8 @@ class Corpus:
         if min_relevance is None:
             min_relevance = get_settings().rag_min_relevance
         k = max(int(k), 0)
-        idx = [i for i, c in enumerate(self._chunks) if _matches(c["metadata"], filters)]
+        idx = [i for i, c in enumerate(self._chunks)
+               if _matches(c["metadata"], filters) and _visible(c["metadata"])]
         if not idx or k == 0:
             return []
         q = self.embedder.embed([query])[0]
@@ -266,11 +276,24 @@ class Corpus:
     def count(self, **filters) -> int:
         """Chunks surviving the filters (pre-similarity) — distinguishes
         'nothing matches your filters' from 'below threshold'."""
-        return sum(1 for c in self._chunks if _matches(c["metadata"], filters))
+        return sum(1 for c in self._chunks
+                   if _matches(c["metadata"], filters) and _visible(c["metadata"]))
+
+    def find(self, doc_id: str) -> dict | None:
+        """One document by id REGARDLESS of visibility — for the contribution gate's
+        own duplicate and ownership checks, never for serving."""
+        chunks = [c for c in self._chunks if c["doc_id"] == doc_id]
+        if not chunks:
+            return None
+        return {"doc_id": doc_id, "chunks": len(chunks), "metadata": chunks[0]["metadata"]}
 
     def documents(self) -> list[dict]:
+        """The library as the CURRENT CALLER may see it: staged documents appear only
+        to their contributor and to reviewers (contrib/identity.py)."""
         docs: dict[str, dict] = {}
         for c in self._chunks:
+            if not _visible(c["metadata"]):
+                continue
             entry = docs.setdefault(
                 c["doc_id"], {"doc_id": c["doc_id"], "chunks": 0, "metadata": c["metadata"]})
             entry["chunks"] += 1

@@ -9,6 +9,10 @@
   uv run python -m app.contrib.cli remove-feed <dataset>   # declarative rows + landed tables
   uv run python -m app.contrib.cli remove-raster <layer>   # contributed layers only
   uv run python -m app.contrib.cli remove-pack <pack-id>   # contributed packs only
+  uv run python -m app.contrib.cli review list [pending|approved|rejected|all]
+  uv run python -m app.contrib.cli review show <contribution-id>
+  uv run python -m app.contrib.cli review approve <contribution-id> [note]
+  uv run python -m app.contrib.cli review reject <contribution-id> <note>
 
 Prints results and exits non-zero if anything declined, so the command is
 honest in scripts too."""
@@ -23,6 +27,23 @@ from . import sources
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "review":
+        from . import identity, staging
+        op = identity.cli_operator()
+        sub = argv[1] if len(argv) > 1 else "list"
+        if sub == "list":
+            out = staging.review_list(op, argv[2] if len(argv) > 2 else "pending")
+        elif sub == "show" and len(argv) > 2:
+            out = staging.status(argv[2], op)
+        elif sub == "approve" and len(argv) > 2:
+            out = staging.approve(argv[2], op, " ".join(argv[3:]) or None)
+        elif sub == "reject" and len(argv) > 3:
+            out = staging.reject(argv[2], " ".join(argv[3:]), op)
+        else:
+            print(__doc__)
+            return 2
+        print(json.dumps(out, indent=2, default=str))
+        return 0 if out["status"] != "declined" else 1
     if argv and argv[0].startswith("remove-"):
         from . import removal
         fn = {"remove-doc": lambda: removal.remove_doc(argv[1], argv[2]),

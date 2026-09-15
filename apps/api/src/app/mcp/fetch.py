@@ -31,6 +31,10 @@ def _passport(metadata: dict, doc_id: str, archived: bool) -> dict:
         "usage_notes": metadata.get("usage_notes"),
         "archived_copy": f"/api/food-security/rag/document/{doc_id}" if archived else None,
         "doc_id": doc_id,
+        **({"staged": {"contribution_id": metadata.get("contribution_id"),
+                       "note": "STAGED — a contribution awaiting review; visible only to "
+                               "its contributor and to reviewers until approved"}}
+           if metadata.get("staged_by") else {}),
     }
 
 

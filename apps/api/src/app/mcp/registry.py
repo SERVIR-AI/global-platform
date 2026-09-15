@@ -527,6 +527,8 @@ def coverage() -> dict:
         corpus = Corpus(_FS_CORPUS)
         for ch in corpus._chunks:
             m = ch.get("metadata") or {}
+            if m.get("staged_by"):          # a preview is nobody's coverage yet
+                continue
             countries.update(m.get("countries") or [])
             crops.update(m.get("crops") or [])
             if m.get("source"):

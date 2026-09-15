@@ -341,6 +341,32 @@ def ui_embed(component: str, receipt_id: str | None = None) -> dict:
     return ui.embed(component, receipt_id=receipt_id)
 
 
+# --- the contribute bone: staged, previewable, reviewed -----------------------
+from ..contrib import staging as _staging  # noqa: E402  (after mcp exists)
+
+
+@mcp.tool(description=_staging.describe_submit())
+def contribute_submit(kind: str, manifest: dict) -> dict:
+    return _staging.submit(kind, manifest)
+
+
+@mcp.tool()
+def contribute_status(contribution_id: str | None = None, action: str = "show") -> dict:
+    """Your contributions and their review state.
+
+    No arguments: everything you submitted, newest first (reviewers also get
+    `pending_review`, the queue). With a contribution_id: that record.
+    action="withdraw" with a contribution_id: take back your own pending
+    contribution — its preview is removed; history it already appears in stays.
+    Returns {status: ok|withdrawn|declined, ...}; `note` says why on a decline.
+    """
+    if action == "withdraw":
+        if not contribution_id:
+            return {"status": "declined", "note": "withdraw needs a contribution_id"}
+        return _staging.withdraw(contribution_id)
+    return _staging.status(contribution_id)
+
+
 @mcp.tool()
 def corpus_document(doc_id: str | None = None) -> dict:
     """Trace a passage back to its source document.

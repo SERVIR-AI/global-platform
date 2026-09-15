@@ -19,6 +19,7 @@ TOOLS = {
     "resolve_place_time", "assemble_pack", "verify_groundedness", "record_receipt",
     "publish_answer", "compose_run", "feeds_query",
     "ui_design", "ui_catalog", "ui_component", "ui_embed",
+    "contribute_submit", "contribute_status",
 }
 PROMPTS = {"build_a_tool", "run_analysis", "explain_platform"}
 PANEL_TOOLS = ("record_receipt", "publish_answer")
