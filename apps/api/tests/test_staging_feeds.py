@@ -15,15 +15,19 @@ OTHER = identity.Caller("user_other", "analyst@hub.test", False, "bound")
 REVIEWER = identity.Caller("user_rev", "reviewer@hub.test", True, "bound")
 
 
-def _fake_table_adapter(params, spec):
-    if spec["fetch"].get("index_name") != "Nino1+2":
-        raise feeds.FeedDecline("index_name not found in the upstream header")
-    return {"as_of": "2026-08", "count": 3, "summary": "3 rows of Nino1+2",
-            "records": [{"year": 2026, "month": 6, "value": 2.48},
-                        {"year": 2026, "month": 7, "value": 2.91},
-                        {"year": 2026, "month": 8, "value": 3.28}],
-            "query_receipt": "fake", "url": spec["fetch"]["url"],
-            "stale_data": {"served_stale": False}, "note": spec.get("usage_notes")}
+NOAA_TEXT = ("  1950  2026\n"
+             "2025  0.11  0.21  0.31  0.41  0.51  0.61  0.71  0.81  0.91  1.01  1.11  1.21\n"
+             "2026  1.48  1.72  1.95  2.10  2.30  2.48  2.91  3.28 -99.99 -99.99 -99.99 -99.99\n"
+             " -99.99\n")
+
+
+class _FakeHTTP:
+    """What requests.get returns for the PSL text series (the REAL adapter parses it)."""
+    def __init__(self, url):
+        self.url, self.text, self.status_code = url, NOAA_TEXT, 200
+
+    def raise_for_status(self):
+        pass
 
 
 @pytest.fixture
@@ -33,7 +37,8 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(s, "feeds_conf_dir", tmp_path / "feeds")
     monkeypatch.setattr(s, "grp_mattermost_webhook", "")
     monkeypatch.setattr(fetch_policy, "check_url", lambda url: [])
-    monkeypatch.setitem(feeds.ADAPTERS, "generic_table", _fake_table_adapter)
+    import requests
+    monkeypatch.setattr(requests, "get", lambda url, timeout=None, **kw: _FakeHTTP(url))
     snapshot = copy.deepcopy(registry.FEEDS)
     staging.STAGED_FEEDS.clear()
     monkeypatch.setattr(staging, "_STAGED_LOADED", False)
@@ -73,8 +78,15 @@ def test_bad_specs_are_refused_with_every_problem(env, log):
     assert store.list_contributions() == []
 
 
-def test_a_spec_that_does_not_answer_is_refused_and_nothing_is_stored(env, log):
-    out = staging.submit("feed", _manifest(fetch={**_manifest()["fetch"], "index_name": "Nope"}), OWNER)
+def test_a_spec_that_does_not_answer_is_refused_and_nothing_is_stored(env, monkeypatch, log):
+    import requests
+
+    class _Empty(_FakeHTTP):
+        def __init__(self, url):
+            super().__init__(url)
+            self.text = "<html>not a data file</html>"
+    monkeypatch.setattr(requests, "get", lambda url, timeout=None, **kw: _Empty(url))
+    out = staging.submit("feed", _manifest(), OWNER)
     log("OUTPUT", out["problems"][0])
     assert out["status"] == "declined" and "did not answer" in out["problems"][0]
     assert store.list_contributions() == [] and staging.STAGED_FEEDS == {}

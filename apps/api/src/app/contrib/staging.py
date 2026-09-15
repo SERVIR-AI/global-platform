@@ -440,7 +440,10 @@ def _validate_feed(manifest) -> list[str]:
 def _feed_row(rec: dict) -> dict:
     m = rec["manifest"]
     row = {k: v for k, v in m.items() if k != "dataset"}
+    # File-loaded rows carry `declarative` (their filename); the adapters key
+    # their fetch cache on it, so a staged row names its contribution instead.
     row.update({"status": "available", "pack": "food-security",
+                "declarative": f"staged:{rec['contribution_id']}",
                 "staged_by": rec["contributor_id"], "contribution_id": rec["contribution_id"],
                 "contributor_label": rec["contributor_label"]})
     return row
@@ -457,6 +460,7 @@ def _prepare_feed(m: dict) -> dict:
     if adapter is None:
         raise Declined(f"no adapter named {m['adapter']!r}")
     probe = {k: v for k, v in m.items() if k != "dataset"}
+    probe.update({"status": "available", "declarative": f"probe:{m['dataset']}"})
     try:
         res = adapter({}, probe)
     except feeds.FeedDecline as exc:
