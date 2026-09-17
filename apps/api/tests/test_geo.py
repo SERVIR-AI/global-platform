@@ -60,3 +60,61 @@ def test_result_carries_source(aoi, log):
     log("CHECK", "both sources are present and non-empty")
     assert src1
     assert src2
+
+
+# --- place resolution must never centre an AOI on a building ------------------
+
+def _poi(name, rank=30, cls="office"):
+    return {"class": cls, "type": "government", "place_rank": rank,
+            "display_name": f"{name}, Street 3, Battambang, Cambodia",
+            "lon": "103.19", "lat": "13.09", "geojson": {"type": "Point"}}
+
+
+def _admin(name, ring, rank=12):
+    return {"class": "boundary", "type": "administrative", "place_rank": rank,
+            "display_name": f"{name}, Cambodia", "lon": "103.2", "lat": "13.1",
+            "geojson": {"type": "Polygon", "coordinates": [ring]}}
+
+
+def test_a_point_of_interest_never_becomes_an_area(monkeypatch, log):
+    """'Battambang Province' returned only a records office and a police station, and
+    the platform answered about a 12 km box around the office — confidently, with
+    citations. Dropping the administrative noun finds the real boundary."""
+    from app.graph.geo import ingest
+    ring = [[103.15, 13.05], [103.25, 13.05], [103.25, 13.15], [103.15, 13.15], [103.15, 13.05]]
+    calls = []
+
+    def fake_search(q):
+        calls.append(q)
+        if "province" in q.lower():
+            return [_poi("Archives of Battambang Province"),
+                    _poi("Gendarmerie Royale de la Province de Battambang", cls="amenity")]
+        return [_admin("Battambang", ring)]
+
+    monkeypatch.setattr(ingest, "_search", fake_search)
+    km2, name, geom, how = ingest._boundary("Battambang Province, Cambodia")
+    log("OUTPUT", f"{calls} -> {name!r} [{how}]")
+    assert calls == ["Battambang Province, Cambodia", "Battambang, Cambodia"]
+    assert name == "Battambang" and "admin boundary" in how
+
+
+def test_a_genuine_building_query_declines_instead_of_inventing_an_area(monkeypatch, log):
+    from app.graph.geo import ingest
+    monkeypatch.setattr(ingest, "_search", lambda q: [_poi("Archives of Battambang Province")])
+    try:
+        ingest._boundary("Archives of Battambang Province")
+        raise AssertionError("should have declined")
+    except ValueError as exc:
+        log("OUTPUT", str(exc))
+        assert "points of interest" in str(exc) and "not a place" in str(exc)
+
+
+def test_an_over_cap_admin_area_is_named_and_sized_not_silently_boxed(monkeypatch, log):
+    """A province over the area cap must say so by name, never hand back a box that
+    reads like the province."""
+    from app.graph.geo import ingest
+    big = [[100.0, 10.0], [106.0, 10.0], [106.0, 16.0], [100.0, 16.0], [100.0, 10.0]]
+    monkeypatch.setattr(ingest, "_search", lambda q: [_admin("Battambang", big, rank=8)])
+    km2, name, geom, how = ingest._boundary("Battambang")
+    log("OUTPUT", f"{name!r} [{how}]")
+    assert "box at its centre" in name and "over the" in how and "NOT the whole" in how

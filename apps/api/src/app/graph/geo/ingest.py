@@ -99,6 +99,24 @@ def _boundary(place):
     if not results:
         raise ValueError(f"could not find '{place}' (try 'City, Country')")
 
+    # A geocoder answers the STRING, not the question. "Battambang Province" returns
+    # exactly two hits, both points of interest: a records office and a police station
+    # that happen to carry the province's name. Building an area of interest around
+    # either produced a confident, fully cited answer about a 12 km box around a
+    # building. When every hit is a point of interest, drop the administrative noun
+    # and ask again — "Battambang" returns the province boundary at rank 8.
+    if all(_is_poi(d) for d in results):
+        stripped = _strip_admin_noun(place)
+        if stripped and stripped.lower() != place.lower():
+            retry = _search(stripped)
+            if retry and not all(_is_poi(d) for d in retry):
+                results = retry
+        if all(_is_poi(d) for d in results):
+            raise ValueError(
+                f"'{place}' only matches points of interest in OpenStreetMap "
+                f"({results[0]['display_name'].split(',')[0]}), not a place. "
+                "Name the settlement or district itself, e.g. 'Battambang, Cambodia'")
+
     hit = _under_cap_admin(results)
     if hit:
         return (*hit, f"admin boundary ~{hit[0]:.0f} km²")
@@ -117,9 +135,23 @@ def _boundary(place):
     dlat = RADIUS_KM / 111.0
     dlon = RADIUS_KM / (111.0 * max(math.cos(math.radians(lat)), 0.01))
     g = box(lon - dlon, lat - dlat, lon + dlon, lat + dlat)
-    name = f"{center['display_name'].split(',')[0]} (~{RADIUS_KM:.0f} km radius)"
-    return (g.area * 111.0 * 108.0, name, g,
-            f"{RADIUS_KM:.0f} km radius box (no admin boundary under cap)")
+    # Say what was actually cut down, and to what. A named administrative area that
+    # exceeded the cap must be reported by NAME and SIZE: the caller asked about a
+    # province and is getting a town-sized box at its centre, which is a different
+    # question and has to read as one.
+    over = _admin_over_cap(results)
+    if over:
+        km2, d, _ = over
+        admin_name = d["display_name"].split(",")[0]
+        name = f"{admin_name}: {RADIUS_KM:.0f} km box at its centre"
+        how = (f"{RADIUS_KM:.0f} km radius box at the centre of {admin_name} "
+               f"(~{km2:.0f} km², over the {AREA_CAP_KM2:.0f} km² cap) — "
+               "NOT the whole administrative area")
+    else:
+        name = f"{center['display_name'].split(',')[0]} (~{RADIUS_KM:.0f} km radius)"
+        how = (f"{RADIUS_KM:.0f} km radius box around "
+               f"{center['display_name'].split(',')[0]} (no admin boundary found)")
+    return (g.area * 111.0 * 108.0, name, g, how)
 
 
 def _search(place):
@@ -152,12 +184,66 @@ def _under_cap_admin(results):
     return max(under, key=lambda c: c[0]) if under else None
 
 
+# Ranks 26+ are street level and below in Nominatim; these classes are things, not places.
+_POI_CLASSES = {"office", "amenity", "shop", "building", "tourism", "leisure", "craft",
+                "healthcare", "historic", "man_made", "emergency", "military", "club"}
+_ADMIN_NOUNS = ("province", "prefecture", "district", "municipality", "county", "region",
+                "governorate", "state", "department", "division", "subdistrict", "commune")
+
+
+def _is_poi(d):
+    """A point of interest — a building or facility — rather than a place."""
+    if d.get("class") in _POI_CLASSES:
+        return True
+    try:
+        return int(d.get("place_rank", 0)) >= 26
+    except (TypeError, ValueError):
+        return False
+
+
+def _strip_admin_noun(place):
+    """'Battambang Province, Cambodia' -> 'Battambang, Cambodia'. The administrative
+    noun is what dragged the match onto a government office in the first place."""
+    head, sep, tail = place.partition(",")
+    words = head.split()
+    while words and words[-1].lower().strip(".") in _ADMIN_NOUNS:
+        words.pop()
+    if not words:
+        return None
+    return " ".join(words) + sep + tail
+
+
+def _admin_over_cap(results):
+    """The largest administrative boundary among the results, whatever its size.
+
+    Needed because the cap rejects a province and then the fallback has to choose a
+    centre. Picking Nominatim's first hit put a records office at the centre of a
+    province query — "Battambang Province" resolved to "Archives of Battambang
+    Province" and answered, with full citations, about a 12 km box around a
+    building. An administrative area is always a better centre than a point of
+    interest that merely shares its name.
+    """
+    admins = []
+    for d in results:
+        gj = d.get("geojson", {})
+        if d.get("class") == "boundary" and d.get("type") == "administrative" \
+                and gj.get("type") in ("Polygon", "MultiPolygon"):
+            admins.append((shape(gj).area * 111.0 * 108.0, d, shape(gj)))
+    return max(admins, key=lambda c: c[0]) if admins else None
+
+
 def _best_center(results):
-    """Pick the centre point: prefer a populated-place node over a giant boundary."""
+    """Pick the centre point: a populated place first, then an administrative area's
+    centroid, and a point of interest only if the results hold nothing better."""
     for t in ("city", "town", "municipality", "village", "suburb"):
         for d in results:
             if d.get("class") == "place" and d.get("type") == t:
                 return d
+    admin = _admin_over_cap(results)
+    if admin:
+        km2, d, geom = admin
+        c = geom.centroid
+        return {**d, "lon": str(c.x), "lat": str(c.y)}
     return results[0]
 
 
