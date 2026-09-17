@@ -59,6 +59,41 @@ def _l2_risk(aoi, hz, trace, gaps):
     return key, weights
 
 
+def _effective_weights(aoi, hz, weights) -> tuple[dict, list]:
+    """What the weights ACTUALLY were, cell by cell.
+
+    The engine drops a no-data vulnerability cell and renormalises the rest (rule R6).
+    That is correct, and silent: a layer that is empty over most of an AOI contributes
+    almost nothing while the recipe still advertises its nominal weight. Measured here
+    so the citation can state the effective weight and the coverage behind it —
+    population cover was 1.6% of one real AOI, against a nominal 0.40.
+    """
+    import numpy as np
+    import rasterio
+    adir = os.path.dirname(aoi["admin"])
+    with rasterio.open(aoi[hz]) as h:
+        footprint = h.read(1) > 0
+    cells = int(footprint.sum())
+    cover, notes = {}, []
+    for layer in weights:
+        aligned = os.path.join(adir, f"{layer}__aligned.tif")
+        try:
+            with rasterio.open(aligned) as s:
+                arr = s.read(1)
+            cover[layer] = float((arr[footprint] > 0).mean()) if cells else 0.0
+        except Exception:
+            cover[layer] = 0.0
+            notes.append(f"{layer}: coverage unreadable")
+    total = sum(weights[l] * cover[l] for l in weights)
+    effective = ({l: round(weights[l] * cover[l] / total, 3) for l in weights}
+                 if total > 0 else {l: 0.0 for l in weights})
+    for layer in weights:
+        if cover[layer] < 0.5:
+            notes.append(f"{layer} covers {cover[layer] * 100:.1f}% of the hazard footprint, so its "
+                         f"nominal weight {weights[layer]} acts as {effective[layer]}")
+    return {"cells": cells, "coverage": cover, "effective": effective}, notes
+
+
 def _severity_text(by_severity: dict, legend: dict, noun: str = "class") -> str:
     parts = []
     for cls in sorted(int(k) for k in (by_severity or {})):
@@ -195,6 +230,8 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
             f"{k}:{v.get('at_risk')}" for k, v in counts.items() if "at_risk" in v)
             + f", roads:{rrk['length_km']:.1f}km")
 
+        eff, eff_notes = _effective_weights(aoi, hz, risk_weights)
+        gaps.extend(eff_notes)
         n += 1
         citations.append({
             "n": n, "kind": "method", "retrieval": "config",
@@ -203,8 +240,13 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
             "text": ("Risk level = clip(round(hazard x V / 5), 1, 5), where V is the "
                      "weighted average of the vulnerability classes at that cell and a "
                      "no-data vulnerability layer is dropped with its weight "
-                     "renormalised. Weights used here: "
+                     "renormalised. Configured weights: "
                      + "; ".join(f"{lay} {w}" for lay, w in risk_weights.items())
+                     + ". EFFECTIVE weights over this area, after each layer's real "
+                     "coverage of the hazard footprint: "
+                     + "; ".join(f"{lay} {eff['effective'][lay]} "
+                                 f"(covers {eff['coverage'][lay] * 100:.1f}%)"
+                                 for lay in risk_weights)
                      + ". Every input is on the same 1 to 5 class scale. The weights are "
                      "platform starting values, not calibrated against observed loss."),
         })
