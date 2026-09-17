@@ -75,7 +75,8 @@ def test_the_full_risk_loop_gates_and_receipts(offline_aoi, log):
     assert out["target"] == {"place": "Testville", "hazard": "flood"}
     f = out["evidence_freshness"]
     assert f["pulled_sources"] == []                     # nothing live in risk v0
-    assert len(f["computed_sources"]) == 5               # 4 exposure + hazard layer
+    # 4 exposure + 4 risk-level + the vulnerability-layer passport + hazard layer
+    assert len(f["computed_sources"]) == 10
     assert out["insight"]["series"]                      # categorical series flow
     assert out["insight"]["pack"] == "risk"
 

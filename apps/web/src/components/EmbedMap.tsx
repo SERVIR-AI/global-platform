@@ -20,7 +20,12 @@ import 'ol/ol.css';
 export type VizPayload = Pick<
   ChatResponse,
   'place' | 'hazard' | 'layer' | 'metric' | 'legend' | 'bounds' | 'aoi' | 'features' | 'hazard_layer'
->;
+> & {
+  /** What the drawn raster actually IS. The risk pack draws a vulnerability-weighted
+   * risk grid when it can compute one, and the hazard clip when it cannot; labelling
+   * a risk grid "hazard" would misstate the evidence. Absent = hazard severity. */
+  layer_kind?: 'risk_level' | 'hazard_severity';
+};
 
 const EmbedMap: FC<{ viz: VizPayload }> = ({ viz }) => {
   const host = useRef<HTMLDivElement>(null);
@@ -45,15 +50,20 @@ const EmbedMap: FC<{ viz: VizPayload }> = ({ viz }) => {
   }, [viz]);
 
   const legend = viz.legend ?? {};
+  const isRisk = viz.layer_kind === 'risk_level';
+  const hazardName = viz.hazard?.replace('hazard_', '');
   return (
     <div className="flex h-full w-full flex-col">
       <div className="px-3 py-2 text-sm">
         <span className="font-semibold">{viz.place ?? 'Area of interest'}</span>
-        {viz.hazard && <span className="opacity-70"> · {viz.hazard.replace('hazard_', '')} hazard</span>}
+        {hazardName && (
+          <span className="opacity-70"> · {hazardName} {isRisk ? 'risk level' : 'hazard'}</span>
+        )}
         {viz.metric?.value != null && (
           <span className="opacity-70">
             {' '}
-            · {viz.metric.value} {viz.metric.unit === 'km' ? 'km of roads' : viz.layer} exposed
+            · {viz.metric.value} {viz.metric.unit === 'km' ? 'km of roads' : viz.layer}{' '}
+            {isRisk ? 'at risk' : 'exposed'}
           </span>
         )}
       </div>
@@ -69,7 +79,10 @@ const EmbedMap: FC<{ viz: VizPayload }> = ({ viz }) => {
         </div>
       )}
       <div className="px-3 pb-2 text-[11px] opacity-60">
-        Rendered from the receipt's recorded evidence pack — resolved live, not frozen.
+        {isRisk
+          ? 'Classes are risk levels: hazard severity weighted by vulnerability, not hazard alone.'
+          : 'Classes are the hazard provider\u2019s severity classes.'}{' '}
+        Rendered from the receipt&apos;s recorded evidence pack — resolved live, not frozen.
       </div>
     </div>
   );

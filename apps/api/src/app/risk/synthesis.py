@@ -15,7 +15,9 @@ replayable as a picture and not only as prose.
 
 from __future__ import annotations
 
-from ..graph.geo import ingest, rasterstats, schema, store as geostore, tiffs, viz
+import os
+
+from ..graph.geo import combine, ingest, rasterstats, schema, store as geostore, tiffs, viz
 
 SECTIONS = (
     "## What the numbers show",
@@ -31,13 +33,39 @@ _ASSETS = ("hospitals", "schools", "buildings")
 _FLOOD_LINEAGE = "ADPC hazard_flood.tif, derived from JRC GLOFAS v2.1"
 
 
-def _severity_text(by_severity: dict, legend: dict) -> str:
+# A computed risk grid carries no catalog legend; these are the platform's own
+# class labels for the 1-5 risk scale (the same scale the hub's indicator scheme uses).
+_RISK_LABELS = {1: "Very Low", 2: "Low", 3: "Moderate", 4: "High", 5: "Very High"}
+
+
+def _l2_risk(aoi, hz, trace, gaps):
+    """Compute the Layer-2 risk grid for this AOI: hazard crossed with weighted
+    vulnerability (conf/risk_l2.yml). Returns (aoi key, weights) or (None, None)
+    with a declared gap — a missing vulnerability layer must decline, not crash."""
+    weights = combine.weights_for(hz)
+    if not weights:
+        gaps.append(f"{hz}: no Layer-2 vulnerability weights are configured, so this "
+                    "answer is hazard exposure only, not a risk level")
+        return None, None
+    try:
+        path = combine.combine_l2(aoi, hz)
+    except Exception as exc:
+        gaps.append(f"{hz}: risk level could not be computed ({type(exc).__name__}: {exc}) "
+                    "— this answer is hazard exposure only")
+        return None, None
+    key = os.path.basename(path)[:-len(".tif")]          # risk_<hazard>_l2
+    aoi[key] = path
+    trace.append(f"risk_l2[{hz}] {' + '.join(f'{k}:{v}' for k, v in weights.items())}")
+    return key, weights
+
+
+def _severity_text(by_severity: dict, legend: dict, noun: str = "class") -> str:
     parts = []
     for cls in sorted(int(k) for k in (by_severity or {})):
         n = by_severity.get(cls, by_severity.get(str(cls), 0))
         if n:
-            parts.append(f"class {cls} ({legend.get(cls, 'unlabelled')}): {n}")
-    return "; ".join(parts) or "none in any hazard class"
+            parts.append(f"{noun} {cls} ({legend.get(cls, 'unlabelled')}): {n}")
+    return "; ".join(parts) or f"none in any {noun}"
 
 
 def _series(sid: str, by_severity: dict, legend: dict, unit: str) -> dict | None:
@@ -116,6 +144,95 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     citations.append(cit)
     trace.append(f"exposure[roads] {rr['length_km']:.1f}km")
 
+    # --- Layer-2 risk: hazard crossed with weighted vulnerability -------------
+    # The engine and its recipe already existed; this pack used to stop at hazard
+    # exposure and declare risk levels a gap. It now computes them and says, in the
+    # citations, exactly which vulnerability layers went in and how few they are.
+    risk_key, risk_weights = _l2_risk(aoi, hz, trace, gaps)
+    if risk_key:
+        for layer in _ASSETS:
+            rk = geostore.count_in_hazard(aoi, risk_key, layer, min_severity=min_sev)
+            counts[layer]["at_risk"] = rk["count"]
+            counts[layer]["by_risk"] = rk["by_severity"]
+            n += 1
+            cit = {
+                "n": n, "kind": "risk_level", "retrieval": "computed-at-pack-time",
+                "source": "platform Layer-2 engine (conf/risk_l2.yml)",
+                "title": f"{layer} by risk level ({hz.removeprefix('hazard_')})",
+                "validation": "documented-method",
+                "text": (f"{rk['count']} of {counts[layer]['total']} {layer} in "
+                         f"{aoi.get('name', place)} sit at risk level {min_sev} or higher "
+                         f"once {hz.removeprefix('hazard_')} hazard is crossed with weighted "
+                         f"vulnerability. By risk level — "
+                         f"{_severity_text(rk['by_severity'], _RISK_LABELS, 'risk level')}. "
+                         "Risk level is not hazard severity: a cell in a severe hazard class "
+                         "with low vulnerability lands lower."),
+                "method": "combine_l2",
+            }
+            sr = _series(f"risk_{layer}", rk["by_severity"], _RISK_LABELS,
+                         f"{layer} by risk level")
+            if sr:
+                cit["series"] = sr
+            citations.append(cit)
+        rrk = geostore.roads_in_hazard(aoi, risk_key, min_severity=min_sev)
+        counts["roads"]["at_risk_km"] = round(rrk["length_km"], 1)
+        n += 1
+        citations.append({
+            "n": n, "kind": "risk_level", "retrieval": "computed-at-pack-time",
+            "source": "platform Layer-2 engine (conf/risk_l2.yml)",
+            "title": f"roads by risk level ({hz.removeprefix('hazard_')})",
+            "validation": "documented-method",
+            "text": (f"{rrk['length_km']:.1f} km of {rrk['total_road_km']:.1f} km of roads in "
+                     f"{aoi.get('name', place)} sit at risk level {min_sev} or higher. "
+                     "By risk level (km) — "
+                     + ("; ".join(f"level {k}: {v:.1f}" for k, v in sorted(
+                         (int(a), b) for a, b in (rrk["by_severity"] or {}).items()) if v)
+                        or "none at any risk level")
+                     + ". Each segment is attributed to the risk level at its midpoint."),
+            "method": rrk["method"],
+        })
+        trace.append("risk_l2[counts] " + ", ".join(
+            f"{k}:{v.get('at_risk')}" for k, v in counts.items() if "at_risk" in v)
+            + f", roads:{rrk['length_km']:.1f}km")
+
+        n += 1
+        citations.append({
+            "n": n, "kind": "method", "retrieval": "config",
+            "source": "platform method registry", "title": "Layer-2 risk method",
+            "validation": "documented-method",
+            "text": ("Risk level = clip(round(hazard x V / 5), 1, 5), where V is the "
+                     "weighted average of the vulnerability classes at that cell and a "
+                     "no-data vulnerability layer is dropped with its weight "
+                     "renormalised. Weights used here: "
+                     + "; ".join(f"{lay} {w}" for lay, w in risk_weights.items())
+                     + ". Every input is on the same 1 to 5 class scale. The weights are "
+                     "platform starting values, not calibrated against observed loss."),
+        })
+
+        n += 1
+        vuln_bits = []
+        for lay in risk_weights:
+            try:
+                m = tiffs.entry(lay)
+            except Exception:
+                m = {}
+            vuln_bits.append(
+                f"{lay} ({m.get('title') or 'no title recorded'}; source "
+                f"{m.get('source') or 'unattributed'}; licence {m.get('license') or 'unstated'}; "
+                f"vintage {m.get('vintage') or 'unrecorded'})")
+        citations.append({
+            "n": n, "kind": "vulnerability_layers", "retrieval": "computed-at-pack-time",
+            "source": "platform raster catalog", "title": "vulnerability layers used",
+            "validation": "unvalidated",
+            "text": (f"{len(risk_weights)} vulnerability layers entered this risk level: "
+                     + "; ".join(vuln_bits)
+                     + ". The regional indicator scheme this platform is being built "
+                     "against names 11 indicator families, so 8 are absent here: "
+                     "population by age and sex, building height, land cover, distance "
+                     "to shelter, distance to hospital, distance to school, GDP per "
+                     "capita, and crop damage cost."),
+        })
+
     # --- the hazard layer's passport: declared contract vs observed clip ------
     meta = tiffs.entry(hz)
     contract, obs, check_notes = None, None, []
@@ -187,8 +304,9 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
                  "a point's class is the raster value at its coordinates (0 = no data / "
                  "no hazard); road exposure attributes each segment's haversine length "
                  "to the class at its midpoint. Severity classes are the provider's, "
-                 "1 (lowest) to 5 (highest). This is a HAZARD overlay, not a risk "
-                 "level: vulnerability weighting (L2) is not part of this pack yet."),
+                 "1 (lowest) to 5 (highest). Hazard exposure answers WHERE the hazard "
+                 "is; the risk-level citations above answer how bad it is once "
+                 "vulnerability is weighted in."),
     })
 
     # --- what is missing, said as content --------------------------------------
@@ -197,21 +315,39 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
         "can be cited for this domain yet",
         "raster vintages unknown: no publication date, version or licence is "
         "recorded for any catalog raster",
-        "risk levels (L1 precomputed / L2 vulnerability-weighted) are not in this "
-        "pack — exposure vs hazard severity only; the compute engine exists",
+        "risk levels use only 3 vulnerability layers (population, building density, "
+        "distance to road) of the 11 indicator families the regional scheme defines, "
+        "and the weights are platform starting values, uncalibrated against observed "
+        "loss — treat a risk level as a screening signal, not an assessment",
+        "no loss or damage estimate: nothing converts exposure or risk level into "
+        "people affected, hectares, or cost",
+        "single hazard scenario only: no return periods, so a risk level here is not "
+        "tied to an annual probability",
         "OSM asset data carries no retrieval date in the AOI bundle",
     ]
 
-    grid = _severity_grid(aoi[hz])
+    # The map shows the RISK grid when one was computed — that is what a planner
+    # asked for — and falls back to the hazard clip when it was not. Both grids ride
+    # along so a consumer can show either; the payload shape is unchanged.
+    shown = risk_key or hz
     stats = {"queries": None, "place": aoi.get("name", place), "hazard": hz,
              "min_severity": min_sev, "counts": counts,
+             "risk_layer": risk_key, "displayed_layer": shown,
              "viz": _bounded_viz(viz.build_payload(aoi, {
-                 "hazard": hz, "method": "count_in_hazard", "layer": "hospitals",
+                 "hazard": shown, "method": "count_in_hazard", "layer": "hospitals",
                  "place": aoi.get("name", place), "min_severity": min_sev,
-                 "count": counts["hospitals"]["exposed"],
-                 "by_severity": counts["hospitals"]["by_severity"]}))}
+                 "count": counts["hospitals"].get("at_risk" if risk_key else "exposed"),
+                 "by_severity": counts["hospitals"].get(
+                     "by_risk" if risk_key else "by_severity")}))}
+    stats["viz"]["layer_kind"] = "risk_level" if risk_key else "hazard_severity"
+    stats["viz"]["hazard"] = hz              # always name the hazard, whatever is drawn
+    grid = _severity_grid(aoi[hz])
     if grid:
         stats["viz"]["hazard_grid"] = grid
+    if risk_key:
+        rgrid = _severity_grid(aoi[risk_key])
+        if rgrid:
+            stats["viz"]["risk_grid"] = rgrid
     return citations, gaps, stats
 
 
