@@ -47,7 +47,12 @@ def align_to(ref, layer, aoi, verify_first=True):
             raise ValueError(f"{layer} failed verification: {report.mismatches}")
     clip = ingest.hazard_clip(aoi, layer)            # windowed clip on the layer's native grid
     adir = os.path.dirname(aoi["admin"])
-    out = os.path.join(adir, f"{layer}__aligned.tif")
+    # The output name must carry the REFERENCE grid, not just the layer. Two hazards at
+    # different resolutions (hazard_flood at ~100 m, hazard_flood_rp100 at ~1 km) share
+    # an area of interest, and a single "<layer>__aligned.tif" meant the coarser run
+    # silently overwrote the finer one's aligned layers.
+    ref_tag = os.path.splitext(os.path.basename(ref["path"]))[0]
+    out = os.path.join(adir, f"{layer}__aligned__{ref_tag}.tif")
     with rasterio.open(clip) as src:
         dst = _resample_onto(src.read(1), src.transform, src.crs, ref, src_nodata=src.nodata)
         prof = {"driver": "GTiff", "height": ref["height"], "width": ref["width"],

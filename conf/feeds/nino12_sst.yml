@@ -1,0 +1,17 @@
+dataset: nino12_sst
+title: Nino 1+2 SST anomaly (monthly)
+description: Monthly sea surface temperature anomaly in the Nino 1+2 region (0-10S,
+  90-80W), the far-eastern equatorial Pacific, from NOAA PSL.
+source: NOAA PSL
+validation: single-agency
+residency: external call-out
+cadence: monthly
+adapter: generic_table
+fetch:
+  url: https://psl.noaa.gov/data/correlation/nina1.anom.data
+  index_name: Nino1+2
+  units: degrees C anomaly
+  missing_below: -90
+usage_notes: 'Driver signal only: far-eastern Pacific index, noisier than Nino 3.4;
+  for the official ENSO status use the CPC discussion.'
+contributed: true

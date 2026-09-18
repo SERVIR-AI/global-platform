@@ -1,0 +1,24 @@
+dataset: btb_station_rainfall
+title: Battambang station monthly rainfall (demonstration)
+description: 'Monthly rainfall totals from a single Battambang-area station. SYNTHETIC
+  DEMONSTRATION TABLE produced to exercise the tabular contribution gate — not observed
+  data.
+
+  '
+source: platform demonstration table (synthetic, generated 2026-09-01)
+validation: unvalidated
+residency: platform-hosted copy
+cadence: monthly
+adapter: generic_csv
+license: CC0-1.0
+vintage: 2026-08
+fetch:
+  path: /Users/puranjaigarg/asean/global_risk_sprint/cache/tables/btb_station_rainfall.csv
+  sha256: eae5ffb67c6ae40340be2536308300d0e90da79b25047d9fab5ef0e4f2170520
+  columns:
+    month: Month
+    rainfall_mm: Rainfall_mm
+  units: mm/month
+  as_of_field: month
+params:
+  limit: rows of series to return (default 12)

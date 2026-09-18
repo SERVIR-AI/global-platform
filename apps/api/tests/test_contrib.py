@@ -58,11 +58,25 @@ def test_unknown_fields_are_refused_not_ignored(log):
     assert any("unknown fields" in f for f in fails)
 
 
-def test_corpusless_pack_declines_honestly(env, log):
-    out = sources.contribute([_entry(pack="risk")])
-    log("OUTPUT", out["results"][0]["failures"][0][:100])
+def test_corpusless_pack_declines_honestly(env, monkeypatch, log):
+    """A pack that names no corpus declines and points at the paths that do work.
+    Risk used to be the example here; it now has a corpus like every other pack, so
+    the behaviour is tested against a pack that genuinely has none."""
+    from app.mcp import packs
+    monkeypatch.setitem(packs.PACKS, "corpusless",
+                        {**packs.PACKS["risk"], "corpus": None})
+    out = sources.contribute([_entry(pack="corpusless")])
+    log("OUTPUT", out["results"][0]["failures"][0][:120])
     assert out["declined"] == 1
     assert "declared gap" in out["results"][0]["failures"][0]
+
+
+def test_the_risk_pack_accepts_documents_like_any_other(env, log):
+    """Domain packs are parallel by design. Risk accepting a document is the same
+    call as food security accepting one."""
+    out = sources.contribute([_entry(pack="risk")], dry_run=True)
+    log("OUTPUT", str(out["results"][0]))
+    assert out["declined"] == 0 and "valid" in out["results"][0]["status"]
 
 
 def test_dry_run_validates_but_never_ingests(env, monkeypatch, log):

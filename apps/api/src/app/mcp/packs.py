@@ -42,6 +42,23 @@ def _risk_sections() -> list[str]:
     return list(risk_synthesis.SECTIONS)
 
 
+def _risk_corpus_state() -> dict:
+    """Real state of the risk document library, not a literal. It is a named corpus
+    that starts empty and fills by contribution, exactly like the food-security one."""
+    try:
+        from ..rag.store import Corpus
+        docs = Corpus("risk").documents()
+    except Exception as exc:
+        return {"status": "unavailable", "name": "risk",
+                "reason": f"{type(exc).__name__}: {exc}"}
+    if not docs:
+        return {"status": "empty", "name": "risk", "documents": 0,
+                "note": ("the library exists and accepts contributions; nothing has been "
+                         "contributed yet, so no publication can be cited alongside the "
+                         "computed numbers")}
+    return {"status": "available", "name": "risk", "documents": len(docs)}
+
+
 def _risk_manifest() -> dict:
     """Honest v0: what the risk pack ships and what it does not. Real state where
     derivable, gaps declared in one place."""
@@ -50,7 +67,8 @@ def _risk_manifest() -> dict:
     hazards = sorted(k.removeprefix("hazard_") for k in cat if k.startswith("hazard_"))
     return {
         "id": "risk", "display_name": "Risk Platform", "version": "v0",
-        "profile": "v0 — hazard exposure only; risk levels and corpus are declared gaps",
+        "profile": "v0 — hazard exposure, vulnerability-weighted risk levels, and a "
+                   "document library that starts empty and grows by contribution",
         "built_for": "asset exposure to a mapped hazard for one place, replayable",
         "output_contract": {
             "required_sections": _risk_sections(),
@@ -58,8 +76,7 @@ def _risk_manifest() -> dict:
             "receipt": "record_receipt / publish_answer — pack carries the map viz",
         },
         "sources": {
-            "corpus": {"status": "declared_gap",
-                       "reason": "no risk document corpus exists yet"},
+            "corpus": _risk_corpus_state(),
             "rasters": {"status": "available", "hazards": hazards,
                         "note": ("only hazard_flood states lineage (ADPC, derived "
                                  "from JRC GLOFAS v2.1); vintages/licences are "
@@ -70,8 +87,10 @@ def _risk_manifest() -> dict:
         "target": {"place": "geocodable place name", "hazard": "one of: " + ", ".join(hazards),
                    "min_severity": "optional, 1-5, default 1"},
         "gaps": [
-            "risk levels (L1/L2) not in the pack — exposure only, engine exists",
-            "no risk corpus", "raster vintages/licences unrecorded",
+            "L1 precomputed risk layers exist in the catalog but are not offered here",
+            "vulnerability uses 3 layers of the 11 the regional indicator scheme names",
+            "raster vintages/licences unrecorded for the layers that predate the "
+            "contribution gate",
             "BYOD uploads are session-scoped and cannot enter a pack",
         ],
         "compositions": {"risk.brief": "available via compose_run — the platform "
@@ -104,7 +123,10 @@ PACKS: dict[str, dict] = {
                        "hazard": "hazard name, e.g. flood, fire, drought"},
         "gather": _gather_risk,
         "sections": _risk_sections,
-        "corpus": None,
+        # Domain packs are meant to be parallel. Food security accepts documents and
+        # risk did not, purely because this field said None — not for want of data or
+        # any technical limit. Named, so the same contribution path works for both.
+        "corpus": "risk",
         "manifest": _risk_manifest,
         "default_focus": lambda t: f"{t.get('hazard', '')} exposure in {t.get('place', '')}".strip(),
         "doctor_target": {"place": "battambang", "hazard": "flood"},

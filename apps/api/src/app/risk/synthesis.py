@@ -76,8 +76,9 @@ def _effective_weights(aoi, hz, weights) -> tuple[dict, list]:
         footprint = h.read(1) > 0
     cells = int(footprint.sum())
     cover, notes = {}, []
+    ref_tag = os.path.splitext(os.path.basename(aoi[hz]))[0]
     for layer in weights:
-        aligned = os.path.join(adir, f"{layer}__aligned.tif")
+        aligned = os.path.join(adir, f"{layer}__aligned__{ref_tag}.tif")
         try:
             with rasterio.open(aligned) as s:
                 arr = s.read(1)
@@ -93,6 +94,46 @@ def _effective_weights(aoi, hz, weights) -> tuple[dict, list]:
             notes.append(f"{layer} covers {cover[layer] * 100:.1f}% of the hazard footprint, so its "
                          f"nominal weight {weights[layer]} acts as {effective[layer]}")
     return {"cells": cells, "coverage": cover, "effective": effective}, notes
+
+
+RISK_CORPUS = "risk"
+
+
+def _document_hits(place, hz, focus, trace, gaps):
+    """Document evidence for this place and hazard, mirroring the food-security pack:
+    one forward-looking slice, one retrospective. An empty or unreadable library is a
+    declared gap, never a failure — the computed numbers still stand on their own."""
+    from ..llm import MissingAPIKey
+    from ..rag.store import Corpus, CorpusError
+    hazard = re.sub(r"_rp\d+$", "", hz.removeprefix("hazard_"))
+    try:
+        corpus = Corpus(RISK_CORPUS)
+    except (CorpusError, MissingAPIKey) as exc:
+        gaps.append(f"the risk document library could not be read ({exc}) — nothing "
+                    "published is cited alongside these numbers")
+        return None, []
+    n_docs = len(corpus.documents())
+    if n_docs == 0:
+        gaps.append("the risk document library is empty — no published assessment, event "
+                    "report or method note is cited alongside these numbers. It accepts "
+                    "contributions: a document lands the same way it does for any pack")
+        return corpus, []
+    queries = ((f"{hazard} hazard risk assessment {place} {focus}".strip(), "forecast"),
+               (f"past {hazard} event impact and damage in {place}".strip(), "retrospective"))
+    hits = []
+    for q, temporal in queries:
+        try:
+            got = corpus.search(q, k=3, temporal=temporal)
+        except (CorpusError, MissingAPIKey) as exc:
+            gaps.append(f"document retrieval failed ({exc})")
+            return corpus, hits
+        trace.append(f"retrieve[{temporal}] {q!r} -> {len(got)} hits")
+        hits.extend(got)
+    if not hits:
+        gaps.append(f"the risk library holds {n_docs} document(s), none relevant to "
+                    f"{hazard} in {place} above the relevance floor — a decline, not a "
+                    "weak match")
+    return corpus, hits
 
 
 def _layer_is_silent(clip_path: str) -> bool:
@@ -146,6 +187,7 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     trace.append(f"clip[{hz}]")
 
     citations, gaps = [], []
+    corpus, doc_hits = _document_hits(place, hz, focus, trace, gaps)
     # A layer that is silent over this area reports the same "0 exposed" as an area
     # that is genuinely safe, and the two mean opposite things. Found live: the JRC
     # 1 km return-period maps hold no flooded cell anywhere inside Battambang town
@@ -161,6 +203,25 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
         trace.append(f"silent[{hz}] no hazard cells in AOI")
     n = 0
     counts: dict = {}
+
+    # --- what has been published about this place and hazard ------------------
+    for h in doc_hits:
+        m = h["metadata"]
+        n += 1
+        citations.append({
+            "n": n, "kind": "document", "retrieval": "archived-document",
+            "source": m.get("source"), "title": m.get("title"),
+            "pub_date": m.get("pub_date"), "validation": m.get("validation"),
+            "temporal": m.get("temporal"), "url": m.get("url"), "score": h["score"],
+            "doc_id": h["doc_id"], "chunk_id": h["id"],
+            "archived_copy": (f"/api/food-security/rag/document/{h['doc_id']}"
+                              if corpus and corpus.raw_path(h["doc_id"]) else None),
+            "usage_notes": m.get("usage_notes"),
+            **({"staged_by": m["staged_by"], "contribution_id": m.get("contribution_id")}
+               if m.get("staged_by") else {}),
+            "text": h["text"]})
+    if doc_hits:
+        trace.append(f"documents[{len(doc_hits)}] cited")
 
     # --- exposure: one citation per asset class, numbers IN the text ----------
     for layer in _ASSETS:
@@ -391,10 +452,7 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
 
     # --- what is missing, said as content --------------------------------------
     rp = re.search(r"_rp(\d+)$", hz)
-    gaps[:0] = [
-        "no risk document corpus exists — no publications, assessments or reports "
-        "can be cited for this domain yet",
-    ] + ([] if meta.get("vintage") else [
+    gaps[:0] = ([] if meta.get("vintage") else [
         "this raster records no publication date, version or licence"]) + [
         "risk levels use only 3 vulnerability layers (population, building density, "
         "distance to road) of the 11 indicator families the regional scheme defines, "

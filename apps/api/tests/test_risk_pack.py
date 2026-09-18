@@ -41,7 +41,9 @@ def test_the_risk_pack_assembles_with_real_numbers(offline_aoi, log):
     kinds = {c["kind"] for c in p["citations"]}
     assert {"exposure", "hazard_layer", "method"} <= kinds
     # gaps are content
-    assert any("no risk document corpus" in g for g in p["gaps"])
+    # The risk pack now HAS a corpus, like every other pack; it simply starts empty,
+    # and says so rather than claiming no library exists.
+    assert any("risk document library is empty" in g for g in p["gaps"])
 
 
 def test_the_pack_carries_a_resolvable_viz(offline_aoi, log):
