@@ -18,3 +18,135 @@ hazard_heatdays:
   license: CC0-1.0
   vintage: 2026-09
   contributed: true
+hazard_flood_rp10:
+  local_path: tiffs/hazard_flood_rp10.tif
+  title: 10-year flood hazard (Southeast Asia, JRC)
+  description: Modelled river flood depth for the 10-year return period (a 10.0% chance
+    in any year), reclassified from metres to the platform's 1-5 severity scale using
+    the same depth bands the existing flood layer publishes. 0 = dry or no data. Clipped
+    from the JRC global flood hazard maps to the Southeast Asia extent.
+  legend:
+    1: Very Low (0-0.5 m)
+    2: Low (0.5-1 m)
+    3: Moderate (1-1.5 m)
+    4: High (1.5-2 m)
+    5: Very High (>2 m)
+  source: European Commission Joint Research Centre, global flood hazard maps, floodMapGL_rp10y,
+    reclassified by depth on the platform
+  license: CC-BY-4.0
+  vintage: 2016-11
+  usage_notes: '1 km cells: ten times coarser than hazard_flood (~100 m), so use it
+    for scenario comparison, not for siting. Model output for a 10-year event, not
+    an observed flood. Depth bands match hazard_flood''s legend, so classes are comparable
+    across return periods. Source: https://jeodpp.jrc.ec.europa.eu/ftp/jrc-opendata/FLOODS/GlobalMaps/floodMapGL_rp10y.zip'
+  contributed: true
+hazard_flood_rp20:
+  local_path: tiffs/hazard_flood_rp20.tif
+  title: 20-year flood hazard (Southeast Asia, JRC)
+  description: Modelled river flood depth for the 20-year return period (a 5.0% chance
+    in any year), reclassified from metres to the platform's 1-5 severity scale using
+    the same depth bands the existing flood layer publishes. 0 = dry or no data. Clipped
+    from the JRC global flood hazard maps to the Southeast Asia extent.
+  legend:
+    1: Very Low (0-0.5 m)
+    2: Low (0.5-1 m)
+    3: Moderate (1-1.5 m)
+    4: High (1.5-2 m)
+    5: Very High (>2 m)
+  source: European Commission Joint Research Centre, global flood hazard maps, floodMapGL_rp20y,
+    reclassified by depth on the platform
+  license: CC-BY-4.0
+  vintage: 2016-11
+  usage_notes: '1 km cells: ten times coarser than hazard_flood (~100 m), so use it
+    for scenario comparison, not for siting. Model output for a 20-year event, not
+    an observed flood. Depth bands match hazard_flood''s legend, so classes are comparable
+    across return periods. Source: https://jeodpp.jrc.ec.europa.eu/ftp/jrc-opendata/FLOODS/GlobalMaps/floodMapGL_rp20y.zip'
+  contributed: true
+hazard_flood_rp50:
+  local_path: tiffs/hazard_flood_rp50.tif
+  title: 50-year flood hazard (Southeast Asia, JRC)
+  description: Modelled river flood depth for the 50-year return period (a 2.0% chance
+    in any year), reclassified from metres to the platform's 1-5 severity scale using
+    the same depth bands the existing flood layer publishes. 0 = dry or no data. Clipped
+    from the JRC global flood hazard maps to the Southeast Asia extent.
+  legend:
+    1: Very Low (0-0.5 m)
+    2: Low (0.5-1 m)
+    3: Moderate (1-1.5 m)
+    4: High (1.5-2 m)
+    5: Very High (>2 m)
+  source: European Commission Joint Research Centre, global flood hazard maps, floodMapGL_rp50y,
+    reclassified by depth on the platform
+  license: CC-BY-4.0
+  vintage: 2016-11
+  usage_notes: '1 km cells: ten times coarser than hazard_flood (~100 m), so use it
+    for scenario comparison, not for siting. Model output for a 50-year event, not
+    an observed flood. Depth bands match hazard_flood''s legend, so classes are comparable
+    across return periods. Source: https://jeodpp.jrc.ec.europa.eu/ftp/jrc-opendata/FLOODS/GlobalMaps/floodMapGL_rp50y.zip'
+  contributed: true
+hazard_flood_rp100:
+  local_path: tiffs/hazard_flood_rp100.tif
+  title: 100-year flood hazard (Southeast Asia, JRC)
+  description: Modelled river flood depth for the 100-year return period (a 1.0% chance
+    in any year), reclassified from metres to the platform's 1-5 severity scale using
+    the same depth bands the existing flood layer publishes. 0 = dry or no data. Clipped
+    from the JRC global flood hazard maps to the Southeast Asia extent.
+  legend:
+    1: Very Low (0-0.5 m)
+    2: Low (0.5-1 m)
+    3: Moderate (1-1.5 m)
+    4: High (1.5-2 m)
+    5: Very High (>2 m)
+  source: European Commission Joint Research Centre, global flood hazard maps, floodMapGL_rp100y,
+    reclassified by depth on the platform
+  license: CC-BY-4.0
+  vintage: 2016-11
+  usage_notes: '1 km cells: ten times coarser than hazard_flood (~100 m), so use it
+    for scenario comparison, not for siting. Model output for a 100-year event, not
+    an observed flood. Depth bands match hazard_flood''s legend, so classes are comparable
+    across return periods. Source: https://jeodpp.jrc.ec.europa.eu/ftp/jrc-opendata/FLOODS/GlobalMaps/floodMapGL_rp100y.zip'
+  contributed: true
+hazard_flood_rp200:
+  local_path: tiffs/hazard_flood_rp200.tif
+  title: 200-year flood hazard (Southeast Asia, JRC)
+  description: Modelled river flood depth for the 200-year return period (a 0.5% chance
+    in any year), reclassified from metres to the platform's 1-5 severity scale using
+    the same depth bands the existing flood layer publishes. 0 = dry or no data. Clipped
+    from the JRC global flood hazard maps to the Southeast Asia extent.
+  legend:
+    1: Very Low (0-0.5 m)
+    2: Low (0.5-1 m)
+    3: Moderate (1-1.5 m)
+    4: High (1.5-2 m)
+    5: Very High (>2 m)
+  source: European Commission Joint Research Centre, global flood hazard maps, floodMapGL_rp200y,
+    reclassified by depth on the platform
+  license: CC-BY-4.0
+  vintage: 2016-11
+  usage_notes: '1 km cells: ten times coarser than hazard_flood (~100 m), so use it
+    for scenario comparison, not for siting. Model output for a 200-year event, not
+    an observed flood. Depth bands match hazard_flood''s legend, so classes are comparable
+    across return periods. Source: https://jeodpp.jrc.ec.europa.eu/ftp/jrc-opendata/FLOODS/GlobalMaps/floodMapGL_rp200y.zip'
+  contributed: true
+hazard_flood_rp500:
+  local_path: tiffs/hazard_flood_rp500.tif
+  title: 500-year flood hazard (Southeast Asia, JRC)
+  description: Modelled river flood depth for the 500-year return period (a 0.2% chance
+    in any year), reclassified from metres to the platform's 1-5 severity scale using
+    the same depth bands the existing flood layer publishes. 0 = dry or no data. Clipped
+    from the JRC global flood hazard maps to the Southeast Asia extent.
+  legend:
+    1: Very Low (0-0.5 m)
+    2: Low (0.5-1 m)
+    3: Moderate (1-1.5 m)
+    4: High (1.5-2 m)
+    5: Very High (>2 m)
+  source: European Commission Joint Research Centre, global flood hazard maps, floodMapGL_rp500y,
+    reclassified by depth on the platform
+  license: CC-BY-4.0
+  vintage: 2016-11
+  usage_notes: '1 km cells: ten times coarser than hazard_flood (~100 m), so use it
+    for scenario comparison, not for siting. Model output for a 500-year event, not
+    an observed flood. Depth bands match hazard_flood''s legend, so classes are comparable
+    across return periods. Source: https://jeodpp.jrc.ec.europa.eu/ftp/jrc-opendata/FLOODS/GlobalMaps/floodMapGL_rp500y.zip'
+  contributed: true

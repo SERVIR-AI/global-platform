@@ -16,6 +16,7 @@ replayable as a picture and not only as prose.
 from __future__ import annotations
 
 import os
+import re
 
 from ..graph.geo import combine, ingest, rasterstats, schema, store as geostore, tiffs, viz
 
@@ -94,6 +95,18 @@ def _effective_weights(aoi, hz, weights) -> tuple[dict, list]:
     return {"cells": cells, "coverage": cover, "effective": effective}, notes
 
 
+def _layer_is_silent(clip_path: str) -> bool:
+    """True when the clipped hazard holds no cell above 0 — the layer says nothing
+    about this area, which is not the same as saying the area is safe."""
+    try:
+        import numpy as np
+        import rasterio
+        with rasterio.open(clip_path) as src:
+            return not bool((src.read(1) > 0).any())
+    except Exception:
+        return False
+
+
 def _severity_text(by_severity: dict, legend: dict, noun: str = "class") -> str:
     parts = []
     for cls in sorted(int(k) for k in (by_severity or {})):
@@ -133,6 +146,19 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     trace.append(f"clip[{hz}]")
 
     citations, gaps = [], []
+    # A layer that is silent over this area reports the same "0 exposed" as an area
+    # that is genuinely safe, and the two mean opposite things. Found live: the JRC
+    # 1 km return-period maps hold no flooded cell anywhere inside Battambang town
+    # because their global model does not represent that catchment, while the 100 m
+    # layer shows the town extensively flooded. Say which one is happening.
+    silent = _layer_is_silent(aoi[hz])
+    if silent:
+        gaps.insert(0, (
+            f"{hz} has NO cell above class 0 anywhere in {aoi.get('name', place)}. "
+            "Every exposure count below is zero because the layer is silent here, not "
+            "because the area is safe. Check the layer's resolution and coverage in its "
+            "passport before reading any zero as an absence of hazard."))
+        trace.append(f"silent[{hz}] no hazard cells in AOI")
     n = 0
     counts: dict = {}
 
@@ -151,7 +177,10 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
             "text": (f"{r['count']} of {total} {layer} in {aoi.get('name', place)} fall in "
                      f"{hz.removeprefix('hazard_')} hazard class >= {min_sev}. "
                      f"By severity — {_severity_text(r['by_severity'], legend)}. "
-                     f"Method: {r['method']}."),
+                     f"Method: {r['method']}."
+                     + (f" NOTE: {hz} has no hazard cell anywhere in this area, so this "
+                        "zero reports the layer's silence, not the absence of hazard."
+                        if silent else "")),
             "method": r["method"],
         }
         sr = _series(sid, r["by_severity"], legend, f"{layer} by hazard class")
@@ -231,7 +260,8 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
             + f", roads:{rrk['length_km']:.1f}km")
 
         eff, eff_notes = _effective_weights(aoi, hz, risk_weights)
-        gaps.extend(eff_notes)
+        if not silent:          # a silent layer has no footprint; the first gap says it
+            gaps.extend(eff_notes)
         n += 1
         citations.append({
             "n": n, "kind": "method", "retrieval": "config",
@@ -292,6 +322,14 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     passport_bits = [f"Hazard layer {hz}: {meta.get('title', hz)}."]
     if hz == "hazard_flood":
         passport_bits.append(f"Lineage: {_FLOOD_LINEAGE}.")
+    elif meta.get("source"):
+        passport_bits.append(f"Source: {meta['source']}.")
+        if meta.get("license") or meta.get("vintage"):
+            passport_bits.append(
+                f"Licence {meta.get('license', 'unstated')}, vintage "
+                f"{meta.get('vintage', 'unrecorded')}.")
+        else:
+            gaps.append(f"{hz} records a source but no licence or vintage")
     else:
         gaps.append(f"{hz} carries no stated lineage in the catalog — provider unattributed")
     if contract:
@@ -352,21 +390,33 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     })
 
     # --- what is missing, said as content --------------------------------------
+    rp = re.search(r"_rp(\d+)$", hz)
     gaps[:0] = [
         "no risk document corpus exists — no publications, assessments or reports "
         "can be cited for this domain yet",
-        "raster vintages unknown: no publication date, version or licence is "
-        "recorded for any catalog raster",
+    ] + ([] if meta.get("vintage") else [
+        "this raster records no publication date, version or licence"]) + [
         "risk levels use only 3 vulnerability layers (population, building density, "
         "distance to road) of the 11 indicator families the regional scheme defines, "
         "and the weights are platform starting values, uncalibrated against observed "
         "loss — treat a risk level as a screening signal, not an assessment",
         "no loss or damage estimate: nothing converts exposure or risk level into "
         "people affected, hectares, or cost",
-        "single hazard scenario only: no return periods, so a risk level here is not "
-        "tied to an annual probability",
+    ] + ([f"this is the {rp.group(1)}-year return period — a "
+          f"{100 / int(rp.group(1)):.1f}% chance in any year. Other return periods are "
+          "separate layers; nothing here combines them into an annual expected loss"]
+         if rp else
+         ["no return period: this hazard layer is a single scenario, so nothing here "
+          "is tied to an annual probability. Flood has return-period layers "
+          "(flood_rp10 … flood_rp500); other hazards do not"]) + [
         "OSM asset data carries no retrieval date in the AOI bundle",
     ]
+
+    if silent:                       # the loudest thing about this answer goes first
+        for i, g in enumerate(gaps):
+            if g.startswith(f"{hz} has NO cell"):
+                gaps.insert(0, gaps.pop(i))
+                break
 
     # The map shows the RISK grid when one was computed — that is what a planner
     # asked for — and falls back to the hazard clip when it was not. Both grids ride

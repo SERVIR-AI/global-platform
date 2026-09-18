@@ -27,9 +27,18 @@ def _recipe():
 
 
 def weights_for(hazard):
-    """Default {layer: weight} for a hazard from conf (e.g. 'hazard_flood' -> key 'flood')."""
+    """Default {layer: weight} for a hazard from conf (e.g. 'hazard_flood' -> key 'flood').
+
+    A return-period variant falls back to its base hazard's recipe: 'flood_rp100' is
+    still flood, and the vulnerability that matters does not change with the return
+    period. Without this, every return-period layer silently lost its risk levels."""
+    import re
     key = hazard[len("hazard_"):] if hazard.startswith("hazard_") else hazard
-    return _recipe().get("weights", {}).get(key, {})
+    weights = _recipe().get("weights", {})
+    if key in weights:
+        return weights[key]
+    base = re.sub(r"_rp\d+$", "", key)
+    return weights.get(base, {})
 
 
 def _combine(hazard, vulns, weights, class_max=5):

@@ -6,3 +6,39 @@ layers:
     valid_max: 5
     nodata: null
     role: hazard
+  hazard_flood_rp10:
+    dtype: int8
+    valid_min: 0
+    valid_max: 5
+    nodata: null
+    role: hazard
+  hazard_flood_rp20:
+    dtype: int8
+    valid_min: 0
+    valid_max: 5
+    nodata: null
+    role: hazard
+  hazard_flood_rp50:
+    dtype: int8
+    valid_min: 0
+    valid_max: 5
+    nodata: null
+    role: hazard
+  hazard_flood_rp100:
+    dtype: int8
+    valid_min: 0
+    valid_max: 5
+    nodata: null
+    role: hazard
+  hazard_flood_rp200:
+    dtype: int8
+    valid_min: 0
+    valid_max: 5
+    nodata: null
+    role: hazard
+  hazard_flood_rp500:
+    dtype: int8
+    valid_min: 0
+    valid_max: 5
+    nodata: null
+    role: hazard
