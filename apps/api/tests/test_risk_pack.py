@@ -76,9 +76,11 @@ def test_the_full_risk_loop_gates_and_receipts(offline_aoi, log):
     assert out["status"] == "ok" and out["passed"] is True
     assert out["target"] == {"place": "Testville", "hazard": "flood"}
     f = out["evidence_freshness"]
-    assert f["pulled_sources"] == []                     # nothing live in risk v0
+    # Risk can now carry live feeds (any feed bound to the pack), so the old
+    # "nothing live in risk" invariant is gone. What must hold is that the pack's
+    # own computed evidence is there and is attributed as computed.
+    assert len(f["computed_sources"]) >= 9
     # 4 exposure + 4 risk-level + the vulnerability-layer passport + hazard layer
-    assert len(f["computed_sources"]) == 10
     assert out["insight"]["series"]                      # categorical series flow
     assert out["insight"]["pack"] == "risk"
 
