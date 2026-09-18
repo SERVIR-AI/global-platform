@@ -6,7 +6,7 @@ Numbers the gate can check, no network, no Drive."""
 
 import pytest
 
-from app.mcp import assemble, packs, publish
+from app.mcp import assemble, packs, publish, record
 from app.risk import synthesis as risk
 
 
@@ -151,3 +151,15 @@ def test_fully_outside_the_raster_declines_rather_than_tracebacks(tif_writer, tm
     finally:
         ing.source_raster = orig
     log("CHECK", "outside-coverage raises ValueError -> governed decline upstream")
+
+
+def test_a_risk_receipt_carries_the_map_as_an_openable_link(offline_aoi, monkeypatch, log):
+    """A panel is small and a hazard map is the thing people want full size. The
+    receipt hands back the embed address itself, not only the tool to call for it."""
+    monkeypatch.setenv("GRP_PUBLIC_BASE", "https://example.org")
+    p = assemble.assemble(place="Testville", hazard="flood")
+    r = record.record(pack_id=p["pack_id"], question="flood in Testville")
+    log("OUTPUT", f"{r.get('map_url')}")
+    assert r["map_url"] == f"https://example.org/?embed=hazard_map&receipt_id={r['receipt_id']}"
+    assert r["render_with"]["map"]["url"] == r["map_url"]
+    assert r["public_resolver"].startswith("https://example.org/api/resolve/receipt/")

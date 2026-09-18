@@ -36,6 +36,11 @@ def _render_with(pack: dict, rid: str) -> dict:
     if pack.get("viz") is not None:
         out["map"] = {"tool": "ui_embed", "component": "hazard_map",
                       "receipt_id": rid,
+                      # The address itself, not just the tool to call for it. A panel
+                      # rendering this result cannot run a tool round-trip before it
+                      # can offer the map, and a user who wants the map full size
+                      # needs something to click.
+                      "url": _embed_url("hazard_map", rid),
                       "note": "the recorded AOI, assets and hazard layer for this receipt"}
     if pack.get("pack", "food-security") == "food-security":
         out["provenance"] = {"tool": "ui_embed", "component": "provenance_graph",
@@ -44,6 +49,17 @@ def _render_with(pack: dict, rid: str) -> dict:
         out["provenance_note"] = ("provenance_graph's lanes are food-security-"
                                   "shaped and are not offered for this pack yet")
     return out
+
+
+def _embed_url(component: str, rid: str) -> str | None:
+    """The platform's own embed address for a component and receipt, from the theme
+    (so GRP_PUBLIC_BASE governs it, exactly as it governs the resolver)."""
+    try:
+        from . import ui
+        base = ui.tokens()["product"]["embed_base"]
+        return base["url"] + base["path"].format(component=component, receipt_id=rid)
+    except Exception:
+        return None
 
 
 def _default_question(pack: dict) -> str:
@@ -202,6 +218,10 @@ def record(pack_id: str | None = None, report_id: str | None = None,
             # Still a declared gap: this is a local/deployed platform URL, not yet a
             # public link that survives copy-paste outside the network.
             "public_resolver": _resolver_url(rid),
+            # The map as a link anyone can open in a browser tab, when the pack
+            # recorded one. Same live-resolving surface as the embed, full size.
+            **({"map_url": _embed_url("hazard_map", rid)}
+               if (pack or {}).get("viz") is not None else {}),
             # HOW TO SHOW THIS, using the platform's own UI capability rather than
             # a visualisation the caller invents. `provenance_graph` is
             # receipt_bound and delivered as an EMBED, so it re-resolves its state

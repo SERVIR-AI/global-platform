@@ -177,6 +177,10 @@ let _ov = false;                        // overlay: both indices on one axis
 let _ana = null;                        // analogue events cache
 let _anaOpen = false;
 const seriesList = () => (_data && _data.insight && _data.insight.series) || [];
+// The recorded map, as an address to open full size. A panel is small and a hazard
+// map is the one thing people want bigger; the link re-resolves against the platform
+// at view time exactly as the embed does, so nothing is frozen by opening it.
+const mapUrl = d => (d && (d.map_url || ((d.render_with || {}).map || {}).url)) || null;
 const serverToolsOK = () => !!(_caps && _caps.serverTools);
 
 const _calls = new Map();               // JSON-RPC id -> promise handlers
@@ -693,6 +697,7 @@ function render(d){
       This shows EVIDENCE only. The verdict is deliberately not drawn here: a rendered
       surface freezes what is in it, and a frozen verdict attests nothing.
       ${d.public_resolver?`Resolve it live: <a class="lnk" data-url="${esc(d.public_resolver)}" href="${esc(d.public_resolver)}">${esc(d.receipt_id||"receipt")}</a>`:""}
+      ${mapUrl(d)?` &middot; <a class="lnk" data-url="${esc(mapUrl(d))}" href="${esc(mapUrl(d))}">Open the map in a tab</a>`:""}
       <div class="meta">${esc((_ctx.hostInfo||{}).name||"host")} ·
         ${esc(_ctx.displayMode||"inline")} ·
         box ${esc(JSON.stringify(_ctx.containerDimensions||"unspecified"))} ·
