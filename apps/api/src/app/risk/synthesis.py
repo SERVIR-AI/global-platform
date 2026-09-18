@@ -136,6 +136,34 @@ def _document_hits(place, hz, focus, trace, gaps):
     return corpus, hits
 
 
+def _pack_feeds(place, trace, gaps):
+    """Every feed bound to the risk pack, queried and returned with its passport.
+
+    The risk gatherer read no feeds at all, so a contributed table or API feed could
+    be landed, be queryable on its own, and still never reach a risk answer. A feed
+    says which pack may cite it; this reads the ones that say risk.
+    """
+    from ..contrib import staging
+    from ..mcp import feeds, registry
+    rows = {k: v for k, v in registry.FEEDS.items()
+            if v.get("pack") == "risk" and v.get("status") == "available"}
+    try:                      # a contributor's own staged feed previews here too
+        rows.update({k: v for k, v in staging.visible_staged_feeds_for_pack("risk").items()
+                     if k not in rows})
+    except Exception:
+        pass
+    out = []
+    for ds in sorted(rows):
+        res = feeds.query(ds, {"limit": 3})
+        if res.get("status") != "ok":
+            gaps.append(f"feed {ds} bound to this pack did not answer: "
+                        f"{res.get('note', 'no reason given')}")
+            continue
+        trace.append(f"feed[{ds}] {res.get('count')} rows as of {res.get('as_of')}")
+        out.append((ds, rows[ds], res))
+    return out
+
+
 def _layer_is_silent(clip_path: str) -> bool:
     """True when the clipped hazard holds no cell above 0 — the layer says nothing
     about this area, which is not the same as saying the area is safe."""
@@ -222,6 +250,28 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
             "text": h["text"]})
     if doc_hits:
         trace.append(f"documents[{len(doc_hits)}] cited")
+
+    # --- feeds bound to this pack --------------------------------------------
+    for ds, spec, res in _pack_feeds(place, trace, gaps):
+        last = (res.get("records") or [{}])[-1]
+        pp = res.get("passport") or {}
+        n += 1
+        bits = ", ".join(f"{k} {v}" for k, v in last.items() if v is not None)
+        citations.append({
+            "n": n, "kind": "index", "retrieval": "pulled-at-pack-time",
+            "source": pp.get("source") or spec.get("source"),
+            "title": spec.get("title", ds),
+            "validation": pp.get("validation") or spec.get("validation", "unvalidated"),
+            "url": pp.get("url"),
+            **({"staged_by": spec["staged_by"],
+                "contribution_id": spec.get("contribution_id")}
+               if spec.get("staged_by") else {}),
+            "text": (f"{spec.get('title', ds)} ({ds}), latest reading as of "
+                     f"{res.get('as_of')}: {bits or 'no values returned'}. "
+                     f"{res.get('summary', '')}"
+                     + (f" Contributor guidance: {spec['usage_notes']}"
+                        if spec.get("usage_notes") else "")),
+        })
 
     # --- exposure: one citation per asset class, numbers IN the text ----------
     for layer in _ASSETS:

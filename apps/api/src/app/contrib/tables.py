@@ -95,6 +95,9 @@ def add(manifest: dict, dry_run: bool = False) -> dict:
                       **({"as_of_field": manifest["as_of_field"]}
                          if manifest.get("as_of_field") else {})},
             "params": {"limit": "rows of series to return (default 12)"},
+            # Which domain pack may cite it. Without this every contributed table
+            # defaulted to food-security and could never enter a risk answer.
+            "pack": manifest.get("pack", "food-security"),
             **({"usage_notes": manifest["usage_notes"]}
                if manifest.get("usage_notes") else {}),
             # The marker remove-feed keys on: only rows the gate wrote are

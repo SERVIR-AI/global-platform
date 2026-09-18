@@ -187,6 +187,7 @@ TABLE_FIELDS = {
         "url": "where the platform can fetch the CSV instead of csv_text (public host)",
         "as_of_field": "the output field holding the row date, so the feed reports as_of",
         "usage_notes": "a few lines the consuming analyst reads on every query (max 500 chars)",
+        "pack": "which domain pack may cite it: food-security or risk (default food-security)",
     },
 }
 CSV_TEXT_CAP = 200 * 1024
@@ -226,7 +227,7 @@ def _validate_table(manifest) -> list[str]:
     base = {k: v for k, v in m.items() if k not in ("csv_text", "url")}
     problems += [f for f in tables.validate_manifest({**base, "file": "-"})
                  if not f.startswith("file ")]        # a fetched file is checked in prepare()
-    unknown = set(base) - set(tables.REQUIRED) - {"as_of_field", "usage_notes"}
+    unknown = set(base) - set(tables.REQUIRED) - {"as_of_field", "usage_notes", "pack"}
     if unknown:
         problems.append(f"unknown fields {sorted(unknown)} — every field is provenance")
     if has_text and isinstance(m.get("columns"), dict):   # pasted: check the header now
@@ -288,6 +289,7 @@ def _table_row(rec: dict, path: str, sha256: str) -> dict:
     m = rec["manifest"]
     return {"title": m["title"], "description": m["description"], "source": m["source"],
             "validation": m["validation"], "residency": "platform-hosted copy (staged)",
+            "pack": m.get("pack", "food-security"),
             "cadence": m["cadence"], "adapter": "generic_csv", "license": m["license"],
             "vintage": m["vintage"], "status": "available",
             "fetch": {"path": path, "sha256": sha256, "columns": m["columns"],
@@ -295,7 +297,6 @@ def _table_row(rec: dict, path: str, sha256: str) -> dict:
                       **({"as_of_field": m["as_of_field"]} if m.get("as_of_field") else {})},
             "params": {"limit": "rows of series to return (default 12)"},
             **({"usage_notes": m["usage_notes"]} if m.get("usage_notes") else {}),
-            "pack": "food-security",
             "staged_by": rec["contributor_id"], "contribution_id": rec["contribution_id"],
             "contributor_label": rec["contributor_label"]}
 
@@ -383,6 +384,15 @@ def visible_staged_feed(dataset: str) -> dict | None:
     return row
 
 
+def visible_staged_feeds_for_pack(pack: str) -> dict:
+    """Staged feed rows bound to `pack` that the current caller may see — so a
+    contributor can preview their own feed inside a real answer before review."""
+    _ensure_staged_loaded()
+    caller = identity.current()
+    return {ds: row for ds, row in STAGED_FEEDS.items()
+            if row.get("pack") == pack and caller.may_see(row.get("staged_by"))}
+
+
 def staged_feeds_for_caller() -> dict:
     """What capabilities shows: the caller's own staged feeds (reviewers: all)."""
     _ensure_staged_loaded()
@@ -413,6 +423,7 @@ FEED_FIELDS = {
     },
     "optional": {
         "usage_notes": "a few lines the consuming analyst reads on every query (max 500 chars)",
+        "pack": "which domain pack may cite it: food-security or risk (default food-security)",
         "license": "upstream licence, e.g. public-domain (US government), or 'unstated'",
         "vintage": "version or date of the upstream product, if it has one",
         "sst_basis": "for SST-based indices: the dataset the anomalies rest on (ERSSTv5, OISST)",
@@ -450,7 +461,7 @@ def _feed_row(rec: dict) -> dict:
     row = {k: v for k, v in m.items() if k != "dataset"}
     # File-loaded rows carry `declarative` (their filename); the adapters key
     # their fetch cache on it, so a staged row names its contribution instead.
-    row.update({"status": "available", "pack": "food-security",
+    row.update({"status": "available", "pack": m.get("pack", "food-security"),
                 "declarative": f"staged:{rec['contribution_id']}",
                 "staged_by": rec["contributor_id"], "contribution_id": rec["contribution_id"],
                 "contributor_label": rec["contributor_label"]})
