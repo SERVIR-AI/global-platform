@@ -51,7 +51,11 @@ const EmbedMap: FC<{ viz: VizPayload }> = ({ viz }) => {
 
   const legend = viz.legend ?? {};
   const isRisk = viz.layer_kind === 'risk_level';
-  const hazardName = viz.hazard?.replace('hazard_', '');
+  // "flood_rp500" is a layer name, not something to show a planner. Return periods
+  // read as what they are: a 500-year flood.
+  const rawHazard = viz.hazard?.replace('hazard_', '');
+  const rp = rawHazard?.match(/^(.*)_rp(\d+)$/);
+  const hazardName = rp ? `${rp[2]}-year ${rp[1]}` : rawHazard;
   return (
     <div className="flex h-full w-full flex-col">
       <div className="px-3 py-2 text-sm">
