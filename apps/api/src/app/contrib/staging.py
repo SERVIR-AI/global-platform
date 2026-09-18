@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from ..mcp import store
 from . import fetch_policy, identity, sources
 
-KINDS = ("document", "table", "feed", "raster")
+KINDS = ("document", "table", "feed", "raster", "weights")
 STATUSES = ("pending", "approved", "rejected", "withdrawn", "failed")
 PENDING_CAP = 20               # open contributions per contributor
 HOURLY_CAP = 30                # submissions per contributor per hour
@@ -372,6 +372,19 @@ def _ensure_staged_loaded() -> None:
         pv = rec.get("preview") or {}
         if pv.get("layer") and pv.get("entry") and pv["layer"] not in STAGED_RASTERS:
             STAGED_RASTERS[pv["layer"]] = {"entry": pv["entry"], "contract": pv.get("contract") or {}}
+    try:
+        wts = store.list_contributions(status="pending", kind="weights")
+    except Exception:
+        return
+    for rec in wts:
+        pv = rec.get("preview") or {}
+        if pv.get("hazard") and pv["hazard"] not in STAGED_WEIGHTS:
+            STAGED_WEIGHTS[pv["hazard"]] = {
+                "weights": pv.get("after") or {}, "staged_by": rec["contributor_id"],
+                "contribution_id": rec["contribution_id"],
+                "contributor_label": rec.get("contributor_label"),
+                "rationale": (rec.get("manifest") or {}).get("rationale"),
+                "usage_notes": (rec.get("manifest") or {}).get("usage_notes")}
 
 
 def visible_staged_feed(dataset: str) -> dict | None:
@@ -710,6 +723,164 @@ def visible_staged_contracts() -> dict:
             if caller.may_see(row["entry"].get("staged_by"))}
 
 
+# --------------------------------------------------------------------------- weights
+
+WEIGHTS_FIELDS = {
+    "required": {
+        "hazard": "which hazard's recipe to adjust, e.g. flood (a return-period layer "
+                  "inherits its base hazard's weights)",
+        "weights": "mapping of vulnerability layer -> weight, summing to 1.0, e.g. "
+                   "{vulnerability_pop_all_total: 0.5, vulnerability_reclass_blddensity: 0.3, "
+                   "vulnerability_reclass_road: 0.2}",
+        "rationale": "why these weights, in a sentence a reviewer can judge — this is the "
+                     "only evidence the number rests on",
+    },
+    "optional": {
+        "usage_notes": "a few lines the consuming analyst reads with every risk level "
+                       "computed from these weights (max 500 chars)",
+    },
+}
+_WEIGHT_TOLERANCE = 0.001
+
+# Staged weight adjustments: the contributor's own risk answers use them, nobody
+# else's do, until a reviewer approves.
+STAGED_WEIGHTS: dict[str, dict] = {}
+
+
+def available_vulnerability_layers() -> list[str]:
+    """The reclassed vulnerability layers a weight may name, read from the live
+    raster contracts rather than a hardcoded list."""
+    try:
+        from ..graph.geo import schema
+        doc = schema._doc()
+        return sorted(k for k, v in (doc.get("layers") or {}).items()
+                      if (v or {}).get("role") == "vulnerability_reclass")
+    except Exception:
+        return []
+
+
+def _validate_weights(manifest) -> list[str]:
+    from ..graph.geo import combine, tiffs
+    if not isinstance(manifest, dict):
+        return ["manifest must be a mapping with hazard, weights and rationale"]
+    m = dict(manifest)
+    problems = []
+    unknown = set(m) - set(WEIGHTS_FIELDS["required"]) - set(WEIGHTS_FIELDS["optional"])
+    if unknown:
+        problems.append(f"unknown fields {sorted(unknown)} — every field is provenance")
+    hazard = str(m.get("hazard") or "").strip()
+    if not hazard:
+        problems.append("missing required field 'hazard'")
+    else:
+        key = hazard.removeprefix("hazard_")
+        if not combine.weights_for(f"hazard_{key}"):
+            known = sorted((combine._recipe().get("weights") or {}))
+            problems.append(f"no risk recipe for hazard {key!r} — one of: {', '.join(known)}")
+        if tiffs.resolve(key) is None:
+            problems.append(f"no hazard layer named {key!r} in the catalog")
+    if not str(m.get("rationale") or "").strip():
+        problems.append("missing required field 'rationale' — a weight with no stated "
+                        "reason cannot be reviewed, and a risk level is only as good "
+                        "as the reason behind its weights")
+    w = m.get("weights")
+    if not isinstance(w, dict) or not w:
+        problems.append("missing required field 'weights' (layer -> weight)")
+    else:
+        allowed = set(available_vulnerability_layers())
+        for layer, val in w.items():
+            if allowed and layer not in allowed:
+                problems.append(f"unknown vulnerability layer {layer!r} — one of: "
+                                + ", ".join(sorted(allowed)))
+            try:
+                f = float(val)
+            except (TypeError, ValueError):
+                problems.append(f"weight for {layer!r} is not a number")
+                continue
+            if not 0.0 <= f <= 1.0:
+                problems.append(f"weight for {layer!r} is {f} — weights run 0 to 1")
+        try:
+            total = sum(float(v) for v in w.values())
+            if abs(total - 1.0) > _WEIGHT_TOLERANCE:
+                problems.append(f"weights sum to {total:.3f}, not 1.0 — they are shares of "
+                                "one vulnerability score, so they must add up")
+        except (TypeError, ValueError):
+            pass
+    from . import notes
+    problems += notes.validate(m.get("usage_notes"))
+    return problems
+
+
+def _prepare_weights(m: dict) -> dict:
+    """Nothing to fetch; report what the change actually is, so the record and the
+    reviewer both see the before and after rather than only the after."""
+    from ..graph.geo import combine
+    key = str(m["hazard"]).removeprefix("hazard_")
+    before = dict(combine.weights_for(f"hazard_{key}"))
+    after = {k: round(float(v), 4) for k, v in m["weights"].items()}
+    moved = {k: (before.get(k), after.get(k)) for k in set(before) | set(after)
+             if abs(float(after.get(k, 0)) - float(before.get(k, 0))) > _WEIGHT_TOLERANCE}
+    if not moved:
+        raise Declined("these are already the weights in force for that hazard")
+    return {"hazard": key, "before": before, "after": after,
+            "changed": {k: {"from": v[0], "to": v[1]} for k, v in moved.items()}}
+
+
+def _stage_weights(rec: dict, prepared: dict) -> dict:
+    _ensure_staged_loaded()
+    STAGED_WEIGHTS[prepared["hazard"]] = {
+        "weights": prepared["after"], "staged_by": rec["contributor_id"],
+        "contribution_id": rec["contribution_id"],
+        "contributor_label": rec["contributor_label"],
+        "rationale": rec["manifest"].get("rationale"),
+        "usage_notes": rec["manifest"].get("usage_notes")}
+    return {**prepared,
+            "how_to_test": (f"ask a risk question for a place and hazard {prepared['hazard']!r} — "
+                            "your risk levels use these weights; everyone else's still use the "
+                            "ones in force until a reviewer approves")}
+
+
+def _land_weights(rec: dict) -> dict:
+    import yaml
+    from ..config import get_settings
+    pv = rec["preview"]
+    path = get_settings().risk_l2_contrib_path
+    doc = {}
+    if path.exists():
+        doc = yaml.safe_load(path.read_text()) or {}
+    doc.setdefault("weights", {})[pv["hazard"]] = pv["after"]
+    doc.setdefault("adjusted", {})[pv["hazard"]] = {
+        "by": rec["contributor_label"], "contribution_id": rec["contribution_id"],
+        "rationale": rec["manifest"].get("rationale"),
+        "replaced": pv["before"],
+        **({"usage_notes": rec["manifest"]["usage_notes"]}
+           if rec["manifest"].get("usage_notes") else {})}
+    path.write_text(
+        "# Hub-adjusted Layer-2 vulnerability weights \u2014 machine-owned, written by\n"
+        "# the contribution gate on approval. Hand-edit conf/risk_l2.yml, never this.\n"
+        + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+    _ensure_staged_loaded()
+    STAGED_WEIGHTS.pop(pv["hazard"], None)
+    return {"hazard": pv["hazard"], "weights": pv["after"], "replaced": pv["before"],
+            "file": str(path)}
+
+
+def _retire_weights(rec: dict) -> dict:
+    _ensure_staged_loaded()
+    hz = (rec.get("preview") or {}).get("hazard", "")
+    return {"removed": STAGED_WEIGHTS.pop(hz, None) is not None,
+            "note": "nothing was written to the recipe for a staged adjustment"}
+
+
+def visible_staged_weights(hazard: str) -> dict | None:
+    """Staged weights for `hazard` if the current caller may see them. This is what
+    makes a weight adjustment previewable: its author's own risk levels use it."""
+    _ensure_staged_loaded()
+    row = STAGED_WEIGHTS.get(str(hazard).removeprefix("hazard_"))
+    if row is None or not identity.current().may_see(row.get("staged_by")):
+        return None
+    return row
+
+
 _KINDS = {
     "document": {"validate": _validate_document, "prepare": _prepare_document,
                  "stage": _stage_document, "land": _land_document,
@@ -727,6 +898,10 @@ _KINDS = {
                "stage": _stage_raster, "land": _land_raster, "retire": _retire_raster,
                "fields": RASTER_FIELDS,
                "title": lambda m: f"{m.get('title') or 'untitled layer'} ({m.get('layer')})"},
+    "weights": {"validate": _validate_weights, "prepare": _prepare_weights,
+                "stage": _stage_weights, "land": _land_weights, "retire": _retire_weights,
+                "fields": WEIGHTS_FIELDS,
+                "title": lambda m: f"vulnerability weights for {m.get('hazard')}"},
 }
 
 

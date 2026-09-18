@@ -305,3 +305,85 @@ def test_preview_packs_reports_and_receipts_resolve_only_for_owner_and_reviewers
     finally:
         identity.unbind(tok)
     assert r["staged_by"] == OWNER.id and "PREVIEW" in r["staged_note"]
+
+
+# --- vulnerability weights as a contribution ---------------------------------
+
+def _weights(**over):
+    d = {"hazard": "flood", "rationale": "population matters more than road access for "
+                                          "riverine flood in the Lower Mekong",
+         "weights": {"vulnerability_pop_all_total": 0.5,
+                     "vulnerability_reclass_blddensity": 0.3,
+                     "vulnerability_reclass_road": 0.2}}
+    d.update(over)
+    return d
+
+
+def test_weights_must_add_up_and_carry_a_reason(env, log):
+    out = staging.submit("weights", _weights(rationale="", weights={
+        "vulnerability_reclass_road": 0.9}), OWNER)
+    joined = " ".join(out["problems"])
+    log("OUTPUT", joined[:220])
+    assert out["status"] == "declined"
+    assert "rationale" in joined and "sum to 0.900" in joined
+    assert store.list_contributions() == []
+
+
+def test_weights_refuse_an_unknown_layer_or_hazard(env, log):
+    bad_layer = staging.submit("weights", _weights(weights={"vulnerability_moon": 1.0}), OWNER)
+    bad_hazard = staging.submit("weights", _weights(hazard="volcano"), OWNER)
+    log("OUTPUT", bad_layer["problems"][0][:90] + " | " + bad_hazard["problems"][0][:90])
+    assert "unknown vulnerability layer" in " ".join(bad_layer["problems"])
+    assert "no risk recipe" in " ".join(bad_hazard["problems"]) \
+        or "no hazard layer" in " ".join(bad_hazard["problems"])
+
+
+def test_staged_weights_change_only_their_authors_risk_levels(env, monkeypatch, log):
+    from app.graph.geo import combine
+    monkeypatch.setattr(get_settings(), "risk_l2_contrib_path", env / "risk_l2.contrib.yml")
+    staging.STAGED_WEIGHTS.clear()
+    monkeypatch.setattr(staging, "_STAGED_LOADED", False)
+    out = staging.submit("weights", _weights(), OWNER)
+    log("OUTPUT", f"{out['status']} changed={out['preview']['changed']}")
+    assert out["status"] == "staged" and out["preview"]["changed"]
+
+    def seen(caller):
+        tok = identity.bind(caller)
+        try:
+            return dict(combine.weights_for("hazard_flood"))
+        finally:
+            identity.unbind(tok)
+
+    assert seen(OWNER)["vulnerability_pop_all_total"] == 0.5
+    assert seen(REVIEWER)["vulnerability_pop_all_total"] == 0.5     # so it can be reviewed
+    assert seen(OTHER)["vulnerability_pop_all_total"] == 0.4        # unchanged for everyone else
+
+    ok = staging.approve(out["contribution_id"], REVIEWER, "sound for riverine flood")
+    assert ok["status"] == "approved"
+    assert seen(OTHER)["vulnerability_pop_all_total"] == 0.5        # now everyone
+    adj = combine.adjustment_for("flood")
+    log("OUTPUT", f"provenance: {adj['by']} — {adj['rationale'][:50]}")
+    assert adj["by"] == OWNER.label and adj["replaced"]["vulnerability_pop_all_total"] == 0.4
+    assert "return period" not in str(adj)                          # base hazard, not a variant
+    staging.STAGED_WEIGHTS.clear()
+
+
+def test_a_return_period_layer_inherits_the_adjusted_weights(env, monkeypatch, log):
+    from app.graph.geo import combine
+    monkeypatch.setattr(get_settings(), "risk_l2_contrib_path", env / "risk_l2.contrib.yml")
+    staging.STAGED_WEIGHTS.clear()
+    monkeypatch.setattr(staging, "_STAGED_LOADED", False)
+    out = staging.submit("weights", _weights(), OWNER)
+    staging.approve(out["contribution_id"], REVIEWER)
+    w = combine.weights_for("hazard_flood_rp100")
+    log("OUTPUT", str(w))
+    assert w["vulnerability_pop_all_total"] == 0.5
+    staging.STAGED_WEIGHTS.clear()
+
+
+def test_proposing_the_weights_already_in_force_is_declined(env, log):
+    from app.graph.geo import combine
+    current = dict(combine.weights_for("hazard_flood"))
+    out = staging.submit("weights", _weights(weights=current), OWNER)
+    log("OUTPUT", out["problems"][0][:100])
+    assert out["status"] == "declined" and "already the weights in force" in out["problems"][0]

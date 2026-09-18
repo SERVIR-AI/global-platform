@@ -12,7 +12,7 @@ import os
 
 from fastmcp import FastMCP
 
-from . import (app_ui, assemble, auth, compose, context, feeds, fetch, loop,
+from . import (app_ui, assemble, auth, compose, context, feeds, fetch, loop, weights_ui,
                publish, record, registry, resolve, ui, verify)
 
 
@@ -350,6 +350,12 @@ def contribute_submit(kind: str, manifest: dict) -> dict:
     return _staging.submit(kind, manifest)
 
 
+@mcp.tool(description=weights_ui.describe(),
+          meta={"ui": {"resourceUri": weights_ui.UI_URI}})
+def risk_weights(hazard: str | None = None) -> dict:
+    return {"status": "ok", "weights_picker": weights_ui.payload(hazard)}
+
+
 @mcp.tool()
 def contribute_status(contribution_id: str | None = None, action: str = "show") -> dict:
     """Your contributions and their review state.
@@ -447,6 +453,12 @@ _register_skills()
 # in a sandboxed iframe beside the tool result. Claude Desktop advertises exactly
 # that in its initialize handshake, so this does NOT depend on the model deciding to
 # draw something — which is what went wrong when we only asked in the instructions.
+@mcp.resource(weights_ui.UI_URI, mime_type=weights_ui.UI_MIME)
+def weights_picker_template() -> str:
+    """The weights picker's HTML, rendered by a host that supports MCP Apps."""
+    return weights_ui.html()
+
+
 @mcp.resource(app_ui.UI_URI, mime_type=app_ui.UI_MIME)
 def evidence_app() -> str:
     """Interactive evidence view: sources with age and provenance, and what is

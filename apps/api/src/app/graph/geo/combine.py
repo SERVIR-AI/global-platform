@@ -22,8 +22,35 @@ from . import align as align_mod
 
 
 def _recipe():
-    with open(get_settings().risk_l2_config_path) as f:
-        return yaml.safe_load(f) or {}
+    """The hand-authored recipe, with any hub-adjusted weights laid over it.
+
+    Adjusted weights live in their own machine-owned file so the committed recipe —
+    and the comments in it, which carry the reasoning — are never rewritten by code.
+    """
+    settings = get_settings()
+    with open(settings.risk_l2_config_path) as f:
+        base = yaml.safe_load(f) or {}
+    try:
+        with open(settings.risk_l2_contrib_path) as f:
+            overlay = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        return base
+    weights = dict(base.get("weights") or {})
+    for hazard, row in (overlay.get("weights") or {}).items():
+        weights[hazard] = row
+    base["weights"] = weights
+    base["adjusted"] = overlay.get("adjusted") or {}
+    return base
+
+
+def adjustment_for(hazard):
+    """Who last changed this hazard's weights and when, or None if they are the
+    platform's own. A risk brief has to say which it is reading."""
+    key = hazard[len("hazard_"):] if hazard.startswith("hazard_") else hazard
+    import re
+    base = re.sub(r"_rp\d+$", "", key)
+    adj = _recipe().get("adjusted") or {}
+    return adj.get(key) or adj.get(base)
 
 
 def weights_for(hazard):
@@ -34,10 +61,20 @@ def weights_for(hazard):
     period. Without this, every return-period layer silently lost its risk levels."""
     import re
     key = hazard[len("hazard_"):] if hazard.startswith("hazard_") else hazard
+    base = re.sub(r"_rp\d+$", "", key)
+    # A staged adjustment is the CALLER's own preview: their risk levels use it,
+    # nobody else's do, until a reviewer approves (contrib/staging.py).
+    try:
+        from ...contrib import staging
+        for k in (key, base):
+            row = staging.visible_staged_weights(k)
+            if row and row.get("weights"):
+                return row["weights"]
+    except Exception:
+        pass
     weights = _recipe().get("weights", {})
     if key in weights:
         return weights[key]
-    base = re.sub(r"_rp\d+$", "", key)
     return weights.get(base, {})
 
 

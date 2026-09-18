@@ -136,6 +136,26 @@ def _document_hits(place, hz, focus, trace, gaps):
     return corpus, hits
 
 
+def _weights_provenance(hz) -> str:
+    """Whose weights these are. A hub-adjusted recipe and the platform's defaults are
+    different claims, and a brief that reads the same either way is hiding the one
+    fact a reviewer approved."""
+    from ..graph.geo import combine
+    adj = combine.adjustment_for(hz)
+    if not adj:
+        return ("The weights are platform starting values, not calibrated against "
+                "observed loss.")
+    bits = [f"These weights were adjusted by {adj.get('by', 'a contributor')} and "
+            f"approved through the contribution gate, replacing the platform defaults "
+            f"{adj.get('replaced')}."]
+    if adj.get("rationale"):
+        bits.append(f"Stated reason: {adj['rationale']}.")
+    if adj.get("usage_notes"):
+        bits.append(f"Contributor guidance: {adj['usage_notes']}")
+    bits.append("They remain uncalibrated against observed loss.")
+    return " ".join(bits)
+
+
 def _pack_feeds(place, trace, gaps):
     """Every feed bound to the risk pack, queried and returned with its passport.
 
@@ -388,8 +408,8 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
                      + "; ".join(f"{lay} {eff['effective'][lay]} "
                                  f"(covers {eff['coverage'][lay] * 100:.1f}%)"
                                  for lay in risk_weights)
-                     + ". Every input is on the same 1 to 5 class scale. The weights are "
-                     "platform starting values, not calibrated against observed loss."),
+                     + ". Every input is on the same 1 to 5 class scale. "
+                     + _weights_provenance(hz)),
         })
 
         n += 1

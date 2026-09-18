@@ -19,7 +19,7 @@ TOOLS = {
     "resolve_place_time", "assemble_pack", "verify_groundedness", "record_receipt",
     "publish_answer", "compose_run", "feeds_query",
     "ui_design", "ui_catalog", "ui_component", "ui_embed",
-    "contribute_submit", "contribute_status", "contribute_review",
+    "contribute_submit", "contribute_status", "contribute_review", "risk_weights",
 }
 PROMPTS = {"build_a_tool", "run_analysis", "explain_platform"}
 PANEL_TOOLS = ("record_receipt", "publish_answer")
@@ -41,10 +41,11 @@ def test_every_prompt_is_still_published(log):
 
 
 def test_resources_cover_the_app_the_guide_and_every_pack(log):
-    """One manifest per PACKS row, plus the MCP App and the human guide."""
+    """One manifest per PACKS row, plus both MCP Apps and the human guide."""
     uris = {str(r.uri) for r in asyncio.run(mcp.list_resources())}
     log("OUTPUT", str(sorted(uris)))
-    expected = {UI_URI, "servirplatform://how-to-use",
+    from app.mcp.weights_ui import UI_URI as WEIGHTS_UI_URI
+    expected = {UI_URI, WEIGHTS_UI_URI, "servirplatform://how-to-use",
                 "servirplatform://skill/trace-emit",
                 "servirplatform://skill/trace-visualize"} | {
         f"servirplatform://pack/{pid}" for pid in packs.available()}

@@ -77,6 +77,9 @@ class Settings(BaseSettings):
     raster_schema_path: Path = _REPO_ROOT / "conf" / "raster_schema.yml"
     raster_schema_contrib_path: Path = _REPO_ROOT / "conf" / "raster_schema.contrib.yml"
     risk_l2_config_path: Path = _REPO_ROOT / "conf" / "risk_l2.yml"
+    # Machine-owned overlay: hub-adjusted vulnerability weights, written by the
+    # weights tool. The hand-authored recipe above is never rewritten by code.
+    risk_l2_contrib_path: Path = _REPO_ROOT / "conf" / "risk_l2.contrib.yml"
 
     # --- Food security ---
     # Hub-adjustable crop calendars (the Call-2 ministry ask); per-request
