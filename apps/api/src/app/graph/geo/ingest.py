@@ -30,6 +30,9 @@ OVERPASS_MIRRORS = (
 AREA_CAP_KM2 = 1500.0
 BUFFER_DEG = 0.01
 RADIUS_KM = 12.0          # fallback AOI: box of this radius around the centre point
+# Bump when place resolution changes meaning. Cached areas of interest stamped with an
+# older value are re-resolved on next use rather than served from a stale boundary.
+RESOLVER_VERSION = 2
 ASSET_LAYERS = ("roads", "hospitals", "schools", "buildings")
 OVERPASS_TIMEOUT = 60          # client HTTP timeout (was 180) — fail over a stalled mirror fast
 OVERPASS_SERVER_TIMEOUT = 55   # Overpass server-side [timeout:] budget per query
@@ -333,8 +336,23 @@ def ensure_aoi(place=None, geometry=None, layers=None):
     # Resolve the AOI boundary once (or reload it from a prior fetch of this AOI).
     emit({"kind": "cache", "what": "aoi_boundary", "key": slug,
           "dest": short_path(meta), "was_cached": os.path.exists(meta)})
-    if os.path.exists(meta):
-        info = json.load(open(meta))
+    cached = json.load(open(meta)) if os.path.exists(meta) else None
+    if cached is not None and place is not None \
+            and int(cached.get("resolver", 0)) < RESOLVER_VERSION:
+        # The cache is keyed on the query string, so a resolution made by an older,
+        # wronger resolver is served forever. "Battambang Province" kept returning a
+        # records office long after the geocoder learned not to pick one. Stamp the
+        # resolver and re-resolve anything older; the layer files stay, only the
+        # boundary is recomputed.
+        print(f"   [ingest: re-resolving '{place}' — cached by an older resolver]")
+        for f in ("meta.json", "admin.geojson"):
+            try:
+                os.remove(os.path.join(adir, f))
+            except OSError:
+                pass
+        cached = None
+    if cached is not None:
+        info = cached
         boundary = shape(json.load(open(os.path.join(adir, "admin.geojson")))["features"][0]["geometry"])
     else:
         if geometry is not None:
@@ -347,7 +365,8 @@ def ensure_aoi(place=None, geometry=None, layers=None):
         print(f"   [ingest: resolving '{name}' (~{km2:.0f} km²)…]")
         os.makedirs(adir, exist_ok=True)
         _write(adir, "admin", [_feature(boundary, {"name": name})])
-        info = {"name": name, "area_km2": round(km2), "how": how, "counts": {}}
+        info = {"name": name, "area_km2": round(km2), "how": how, "counts": {},
+                "resolver": RESOLVER_VERSION}
         json.dump(info, open(meta, "w"), indent=2)
 
     # Fetch only the requested asset layers that aren't already cached.
