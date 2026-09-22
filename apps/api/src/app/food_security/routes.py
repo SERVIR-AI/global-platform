@@ -315,12 +315,43 @@ def rag_document(doc_id: str):
     if not re.fullmatch(r"[0-9a-f]{16}", doc_id):
         raise HTTPException(status_code=404, detail="unknown doc_id")
     corpus = Corpus(_CORPUS)
-    _refuse_unless_visible(corpus, doc_id)
     path = corpus.raw_path(doc_id)
     if path is None:
+        # Receipts minted before the archive was mounted per library carry THIS
+        # address for documents that live in another pack's library. They are
+        # shareable proof; a dead link on one is the trace-back failing in the
+        # place it matters most. Look the id up in the other libraries rather than
+        # 404ing on an id the platform can plainly resolve.
+        other = _archived_elsewhere(doc_id)
+        if other is not None:
+            return other
+        _refuse_unless_visible(corpus, doc_id)
         known = any(d["doc_id"] == doc_id for d in corpus.documents())
         raise HTTPException(status_code=404, detail=(
             "document is in the library but has no archived original (ingested before "
             "archiving existed) — re-ingest it, or fetch it from its source_url"
             if known else "unknown doc_id"))
+    _refuse_unless_visible(corpus, doc_id)
     return FileResponse(path)
+
+
+def _archived_elsewhere(doc_id: str):
+    """The same document in another pack's library, if that is where it lives."""
+    from ..contrib import identity
+    from ..mcp import packs
+    for name in {p.get("corpus") for p in packs.PACKS.values() if p.get("corpus")}:
+        if name == _CORPUS:
+            continue
+        try:
+            other = Corpus(name)
+        except CorpusError:
+            continue
+        found = other.find(doc_id)
+        if found is None:
+            continue          # absent from the index is not permission
+        if not identity.visible(found["metadata"]):
+            continue
+        path = other.raw_path(doc_id)
+        if path is not None:
+            return FileResponse(path)
+    return None

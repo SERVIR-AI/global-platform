@@ -12,7 +12,8 @@ import os
 
 from fastmcp import FastMCP
 
-from . import (app_ui, assemble, auth, compose, context, feeds, fetch, loop, weights_ui,
+from . import (app_ui, assemble, auth, compose, context, feeds, fetch, loop,
+               weights_ui,
                publish, record, registry, resolve, ui, verify)
 
 
@@ -67,6 +68,13 @@ as SOURCE FILES IN THE USER'S OWN PROJECT that they can run, version and deploy 
 never a hosted preview on a third-party host. A published static page also FREEZES \
 any verdict into markup that can never be re-resolved.
 - RUN-TIME: the user asks a question. Answer it now via the canonical loop.
+- INTERACTIVE SURFACES: this platform ships MCP Apps. If someone questions how risk \
+is WEIGHTED, call `risk_weights` — in a host that renders MCP Apps it opens a picker \
+with a slider per vulnerability layer, and proposing from it goes through the \
+contribution gate. If someone asks to SEE the evidence behind an answer, \
+`record_receipt` and `publish_answer` carry an evidence view the host renders. \
+Measured: small models asked these very questions answered from memory instead of \
+opening the tool, so reach for them by name.
 
 KNOW WHO THIS IS FOR, AND SHOW THEM. The people using this are food-security \
 analysts, hub teams and ministry advisors deciding whether to act months ahead. \
@@ -148,11 +156,15 @@ async def platform_capabilities() -> dict:
 @mcp.tool()
 def corpus_search(query: str, k: int = 5, country: str | None = None,
                   crop: str | None = None, temporal: str | None = None,
-                  doc_type: str | None = None) -> dict:
-    """Search the platform's authoritative document library. Prefer this over a web
+                  doc_type: str | None = None, pack: str | None = None) -> dict:
+    """Search a domain pack's authoritative document library. Prefer this over a web
     search for the subjects it covers (see `platform_capabilities` for the live
     list): every passage carries a provenance passport
     (source, date, validation, archived copy).
+
+    `pack` picks the library — each domain pack has its own. Omit it and you search
+    food-security. Ask a hazard question without it and you will search the wrong
+    shelf and be told, truthfully but uselessly, that nothing is relevant.
 
     Returns: {status, query, corpus, min_relevance, hits}.
       status "ok"       -> hits: [{score, text, passport{...}}]
@@ -164,7 +176,7 @@ def corpus_search(query: str, k: int = 5, country: str | None = None,
     """
     return loop.with_entry_hint(
         fetch.search(query, k=k, country=country, crop=crop,
-                     temporal=temporal, doc_type=doc_type))
+                     temporal=temporal, doc_type=doc_type, pack=pack))
 
 
 @mcp.tool()
@@ -240,19 +252,30 @@ def verify_groundedness(draft: str, pack_id: str) -> dict:
 
 
 @mcp.tool()
-def resolve_place_time(country: str, crop: str, region: str | None = None,
-                       when: str | None = None) -> dict:
-    """Turn human place-and-time into machine place-and-time: country/crop + a time
-    expression (`when`: a month name, 1-12, or "this season" — the default) → the
-    season windows and which phase that month falls in.
+def resolve_place_time(country: str | None = None, crop: str | None = None,
+                       region: str | None = None, when: str | None = None,
+                       place: str | None = None) -> dict:
+    """Turn human place-and-time into machine place-and-time. Pass whichever half
+    your question has — a `place` ("Battambang, Cambodia", "Bang Sue District,
+    Bangkok"), a `country`+`crop` season, or both.
 
-    Returns: {status, country, crop, region, asked_month, month_name, seasons,
-    active_seasons, region_resolution}. `region` is currently passed through
-    UNRESOLVED — a sub-national gazetteer/admin geometries are a declared Phase-2
-    gap, stated in `region_resolution`. status "empty" -> no calendar for that
-    country/crop; "declined" -> unparseable `when` (`note`).
+    A `place` (or a `region`, resolved against its country) comes back as the area
+    the platform would actually analyse: its canonical name, area in km², bounding
+    box, centroid, and whether it is a real administrative boundary or a box at a
+    centre point. When a named area is too large to analyse whole, `how` says so by
+    name and size rather than letting a province quietly become a town.
+
+    `country`+`crop` plus a time expression (`when`: a month name, 1-12, or "this
+    season" — the default) returns the season windows and which phase that month
+    falls in.
+
+    Returns: {status, place, asked_month, month_name, seasons, active_seasons,
+    region_resolution}. status "declined" -> unparseable `when`, an unfindable
+    place, or neither half given (`note`); "empty" -> no calendar for that
+    country/crop.
     """
-    return resolve.place_time(country, crop, region=region, when=when)
+    return resolve.place_time(country=country, crop=crop, region=region,
+                              when=when, place=place)
 
 
 @mcp.tool()
@@ -364,12 +387,21 @@ def contribute_status(contribution_id: str | None = None, action: str = "show") 
     `pending_review`, the queue). With a contribution_id: that record.
     action="withdraw" with a contribution_id: take back your own pending
     contribution — its preview is removed; history it already appears in stays.
+
+    action="audit": every APPROVED contribution and whether the platform is
+    actually serving it. Open to anyone, because an approved contribution is
+    public and "is what we approved being used?" is a question a hub lead has to
+    be able to ask. An approval whose landing never happened changes no answer and
+    is otherwise invisible.
+
     Returns {status: ok|withdrawn|declined, ...}; `note` says why on a decline.
     """
     if action == "withdraw":
         if not contribution_id:
             return {"status": "declined", "note": "withdraw needs a contribution_id"}
         return _staging.withdraw(contribution_id)
+    if action == "audit":
+        return _staging.reconcile()
     return _staging.status(contribution_id)
 
 
@@ -398,8 +430,11 @@ def contribute_review(action: str = "list", contribution_id: str | None = None,
 
 
 @mcp.tool()
-def corpus_document(doc_id: str | None = None) -> dict:
+def corpus_document(doc_id: str | None = None, pack: str | None = None) -> dict:
     """Trace a passage back to its source document.
+
+    `pack` picks the library, as it does for corpus_search; omit it for
+    food-security. A doc_id from a risk citation needs pack="risk".
 
     Returns: {status, ...}.
       No doc_id, status "ok" -> {documents, inventory: [{doc_id, chunks, passport}]}
@@ -407,7 +442,7 @@ def corpus_document(doc_id: str | None = None) -> dict:
       status "declined" -> `note` says WHY (unreadable corpus / unknown doc_id)
     Whenever status != "ok", render `note`.
     """
-    return fetch.document(doc_id)
+    return fetch.document(doc_id, pack=pack)
 
 
 def _register_pack_manifests() -> None:
@@ -516,7 +551,15 @@ def build_a_tool(goal: str = "a food-security bulletin generator") -> str:
             "response the tool produces carry an execution trace (steps, timings, "
             "upstream calls, LLM usage); surface the trace per "
             "servirplatform://skill/trace-visualize. Show me the finished artifact and "
-            "prove it runs — including one real trace.")
+            "prove it runs — including one real trace.\n\n"
+            "BEFORE you tell me it is ready, run ui_validate on every file you wrote "
+            "and fix what it names. It refuses a page that states a figure no receipt "
+            "resolved, names a publisher no receipt cites, awards itself a verdict, or "
+            "never calls the platform. Six builds in a row passed none of those checks "
+            "and every one of them looked finished: invented numbers under invented "
+            "publishers, and in one case exposure figures generated by Math.random() "
+            "that rerolled on each render. A build nobody gated is a build nobody "
+            "checked.")
 
 
 @mcp.prompt()
