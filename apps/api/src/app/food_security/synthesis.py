@@ -450,6 +450,29 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
                 f"no retrospective document matched the specific question ({focus!r}); "
                 "the historical evidence below answers the general question about "
                 f"{crop or 'this crop'} in {country} instead")
+    # THE CURRENT SEASON, which neither query above could reach. `temporal` marks a
+    # document observational-vs-forecast; `q_past` reads that same tag as meaning
+    # HISTORICAL. A country brief published during this season is observational but
+    # not historical, so the only query that could see it asked about past events.
+    # Measured on the flagship question: the FAO GIEWS Kenya brief (04-May-2026)
+    # scores 0.716 and 0.679 on a current-season query for the two chunks describing
+    # THIS season's rains, and 0.611 for its price table — and the price table was
+    # the one that reached the pack, so the brief reported no current-season
+    # evidence while the library held it. Additive: this can only ADD observational
+    # evidence already tagged the same way, never displace what was retrieved.
+    q_current = (f"{country} {crop or 'crop'} current season to date — rainfall "
+                 f"received, crop and rangeland condition, harvest prospects "
+                 f"{focus}").strip()
+    current_hits = corpus.search(q_current, k=3, temporal="retrospective")
+    already = {h["id"] for h in retro_hits}
+    added = [h for h in current_hits if h["id"] not in already]
+    retro_hits = retro_hits + added
+    trace.append(f"retrieve[current-season] {q_current!r} -> {len(current_hits)} hits, "
+                 f"{len(added)} not already retrieved")
+    if not current_hits:
+        gaps.append("no document in the library describes the CURRENT season's "
+                    "observed conditions for this country and crop")
+
     if not forecast_hits:
         gaps.append("no forecast/outlook document in the library matched the question")
     if not retro_hits:
@@ -475,6 +498,24 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
                 "shared driver, but nothing here observes this country. Do not read "
                 "any of it as evidence about "
                 f"{country}."))
+
+    # The same check for CROP, which was never written. Country was varied all
+    # through testing and crop never was — every test asked about maize — so an
+    # uncovered crop declared no gap at all: asking for Kenya RICE returned maize
+    # documents with the word rice around them. Silence is worse than the country
+    # case, which at least announced itself.
+    if crop:
+        covered_crops = {str(x).strip().lower()
+                         for h in forecast_hits + retro_hits
+                         for x in (h["metadata"].get("crops") or [])}
+        if covered_crops and crop.strip().lower() not in covered_crops:
+            gaps.insert(0, (
+                f"NO DOCUMENT IN THE LIBRARY IS ABOUT {crop.upper()}. The "
+                f"{len(forecast_hits) + len(retro_hits)} document(s) cited below are "
+                f"about {', '.join(sorted(x.title() for x in covered_crops))}. Their "
+                f"findings do not transfer to {crop}: sowing windows, water demand and "
+                f"failure modes differ by crop. Do not read any of it as evidence "
+                f"about {crop}."))
 
     citations = []
     for h in forecast_hits + retro_hits:
@@ -613,6 +654,22 @@ def _driver_only_claims(draft: str, citations: list) -> list[dict]:
     return out
 
 
+def _index_scale(num: str) -> bool:
+    """A small DECIMAL — the shape every climate index takes.
+
+    `_load_bearing` skips everything under 10 so that counts ("3 districts") do
+    not bury the figures that matter. That silently exempted exactly the numbers
+    a driver claim turns on: an ONI of +1.8, an SOI of -0.5, a Nino-3.4 anomaly.
+    A fabricated index value was never checked at all. An integer under 10 is
+    still noise; a decimal under 10 is not.
+    """
+    try:
+        v = float(num)
+    except ValueError:                                      # pragma: no cover
+        return False
+    return abs(v) < 10 and v != int(v)
+
+
 def _load_bearing(num: str) -> bool:
     """Is this the kind of number a decision would turn on?
 
@@ -722,7 +779,41 @@ def _fmt(v: float) -> set:
     return out
 
 
-def check_grounded(draft, citations, sections=None, extra_evidence=None):
+
+_GAP_SUBJECT = re.compile(r"NO DOCUMENT IN THE LIBRARY IS ABOUT ([A-Z][A-Z \-\'']+?)\.")
+_ACK_PHRASES = ("no document", "no evidence", "nothing here observes", "not covered",
+                "no source", "does not transfer", "no data", "outside the library",
+                "not in the library", "library holds nothing", "cannot be answered")
+
+
+def _unacknowledged_gaps(draft: str, gaps) -> list[str]:
+    """Declared 'we hold nothing about X' gaps that the draft writes straight past.
+
+    The pack already announces when it has no document about the country or crop
+    asked for. Nothing made the draft repeat it, so a confident brief about an
+    uncovered target passed the gate and minted a receipt. WARNING for now, not a
+    block: an honest brief that DOES own the gap must never be punished, and the
+    false-alarm rate has to be measured before this is made binding.
+    """
+    low = draft.lower()
+    owned = any(p in low for p in _ACK_PHRASES)
+    out = []
+    for g in gaps or []:
+        m = _GAP_SUBJECT.search(str(g))
+        if not m:
+            continue
+        subject = m.group(1).strip()
+        if subject.lower() not in low:
+            continue        # the draft never claims anything about it at all
+        if not owned:
+            out.append(f"the pack declares it holds no document about {subject.title()}, "
+                       f"and the draft makes claims about {subject.title()} without "
+                       "stating that gap")
+    return out
+
+
+def check_grounded(draft, citations, sections=None, extra_evidence=None,
+                   gaps=None):
     """Blocking: required sections present, no model-written Sources, citations
     resolve, every paragraph cites. Recorded (not yet blocking): numbers absent
     from the evidence (whole-token compare over chunk text + citation metadata).
@@ -760,9 +851,14 @@ def check_grounded(draft, citations, sections=None, extra_evidence=None):
     # nothing at all. Measured across 1,288 previously-passing briefs: 1.3% newly
     # blocked, and the real fabrication ("US$167.13 million", "47281 displaced",
     # absent from every field of every citation in its pack) is among them.
-    derived, unverified = {}, []
+    derived, unverified, index_scale = {}, [], []
     for num in flagged:
         if not _load_bearing(num):
+            # Sub-threshold. A decimal down here is a climate-index value, not a
+            # count, and was exempt from every check — WARN on it while the
+            # false-alarm rate is measured, rather than block today.
+            if _index_scale(num) and not _cited_share(num, citations, draft_nums):
+                index_scale.append(num)
             continue          # a year or a count under 10 blocks nothing
         share = _cited_share(num, citations, draft_nums)
         if share:
@@ -771,6 +867,7 @@ def check_grounded(draft, citations, sections=None, extra_evidence=None):
             unverified.append(num)
     misattributed = _attribution_warnings(draft, citations)
     driver_only = _driver_only_claims(draft, citations)
+    unowned_gaps = _unacknowledged_gaps(draft, gaps)
     failures = []
     if missing_sections:
         failures.append(f"missing required sections: {missing_sections}")
@@ -800,7 +897,18 @@ def check_grounded(draft, citations, sections=None, extra_evidence=None):
             # WARNING, not a failure: the figure is in the pack but not in the
             # citation the paragraph points at.
             "numbers_attributed_elsewhere": misattributed,
-            "local_claims_on_driver_evidence": driver_only}
+            "local_claims_on_driver_evidence": driver_only,
+            "numbers_index_scale_unverified": index_scale,
+            "gaps_not_acknowledged": unowned_gaps,
+            # One place a caller can look for everything that did NOT block. These
+            # are the checks queued for promotion once their false-alarm rate is
+            # measured; keeping them in one list makes that promotion one edit.
+            "warnings": ([f"claim about an uncovered target: {w}" for w in unowned_gaps]
+                         + [f"climate-index figure in no citation: {n}" for n in index_scale]
+                         + [f"local claim resting on driver evidence: {d}"
+                            for d in (driver_only or [])]
+                         + [f"number attributed to a citation that lacks it: {m}"
+                            for m in (misattributed or [])])}
 
 
 def _sources_md(citations):
