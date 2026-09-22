@@ -90,7 +90,10 @@ def add(manifest: dict, dry_run: bool = False) -> dict:
             "residency": "platform-hosted copy",
             "cadence": manifest["cadence"], "adapter": "generic_csv",
             "license": manifest["license"], "vintage": manifest["vintage"],
-            "fetch": {"path": str(dest), "sha256": digest,
+            # Relative to the cache dir: an absolute path here is the staging
+            # machine's and goes dark on every other host.
+            "fetch": {"path": str(dest.relative_to(Path(settings.cache_dir))),
+                      "sha256": digest,
                       "columns": manifest["columns"], "units": manifest["units"],
                       **({"as_of_field": manifest["as_of_field"]}
                          if manifest.get("as_of_field") else {})},

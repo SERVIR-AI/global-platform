@@ -177,6 +177,28 @@ def _classify_bands(v: float, bands: list) -> str | None:
     return None
 
 
+
+def _landed_table(recorded: str) -> _Path:
+    """Where a contributed table actually lives ON THIS HOST.
+
+    The spec records the path as it was at contribution time. An absolute one is
+    the staging machine's, so it cannot resolve anywhere else — a developer's
+    /Users/... path shipped to a Linux host left the feed permanently dark. A
+    relative path is resolved against this host's cache dir; an absolute one is
+    honoured if it exists, and otherwise recovered by basename under cache/tables
+    so specs already written that way keep working.
+    """
+    from pathlib import Path
+    from ..config import get_settings
+    root = Path(get_settings().cache_dir)
+    p = Path(recorded)
+    if not p.is_absolute():
+        return root / p
+    if p.is_file():
+        return p
+    return root / "tables" / p.name
+
+
 def _adapt_generic_table(params: dict, spec: dict) -> dict:
     """Declarative adapter for the NOAA text-series family: one row per year,
     12 monthly values, sentinel for not-yet-published. ONI/DMI/SOI all share it —
@@ -343,9 +365,12 @@ def _adapt_generic_csv(params: dict, spec: dict) -> dict:
             limit = max(1, int(params["limit"]))
         except (TypeError, ValueError) as exc:
             raise FeedDecline("'limit' must be a whole number") from exc
-    path = _Path(fetch["path"])
+    path = _landed_table(fetch["path"])
     if not path.is_file():
-        raise FeedDecline(f"landed table missing at {path} — re-land it")
+        raise FeedDecline(
+            f"landed table missing at {path} — the feed spec recorded "
+            f"{fetch['path']!r}, which is a path on the machine that staged the "
+            "contribution, not on this host. Re-land the table here.")
     raw = path.read_bytes()
     digest = _hashlib.sha256(raw).hexdigest()
     if fetch.get("sha256") and digest != fetch["sha256"]:

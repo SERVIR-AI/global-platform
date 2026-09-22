@@ -13,7 +13,7 @@ adapter: generic_csv
 license: CC0-1.0
 vintage: 2026-08
 fetch:
-  path: /Users/puranjaigarg/asean/global_risk_sprint/cache/tables/btb_station_rainfall.csv
+  path: tables/btb_station_rainfall.csv
   sha256: eae5ffb67c6ae40340be2536308300d0e90da79b25047d9fab5ef0e4f2170520
   columns:
     month: Month
