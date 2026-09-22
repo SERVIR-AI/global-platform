@@ -323,8 +323,18 @@ def test_declared_gaps_are_a_citable_pack_entry(risk_pack, pack, log):
     rules = " ".join(risk_pack["next_step"]["draft_rules"])
     assert f"[{last['n']}]" in rules                   # the drafter is told
     fs_last = pack["citations"][-1]
-    assert not pack["gaps"] and fs_last["kind"] == "gaps"
-    assert "No evidence gaps were declared" in fs_last["text"]
+    assert fs_last["kind"] == "gaps"
+    if pack["gaps"]:
+        # A live upstream can be down while the suite runs — the Crop Monitor
+        # service returns 500 for weeks at a time — and that declares a real gap.
+        # Asserting "no gaps" made a third party's uptime a condition of a green
+        # suite, so the failure became permanent scenery and stopped meaning
+        # anything. Assert the CONTRACT: whatever the gaps are, they are carried
+        # verbatim into the citation a drafter is told to cite.
+        for g in pack["gaps"]:
+            assert g in fs_last["text"]
+    else:
+        assert "No evidence gaps were declared" in fs_last["text"]
 
 
 def test_a_gaps_only_missing_section_passes_the_gate(risk_pack, log):
