@@ -77,7 +77,7 @@ _CITE_GROUP = re.compile(r"\[([\d\s,–\-]+)\]")   # [3], [1, 9], [1-3], [2016]
 # cropland" as the numbers 30, 000, 170, 000 — so a brief quoting it faithfully was
 # scored as two fabrications and blocked. Roughly two thirds of the gate's blocks
 # were correctly-sourced figures until this class was widened.
-_SEP = "[ ,\u00a0\u202f\u2009\n]"
+_SEP = "[ ,\u00a0\u202f\u2009]"
 _THOUSANDS = re.compile(rf"(?<=\d){_SEP}(?=\d{{3}}(?:{_SEP}\d{{3}})*(?!\d))")
 
 
@@ -675,7 +675,7 @@ def _attribution_warnings(draft: str, citations: list) -> list[dict]:
     return out
 
 
-def _cited_share(target: str, citations: list) -> str | None:
+def _cited_share(target: str, citations: list, draft_nums: set | None = None) -> str | None:
     """Is `target` a share of a total stated in the SAME citation?
 
     The one piece of arithmetic a drafter legitimately does is "X of Y, which is
@@ -701,9 +701,25 @@ def _cited_share(target: str, citations: list) -> str | None:
         vals = _citation_values(c)
         for a in vals:
             for b in vals:
-                if b and a <= b and abs(a / b * 100 - t) <= 0.6:
-                    return f"{a} of {b} in [{c.get('n')}]"
+                if not b or a > b or abs(a / b * 100 - t) > 0.6:
+                    continue
+                # BOTH figures must be on the page. "2 of 27 schools, 7.4%" is
+                # checkable by a reader; a bare 7.4 that happens to equal some
+                # ratio buried in a citation is not, and allowing it waved
+                # through 88% of arbitrary percentages in a real pack.
+                if draft_nums is not None and not (
+                        _fmt(a) & draft_nums and _fmt(b) & draft_nums):
+                    continue
+                return f"{a} of {b} in [{c.get('n')}]"
     return None
+
+
+def _fmt(v: float) -> set:
+    """How a figure might be written, so "2" matches "2.0"."""
+    out = {f"{v:.10g}", str(round(v))}
+    if v == int(v):
+        out.add(str(int(v)))
+    return out
 
 
 def check_grounded(draft, citations, sections=None, extra_evidence=None):
@@ -746,7 +762,9 @@ def check_grounded(draft, citations, sections=None, extra_evidence=None):
     # absent from every field of every citation in its pack) is among them.
     derived, unverified = {}, []
     for num in flagged:
-        share = _cited_share(num, citations)
+        if not _load_bearing(num):
+            continue          # a year or a count under 10 blocks nothing
+        share = _cited_share(num, citations, draft_nums)
         if share:
             derived[num] = share
         else:
