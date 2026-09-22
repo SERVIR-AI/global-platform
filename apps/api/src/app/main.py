@@ -39,6 +39,11 @@ _PUBLIC_PREFIXES = (
     "/api/health",
     "/api/resolve/",
     "/api/food-security/rag/document/",
+    # The per-library archive, for the same reason: a receipt's trace-back link is
+    # public proof and the reader following it is a third party with no session.
+    # Moving archived_copy here without this made every risk citation's link 401
+    # for exactly the reader it exists for.
+    "/api/rag/",
     # Raster tiles: the hazard_map embed's raster option must load for anonymous
     # visitors, like the resolver it rides on.
     "/api/raster/",

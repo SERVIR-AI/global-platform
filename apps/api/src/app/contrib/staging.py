@@ -1107,7 +1107,13 @@ def reconcile(caller: identity.Caller | None = None) -> dict:
     live, inert, unknown = [], [], []
     for r in rows:
         st = _landed_state(r)
-        entry = {**_public(r), "serving": st.get("live"), "why": st.get("why")}
+        # Open to anyone, so it must not enumerate people. _public carries the
+        # contributor and reviewer labels — real identities on a deployment — and
+        # the preview blob repeats them inside its passport.
+        pub = {k: v for k, v in _public(r).items()
+               if k not in ("contributor_label", "reviewer_label", "preview",
+                            "contributor_id", "reviewer_id")}
+        entry = {**pub, "serving": st.get("live"), "why": st.get("why")}
         (live if st.get("live") else inert if st.get("live") is False else unknown).append(entry)
     return {"status": "ok", "approved": len(rows),
             "serving": len(live), "approved_but_inert": len(inert),
