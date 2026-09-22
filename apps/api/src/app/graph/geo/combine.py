@@ -53,6 +53,30 @@ def adjustment_for(hazard):
     return adj.get(key) or adj.get(base)
 
 
+def staged_weights_row(hazard):
+    """The caller's own STAGED weights row for this hazard, or None.
+
+    Exposed rather than inlined because the brief has to be able to SAY that its
+    risk levels rest on an unreviewed proposal. While this was private, the pack
+    used the staged weights and then described the approved ones, so a receipt
+    reported "the weights are platform starting values" over numbers computed from
+    somebody's pending 0.55/0.30/0.15 — the precise fact the provenance line exists
+    to surface.
+    """
+    import re as _re
+    key = hazard[len("hazard_"):] if hazard.startswith("hazard_") else hazard
+    base = _re.sub(r"_rp\d+$", "", key)
+    try:
+        from ...contrib import staging
+        for k in (key, base):
+            row = staging.visible_staged_weights(k)
+            if row and row.get("weights"):
+                return row
+    except Exception:
+        return None
+    return None
+
+
 def weights_for(hazard):
     """Default {layer: weight} for a hazard from conf (e.g. 'hazard_flood' -> key 'flood').
 
@@ -64,14 +88,9 @@ def weights_for(hazard):
     base = re.sub(r"_rp\d+$", "", key)
     # A staged adjustment is the CALLER's own preview: their risk levels use it,
     # nobody else's do, until a reviewer approves (contrib/staging.py).
-    try:
-        from ...contrib import staging
-        for k in (key, base):
-            row = staging.visible_staged_weights(k)
-            if row and row.get("weights"):
-                return row["weights"]
-    except Exception:
-        pass
+    row = staged_weights_row(hazard)
+    if row:
+        return row["weights"]
     weights = _recipe().get("weights", {})
     if key in weights:
         return weights[key]
@@ -96,6 +115,22 @@ def _combine(hazard, vulns, weights, class_max=5):
     return np.where(ok, risk, 0).astype("uint8")
 
 
+def _weights_tag(weights: dict) -> str:
+    """A short, stable fingerprint of the weights a grid was computed from."""
+    import hashlib
+    payload = ";".join(f"{k}={float(v):.6g}" for k, v in sorted((weights or {}).items()))
+    return hashlib.sha1(payload.encode()).hexdigest()[:8]
+
+
+def _recipe_weights(hazard: str) -> dict:
+    """The recipe's own weights for this hazard, ignoring any staged proposal."""
+    import re as _re
+    key = hazard[len("hazard_"):] if hazard.startswith("hazard_") else hazard
+    base = _re.sub(r"_rp\d+$", "", key)
+    w = _recipe().get("weights", {})
+    return w.get(key) or w.get(base, {})
+
+
 def combine_l2(aoi, hazard="hazard_flood", vuln_weights=None, recompute=False):
     """Compute the Layer-2 risk grid for `aoi` and write <aoi>/risk_<hazard>_l2.tif (the
     same 1-5 contract as a clipped hazard). Cached by file existence unless recompute."""
@@ -103,9 +138,20 @@ def combine_l2(aoi, hazard="hazard_flood", vuln_weights=None, recompute=False):
     if not weights:
         raise ValueError(f"no Layer-2 weights for {hazard} (pass vuln_weights or add to conf)")
     adir = os.path.dirname(aoi["admin"])
-    out = os.path.join(adir, f"risk_{hazard.replace('hazard_', '')}_l2.tif")
+    # The weights are PART OF THE IDENTITY of this grid. Keyed on (AOI, hazard)
+    # alone, a cached grid computed from the platform recipe was returned to a
+    # caller whose staged proposal had replaced it — and the brief printed the new
+    # weights over numbers produced by the old ones. A receipt that names a method
+    # its numbers did not come from is the failure this platform exists to prevent,
+    # and it is invisible: every figure looks plausible because it IS a real risk
+    # grid, just not the one described.
+    out = os.path.join(adir, f"risk_{hazard.replace('hazard_', '')}"
+                             f"_l2__{_weights_tag(weights)}.tif")
+    legacy = os.path.join(adir, f"risk_{hazard.replace('hazard_', '')}_l2.tif")
     if os.path.exists(out) and not recompute:
         return out
+    if os.path.exists(legacy) and not recompute and weights == _recipe_weights(hazard):
+        return legacy                      # the default recipe's grid, already computed
 
     ref = align_mod.reference_grid(aoi, hazard)
     with rasterio.open(ref["path"]) as h:

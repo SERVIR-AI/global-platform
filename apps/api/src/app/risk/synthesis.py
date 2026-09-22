@@ -141,6 +141,25 @@ def _weights_provenance(hz) -> str:
     different claims, and a brief that reads the same either way is hiding the one
     fact a reviewer approved."""
     from ..graph.geo import combine
+    # A STAGED proposal is in force for this caller and nobody else. Say so first
+    # and loudly: these numbers were computed with weights no reviewer has seen,
+    # and a brief that describes the approved recipe instead is asserting something
+    # false about how its own risk levels were produced.
+    staged = combine.staged_weights_row(hz)
+    if staged:
+        who = staged.get("staged_by") or staged.get("by") or "you"
+        cid = staged.get("id") or staged.get("contribution_id")
+        bits = [f"⚠ These risk levels were computed with a STAGED, UNREVIEWED weights "
+                f"proposal by {who}"
+                + (f" (contribution {cid})" if cid else "")
+                + ", not the platform recipe. It applies to YOUR answers only, until "
+                  "a reviewer approves or rejects it."]
+        if staged.get("replaced"):
+            bits.append(f"It replaces the platform defaults {staged['replaced']}.")
+        if staged.get("rationale"):
+            bits.append(f"Stated reason: {staged['rationale']}.")
+        bits.append("They remain uncalibrated against observed loss.")
+        return " ".join(bits)
     adj = combine.adjustment_for(hz)
     if not adj:
         return ("The weights are platform starting values, not calibrated against "
@@ -156,7 +175,28 @@ def _weights_provenance(hz) -> str:
     return " ".join(bits)
 
 
-def _pack_feeds(place, trace, gaps):
+def _feed_speaks_to(spec: dict, hazard: str) -> bool:
+    """Does this feed have anything to do with the hazard being asked about?
+
+    Every feed bound to the pack was cited in every answer, so a Battambang FLOOD
+    brief carried global M4.5+ earthquakes as evidence. That is not neutral
+    padding: a citation list is a claim about what the answer rests on, and
+    stuffing it with unrelated feeds dilutes the ones that matter and invites a
+    reader to believe a connection nobody asserted.
+
+    A feed that declares `hazards` is filtered on it. One that declares nothing is
+    still included — dropping it silently would hide evidence — but the citation
+    says it is not scoped to this question.
+    """
+    declared = spec.get("hazards")
+    if not declared:
+        return True
+    base = re.sub(r"_rp\d+$", "", str(hazard).removeprefix("hazard_"))
+    names = {str(h).strip().lower() for h in declared}
+    return base.lower() in names or str(hazard).lower() in names
+
+
+def _pack_feeds(place, trace, gaps, hazard=None):
     """Every feed bound to the risk pack, queried and returned with its passport.
 
     The risk gatherer read no feeds at all, so a contributed table or API feed could
@@ -172,8 +212,11 @@ def _pack_feeds(place, trace, gaps):
                      if k not in rows})
     except Exception:
         pass
-    out = []
+    out, off_topic = [], []
     for ds in sorted(rows):
+        if hazard and not _feed_speaks_to(rows[ds], hazard):
+            off_topic.append(ds)
+            continue
         res = feeds.query(ds, {"limit": 3})
         if res.get("status") != "ok":
             gaps.append(f"feed {ds} bound to this pack did not answer: "
@@ -181,6 +224,11 @@ def _pack_feeds(place, trace, gaps):
             continue
         trace.append(f"feed[{ds}] {res.get('count')} rows as of {res.get('as_of')}")
         out.append((ds, rows[ds], res))
+    if off_topic:
+        trace.append(f"feeds[skipped:{','.join(off_topic)}] declare other hazards")
+        gaps.append(f"{len(off_topic)} feed(s) bound to this pack were NOT cited "
+                    f"because they declare other hazards ({', '.join(off_topic)}). "
+                    "They are available through feeds_query if you want them.")
     return out
 
 
@@ -241,6 +289,16 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     # 1 km return-period maps hold no flooded cell anywhere inside Battambang town
     # because their global model does not represent that catchment, while the 100 m
     # layer shows the town extensively flooded. Say which one is happening.
+    # A demonstration layer can still be named explicitly, and then the brief has
+    # to lead with what it is. A synthetic raster produces a complete, cited,
+    # gate-eligible answer that looks exactly like a real one.
+    from ..graph.geo import tiffs as _tiffs
+    from ..mcp.packs import _is_synthetic
+    if _is_synthetic((_tiffs.catalog() or {}).get(hz) or {}):
+        gaps.insert(0, (
+            f"{hz} is a SYNTHETIC DEMONSTRATION LAYER, not a scientific product — it "
+            "was built to exercise the contribution gate. Every number below is "
+            "computed correctly from made-up hazard data. Do not plan against it."))
     silent = _layer_is_silent(aoi[hz])
     if silent:
         gaps.insert(0, (
@@ -262,7 +320,7 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
             "pub_date": m.get("pub_date"), "validation": m.get("validation"),
             "temporal": m.get("temporal"), "url": m.get("url"), "score": h["score"],
             "doc_id": h["doc_id"], "chunk_id": h["id"],
-            "archived_copy": (f"/api/food-security/rag/document/{h['doc_id']}"
+            "archived_copy": (f"/api/rag/{RISK_CORPUS}/document/{h['doc_id']}"
                               if corpus and corpus.raw_path(h["doc_id"]) else None),
             "usage_notes": m.get("usage_notes"),
             **({"staged_by": m["staged_by"], "contribution_id": m.get("contribution_id")}
@@ -272,11 +330,36 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
         trace.append(f"documents[{len(doc_hits)}] cited")
 
     # --- feeds bound to this pack --------------------------------------------
-    for ds, spec, res in _pack_feeds(place, trace, gaps):
-        last = (res.get("records") or [{}])[-1]
+    for ds, spec, res in _pack_feeds(place, trace, gaps, hazard=hz):
+        records = res.get("records") or []
         pp = res.get("passport") or {}
         n += 1
-        bits = ", ".join(f"{k} {v}" for k, v in last.items() if v is not None)
+        # A TIME SERIES has a latest reading. A LOOKUP TABLE — one row per crop, per
+        # country, per class — does not, and printing its arbitrary last row as "the
+        # latest reading as of None" turned a dimensional table into a false
+        # observation. The feed's own as_of is the signal: no timestamp, no latest.
+        # A whole-table VINTAGE is not a per-row timestamp. The ASEAN damage-cost
+        # table carries as_of 2026-09 for the entire table — one row per crop class,
+        # no time dimension — so a vintage alone must not promote it to a series.
+        # The test is whether the RECORDS themselves carry the timestamp field.
+        per_row_time, _af = _is_time_series(spec, records)
+        as_of = _readable_as_of(res.get("as_of")) if per_row_time else None
+        if as_of:
+            last = records[-1] if records else {}
+            bits = ", ".join(f"{k} {v}" for k, v in last.items() if v is not None)
+            body = (f"{spec.get('title', ds)} ({ds}), latest reading as of {as_of}: "
+                    f"{bits or 'no values returned'}. ")
+        else:
+            shown = records[:4]
+            rows = "; ".join(
+                ", ".join(f"{k} {v}" for k, v in r.items() if v is not None)
+                for r in shown) or "no values returned"
+            body = (f"{spec.get('title', ds)} ({ds}) is a LOOKUP TABLE, not a time "
+                    f"series — it carries no timestamp, so no row is 'the latest'. "
+                    f"{len(records)} row(s) available; showing {len(shown)}: {rows}. "
+                    f"The rows are NOT filtered to {place} — match the row you need "
+                    f"yourself. ")
+        bits = ""   # superseded by `body`
         citations.append({
             "n": n, "kind": "index", "retrieval": "pulled-at-pack-time",
             "source": pp.get("source") or spec.get("source"),
@@ -286,15 +369,25 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
             **({"staged_by": spec["staged_by"],
                 "contribution_id": spec.get("contribution_id")}
                if spec.get("staged_by") else {}),
-            "text": (f"{spec.get('title', ds)} ({ds}), latest reading as of "
-                     f"{res.get('as_of')}: {bits or 'no values returned'}. "
-                     f"{res.get('summary', '')}"
+            "text": (body + f"{res.get('summary', '')}"
                      + (f" Contributor guidance: {spec['usage_notes']}"
                         if spec.get("usage_notes") else "")),
         })
 
     # --- exposure: one citation per asset class, numbers IN the text ----------
+    # An asset layer that was never fetched (too large an area) is DECLARED, never
+    # counted. A count of zero and a count that does not exist look identical in a
+    # table and mean opposite things.
+    declined = (aoi.get("assets_declined") or {}).get("layers") or []
+    if declined:
+        gaps.insert(0, (
+            f"{', '.join(declined)} were NOT counted for "
+            f"{aoi.get('name', place)}: the area is ~{aoi.get('area_km2')} km², over "
+            "the asset budget, so those layers were never fetched. They are ABSENT "
+            "from this pack, not zero. Ask about a smaller area to get them."))
     for layer in _ASSETS:
+        if layer in declined:
+            continue
         total = geostore.count_features(aoi, layer)["count"]
         r = geostore.count_in_hazard(aoi, hz, layer, min_severity=min_sev)
         counts[layer] = {"exposed": r["count"], "total": total,
@@ -320,24 +413,25 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
         citations.append(cit)
         trace.append(f"exposure[{layer}] {r['count']}/{total}")
 
-    rr = geostore.roads_in_hazard(aoi, hz, min_severity=min_sev)
-    counts["roads"] = {"exposed_km": round(rr["length_km"], 1),
-                       "total_km": round(rr["total_road_km"], 1)}
-    n += 1
-    cit = {
-        "n": n, "kind": "exposure", "retrieval": "computed-at-pack-time",
-        "source": rr["source"], "title": f"roads vs {hz}",
-        "validation": "deterministic-computation",
-        "text": (f"{rr['length_km']:.1f} km of {rr['total_road_km']:.1f} km of roads in "
-                 f"{aoi.get('name', place)} fall in {hz.removeprefix('hazard_')} hazard "
-                 f"class >= {min_sev}. By severity (km) — "
-                 + "; ".join(f"class {k}: {v:.1f}" for k, v in sorted(
-                     (int(a), b) for a, b in (rr["by_severity"] or {}).items()) if v)
-                 + f". Method: {rr['method']}."),
-        "method": rr["method"],
-    }
-    citations.append(cit)
-    trace.append(f"exposure[roads] {rr['length_km']:.1f}km")
+    if "roads" not in declined:
+        rr = geostore.roads_in_hazard(aoi, hz, min_severity=min_sev)
+        counts["roads"] = {"exposed_km": round(rr["length_km"], 1),
+                           "total_km": round(rr["total_road_km"], 1)}
+        n += 1
+        cit = {
+            "n": n, "kind": "exposure", "retrieval": "computed-at-pack-time",
+            "source": rr["source"], "title": f"roads vs {hz}",
+            "validation": "deterministic-computation",
+            "text": (f"{rr['length_km']:.1f} km of {rr['total_road_km']:.1f} km of roads in "
+                     f"{aoi.get('name', place)} fall in {hz.removeprefix('hazard_')} hazard "
+                     f"class >= {min_sev}. By severity (km) — "
+                     + "; ".join(f"class {k}: {v:.1f}" for k, v in sorted(
+                         (int(a), b) for a, b in (rr["by_severity"] or {}).items()) if v)
+                     + f". Method: {rr['method']}."),
+            "method": rr["method"],
+        }
+        citations.append(cit)
+        trace.append(f"exposure[roads] {rr['length_km']:.1f}km")
 
     # --- Layer-2 risk: hazard crossed with weighted vulnerability -------------
     # The engine and its recipe already existed; this pack used to stop at hazard
@@ -346,6 +440,8 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     risk_key, risk_weights = _l2_risk(aoi, hz, trace, gaps)
     if risk_key:
         for layer in _ASSETS:
+            if layer in declined:
+                continue
             rk = geostore.count_in_hazard(aoi, risk_key, layer, min_severity=min_sev)
             counts[layer]["at_risk"] = rk["count"]
             counts[layer]["by_risk"] = rk["by_severity"]
@@ -369,35 +465,47 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
             if sr:
                 cit["series"] = sr
             citations.append(cit)
-        rrk = geostore.roads_in_hazard(aoi, risk_key, min_severity=min_sev)
-        counts["roads"]["at_risk_km"] = round(rrk["length_km"], 1)
-        n += 1
-        citations.append({
-            "n": n, "kind": "risk_level", "retrieval": "computed-at-pack-time",
-            "source": "platform Layer-2 engine (conf/risk_l2.yml)",
-            "title": f"roads by risk level ({hz.removeprefix('hazard_')})",
-            "validation": "documented-method",
-            "text": (f"{rrk['length_km']:.1f} km of {rrk['total_road_km']:.1f} km of roads in "
-                     f"{aoi.get('name', place)} sit at risk level {min_sev} or higher. "
-                     "By risk level (km) — "
-                     + ("; ".join(f"level {k}: {v:.1f}" for k, v in sorted(
-                         (int(a), b) for a, b in (rrk["by_severity"] or {}).items()) if v)
-                        or "none at any risk level")
-                     + ". Each segment is attributed to the risk level at its midpoint."),
-            "method": rrk["method"],
-        })
+        rrk = (geostore.roads_in_hazard(aoi, risk_key, min_severity=min_sev)
+               if "roads" not in declined else None)
+        if rrk is not None:
+            counts["roads"]["at_risk_km"] = round(rrk["length_km"], 1)
+            n += 1
+            citations.append({
+                "n": n, "kind": "risk_level", "retrieval": "computed-at-pack-time",
+                "source": "platform Layer-2 engine (conf/risk_l2.yml)",
+                "title": f"roads by risk level ({hz.removeprefix('hazard_')})",
+                "validation": "documented-method",
+                "text": (f"{rrk['length_km']:.1f} km of {rrk['total_road_km']:.1f} km of roads in "
+                         f"{aoi.get('name', place)} sit at risk level {min_sev} or higher. "
+                         "By risk level (km) — "
+                         + ("; ".join(f"level {k}: {v:.1f}" for k, v in sorted(
+                             (int(a), b) for a, b in (rrk["by_severity"] or {}).items()) if v)
+                            or "none at any risk level")
+                         + ". Each segment is attributed to the risk level at its midpoint."),
+                "method": rrk["method"],
+            })
         trace.append("risk_l2[counts] " + ", ".join(
             f"{k}:{v.get('at_risk')}" for k, v in counts.items() if "at_risk" in v)
-            + f", roads:{rrk['length_km']:.1f}km")
+            + (f", roads:{rrk['length_km']:.1f}km" if rrk is not None else ""))
 
         eff, eff_notes = _effective_weights(aoi, hz, risk_weights)
         if not silent:          # a silent layer has no footprint; the first gap says it
             gaps.extend(eff_notes)
         n += 1
+        # When the risk levels rest on a STAGED weights proposal, the method
+        # citation carries that fact — which is what makes the whole pack a
+        # preview. Without it, a brief and receipt computed from weights no
+        # reviewer had seen were minted as ordinary platform answers and shared
+        # like them, while every other staged contribution kind was access-gated.
+        _staged_w = combine.staged_weights_row(hz)
         citations.append({
             "n": n, "kind": "method", "retrieval": "config",
             "source": "platform method registry", "title": "Layer-2 risk method",
             "validation": "documented-method",
+            **({"staged_by": _staged_w.get("staged_by")
+                             or _staged_w.get("contributor_id"),
+                "contribution_id": _staged_w.get("contribution_id")}
+               if _staged_w else {}),
             "text": ("Risk level = clip(round(hazard x V / 5), 1, 5), where V is the "
                      "weighted average of the vulnerability classes at that cell and a "
                      "no-data vulnerability layer is dropped with its weight "
@@ -550,14 +658,23 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     # asked for — and falls back to the hazard clip when it was not. Both grids ride
     # along so a consumer can show either; the payload shape is unchanged.
     shown = risk_key or hz
+    drawn = _headline_layer(counts, risk_key)
     stats = {"queries": None, "place": aoi.get("name", place), "hazard": hz,
+             # How the area of interest was decided, as a field rather than something
+             # a consumer has to infer. A hub product built a "check the platform used
+             # the real district boundary" step because this was only ever in the
+             # trace; `how` says which path was taken and `is_admin_boundary` answers
+             # their question directly.
+             "aoi": {"requested": place, "name": aoi.get("name"),
+                     "area_km2": aoi.get("area_km2"), "how": aoi.get("how"),
+                     "is_admin_boundary": str(aoi.get("how", "")).startswith("admin boundary")},
              "min_severity": min_sev, "counts": counts,
              "risk_layer": risk_key, "displayed_layer": shown,
              "viz": _bounded_viz(viz.build_payload(aoi, {
-                 "hazard": shown, "method": "count_in_hazard", "layer": "hospitals",
+                 "hazard": shown, "method": "count_in_hazard", "layer": drawn,
                  "place": aoi.get("name", place), "min_severity": min_sev,
-                 "count": counts["hospitals"].get("at_risk" if risk_key else "exposed"),
-                 "by_severity": counts["hospitals"].get(
+                 "count": counts[drawn].get("at_risk" if risk_key else "exposed"),
+                 "by_severity": counts[drawn].get(
                      "by_risk" if risk_key else "by_severity")}))}
     stats["viz"]["layer_kind"] = "risk_level" if risk_key else "hazard_severity"
     stats["viz"]["hazard"] = hz              # always name the hazard, whatever is drawn
@@ -569,6 +686,60 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
         if rgrid:
             stats["viz"]["risk_grid"] = rgrid
     return citations, gaps, stats
+
+
+def _is_time_series(spec: dict, records: list) -> tuple[bool, str | None]:
+    """Does this source have a latest reading, or is it a lookup table?
+
+    Three ways a row can be timestamped, and all three count: the NOAA series
+    adapter is a time series by construction (one row per year-month); a feed can
+    declare an `as_of_field`; or the records can simply carry year/month columns.
+    Testing only for a declared field mislabelled the SOI and Nino 1+2 indices —
+    real monthly series — as lookup tables, which is the same wrong-shape error in
+    the opposite direction.
+    """
+    if spec.get("adapter") == "generic_table":
+        return True, None
+    af = ((spec.get("fetch") or {}).get("as_of_field") or spec.get("as_of_field"))
+    if af and any(r.get(af) is not None for r in records):
+        return True, af
+    keys = set().union(*(set(r) for r in records)) if records else set()
+    if {"year"} & keys or {"date"} & keys or {"month"} & keys and {"year"} & keys:
+        return True, None
+    return False, None
+
+
+def _readable_as_of(value):
+    """A timestamp a person can read. Epoch milliseconds in a brief is not one."""
+    if isinstance(value, (int, float)) or (isinstance(value, str) and value.isdigit()):
+        try:
+            from datetime import datetime, timezone
+            v = float(value)
+            if v > 1e11:                      # milliseconds
+                v /= 1000.0
+            if 0 < v < 4e9:                   # a plausible epoch second
+                return datetime.fromtimestamp(v, timezone.utc).strftime("%Y-%m-%d %H:%MZ")
+        except (ValueError, OverflowError, OSError):
+            pass
+    return value
+
+
+def _headline_layer(counts, risk_key):
+    """Which asset class the map should draw.
+
+    It used to be hospitals, always. When no hospital was exposed the map drew six
+    grey dots and captioned itself "0 hospitals at risk" over an area where 98
+    buildings and 242 km of road were in the flood footprint — a planner reads that
+    as "nothing at risk". Lead with the most consequential class that ACTUALLY
+    carries exposure; fall back to hospitals so a genuinely clear area still reads
+    as a clear area rather than switching classes for no reason.
+    """
+    key = "at_risk" if risk_key else "exposed"
+    for layer in ("hospitals", "schools", "buildings"):
+        c = counts.get(layer) or {}
+        if (c.get(key) or 0) > 0:
+            return layer
+    return "hospitals"
 
 
 def _severity_grid(clip_path: str, cells: int = 56) -> dict | None:

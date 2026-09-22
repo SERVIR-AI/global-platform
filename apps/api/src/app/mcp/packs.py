@@ -59,12 +59,26 @@ def _risk_corpus_state() -> dict:
     return {"status": "available", "name": "risk", "documents": len(docs)}
 
 
+def _is_synthetic(row: dict) -> bool:
+    """A demonstration layer, by its own declaration."""
+    blob = " ".join(str(row.get(k) or "") for k in
+                    ("title", "description", "source")).lower()
+    return "synthetic" in blob or "demonstration layer" in blob
+
+
 def _risk_manifest() -> dict:
     """Honest v0: what the risk pack ships and what it does not. Real state where
     derivable, gaps declared in one place."""
     from ..graph.geo import tiffs
     cat = tiffs.catalog()
-    hazards = sorted(k.removeprefix("hazard_") for k in cat if k.startswith("hazard_"))
+    all_hazards = sorted(k.removeprefix("hazard_") for k in cat if k.startswith("hazard_"))
+    # A synthetic demonstration layer must not sit in a hazard MENU looking like a
+    # mapped hazard. Its own description says "SYNTHETIC DEMONSTRATION LAYER — not a
+    # scientific product", but a consumer reading a list of names cannot see that:
+    # UAT caught a brief offering `heatdays` to an air-quality officer as one of
+    # "all 16 mapped hazards" for their city.
+    synthetic = {h for h in all_hazards if _is_synthetic(cat.get(f"hazard_{h}") or {})}
+    hazards = [h for h in all_hazards if h not in synthetic]
     return {
         "id": "risk", "display_name": "Risk Platform", "version": "v0",
         "profile": "v0 — hazard exposure, vulnerability-weighted risk levels, and a "
@@ -78,6 +92,13 @@ def _risk_manifest() -> dict:
         "sources": {
             "corpus": _risk_corpus_state(),
             "rasters": {"status": "available", "hazards": hazards,
+                        **({"demonstration_only": sorted(synthetic),
+                            "demonstration_note": (
+                                "synthetic layers built to exercise the contribution "
+                                "gate. They are NOT scientific products and are not "
+                                "offered as hazards; naming one explicitly still "
+                                "works and the brief says what it is.")}
+                           if synthetic else {}),
                         "note": ("only hazard_flood states lineage (ADPC, derived "
                                  "from JRC GLOFAS v2.1); vintages/licences are "
                                  "unrecorded for all — declared in every pack")},
