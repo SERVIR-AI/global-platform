@@ -17,6 +17,7 @@ JSON-serializable for the checkpointer (multi-turn memory keyed by thread_id).
 from __future__ import annotations
 
 import json
+import re
 import time
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -362,8 +363,11 @@ def fetch(state: State) -> dict:
         else:
             aoi = ingest.ensure_aoi(place, layers=needed)               # named place
         for layer in state.get("tiffs") or []:
-            if layer.startswith("risk_") and layer.endswith("_l2"):     # computed Layer-2 risk grid
-                hazard = "hazard_" + layer[len("risk_"):-len("_l2")]    # risk_flood_l2 -> hazard_flood
+            # risk_flood_l2, or risk_flood_l2__<weights tag> once the grid started
+            # carrying the identity of the weights it was computed from.
+            _l2 = re.match(r"^risk_(.+?)_l2(?:__[0-9a-f]{6,})?$", layer)
+            if _l2:                                                     # computed Layer-2 risk grid
+                hazard = "hazard_" + _l2.group(1)
                 aoi = {**aoi, layer: combine.combine_l2(aoi, hazard)}
                 l2_computed.append(layer)
             else:

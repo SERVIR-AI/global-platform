@@ -27,12 +27,24 @@ OVERPASS_MIRRORS = (
     "https://overpass.kumi.systems/api/interpreter",
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 )
-AREA_CAP_KM2 = 1500.0
+# Two different caps, because two different things cost. Raster work over a province
+# is trivial — 12,000 km² of 1 km flood grid is ~150x150 cells. Counting OSM assets
+# over the same area is not: buildings and road geometry run to hundreds of thousands
+# of features and stall Overpass. Capping BOTH at the asset budget is why a provincial
+# planner was told their province had zero flood exposure: the analysed 115 km² urban
+# core is dry in the JRC layers while the floodplain around it — the part they plan
+# for — carries class 5. Measured 2026-09-21: 288/288 cells class 0 over the
+# municipality, 4,997 flooded cells including 730 at class 5 over the province.
+AREA_CAP_KM2 = 25000.0          # how large an AREA we will analyse at all
+ASSET_CAP_KM2 = 1500.0          # above this, heavy OSM layers are declined, not fetched
+# Which asset layers are cheap enough to fetch over a large area. Points are small;
+# building footprints and full road geometry are not.
+LIGHT_ASSET_LAYERS = ("hospitals", "schools")
 BUFFER_DEG = 0.01
 RADIUS_KM = 12.0          # fallback AOI: box of this radius around the centre point
 # Bump when place resolution changes meaning. Cached areas of interest stamped with an
 # older value are re-resolved on next use rather than served from a stale boundary.
-RESOLVER_VERSION = 2
+RESOLVER_VERSION = 8
 ASSET_LAYERS = ("roads", "hospitals", "schools", "buildings")
 OVERPASS_TIMEOUT = 60          # client HTTP timeout (was 180) — fail over a stalled mirror fast
 OVERPASS_SERVER_TIMEOUT = 55   # Overpass server-side [timeout:] budget per query
@@ -120,9 +132,41 @@ def _boundary(place):
                 f"({results[0]['display_name'].split(',')[0]}), not a place. "
                 "Name the settlement or district itself, e.g. 'Battambang, Cambodia'")
 
-    hit = _under_cap_admin(results)
+    # How big an area the caller actually meant. Naming an administrative level
+    # ("Battambang Province") asks for that level and should get it. Naming a place
+    # bare ("Battambang, Cambodia") means the settlement — so the larger cap that
+    # makes province-scale planning possible must NOT quietly promote every city
+    # query to its province. The wording decides which cap applies.
+    cap = AREA_CAP_KM2 if _names_admin_level(place) else ASSET_CAP_KM2
+    hit = _under_cap_admin(results, cap)
+    if hit is None and cap != AREA_CAP_KM2:
+        hit = _under_cap_admin(results, AREA_CAP_KM2)   # nothing small enough; take what fits
     if hit:
-        return (*hit, f"admin boundary ~{hit[0]:.0f} km²")
+        how = f"admin boundary ~{hit[0]:.0f} km²"
+        # A planner asking about a province must not be handed the town of the same
+        # name without being told. The cap picks the largest area that FITS, so when
+        # a bigger administrative area of the same name also matched, say what was
+        # left out, by name and size. Silence here is how city-scale numbers get
+        # read as province-scale ones.
+        bigger = _admin_over_cap(results)
+        if bigger and bigger[0] > hit[0] * 1.5:
+            km2, d, _g = bigger
+            level = d.get("addresstype") or d.get("type") or "area"
+            if km2 <= AREA_CAP_KM2:
+                # We CAN analyse the larger one — the caller just did not ask for it.
+                # Say exactly what to type, because the difference between a town and
+                # its province is the difference between two different answers.
+                # Do not invent the local word for the level — Nominatim calls a
+                # Cambodian province a "state". Give an example of the shape of the
+                # request instead; any administrative noun widens the search.
+                how += (f" — this is {hit[1]} itself, not the wider administrative "
+                        f"area of the same name (~{km2:.0f} km²). Name the level "
+                        f"(for example '{hit[1]} Province') to analyse that instead")
+            else:
+                how += (f" — this is the SMALLER {hit[1]}; the {level} of the same "
+                        f"name (~{km2:.0f} km²) is over the "
+                        f"{AREA_CAP_KM2:.0f} km² analysis cap and was NOT analysed")
+        return (*hit, how)
 
     center = _best_center(results)
     canonical = center["display_name"].split(",")[0]
@@ -174,15 +218,16 @@ def _search(place):
     return results
 
 
-def _under_cap_admin(results):
-    """The most complete admin boundary under the area cap, or None."""
+def _under_cap_admin(results, cap=None):
+    """The most complete admin boundary under `cap` (default the analysis cap), or None."""
+    cap = AREA_CAP_KM2 if cap is None else cap
     under = []
     for d in results:
         gj = d.get("geojson", {})
         if d.get("class") == "boundary" and d.get("type") == "administrative" \
                 and gj.get("type") in ("Polygon", "MultiPolygon"):
             km2 = shape(gj).area * 111.0 * 108.0
-            if km2 <= AREA_CAP_KM2:
+            if km2 <= cap:
                 under.append((km2, d["display_name"].split(",")[0], shape(gj)))
     return max(under, key=lambda c: c[0]) if under else None
 
@@ -192,6 +237,13 @@ _POI_CLASSES = {"office", "amenity", "shop", "building", "tourism", "leisure", "
                 "healthcare", "historic", "man_made", "emergency", "military", "club"}
 _ADMIN_NOUNS = ("province", "prefecture", "district", "municipality", "county", "region",
                 "governorate", "state", "department", "division", "subdistrict", "commune")
+
+
+def _names_admin_level(place):
+    """Did the caller name an administrative level, rather than just a place?"""
+    head = str(place or "").partition(",")[0].lower()
+    return any(n in head.split() or n in head.replace(".", " ").split()
+               for n in _ADMIN_NOUNS)
 
 
 def _is_poi(d):
@@ -261,7 +313,22 @@ def _overpass(query, attempts=3):
                     last = f"{r.status_code} from {url}"
                     continue
                 r.raise_for_status()
-                elements = r.json()["elements"]
+                body = r.json()
+                # Overpass answers a TIMED-OUT query with HTTP 200, a partial
+                # element list and a `remark`. Reading only `elements` turns a
+                # truncated fetch into a confident undercount: a province asked for
+                # its schools would be told how many are exposed out of however many
+                # happened to arrive before the server gave up. For a brief that
+                # allocates emergency resources, a partial count is worse than none,
+                # so a remark is a FAILURE here, never a result.
+                remark = body.get("remark") or ""
+                if remark:
+                    last = f"partial result from {url}: {remark.strip()[:200]}"
+                    emit({"kind": "api", "api": "Overpass", "mirror_used": url,
+                          "attempts": attempt + 1, "truncated": True,
+                          "remark": remark.strip()[:200], "api_query": query})
+                    continue
+                elements = body["elements"]
                 emit({"kind": "api", "api": "Overpass", "mirror_used": url,
                       "attempts": attempt + 1, "n_elements": len(elements), "api_query": query})
                 return elements
@@ -312,6 +379,27 @@ def source_raster(layer="hazard_flood"):
     return path
 
 
+def resolve_place(place):
+    """Resolve a place name to the area the platform would actually analyse.
+
+    Boundary only, no OSM fetch, so it is cheap enough to answer a resolve call.
+    `how` carries the honest account when a named administrative area was too big
+    to take whole — a planner should be told their province became a box here,
+    not discover it later in the numbers.
+    """
+    try:
+        km2, name, boundary, how = _boundary(place)
+    except ValueError as e:
+        return {"status": "declined", "place": place, "note": str(e)}
+    minx, miny, maxx, maxy = boundary.bounds
+    return {"status": "ok", "place": place, "name": name,
+            "area_km2": round(km2), "how": how,
+            "is_admin_boundary": str(how).startswith("admin boundary"),
+            "bbox": [round(v, 5) for v in (minx, miny, maxx, maxy)],
+            "centroid": [round(boundary.centroid.x, 5), round(boundary.centroid.y, 5)],
+            "area_cap_km2": AREA_CAP_KM2}
+
+
 def ensure_aoi(place=None, geometry=None, layers=None):
     """Return a cached bundle of file paths for an AOI — resolved from a `place` name, or
     from a user-drawn `geometry` (GeoJSON Polygon or [minLon,minLat,maxLon,maxLat] bbox,
@@ -345,7 +433,12 @@ def ensure_aoi(place=None, geometry=None, layers=None):
         # resolver and re-resolve anything older; the layer files stay, only the
         # boundary is recomputed.
         print(f"   [ingest: re-resolving '{place}' — cached by an older resolver]")
-        for f in ("meta.json", "admin.geojson"):
+        # The asset layers go too. They were fetched for the OLD boundary, and a
+        # boundary can now change by two orders of magnitude — "Battambang Province"
+        # moved from a 115 km² town to the 12,159 km² province. Keeping the old
+        # files silently reported a town's 27 schools as the province's.
+        for f in ("meta.json", "admin.geojson",
+                  *(f"{ly}.geojson" for ly in ASSET_LAYERS)):
             try:
                 os.remove(os.path.join(adir, f))
             except OSError:
@@ -368,6 +461,27 @@ def ensure_aoi(place=None, geometry=None, layers=None):
         info = {"name": name, "area_km2": round(km2), "how": how, "counts": {},
                 "resolver": RESOLVER_VERSION}
         json.dump(info, open(meta, "w"), indent=2)
+
+    # Over a large area the heavy OSM layers are declined rather than attempted.
+    # Saying so is the point: a count that was never fetched must never read as a
+    # count of zero.
+    # Above the asset budget the heavy OSM layers are DECLARED, not attempted: a
+    # single Overpass query over a province truncates, and a count that was never
+    # fetched must never read as a count of zero. (Tiling them works and takes
+    # ~43 minutes for a province — parked on uat/local-hardening as prefetch work.)
+    area_km2 = float(info.get("area_km2") or 0)
+    if area_km2 > ASSET_CAP_KM2:
+        declined = [ly for ly in needed if ly not in LIGHT_ASSET_LAYERS]
+        needed = tuple(ly for ly in needed if ly in LIGHT_ASSET_LAYERS)
+        if declined:
+            info["assets_declined"] = {
+                "layers": declined, "area_km2": round(area_km2),
+                "reason": (f"area is ~{area_km2:.0f} km², over the "
+                           f"{ASSET_CAP_KM2:.0f} km² asset budget — "
+                           f"{', '.join(declined)} were NOT fetched, so they must "
+                           "not be read as zero"),
+            }
+            json.dump(info, open(meta, "w"), indent=2)
 
     # Fetch only the requested asset layers that aren't already cached.
     minx, miny, maxx, maxy = boundary.bounds
@@ -429,6 +543,9 @@ def _bundle(adir, info):
     (meta.json holds only metadata — name/area/how/counts — never absolute paths)."""
     return {"name": info["name"], "area_km2": info["area_km2"],
             "how": info.get("how"), "counts": info["counts"],
+            # Which asset layers were never fetched because the area is too large.
+            # Carried so a brief can DECLARE them instead of counting them as zero.
+            "assets_declined": info.get("assets_declined"),
             "admin": os.path.join(adir, "admin.geojson"),
             "roads": os.path.join(adir, "roads.geojson"),
             "hospitals": os.path.join(adir, "hospitals.geojson"),

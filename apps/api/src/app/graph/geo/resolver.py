@@ -7,6 +7,7 @@ Default preference is L1 (cheapest, already validated); L2 is chosen when explic
 requested (e.g. custom weights / validation) or when no precomputed risk exists. The
 hazard<->risk name map (conf/risk_l2.yml) handles the landslides/landslide mismatch.
 """
+import re
 from dataclasses import dataclass, field
 
 import yaml
@@ -43,8 +44,7 @@ def _logical(name):
     for pre in ("hazard_", "risk_"):
         if stem.startswith(pre):
             stem = stem[len(pre):]
-    if stem.endswith("_l2"):
-        stem = stem[:-3]
+    stem = re.sub(r"_l2(?:__[0-9a-f]{6,})?$", "", stem)
     if stem in nm:
         return stem
     for key, v in nm.items():        # match the actual tif names (handles landslides->landslide)
