@@ -320,9 +320,12 @@ def record_receipt(pack_id: str | None = None, report_id: str | None = None,
     every cited claim traces to the pack, NOT the truth of the underlying sources.
 
     Returns: {status, receipt_id, question, pack_id, report_id, passed,
-    evidence_tier, sources, claim_scope, minted_at, resolve_with}. A hosted,
-    copy-paste-survivable resolver URL is a declared Phase-2 gap. status "declined"
-    -> `note` (no pack for mint / unknown receipt_id).
+    evidence_tier, sources, claim_scope, minted_at, public_resolver, render_with}.
+    `public_resolver` is a hosted URL that survives copy-paste and resolves for an
+    unauthenticated reader — EXCEPT for a receipt citing a staged contribution,
+    which stays visible to its contributor and reviewers only and says so in
+    `staged_note`. status "declined" -> `note` (no pack for mint / unknown
+    receipt_id).
     """
     return record.record(pack_id=pack_id, report_id=report_id,
                          receipt_id=receipt_id, question=question)

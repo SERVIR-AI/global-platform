@@ -196,8 +196,13 @@ def _freshness(pack: dict) -> dict:
 
 def _claim_scope(pack: dict) -> str:
     """Scope wording that tells the truth about HOW the evidence was obtained."""
-    base = ("verified = every cited claim is traceable to this evidence pack at mint "
-            "time; NOT verified = the truth of the underlying sources")
+    base = ("verified = the draft was checked against this evidence pack at mint time "
+            "for STRUCTURE AND CITATION MECHANICS: required sections present, every "
+            "paragraph carrying a citation, every [n] resolving to a real pack item, "
+            "and load-bearing figures matched to the evidence; NOT verified = that a "
+            "cited source actually SUPPORTS the claim attached to it — the gate does "
+            "not read for agreement, so a claim that contradicts its own citation can "
+            "still pass; NOT verified = the truth of the underlying sources")
     if any(_is_pulled(c) for c in pack.get("citations", [])):
         base += ("; live-feed values are a snapshot taken at pack time and are attested "
                  "as WHAT THE FEED SAID THEN, not as current")

@@ -43,8 +43,12 @@ def groundedness(draft: str, pack_id: str) -> dict:
     # The pack's own computed figures count as evidence: the area of interest, the
     # asset totals, the weights. Quoting the platform's number back at it is the
     # opposite of making one up.
+    # The pack's declared gaps go in too: it already announces when it holds no
+    # document about the country or crop asked for, and nothing used to check that
+    # the draft repeated it.
     r = synthesis.check_grounded(draft, citations, sections=sections,
-                                 extra_evidence=pack.get("stats"))
+                                 extra_evidence=pack.get("stats"),
+                                 gaps=pack.get("gaps"))
     # Store the FULL verified text + its hash: a receipt that can't show what
     # passed can't answer "is the circulating copy the one you verified?".
     digest = hashlib.sha256(draft.encode("utf-8")).hexdigest()
@@ -68,6 +72,14 @@ def groundedness(draft: str, pack_id: str) -> dict:
             "missing_sections": r["missing_sections"],
             "uncited_paragraphs": r["uncited_paragraphs"],
             "numbers_unverified_recorded": r["numbers_unverified"],
+            # NOT blocking yet, and deliberately so: each of these closes a hole a
+            # cold-consumer UAT found on the deployed host, and each is queued for
+            # promotion once its false-alarm rate has been measured over ordinary
+            # briefs. Making a check binding before measuring it is how this gate
+            # once came to block correct work four times for every real catch.
+            "warnings": r.get("warnings") or [],
+            "gaps_not_acknowledged": r.get("gaps_not_acknowledged") or [],
+            "numbers_index_scale_unverified": r.get("numbers_index_scale_unverified") or [],
             # A share of a cited total, allowed and shown so a reader can check it.
             "numbers_derived": r.get("numbers_derived") or {},
             # WARNING, never blocking: the figure IS in the pack, but not in the
