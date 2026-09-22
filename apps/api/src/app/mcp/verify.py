@@ -15,7 +15,9 @@ from . import loop, packs, store
 def groundedness(draft: str, pack_id: str) -> dict:
     """Gate `draft` against the pack's numbered citations. Blocking failures:
     missing required sections, model-written Sources, no/phantom citations,
-    uncited paragraphs. Recorded (not blocking): numbers absent from evidence.
+    uncited paragraphs, and any number that appears in no citation and in no
+    platform-computed figure. Warned (not blocking): a number attributed to a
+    citation that does not contain it.
     Persists a report_id resolvable later (feeds record_receipt)."""
     pack = store.load_pack(pack_id)
     if pack is None:
@@ -38,7 +40,11 @@ def groundedness(draft: str, pack_id: str) -> dict:
                 "note": (f"pack {pack_id!r} carries an EMPTY required_sections — a "
                          "storage bug, not a gateable contract. Re-assemble the pack.")}
     citations = pack.get("citations", [])
-    r = synthesis.check_grounded(draft, citations, sections=sections)
+    # The pack's own computed figures count as evidence: the area of interest, the
+    # asset totals, the weights. Quoting the platform's number back at it is the
+    # opposite of making one up.
+    r = synthesis.check_grounded(draft, citations, sections=sections,
+                                 extra_evidence=pack.get("stats"))
     # Store the FULL verified text + its hash: a receipt that can't show what
     # passed can't answer "is the circulating copy the one you verified?".
     digest = hashlib.sha256(draft.encode("utf-8")).hexdigest()
@@ -61,4 +67,15 @@ def groundedness(draft: str, pack_id: str) -> dict:
             "phantom_citations": r["phantom_citations"],
             "missing_sections": r["missing_sections"],
             "uncited_paragraphs": r["uncited_paragraphs"],
-            "numbers_unverified_recorded": r["numbers_unverified"]}
+            "numbers_unverified_recorded": r["numbers_unverified"],
+            # A share of a cited total, allowed and shown so a reader can check it.
+            "numbers_derived": r.get("numbers_derived") or {},
+            # WARNING, never blocking: the figure IS in the pack, but not in the
+            # citation the paragraph points at. Existence is not attribution, and a
+            # reader following a claim to its source lands in the wrong place.
+            "numbers_attributed_elsewhere": r.get("numbers_attributed_elsewhere") or [],
+            # WARNING: a local rainfall/crop/food-security claim resting only on
+            # evidence that says it describes the ocean and nothing about any
+            # particular place. The drafting rules forbid it; this is where anyone
+            # can see when it happened anyway.
+            "local_claims_on_driver_evidence": r.get("local_claims_on_driver_evidence") or []}

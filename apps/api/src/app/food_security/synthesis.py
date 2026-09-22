@@ -69,11 +69,48 @@ _CITE_GROUP = re.compile(r"\[([\d\s,–\-]+)\]")   # [3], [1, 9], [1-3], [2016]
 # Thousands separators: a comma OR space between a digit and a 3-digit group
 # (chained) — "800 000"/"800,000" are one number. UN/African docs use spaces,
 # so a comma-only strip false-flagged legitimate figures as unverified.
-_THOUSANDS = re.compile(r"(?<=\d)[ ,](?=\d{3}(?:[ ,]\d{3})*(?!\d))")
+# Thousands separators, as they ACTUALLY occur in extracted source text — not just
+# the ASCII two. UN and WMO house style uses U+00A0 NO-BREAK SPACE, and PDF
+# extraction emits it and bare newlines; measured across stored citations: comma
+# 1,083, space 298, NBSP 160, newline 21. Missing the last two made the gate read
+# WMO's "more than 30\xa0000 livestock deaths and destroyed 170\xa0000\xa0ha of
+# cropland" as the numbers 30, 000, 170, 000 — so a brief quoting it faithfully was
+# scored as two fabrications and blocked. Roughly two thirds of the gate's blocks
+# were correctly-sourced figures until this class was widened.
+_SEP = "[ ,\u00a0\u202f\u2009\n]"
+_THOUSANDS = re.compile(rf"(?<=\d){_SEP}(?=\d{{3}}(?:{_SEP}\d{{3}})*(?!\d))")
 
 
 def _norm_nums(text: str) -> str:
     return _THOUSANDS.sub("", text)
+
+
+def _number_set(text: str) -> set[str]:
+    """Every number in `text`, keyed by VALUE rather than spelling.
+
+    "0.40" and "0.4" are the same weight; "242.0" and "242" are the same
+    kilometres. Comparing the strings made honest drafts look unsourced and, worse,
+    buried the numbers that really were unsourced in that noise — which is how an
+    invented figure rode through a gate that had actually noticed it.
+    """
+    out: set[str] = set()
+    for tok in re.findall(r"\d+(?:\.\d+)?", _norm_nums(text)):
+        if "." not in tok:
+            # An integer keeps its exact digits. Float-normalising it turned a
+            # 14-digit identifier into 2.02305e+13 and made two copies of the same
+            # number stop matching — noise in exactly the signal that has to be
+            # trustworthy before it can block anything.
+            out.add(tok.lstrip("0") or "0")
+            continue
+        try:
+            v = float(tok)
+        except ValueError:                                  # pragma: no cover
+            out.add(tok)
+            continue
+        out.add(f"{v:.10g}")
+        out.add(str(int(v)) if v == int(v) else f"{v:.10g}")
+        out.add(str(round(v)))              # a rounded quote of the same figure
+    return out
 
 
 def _cited_numbers(text: str) -> set[int]:
@@ -230,7 +267,7 @@ def _driver_citations(trace):
         # stringified, and nothing downstream could plot a number. The text stays
         # exactly as it was; this is an addition, not a change to what is cited.
         series = _series(name, res.get("records"))
-        out.append({"kind": "index", "retrieval": "pulled-at-pack-time",
+        out.append({"kind": "index", "brief_role": "driver", "retrieval": "pulled-at-pack-time",
                     **({"series": series} if series else {}),
                     "source": spec.get("source"), "title": spec.get("title") or spec.get("description", name),
                     "pub_date": res.get("as_of"), "validation": spec.get("validation"),
@@ -278,6 +315,99 @@ def _series(name: str, records) -> dict | None:
     return out
 
 
+def _source_speaks_to(spec: dict, country: str | None) -> bool:
+    """Is this pack-bound source about the country being asked about?
+
+    Added the moment the path existed: a cold contributor watched a Battambang
+    rainfall table get cited into a KENYA maize brief. A citation list is a claim
+    about what the answer rests on, and an unrelated source dilutes the ones that
+    matter — the same failure as a flood brief citing global earthquakes, made on
+    the food-security side by giving it the path without the filter.
+
+    A source that declares its countries is filtered on them. One that declares
+    none is global as far as the platform knows, so it is still included.
+    """
+    if not country:
+        return True
+    declared = spec.get("countries") or ([spec["country"]] if spec.get("country") else None)
+    if not declared:
+        return True
+    return country.strip().lower() in {str(c).strip().lower() for c in declared}
+
+
+def _pack_bound_sources(trace, gaps, country=None):
+    """Feeds and tables bound to this pack that are NOT seasonal drivers.
+
+    The brief read only `brief_role: driver` rows, so a contributed table bound to
+    food-security — the DEFAULT pack for a contribution — staged, answered
+    feeds_query, and could never be cited in an answer. The risk pack already
+    reads its own pack-bound sources; this is the same path, which food-security
+    simply never had.
+    """
+    from ..contrib import staging
+    from ..mcp import feeds, registry
+    rows = {n: sp for n, sp in registry.FEEDS.items()
+            if sp.get("status") == "available"
+            and sp.get("pack", "food-security") == "food-security"
+            and sp.get("brief_role") != "driver"}
+    try:
+        rows.update({n: sp for n, sp
+                     in staging.visible_staged_feeds_for_pack("food-security").items()
+                     if n not in rows})
+    except Exception:
+        pass
+    out, off_topic = [], []
+    for ds in sorted(rows):
+        if not _source_speaks_to(rows[ds], country):
+            off_topic.append(ds)
+            continue
+        res = feeds.query(ds, {"limit": 4})
+        if res.get("status") != "ok":
+            gaps.append(f"source {ds} bound to this pack did not answer: "
+                        f"{res.get('note', 'no reason given')}")
+            continue
+        spec, records = rows[ds], (res.get("records") or [])
+        from ..risk.synthesis import _is_time_series
+        per_row_time, _af = _is_time_series(spec, records)
+        if per_row_time and records:
+            last = records[-1]
+            body = (f"{spec.get('title', ds)} ({ds}), latest reading as of "
+                    f"{res.get('as_of')}: "
+                    + ", ".join(f"{k} {v}" for k, v in last.items() if v is not None))
+        else:
+            shown = records[:4]
+            body = (f"{spec.get('title', ds)} ({ds}) is a LOOKUP TABLE, not a time "
+                    f"series — no row is 'the latest'. {len(records)} row(s); showing "
+                    f"{len(shown)}: "
+                    + ("; ".join(", ".join(f"{k} {v}" for k, v in r.items()
+                                           if v is not None) for r in shown)
+                       or "no values returned"))
+        pp = res.get("passport") or {}
+        out.append({
+            "kind": "index", "retrieval": "pulled-at-pack-time",
+            # A standing seasonal DRIVER and a table bound to this pack are
+            # different kinds of evidence, and a reader should be able to tell
+            # which one they are looking at.
+            "brief_role": "pack-source",
+            "source": pp.get("source") or spec.get("source"),
+            "title": spec.get("title", ds),
+            "validation": pp.get("validation") or spec.get("validation", "unvalidated"),
+            "url": pp.get("url"),
+            **({"staged_by": spec["staged_by"],
+                "contribution_id": spec.get("contribution_id")}
+               if spec.get("staged_by") else {}),
+            "text": body + ". " + (res.get("summary") or "")
+                    + (f" Contributor guidance: {spec['usage_notes']}"
+                       if spec.get("usage_notes") else ""),
+        })
+        trace.append(f"pack_source[{ds}] {res.get('count')} rows")
+    if off_topic:
+        gaps.append(f"{len(off_topic)} source(s) bound to this pack were NOT cited "
+                    f"because they declare other countries ({', '.join(off_topic)}). "
+                    "They are available through feeds_query if you want them.")
+    return out
+
+
 def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None, None)):
     """Deterministic evidence assembly: two retrieval slices + the conditions feed
     + the Pillar-1 climate drivers + the crop calendar. Returns (citations, gaps,
@@ -287,17 +417,64 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
     corpus = Corpus(CORPUS)
     crop, country, focus = parsed["crop"], parsed["country"], parsed["focus"]
     gaps = []
+    # BOTH slices have to be about what was ASKED. The retrospective query used to
+    # be a fixed sentence — "impact of past El Nino events on <crop> production and
+    # food security in <country>" — with no trace of the question in it, so half of
+    # every brief's document evidence was retrieved blind. Measured: for Kenya it
+    # returned the SAME three documents whether the analyst asked about post-harvest
+    # storage losses or about early signs of crop failure. A platform whose promise
+    # is that an answer traces to its evidence cannot retrieve that evidence against
+    # a question nobody asked.
     q_now = f"El Nino seasonal rainfall forecast outlook {country} {crop} {focus}".strip()
-    q_past = (f"impact of past El Nino events on {crop or 'crop'} production and "
+    q_past = (f"{focus} — impact of past events on {crop or 'crop'} production and "
               f"food security in {country}").strip()
     forecast_hits = corpus.search(q_now, k=5, temporal="forecast")
     retro_hits = corpus.search(q_past, k=5, temporal="retrospective")
     trace.append(f"retrieve[forecast] {q_now!r} -> {len(forecast_hits)} hits")
     trace.append(f"retrieve[retrospective] {q_past!r} -> {len(retro_hits)} hits")
+    if not retro_hits:
+        # A narrow question can put every retrospective document below the floor.
+        # Losing the whole historical slice is worse than answering the general
+        # question, so fall back — and SAY which query produced the evidence, or
+        # the citation list quietly stops matching the question it is filed under.
+        # The corpus was assembled around El Nino, so this is the question it was
+        # built to answer — the right thing to fall back TO, and it was the only
+        # query the platform ever ran until now.
+        q_general = (f"impact of past El Nino events on {crop or 'crop'} production "
+                     f"and food security in {country}").strip()
+        retro_hits = corpus.search(q_general, k=5, temporal="retrospective")
+        trace.append(f"retrieve[retrospective:fallback] {q_general!r} -> "
+                     f"{len(retro_hits)} hits")
+        if retro_hits:
+            gaps.append(
+                f"no retrospective document matched the specific question ({focus!r}); "
+                "the historical evidence below answers the general question about "
+                f"{crop or 'this crop'} in {country} instead")
     if not forecast_hits:
         gaps.append("no forecast/outlook document in the library matched the question")
     if not retro_hits:
         gaps.append("no analog-year/retrospective document in the library matched the question")
+
+    # WHICH COUNTRY ARE THESE DOCUMENTS ACTUALLY ABOUT? Retrieval is by meaning,
+    # so a question about a country the library does not cover comes back full of
+    # confident, well-scored documents about a different one. Asked about Ethiopia,
+    # the pack returned status ok with ten document citations, every one tagged
+    # Kenya or Zambia, and declared no gap at all. A brief drafted from that reads
+    # as authoritative and is about the wrong country — the failure that moves
+    # emergency resources to the wrong place.
+    if country:
+        covered = {str(c).strip().lower()
+                   for h in forecast_hits + retro_hits
+                   for c in (h["metadata"].get("countries") or [])}
+        if covered and country.strip().lower() not in covered:
+            gaps.insert(0, (
+                f"NO DOCUMENT IN THE LIBRARY IS ABOUT {country.upper()}. The "
+                f"{len(forecast_hits) + len(retro_hits)} document(s) cited below were "
+                f"retrieved by meaning and are about "
+                f"{', '.join(sorted(c.title() for c in covered))}. They may describe a "
+                "shared driver, but nothing here observes this country. Do not read "
+                "any of it as evidence about "
+                f"{country}."))
 
     citations = []
     for h in forecast_hits + retro_hits:
@@ -307,6 +484,9 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
             "source": m.get("source"), "title": m.get("title"),
             "pub_date": m.get("pub_date"), "validation": m.get("validation"),
             "temporal": m.get("temporal"), "url": m.get("url"), "score": h["score"],
+            # The countries this document is actually about. Without it the drafter
+            # cannot see a geography mismatch it is about to write over.
+            "countries": m.get("countries"),
             "doc_id": h["doc_id"], "chunk_id": h["id"],
             "archived_copy": (f"/api/food-security/rag/document/{h['doc_id']}"
                               if corpus.raw_path(h["doc_id"]) else None),
@@ -324,6 +504,7 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
     drivers, driver_gaps = _driver_citations(trace)
     citations.extend(drivers)
     gaps.extend(driver_gaps)
+    citations.extend(_pack_bound_sources(trace, gaps, country=country))
     asked_month = datetime.now(timezone.utc).month
     t_country, t_crop = calendar_target
     if calendar_override and (
@@ -370,7 +551,162 @@ def _render_pack(citations):
     return source_block(doc_like)
 
 
-def check_grounded(draft, citations, sections=None):
+def _citation_values(c: dict) -> list[float]:
+    """Every number inside ONE citation's text."""
+    out = []
+    for tok in re.findall(r"\d+(?:\.\d+)?", _norm_nums(str(c.get("text") or ""))):
+        try:
+            out.append(float(tok))
+        except ValueError:                                  # pragma: no cover
+            pass
+    return sorted(set(out))
+
+
+_DRIVER_ONLY = re.compile(r"DRIVER SIGNAL ONLY|says nothing about rainfall", re.I)
+_LOCAL_CLAIM = re.compile(
+    r"\b(rainfall|rains|precipitation|harvest|crop|yield|planting|sowing|"
+    r"food security|famine|hunger|waterlogg|flooding|drought)\w*\b", re.I)
+
+
+def _driver_only_claims(draft: str, citations: list) -> list[dict]:
+    """Paragraphs that make a LOCAL claim resting only on driver-signal evidence.
+
+    The drafting rules already say it: evidence marked DRIVER SIGNAL ONLY describes
+    the ocean and atmosphere, and "You may NOT use it on its own to claim any local
+    rainfall, crop or food-security outcome". The citations say it too — they carry
+    the sentence "says nothing about rainfall, crops or food security at any
+    particular place". Nothing enforced it, and a brief told a ministry advisor that
+    "the forecast rainfall peak lands immediately after" the harvest window, citing
+    a NOAA CPC ENSO discussion that contains no rainfall forecast and explicitly
+    disclaims that use. That sentence was the answer's only action item.
+
+    It WARNS rather than blocks. Measured across 1,348 passing briefs it fires on
+    0.8%, and reading them, some are a legitimate description of what a driver
+    modulates rather than a claim about a place. A blocking check has to be right
+    about every one of those, and this one is not yet.
+    """
+    by_n = {}
+    for c in citations or []:
+        try:
+            by_n[int(c.get("n"))] = c
+        except (TypeError, ValueError):
+            continue
+    out = []
+    # SENTENCE level, not paragraph. The real case was
+    # "September 2026 is inside that same harvest window [16], and the forecast
+    # rainfall peak falls immediately after it [11]." — [16] is the crop calendar,
+    # so a paragraph-level "are all of these driver-only?" test passes it. The
+    # claim that matters is pinned to [11] alone, in its own clause.
+    for para in re.split(r"\n\s*\n", draft.split("\n## Sources")[0]):
+        for sentence in re.split(r"(?<=[.!?])\s+|(?<=\])\s*,\s+and\s+", para):
+            cited = [n for n in _cited_numbers(sentence) if n in by_n]
+            if not cited:
+                continue
+            body = _CITE_GROUP.sub("", sentence)
+            if not _LOCAL_CLAIM.search(body):
+                continue
+            if all(_DRIVER_ONLY.search(str(by_n[n].get("text") or "")) for n in cited):
+                out.append({"cites": sorted(cited), "claim": sentence.strip()[:220],
+                            "why": ("every source cited for this claim is DRIVER "
+                                    "SIGNAL ONLY and says nothing about rainfall, "
+                                    "crops or food security at any particular place")})
+    return out
+
+
+def _load_bearing(num: str) -> bool:
+    """Is this the kind of number a decision would turn on?
+
+    Years and small counts dominate any paragraph-level scan and are almost never
+    the figure a reader acts on, so flagging them buries the ones that matter. A
+    warning nobody reads protects nobody.
+    """
+    try:
+        v = float(num)
+    except ValueError:                                      # pragma: no cover
+        return False
+    if 1900 <= v <= 2100 and v == int(v):
+        return False                                        # a year
+    return v >= 10
+
+
+def _attribution_warnings(draft: str, citations: list) -> list[dict]:
+    """Numbers attributed to a citation that does not contain them.
+
+    The blocking check asks whether a number exists ANYWHERE in the pack, so a
+    figure lifted from citation [7] and attributed to [2] passes it. Existence is
+    not attribution, and for a reader following a claim back to its source the
+    difference is the whole point of the receipt.
+
+    This WARNS rather than blocks: paragraph-level scoping mis-reads legitimately
+    (a paragraph citing [2][3] and quoting a figure whose supporting citation is
+    named in the next sentence), and a check that blocks honest work gets switched
+    off. It is surfaced so a reader can see it, not used to refuse the brief.
+    """
+    out = []
+    by_n = {}
+    for c in citations or []:
+        try:
+            by_n[int(c.get("n"))] = c
+        except (TypeError, ValueError):
+            continue
+    for para in re.split(r"\n\s*\n", draft.split("\n## Sources")[0]):
+        cited = _cited_numbers(para)
+        if not cited:
+            continue
+        local = set()
+        for n in cited:
+            c = by_n.get(n)
+            if c:
+                local |= _number_set(" ".join(str(c.get(k) or "") for k in
+                                              ("text", "pub_date", "title", "source")))
+        if not local:
+            continue
+        for num in sorted(_number_set(_CITE_GROUP.sub("", para)) - local):
+            if not _load_bearing(num):
+                continue
+            if _cited_share(num, [by_n[n] for n in cited if n in by_n]):
+                continue
+            elsewhere = sorted(n for n, c in by_n.items()
+                               if num in _number_set(str(c.get("text") or "")))
+            if elsewhere:
+                out.append({"number": num, "attributed_to": sorted(cited),
+                            "actually_in": elsewhere,
+                            "paragraph": para.strip()[:120]})
+    return out
+
+
+def _cited_share(target: str, citations: list) -> str | None:
+    """Is `target` a share of a total stated in the SAME citation?
+
+    The one piece of arithmetic a drafter legitimately does is "X of Y, which is
+    Z%". Everything else it computes is the drafter doing analysis the platform did
+    not do, and in a brief that allocates disaster response that has to be refused
+    rather than reasoned about.
+
+    The constraints are what make this safe, and they were all found by measurement:
+    the target must actually BE a percentage (0-100), the two figures must come from
+    the SAME citation, and the numerator cannot exceed the denominator. Without the
+    percentage bound a fabricated "US$167.13 million" was "explained" as a share of
+    two unrelated figures; without the single-citation bound, searching every number
+    in the pack explained ALL 46 flagged numbers including the known fabrications,
+    because a few hundred values combined pairwise can hit any target by chance.
+    """
+    try:
+        t = float(target)
+    except ValueError:                                      # pragma: no cover
+        return None
+    if not 0.0 <= t <= 100.0:
+        return None
+    for c in citations or []:
+        vals = _citation_values(c)
+        for a in vals:
+            for b in vals:
+                if b and a <= b and abs(a / b * 100 - t) <= 0.6:
+                    return f"{a} of {b} in [{c.get('n')}]"
+    return None
+
+
+def check_grounded(draft, citations, sections=None, extra_evidence=None):
     """Blocking: required sections present, no model-written Sources, citations
     resolve, every paragraph cites. Recorded (not yet blocking): numbers absent
     from the evidence (whole-token compare over chunk text + citation metadata).
@@ -388,13 +724,35 @@ def check_grounded(draft, citations, sections=None):
         if body:
             paragraphs.append(body)
     uncited = [p[:70] for p in paragraphs if not _CITE_GROUP.search(p)]
-    evid_blob = _norm_nums(" ".join(" ".join(str(c.get(k) or "") for k in
+    evid_blob = " ".join(" ".join(str(c.get(k) or "") for k in
                                   ("text", "pub_date", "title", "source"))
-                         for c in citations))
-    evid_nums = set(re.findall(r"\d+(?:\.\d+)?", evid_blob))
-    draft_nums = set(re.findall(r"\d+(?:\.\d+)?",
-                                _norm_nums(_CITE_GROUP.sub("", draft))))
-    unverified = sorted(draft_nums - evid_nums)
+                         for c in citations)
+    # Numbers the PLATFORM computed — the area of interest, the asset totals, the
+    # weights — are evidence as much as a citation is. They were not in the blob, so
+    # quoting the platform's own figure back at it counted as unsourced.
+    if extra_evidence:
+        evid_blob += " " + str(extra_evidence)
+    evid_nums = _number_set(evid_blob)
+    # The bibliography is not a claim. A trailing "## Sources" block is the
+    # platform's own rendering of the citations, and its digits are URLs, document
+    # ids and dates — scanning them produced a steady drip of false "unverified
+    # numbers" that buried the fabricated figures among the noise.
+    claim_text = _CITE_GROUP.sub("", draft.split("\n## Sources")[0])
+    draft_nums = _number_set(claim_text)
+    flagged = sorted(draft_nums - evid_nums)
+    # Separate the drafter's one legitimate calculation from figures that trace to
+    # nothing at all. Measured across 1,288 previously-passing briefs: 1.3% newly
+    # blocked, and the real fabrication ("US$167.13 million", "47281 displaced",
+    # absent from every field of every citation in its pack) is among them.
+    derived, unverified = {}, []
+    for num in flagged:
+        share = _cited_share(num, citations)
+        if share:
+            derived[num] = share
+        else:
+            unverified.append(num)
+    misattributed = _attribution_warnings(draft, citations)
+    driver_only = _driver_only_claims(draft, citations)
     failures = []
     if missing_sections:
         failures.append(f"missing required sections: {missing_sections}")
@@ -406,9 +764,25 @@ def check_grounded(draft, citations, sections=None):
         failures.append(f"citation numbers not in the evidence list: {phantom}")
     if uncited:
         failures.append(f"paragraphs without citations: {uncited}")
+    if unverified:
+        # BLOCKING. A number that traces to no citation and no platform-computed
+        # figure is the failure this platform exists to prevent: it reads as
+        # authoritative, it is precise, it carries a citation marker, and someone
+        # allocates flood response with it. Recording it and passing anyway put a
+        # PASSED badge above two fabricated figures in a real brief.
+        failures.append(
+            "numbers that appear in no citation and in no platform-computed figure: "
+            f"{unverified} — quote the platform's own figure, cite a source that "
+            "states it, or remove the number. If it is a share of a cited total, "
+            "state both figures so it can be checked.")
     return {"passed": not failures, "failures": failures, "cited": sorted(used),
             "phantom_citations": phantom, "missing_sections": missing_sections,
-            "uncited_paragraphs": uncited, "numbers_unverified": unverified}
+            "uncited_paragraphs": uncited, "numbers_unverified": unverified,
+            "numbers_derived": derived,
+            # WARNING, not a failure: the figure is in the pack but not in the
+            # citation the paragraph points at.
+            "numbers_attributed_elsewhere": misattributed,
+            "local_claims_on_driver_evidence": driver_only}
 
 
 def _sources_md(citations):

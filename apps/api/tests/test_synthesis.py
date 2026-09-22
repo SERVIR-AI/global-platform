@@ -146,7 +146,12 @@ def test_grounded_brief_ships_with_sources_and_receipts(brief_env):
     assert kinds.count("conditions") == 1 and kinds.count("calendar") == 1
     n_drivers = sum(1 for s in registry.FEEDS.values()
                     if s.get("status") == "available" and s.get("brief_role") == "driver")
-    assert kinds.count("index") == n_drivers   # every registry-tagged driver rides along
+    # Every registry-tagged driver rides along, and pack-bound sources ride
+    # alongside them — so index citations are drivers PLUS pack sources.
+    driver_cites = [c for c in out["citations"]
+                    if c["kind"] == "index" and c.get("brief_role") != "pack-source"]
+    assert len(driver_cites) == n_drivers
+    assert kinds.count("index") >= n_drivers
     assert "source: https://icpac.net/g.pdf" in out["brief"]
     assert "archived: /api/food-security/rag/document/" in out["brief"]
     assert "query: Crop IN" in out["brief"]            # the conditions receipt
@@ -261,13 +266,31 @@ def test_model_decline_passes_through(brief_env):
     assert out["declined"] is True and "Peru" in out["decline_reason"]
 
 
-def test_unverified_numbers_are_recorded_not_blocking(brief_env):
-    """v1 contract: citation/structure checks block; a number absent from the
-    evidence (whole-token compare) is RECORDED (upgrade path to blocking)."""
-    brief_env([GOOD_BRIEF.replace("above-normal rains", "a 9999 tonne surplus")])
+def test_a_number_from_nowhere_blocks_the_brief(brief_env):
+    """A figure that traces to no citation and no platform-computed number BLOCKS.
+
+    It used to be recorded and passed, which put a PASSED badge above two
+    fabricated figures in a real brief — precise, cited, and absent from the
+    evidence. In a brief that allocates disaster response that cannot pass."""
+    bad = GOOD_BRIEF.replace("above-normal rains", "a 9999 tonne surplus")
+    # The gate now blocks, so the drafter is asked again with the failure named.
+    # A drafter that keeps the invented figure must never end up published.
+    brief_env([bad, bad, bad, bad])
     out = synthesis.synthesize("maize in Kenya?")
-    assert out["declined"] is False
     assert "9999" in out["grounded"]["numbers_unverified"]
+    assert any("appear in no citation" in f for f in out["grounded"]["failures"])
+    assert out["grounded"]["passed"] is False
+
+
+def test_a_share_of_a_cited_total_is_not_a_fabrication(brief_env):
+    """The one calculation a drafter legitimately does stays allowed: a percentage
+    of a total stated in the SAME citation. Blocking that would block honest work,
+    and a gate that blocks honest work gets switched off."""
+    from app.food_security import synthesis as fs
+    cits = [{"n": 1, "text": "2 of 27 schools in Battambang fall in the flood footprint."}]
+    assert fs._cited_share("7.4", cits)        # 2/27*100
+    assert fs._cited_share("167.13", cits) is None      # not a percentage at all
+    assert fs._cited_share("47281", cits) is None       # traces to nothing
 
 
 def test_conditions_truncation_is_visible(brief_env, monkeypatch):
@@ -380,7 +403,11 @@ def test_driver_feeds_reach_the_pack_and_are_marked_as_pulls(brief_env):
     from app.mcp import record
     brief_env([GOOD_BRIEF])
     citations, gaps, stats = synthesis.gather_evidence(PARSED, trace=[])
-    drivers = [c for c in citations if c["kind"] == "index"]
+    # Index citations are now drivers PLUS pack-bound sources (a contributed table
+    # bound to food-security had no path into a brief at all before). Count the
+    # drivers, which is what stats["drivers"] means.
+    drivers = [c for c in citations
+               if c["kind"] == "index" and c.get("brief_role") != "pack-source"]
     assert stats["drivers"] == len(drivers) > 0
     for d in drivers:
         assert "DRIVER SIGNAL ONLY" in d["text"]
