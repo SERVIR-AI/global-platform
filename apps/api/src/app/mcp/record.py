@@ -51,6 +51,30 @@ def _render_with(pack: dict, rid: str) -> dict:
     return out
 
 
+def replay_view(receipt: dict) -> dict:
+    """How to SHOW a receipt that is being re-resolved rather than minted.
+
+    The map address and the render instructions are derived from the pack, so
+    they were only ever returned at mint time and vanished on every later read —
+    a receipt someone shared came back without its map, which is the opposite of
+    a platform whose promise is that a verdict re-resolves. Deriving them here
+    keeps them live rather than freezing them into the stored row.
+    """
+    rid = receipt.get("receipt_id")
+    pack_id = receipt.get("pack_id")
+    if not (rid and pack_id):
+        return {}
+    pack = store.load_pack(pack_id)
+    if pack is None:
+        return {"replay_note": ("the evidence pack behind this receipt is no longer "
+                                "stored, so the map and evidence views cannot be rebuilt")}
+    view = {"render_with": _render_with(pack, rid),
+            "public_resolver": _resolver_url(rid)}
+    if pack.get("viz") is not None:
+        view["map_url"] = _embed_url("hazard_map", rid)
+    return view
+
+
 def _embed_url(component: str, rid: str) -> str | None:
     """The platform's own embed address for a component and receipt, from the theme
     (so GRP_PUBLIC_BASE governs it, exactly as it governs the resolver)."""
@@ -118,7 +142,16 @@ def _sources(pack: dict) -> list[dict]:
                  "residency": c.get("residency"), "authority": c.get("authority"),
                  "usage_notes": c.get("usage_notes"),
                  # how this evidence was obtained, and whether it can be re-read
-                 "query_receipt": c.get("query")}
+                 "query_receipt": c.get("query"),
+                 # WHICH source is unreviewed. The receipt carried `staged_by` at the
+                 # top level and then projected every source identically, so a reader
+                 # could tell that SOMETHING in the answer was unreviewed and not
+                 # which thing. That is the question a reviewer actually asks.
+                 **({"staged_by": c["staged_by"],
+                     "contribution_id": c.get("contribution_id"),
+                     "review_status": ("STAGED — contributed and not yet reviewed; "
+                                       "visible to its contributor and reviewers only")}
+                    if c.get("staged_by") else {})}
         stale = c.get("stale_data")
         if stale:
             # Carried either way: cadence/retrieved_at are real provenance. But only a
@@ -181,7 +214,7 @@ def record(pack_id: str | None = None, report_id: str | None = None,
         r = store.load_receipt(receipt_id)
         if r is None:
             return {"status": "declined", "note": f"no receipt with id {receipt_id!r}"}
-        return {"status": "ok", **r}
+        return {"status": "ok", **r, **replay_view(r)}
 
     pack = store.load_pack(pack_id) if pack_id else None
     if pack is None:

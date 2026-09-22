@@ -1,0 +1,24 @@
+dataset: usgs_quakes_m45_month
+title: USGS M4.5+ earthquakes (past month, global)
+description: Global feed of earthquakes of magnitude 4.5 and above over the past 30
+  days, published by the USGS Earthquake Hazards Program.
+source: USGS
+validation: single-agency
+residency: external call-out
+cadence: continuous
+adapter: generic_json
+fetch:
+  url: https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_month.geojson
+  records_path: features
+  as_of_field: time
+  fields:
+    magnitude: properties.mag
+    place: properties.place
+    time: properties.time
+pack: risk
+hazards:
+  - earthquake
+  - tsunami
+usage_notes: This is the global USGS list of M4.5+ earthquakes for the last month.
+  It is NOT filtered to Southeast Asia — an analyst must filter by place themselves.
+contributed: true

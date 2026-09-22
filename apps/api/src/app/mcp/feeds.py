@@ -290,11 +290,33 @@ def _adapt_generic_json(params: dict, spec: dict) -> dict:
         raise FeedDecline(f"feed unavailable: {exc}") from exc
     except (OSError, ValueError) as exc:
         raise FeedDecline(f"feed unavailable: {type(exc).__name__}: {exc}") from exc
-    rows = res["rows"]
-    as_of = fetch.get("as_of_field") and rows[-1].get(fetch["as_of_field"])
-    return {"as_of": as_of, "count": len(rows[-limit:]), "records": rows[-limit:],
+    rows = list(res["rows"])
+    # WHICH END IS RECENT? The tail is only the newest if the upstream happens to
+    # publish oldest-first. USGS publishes newest-first, so "the latest M4.5+
+    # earthquakes" were the OLDEST twelve of the past month — month-old events
+    # served as current values, to a risk platform. Sort by the timestamp when the
+    # feed names one, and the question stops depending on a publisher's house
+    # style. Without one, say which end was taken instead of implying recency.
+    af = fetch.get("as_of_field")
+    ordered_by_time = False
+    if af and all(r.get(af) is not None for r in rows):
+        try:
+            rows.sort(key=lambda r: (isinstance(r[af], str), r[af]))
+            ordered_by_time = True
+        except TypeError:
+            pass
+    tail = rows[-limit:]
+    as_of = (tail[-1].get(af) if af and tail else None)
+    return {"as_of": as_of, "count": len(tail), "records": tail,
+            "record_order": ("sorted newest-last by the feed's own timestamp field "
+                             f"({af})" if ordered_by_time else
+                             "as published by the upstream, unsorted — this feed "
+                             "declares no timestamp field, so these are the last "
+                             "records in publication order, which is NOT necessarily "
+                             "the most recent"),
             "summary": f"{len(rows)} records from {spec.get('title')}"
-                       + (f", latest {as_of}" if as_of else ""),
+                       + (f", latest {as_of}" if as_of else
+                          " (no timestamp field declared, so recency is unverified)"),
             "query_receipt": f"{fetch['records_path']} via {fetch['url']}",
             "url": fetch["url"],
             "stale_data": {"cadence": spec.get("cadence"),

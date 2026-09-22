@@ -22,3 +22,5 @@ fetch:
   as_of_field: month
 params:
   limit: rows of series to return (default 12)
+countries:
+  - Cambodia

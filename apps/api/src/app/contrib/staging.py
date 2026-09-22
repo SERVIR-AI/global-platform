@@ -432,11 +432,31 @@ FEED_FIELDS = {
                    "(a JSON API with a record list)",
         "fetch": "adapter settings — generic_table: {url, index_name, units, missing_below?, "
                  "bands?: [{min?, max?, label}]}; generic_json: {url, records_path (dot path "
-                 "to the record list), fields (output field -> dot path in a record)}",
+                 "to the record list), fields (output field -> dot path in a record), "
+                 "as_of_field (STRONGLY RECOMMENDED — the output field holding each "
+                 "record's timestamp). Without it the platform cannot tell which end "
+                 "of your feed is recent, has to serve the last records in publication "
+                 "order, and reports no as_of. A USGS feed published newest-first was "
+                 "answering 'the latest earthquakes' with the oldest of the month.}",
     },
     "optional": {
         "usage_notes": "a few lines the consuming analyst reads on every query (max 500 chars)",
         "pack": "which domain pack may cite it: food-security or risk (default food-security)",
+        "countries": ("which countries this source is about, e.g. [Kenya]. Without "
+                      "it the platform treats it as global and cites it in every "
+                      "answer for this pack — a Battambang rainfall table was cited "
+                      "into a Kenya maize brief before this was declarable."),
+        "hazards": ("which hazards this feed speaks to, e.g. [earthquake, tsunami]. "
+                    "Without it a risk feed is cited in EVERY risk answer — a flood "
+                    "brief carried global earthquakes until these were declared. A "
+                    "citation list is a claim about what the answer rests on, so an "
+                    "unrelated feed in it dilutes the ones that matter."),
+        "brief_role": ("'driver' if this is a seasonal DRIVER a food-security brief "
+                       "should cite every time (ENSO/IOD-style indices). Without it a "
+                       "contributed food-security feed is queryable but can never "
+                       "appear in a brief: it stages, it answers feeds_query, and the "
+                       "evidence assembler never reads it. A reviewer decides whether "
+                       "a feed has earned a place in every brief."),
         "license": "upstream licence, e.g. public-domain (US government), or 'unstated'",
         "vintage": "version or date of the upstream product, if it has one",
         "sst_basis": "for SST-based indices: the dataset the anomalies rest on (ERSSTv5, OISST)",
@@ -455,6 +475,12 @@ def _validate_feed(manifest) -> list[str]:
     if m.pop("file", None) or (isinstance(m.get("fetch"), dict) and m["fetch"].get("path")):
         problems.append("a feed reads an upstream URL; for a file you have, contribute it as a "
                         "table (kind table, csv_text or url)")
+    if m.get("brief_role") not in (None, "driver"):
+        problems.append("brief_role, if given, must be 'driver' — the only role a "
+                        "brief selects on today")
+    if m.get("brief_role") == "driver" and m.get("pack", "food-security") != "food-security":
+        problems.append("brief_role 'driver' is a food-security brief concept; a risk "
+                        "feed reaches a risk answer by its `pack` alone")
     if m.get("adapter") and m["adapter"] not in _FEED_ADAPTERS:
         problems.append(f"adapter must be one of {_FEED_ADAPTERS} over the MCP "
                         "(generic_csv is what a table contribution produces)")
@@ -931,9 +957,38 @@ def _caps(caller: identity.Caller) -> list[str]:
 
 
 def _not_reviewer(caller: identity.Caller) -> dict:
+    """Why this caller cannot review, and what would actually change that.
+
+    The old note named the environment variable and stopped, so a reviewer read
+    "needs a reviewer identity (GRP_REVIEWERS)" and had no way to act on it. UAT
+    found the queue unreachable from chat entirely: with an allowlist set, the only
+    identity mechanism is an HTTP header no chat client can send, and nothing said
+    so. A gate nobody can reach is not a gate, it is a wall.
+    """
+    from ..config import get_settings
+    s = get_settings()
+    listed = [r.strip() for r in s.grp_reviewers if r.strip()]
+    how = []
+    if listed:
+        how.append(f"this instance recognises {', '.join(listed)} as reviewers, and "
+                   f"you are {caller.label!r} (identified by: {caller.source})")
+        if not s.grp_oauth_enabled:
+            how.append("OAuth is off here, so an identity comes from the "
+                       "`X-GRP-Dev-Identity` request header — which a chat client "
+                       "cannot set. To review from a chat client on this instance, "
+                       "add your identity to GRP_REVIEWERS and restart, or set "
+                       "GRP_REVIEWERS empty so the local operator reviews")
+        else:
+            how.append("sign in as one of those identities; the reviewer is taken "
+                       "from your token subject")
+    else:
+        how.append("GRP_REVIEWERS is empty, so the local operator reviews — you are "
+                   f"being seen as {caller.label!r} via {caller.source}, which is not "
+                   "the local operator")
     return {"status": "declined",
-            "note": (f"{caller.label} is not a reviewer — approving and rejecting "
-                     "contributions needs a reviewer identity (GRP_REVIEWERS)")}
+            "note": f"{caller.label} is not a reviewer. " + ". ".join(how) + ".",
+            "reviewers_configured": listed or None,
+            "you_are": {"id": caller.id, "label": caller.label, "source": caller.source}}
 
 
 # --------------------------------------------------------------------------- API
@@ -980,6 +1035,88 @@ def submit(kind: str, manifest: dict, caller: identity.Caller | None = None) -> 
     return {**_public(rec), "status": "staged",
             "next": ("test it now — only you and reviewers can see it; a reviewer "
                      "approves or rejects it, and contribute_status shows the decision")}
+
+
+def _landed_state(rec: dict) -> dict:
+    """Is this APPROVED contribution actually being served?
+
+    An approved contribution whose landing file never appeared is silently
+    ignored — the read paths swallow a missing file, and nothing reconciles the
+    approval ledger against what the platform serves. So a reviewer approves
+    something, the ledger says approved, and no answer ever changes. Nobody could
+    even ask the question: the ledger is reviewer-only and per-id status is
+    owner-only, while an approved contribution is public by definition.
+    """
+    kind, m = rec.get("kind"), rec.get("manifest") or {}
+    try:
+        if kind == "document":
+            from ..rag.store import Corpus
+            from . import sources
+            corpus, why = sources._corpus_for(m.get("pack") or "food-security")
+            if corpus is None:
+                return {"live": False, "why": why}
+            landing = rec.get("landing") or {}
+            doc_id = landing.get("doc_id") or rec.get("doc_id")
+            if doc_id:
+                # The landing record names its own corpus; a document contributed
+                # to risk must be looked for in the risk library, not in whichever
+                # one the manifest's pack happened to resolve to.
+                name = landing.get("corpus")
+                if name:
+                    from ..rag.store import Corpus as _C
+                    try:
+                        corpus = _C(name)
+                    except Exception:
+                        pass
+                found = corpus.find(doc_id) is not None
+                return {"live": found,
+                        "why": None if found else
+                               f"doc_id {doc_id} is not in the {name or 'target'} library"}
+            return {"live": None, "why": "no landed doc_id recorded"}
+        if kind in ("table", "feed"):
+            from ..mcp import registry
+            ds = m.get("dataset")
+            row = registry.FEEDS.get(ds)
+            return {"live": bool(row), "why": None if row else
+                    f"no registry row named {ds!r} — the landing file is missing or unreadable"}
+        if kind == "raster":
+            from ..graph.geo import tiffs
+            layer = m.get("layer")
+            cat = tiffs.catalog(include_staged=False)
+            return {"live": layer in cat, "why": None if layer in cat else
+                    f"no catalog row named {layer!r}"}
+        if kind == "weights":
+            from ..graph.geo import combine
+            adj = combine.adjustment_for("hazard_" + str(m.get("hazard") or ""))
+            return {"live": bool(adj), "why": None if adj else
+                    "no adjusted block is in force for this hazard"}
+    except Exception as exc:                                # pragma: no cover
+        return {"live": None, "why": f"could not check ({type(exc).__name__}: {exc})"}
+    return {"live": None, "why": f"no reconciliation for kind {kind!r}"}
+
+
+def reconcile(caller: identity.Caller | None = None) -> dict:
+    """Every APPROVED contribution, and whether the platform is actually serving it.
+
+    Open to anyone: an approved contribution is public, and "is what we approved
+    being used?" is a question a hub lead must be able to ask without being a
+    reviewer.
+    """
+    caller = caller or identity.current()
+    rows = store.list_contributions(status="approved")
+    live, inert, unknown = [], [], []
+    for r in rows:
+        st = _landed_state(r)
+        entry = {**_public(r), "serving": st.get("live"), "why": st.get("why")}
+        (live if st.get("live") else inert if st.get("live") is False else unknown).append(entry)
+    return {"status": "ok", "approved": len(rows),
+            "serving": len(live), "approved_but_inert": len(inert),
+            "unverifiable": len(unknown),
+            "contributions": {"serving": live, "inert": inert, "unverifiable": unknown},
+            "note": ("an approved contribution that is not being served changed "
+                     "nothing: the approval succeeded and the landing did not"
+                     if inert else
+                     "every approved contribution is being served")}
 
 
 def status(contribution_id: str | None = None, caller: identity.Caller | None = None) -> dict:
