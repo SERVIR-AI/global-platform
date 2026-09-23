@@ -45,6 +45,61 @@ def count_in_hazard(aoi, hazard, layer, min_severity=1):
             "source": f"{hazard}.tif × {layer}", "method": "count_in_hazard"}
 
 
+
+def people_in_hazard(aoi, hazard, pop_layer, min_severity=1):
+    """Sum a population-COUNT raster inside `aoi` by `hazard` severity class.
+
+    The platform's class layers say how dense a cell is; this says how many people
+    are in it. The count grid is resampled onto the hazard clip's grid with a
+    sum-preserving method where the toolchain allows it, masked to the AOI polygon,
+    and summed per class. Returns whole people, rounded.
+    """
+    import numpy as np
+    import rasterio.features
+    import rasterio.warp
+    from . import ingest
+    boundary = _boundary(aoi)
+    with rasterio.open(aoi[hazard]) as hz:
+        haz = hz.read(1).astype("float64")
+        transform, crs, shape_ = hz.transform, hz.crs, hz.shape
+    haz[~np.isfinite(haz)] = 0
+    pop_on_grid = np.zeros(shape_, dtype="float64")
+    try:
+        resampling = rasterio.warp.Resampling.sum
+        method = "resample:sum (count-preserving)"
+    except AttributeError:                       # older GDAL: no sum resampling
+        resampling = rasterio.warp.Resampling.nearest
+        method = "resample:nearest (approximate for mismatched grids)"
+    with rasterio.open(ingest.source_raster(pop_layer)) as src:
+        try:
+            rasterio.warp.reproject(
+                source=rasterio.band(src, 1), destination=pop_on_grid,
+                src_transform=src.transform, src_crs=src.crs,
+                dst_transform=transform, dst_crs=crs,
+                src_nodata=src.nodata, dst_nodata=0.0, resampling=resampling)
+        except Exception:
+            # sum resampling can refuse some drivers; fall back rather than fail
+            rasterio.warp.reproject(
+                source=rasterio.band(src, 1), destination=pop_on_grid,
+                src_transform=src.transform, src_crs=src.crs,
+                dst_transform=transform, dst_crs=crs,
+                src_nodata=src.nodata, dst_nodata=0.0,
+                resampling=rasterio.warp.Resampling.nearest)
+            method = "resample:nearest (sum unavailable)"
+    pop_on_grid[~np.isfinite(pop_on_grid)] = 0
+    pop_on_grid[pop_on_grid < 0] = 0
+    inside = rasterio.features.geometry_mask([boundary.__geo_interface__], out_shape=shape_,
+                                             transform=transform, invert=True)
+    total = float(pop_on_grid[inside].sum())
+    by_severity = {}
+    for s in range(1, 6):
+        by_severity[s] = int(round(float(pop_on_grid[inside & (haz == s)].sum())))
+    count = sum(c for s, c in by_severity.items() if s >= min_severity)
+    return {"count": int(count), "total": int(round(total)), "by_severity": by_severity,
+            "legend": tiffs.legend(hazard), "hazard": hazard, "layer": pop_layer,
+            "place": aoi["name"], "min_severity": min_severity,
+            "source": f"{hazard}.tif × {pop_layer}", "method": f"people_in_hazard; {method}"}
+
 def roads_in_hazard(aoi, hazard, min_severity=1):
     """Length (km) of road in `aoi` by `hazard` severity class (1-5)."""
     boundary = _boundary(aoi)

@@ -441,6 +441,51 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
         citations.append(cit)
         trace.append(f"exposure[{layer}] {r['count']}/{total}")
 
+    # --- people: a population COUNT grid summed inside each hazard class -------
+    # The class layers say how dense a cell is; a population_* layer says how many
+    # people are in it. One citation per count grid the caller may see, and a
+    # declared gap — never a silent zero — when it cannot be computed.
+    from ..graph.geo import tiffs as _tiffs
+    for layer, ent in _tiffs.catalog().items():
+        if not layer.startswith("population_"):
+            continue
+        try:
+            r = geostore.people_in_hazard(aoi, hz, layer, min_severity=min_sev)
+        except Exception as exc:
+            gaps.append(f"people exposed could not be computed from {layer}: "
+                        f"{type(exc).__name__}: {exc}")
+            trace.append(f"people[{layer}] FAILED {type(exc).__name__}")
+            continue
+        counts[f"people:{layer}"] = {"exposed": r["count"], "total": r["total"],
+                                     "by_severity": r["by_severity"]}
+        n += 1
+        cit = {
+            "n": n, "kind": "exposure", "retrieval": "computed-at-pack-time",
+            "source": ent.get("source") or r["source"],
+            "title": f"people ({ent.get('title') or layer}) vs {hz}",
+            "pub_date": ent.get("vintage"),
+            "validation": "deterministic-computation",
+            "text": (f"{r['count']:,} of {r['total']:,} people in {aoi.get('name', place)} "
+                     f"live in {hz.removeprefix('hazard_')} hazard class >= {min_sev}. "
+                     f"By severity — {_severity_text(r['by_severity'], legend)}. "
+                     f"Method: {r['method']}. Population grid: {ent.get('title') or layer} "
+                     f"({ent.get('source')}, vintage {ent.get('vintage')}); a count of "
+                     "residents per pixel, summed inside the area and each hazard class."
+                     + (f" NOTE: {hz} has no hazard cell anywhere in this area, so this "
+                        "zero reports the layer's silence, not the absence of hazard."
+                        if silent else "")),
+            "method": r["method"],
+            **({"staged_by": ent["staged_by"], "contribution_id": ent.get("contribution_id")}
+               if ent.get("staged_by") else {}),
+            **({"review_status": ent["review"]} if ent.get("review") else {}),
+        }
+        sr = _series(f"people_{layer}", r["by_severity"], legend,
+                     f"people by hazard class ({layer})")
+        if sr:
+            cit["series"] = sr
+        citations.append(cit)
+        trace.append(f"people[{layer}] {r['count']}/{r['total']}")
+
     if "roads" not in declined:
         rr = geostore.roads_in_hazard(aoi, hz, min_severity=min_sev)
         counts["roads"] = {"exposed_km": round(rr["length_km"], 1),

@@ -577,16 +577,18 @@ def _retire_feed(rec: dict) -> dict:
 
 RASTER_FIELDS = {
     "required": {
-        "layer": "namespaced name: hazard_<name>, risk_<name>, or vulnerability_<name> "
-                 "(a vulnerability layer becomes weightable in the Layer-2 recipe via the "
-                 "'weights' kind), e.g. hazard_heatdays, vulnerability_vulnerable_people",
+        "layer": "namespaced name: hazard_<name> (classes 1-5), risk_<name>, "
+                 "vulnerability_<name> (classes 1-5, weightable via the 'weights' kind), or "
+                 "population_<name> (a COUNT grid: people per pixel, float; the pack sums it "
+                 "inside each hazard class to report people exposed — no legend needed)",
         "url": "where the platform can fetch the GeoTIFF (public host; up to the size cap)",
         "title": "what the layer is",
         "description": "what a pixel value means and how the layer was produced",
         "source": "who produced it, derived from what",
         "license": "e.g. CC-BY-4.0, or 'unstated' (silence is not accepted)",
         "vintage": "when the layer was produced, YYYY-MM",
-        "legend": "mapping class number -> label, e.g. {1: Very Low, ..., 5: Very High}",
+        "legend": "mapping class number -> label, e.g. {1: Very Low, ..., 5: Very High} "
+                  "(not required for a population_* count grid)",
         "declared": "the CONTRACT the file is verified against: {dtype, valid_min, valid_max, "
                     "nodata?} — say what the file IS; the platform checks it before staging",
     },
@@ -836,6 +838,14 @@ def _validate_weights(manifest) -> list[str]:
             pass
     from . import notes
     problems += notes.validate(m.get("usage_notes"))
+    # A count grid is summed, never weighted: a population_* layer in a recipe
+    # would be read as classes 1-5 and produce risk levels that mean nothing.
+    _w = manifest.get("weights") if isinstance(manifest, dict) else None
+    if isinstance(_w, dict):
+        _bad = [k for k in _w if not str(k).startswith("vulnerability_")]
+        if _bad:
+            problems.append(f"weights may only name vulnerability_* class layers, not {_bad} "
+                            "— a population_* count grid is summed, never weighted")
     return problems
 
 

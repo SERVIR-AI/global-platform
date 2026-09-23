@@ -22,7 +22,7 @@ _DECLARED_REQUIRED = ("dtype", "valid_min", "valid_max")
 def _role(layer: str) -> str:
     """The namespace IS the role. A vulnerability_* layer feeds the Layer-2 recipe
     as a weighted input; the gate used to refuse the very prefix the engine reads."""
-    for prefix in ("hazard_", "risk_", "vulnerability_"):
+    for prefix in ("hazard_", "risk_", "vulnerability_", "population_"):
         if layer.startswith(prefix):
             return prefix[:-1]
     return "risk"
@@ -35,12 +35,14 @@ def validate_manifest(m: dict) -> list[str]:
     fails = []
     if not isinstance(m, dict):
         return ["manifest is not a mapping"]
+    layer = str(m.get("layer") or "")
     for k in REQUIRED:
+        if k == "legend" and layer.startswith("population_"):
+            continue          # a count raster has no classes to label
         if not m.get(k):
             fails.append(f"missing required field '{k}'")
-    layer = str(m.get("layer") or "")
-    if layer and not layer.startswith(("hazard_", "risk_", "vulnerability_")):
-        fails.append("layer must be namespaced hazard_*, risk_* or vulnerability_*")
+    if layer and not layer.startswith(("hazard_", "risk_", "vulnerability_", "population_")):
+        fails.append("layer must be namespaced hazard_*, risk_*, vulnerability_* or population_*")
     if m.get("file") and not Path(str(m["file"])).is_file():
         fails.append(f"file {m['file']!r} does not exist")
     if m.get("legend") is not None and not isinstance(m.get("legend"), dict):
