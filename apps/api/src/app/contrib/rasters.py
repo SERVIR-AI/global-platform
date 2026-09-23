@@ -19,6 +19,15 @@ REQUIRED = ("layer", "file", "title", "description", "source", "license",
 _DECLARED_REQUIRED = ("dtype", "valid_min", "valid_max")
 
 
+def _role(layer: str) -> str:
+    """The namespace IS the role. A vulnerability_* layer feeds the Layer-2 recipe
+    as a weighted input; the gate used to refuse the very prefix the engine reads."""
+    for prefix in ("hazard_", "risk_", "vulnerability_"):
+        if layer.startswith(prefix):
+            return prefix[:-1]
+    return "risk"
+
+
 def validate_manifest(m: dict) -> list[str]:
     """Every problem at once. license/vintage are REQUIRED for new layers — the
     existing catalog's unrecorded vintages are a declared gap we do not grow.
@@ -30,8 +39,8 @@ def validate_manifest(m: dict) -> list[str]:
         if not m.get(k):
             fails.append(f"missing required field '{k}'")
     layer = str(m.get("layer") or "")
-    if layer and not layer.startswith(("hazard_", "risk_")):
-        fails.append("layer must be namespaced hazard_* or risk_*")
+    if layer and not layer.startswith(("hazard_", "risk_", "vulnerability_")):
+        fails.append("layer must be namespaced hazard_*, risk_* or vulnerability_*")
     if m.get("file") and not Path(str(m["file"])).is_file():
         fails.append(f"file {m['file']!r} does not exist")
     if m.get("legend") is not None and not isinstance(m.get("legend"), dict):
@@ -68,7 +77,7 @@ def add(manifest: dict, dry_run: bool = False) -> dict:
                              "add layers, they do not overwrite them"]}
 
     decl = {**manifest["declared"]}
-    decl.setdefault("role", "hazard" if layer.startswith("hazard_") else "risk")
+    decl.setdefault("role", _role(layer))
     obs = verify.windowed_stats(str(manifest["file"]))
     mismatches = verify._check({**(schema_mod._doc().get("defaults") or {}), **decl}, obs)
     if mismatches:

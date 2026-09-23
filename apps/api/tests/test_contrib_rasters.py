@@ -42,7 +42,7 @@ def conf_env(monkeypatch, tmp_path):
 def test_manifest_failures_all_named(log):
     fails = rasters.validate_manifest({"layer": "heat"})
     log("OUTPUT", "; ".join(fails)[:140])
-    assert any("hazard_* or risk_*" in f for f in fails)
+    assert any("hazard_*, risk_* or vulnerability_*" in f for f in fails)
     named = {f.split("'")[1] for f in fails if "missing required" in f}
     assert {"file", "title", "source", "license", "vintage", "legend"} <= named
 
