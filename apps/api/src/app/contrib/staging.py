@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from ..mcp import store
 from . import fetch_policy, identity, sources
 
-KINDS = ("document", "table", "feed", "raster", "weights")
+KINDS = ("document", "table", "feed", "raster", "vector", "weights")
 STATUSES = ("pending", "approved", "rejected", "withdrawn", "failed")
 PENDING_CAP = 20               # open contributions per contributor
 HOURLY_CAP = 30                # submissions per contributor per hour
@@ -577,7 +577,9 @@ def _retire_feed(rec: dict) -> dict:
 
 RASTER_FIELDS = {
     "required": {
-        "layer": "namespaced name, hazard_<name> or risk_<name>, e.g. hazard_heatdays",
+        "layer": "namespaced name: hazard_<name>, risk_<name>, or vulnerability_<name> "
+                 "(a vulnerability layer becomes weightable in the Layer-2 recipe via the "
+                 "'weights' kind), e.g. hazard_heatdays, vulnerability_vulnerable_people",
         "url": "where the platform can fetch the GeoTIFF (public host; up to the size cap)",
         "title": "what the layer is",
         "description": "what a pixel value means and how the layer was produced",
@@ -687,7 +689,8 @@ def _stage_raster(rec: dict, prepared: dict) -> dict:
              **({"usage_notes": m["usage_notes"]} if m.get("usage_notes") else {}),
              "contributed": True, "staged_by": rec["contributor_id"], "contribution_id": cid,
              "contributor_label": rec["contributor_label"]}
-    contract = {**m["declared"], "role": "hazard" if layer.startswith("hazard_") else "risk"}
+    from . import rasters as _r
+    contract = {**m["declared"], "role": _r._role(layer)}
     _ensure_staged_loaded()
     STAGED_RASTERS[layer] = {"entry": entry, "contract": contract}
     _purge_clips(layer)
@@ -907,6 +910,180 @@ def visible_staged_weights(hazard: str) -> dict | None:
     return row
 
 
+
+# --------------------------------------------------------------------------- vectors
+
+VECTOR_FIELDS = {
+    "required": {
+        "layer": "a short snake_case name the risk pack will count under, e.g. "
+                 "evacuation_centres — becomes a countable asset beside hospitals/schools",
+        "url": "where the platform can fetch a GeoJSON FeatureCollection of Point features "
+               "in EPSG:4326 (lon, lat); public host, up to the size cap",
+        "title": "what the points are",
+        "description": "what one point represents, how the list was compiled, what it excludes",
+        "source": "who maintains the list (agency), derived from what",
+        "license": "e.g. CC-BY-4.0, or 'unstated' (silence is not accepted)",
+        "vintage": "when the list was last updated, YYYY-MM",
+    },
+    "optional": {
+        "countries": "which countries the layer covers, e.g. [Thailand]",
+        "name_field": "the property holding each point's name, if any",
+        "usage_notes": "a few lines the consuming analyst reads (max 500 chars)",
+    },
+}
+_VECTOR_KNOWN = set(VECTOR_FIELDS["required"]) | set(VECTOR_FIELDS["optional"])
+STAGED_VECTORS: dict[str, dict] = {}
+_STAGED_VECTORS_LOADED = False
+
+
+def _ensure_staged_vectors_loaded() -> None:
+    global _STAGED_VECTORS_LOADED
+    if _STAGED_VECTORS_LOADED:
+        return
+    _STAGED_VECTORS_LOADED = True
+    try:
+        pending = store.list_contributions(status="pending", kind="vector")
+    except Exception:
+        return
+    for rec in pending:
+        pv = rec.get("preview") or {}
+        if pv.get("layer") and pv.get("entry") and pv["layer"] not in STAGED_VECTORS:
+            STAGED_VECTORS[pv["layer"]] = pv["entry"]
+
+
+def _vector_taken(layer: str) -> str | None:
+    import re
+    from ..graph.geo import ingest, vectors
+    if not re.fullmatch(vectors.NAME_RE, layer or ""):
+        return "layer must be snake_case: lowercase letters, digits, underscores, 3-40 chars"
+    if layer in ingest.ASSET_LAYERS or layer in ("admin",):
+        return f"layer {layer!r} is a built-in OSM layer — pick another name"
+    _ensure_staged_vectors_loaded()
+    if layer in vectors.landed() or layer in STAGED_VECTORS:
+        return f"layer {layer!r} is already contributed — contributions add layers, they do not overwrite them"
+    return None
+
+
+def _validate_vector(manifest) -> list[str]:
+    if not isinstance(manifest, dict):
+        return ["manifest must be a mapping of provenance fields"]
+    m = dict(manifest)
+    problems = []
+    if m.pop("file", None):
+        problems.append("'file' is not accepted over the MCP — the platform cannot read "
+                        "your disk; give a url it can fetch")
+    for k in VECTOR_FIELDS["required"]:
+        if not m.get(k):
+            problems.append(f"missing required field '{k}'")
+    taken = _vector_taken(str(m.get("layer") or ""))
+    if taken and m.get("layer"):
+        problems.append(taken)
+    unknown = set(m) - _VECTOR_KNOWN
+    if unknown:
+        problems.append(f"unknown fields {sorted(unknown)} — every field is provenance")
+    from . import notes
+    problems += notes.validate(m.get("usage_notes"))
+    if m.get("url"):
+        problems += fetch_policy.check_url(m["url"])
+    return problems
+
+
+def _prepare_vector(m: dict) -> dict:
+    import os
+    import tempfile
+    from ..graph.geo import vectors
+    taken = _vector_taken(m["layer"])
+    if taken:
+        raise Declined(taken)
+    try:
+        raw, _ = fetch_policy.fetch(m["url"])
+    except fetch_policy.FetchRefused as exc:
+        raise Declined(str(exc)) from None
+    except Exception as exc:
+        raise Declined(f"could not fetch {m['url']}: {type(exc).__name__}: {exc}") from None
+    try:
+        observed = vectors.inspect(raw)
+    except ValueError as exc:
+        raise Declined(f"{m['url']}: {exc}") from None
+    vdir = vectors._dir()
+    fd, tmp = tempfile.mkstemp(prefix="staged-tmp-", suffix=".geojson", dir=vdir)
+    with os.fdopen(fd, "wb") as f:
+        f.write(raw)
+    return {"tmp": tmp, "observed": observed}
+
+
+def _stage_vector(rec: dict, prepared: dict) -> dict:
+    import os
+    from ..graph.geo import vectors
+    m = rec["manifest"]
+    layer, cid = m["layer"], rec["contribution_id"]
+    dest = vectors._dir() / f"staged-{cid}.geojson"
+    os.replace(prepared["tmp"], dest)
+    entry = {"local_path": f"vectors/staged-{cid}.geojson", "title": m["title"],
+             "description": m["description"], "source": m["source"],
+             "license": m["license"], "vintage": m["vintage"],
+             "features": prepared["observed"]["features"],
+             "bbox": prepared["observed"]["bbox"],
+             **({"countries": m["countries"]} if m.get("countries") else {}),
+             **({"name_field": m["name_field"]} if m.get("name_field") else {}),
+             **({"usage_notes": m["usage_notes"]} if m.get("usage_notes") else {}),
+             "contributed": True, "staged_by": rec["contributor_id"], "contribution_id": cid,
+             "contributor_label": rec["contributor_label"]}
+    _ensure_staged_vectors_loaded()
+    STAGED_VECTORS[layer] = entry
+    vectors.purge_clips(layer)
+    return {"layer": layer, "observed": prepared["observed"], "staged_file": str(dest),
+            "entry": entry,
+            "how_to_test": (f"assemble_pack(pack='risk', place=<a place inside the layer's "
+                            f"bbox>, hazard='flood') — the pack now counts {layer!r} against "
+                            "the hazard beside hospitals and schools; only you and reviewers "
+                            "see it until it is approved")}
+
+
+def _land_vector(rec: dict) -> dict:
+    import os
+    from ..graph.geo import vectors
+    m, preview = rec["manifest"], rec["preview"]
+    layer = m["layer"]
+    src = vectors.master_path(preview["entry"])
+    dest = vectors._dir() / f"{layer}.geojson"
+    if dest.exists():
+        raise Declined(f"layer {layer!r} already landed")
+    os.replace(src, dest)
+    entry = {k: v for k, v in preview["entry"].items()
+             if k not in ("staged_by", "contributor_label")}
+    entry["local_path"] = f"vectors/{layer}.geojson"
+    vectors.register(layer, entry)
+    _ensure_staged_vectors_loaded()
+    STAGED_VECTORS.pop(layer, None)
+    vectors.purge_clips(layer)
+    return {"layer": layer, "file": str(dest), "features": entry.get("features")}
+
+
+def _retire_vector(rec: dict) -> dict:
+    from pathlib import Path
+    from ..graph.geo import vectors
+    preview = rec.get("preview") or {}
+    layer = preview.get("layer", "")
+    _ensure_staged_vectors_loaded()
+    STAGED_VECTORS.pop(layer, None)
+    vectors.unregister(layer)
+    vectors.purge_clips(layer)
+    path = Path(preview.get("staged_file") or "")
+    if path.is_file():
+        retired = path.with_suffix(".geojson.retired")
+        path.rename(retired)
+        return {"removed": True, "staged_file": f"moved aside to {retired.name}", "note": _HISTORY}
+    return {"removed": False, "note": "no staged file remains"}
+
+
+def visible_staged_vectors() -> dict:
+    """{layer: entry} for the staged point layers the current caller may see."""
+    _ensure_staged_vectors_loaded()
+    caller = identity.current()
+    return {layer: e for layer, e in STAGED_VECTORS.items()
+            if caller.may_see(e.get("staged_by"))}
+
 _KINDS = {
     "document": {"validate": _validate_document, "prepare": _prepare_document,
                  "stage": _stage_document, "land": _land_document,
@@ -924,6 +1101,10 @@ _KINDS = {
                "stage": _stage_raster, "land": _land_raster, "retire": _retire_raster,
                "fields": RASTER_FIELDS,
                "title": lambda m: f"{m.get('title') or 'untitled layer'} ({m.get('layer')})"},
+    "vector": {"validate": _validate_vector, "prepare": _prepare_vector,
+               "stage": _stage_vector, "land": _land_vector, "retire": _retire_vector,
+               "fields": VECTOR_FIELDS,
+               "title": lambda m: f"{m.get('title') or 'untitled point layer'} ({m.get('layer')})"},
     "weights": {"validate": _validate_weights, "prepare": _prepare_weights,
                 "stage": _stage_weights, "land": _land_weights, "retire": _retire_weights,
                 "fields": WEIGHTS_FIELDS,

@@ -17,7 +17,7 @@ from . import registry, tiffs
 
 def count_features(aoi, layer):
     """Count hospitals or schools inside `aoi`."""
-    if layer not in registry.COUNTABLE:
+    if layer not in registry.countable():
         raise ValueError(f"unknown layer: {layer}")
     boundary = _boundary(aoi)
     n = sum(1 for ft in _features(aoi[layer])
@@ -28,7 +28,7 @@ def count_features(aoi, layer):
 
 def count_in_hazard(aoi, hazard, layer, min_severity=1):
     """Count hospitals or schools by `hazard` severity class (1-5)."""
-    if layer not in registry.COUNTABLE:
+    if layer not in registry.countable():
         raise ValueError(f"unknown layer: {layer}")
     boundary = _boundary(aoi)
     sev = _Severity(aoi[hazard])

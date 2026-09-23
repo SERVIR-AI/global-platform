@@ -437,8 +437,10 @@ def ensure_aoi(place=None, geometry=None, layers=None):
         # boundary can now change by two orders of magnitude — "Battambang Province"
         # moved from a 115 km² town to the 12,159 km² province. Keeping the old
         # files silently reported a town's 27 schools as the province's.
+        from . import vectors as _vectors
         for f in ("meta.json", "admin.geojson",
-                  *(f"{ly}.geojson" for ly in ASSET_LAYERS)):
+                  *(f"{ly}.geojson" for ly in ASSET_LAYERS),
+                  *(f"{ly}.geojson" for ly in _vectors.visible())):
             try:
                 os.remove(os.path.join(adir, f))
             except OSError:
@@ -500,6 +502,20 @@ def ensure_aoi(place=None, geometry=None, layers=None):
         _write(adir, layer, features)
         info.setdefault("counts", {})[layer] = len(features)
         fetched = True
+    # Contributed point layers (a hub's evacuation centres, say) are clipped from
+    # their master file into this AOI beside the OSM layers, under their own name,
+    # so the same exposure count reaches them. Never declined by area: a hub's own
+    # list is small and already local, unlike an Overpass pull.
+    from . import vectors as _vectors
+    for layer, entry in _vectors.visible().items():
+        dest = os.path.join(adir, f"{layer}.geojson")
+        emit({"kind": "cache", "what": "contributed_layer", "layer": layer,
+              "dest": short_path(dest), "was_cached": os.path.exists(dest)})
+        if os.path.exists(dest):
+            continue
+        n_pts = _vectors.clip_into(adir, boundary, layer, entry)
+        info.setdefault("counts", {})[layer] = n_pts
+        fetched = True
     if fetched:
         json.dump(info, open(meta, "w"), indent=2)
     return _bundle(adir, info)
@@ -550,7 +566,13 @@ def _bundle(adir, info):
             "roads": os.path.join(adir, "roads.geojson"),
             "hospitals": os.path.join(adir, "hospitals.geojson"),
             "schools": os.path.join(adir, "schools.geojson"),
-            "buildings": os.path.join(adir, "buildings.geojson")}
+            "buildings": os.path.join(adir, "buildings.geojson"),
+            **{ly: os.path.join(adir, f"{ly}.geojson") for ly in _contributed_layers()}}
+
+
+def _contributed_layers():
+    from . import vectors
+    return list(vectors.visible())
 
 
 def hazard_clip(aoi, layer):

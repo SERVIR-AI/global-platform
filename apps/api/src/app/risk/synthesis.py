@@ -27,7 +27,13 @@ SECTIONS = (
     "## Reading the severity scale",
 )
 
-_ASSETS = ("hospitals", "schools", "buildings")
+_ASSETS = ("hospitals", "schools", "buildings")     # built-in, from OSM
+
+
+def _asset_layers() -> tuple:
+    """Built-in point assets plus every contributed point layer the caller may see."""
+    from ..graph.geo import vectors
+    return _ASSETS + tuple(l for l in vectors.visible() if l not in _ASSETS)
 
 # Only hazard_flood's lineage is stated in conf/tiffs.yml; announcing that the
 # other eight are unattributed is part of the evidence, not a footnote.
@@ -385,8 +391,13 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
             f"{aoi.get('name', place)}: the area is ~{aoi.get('area_km2')} km², over "
             "the asset budget, so those layers were never fetched. They are ABSENT "
             "from this pack, not zero. Ask about a smaller area to get them."))
-    for layer in _ASSETS:
+    for layer in _asset_layers():
         if layer in declined:
+            continue
+        if layer not in aoi:
+            # A contributed layer the bundle was built without (an older cache, a
+            # fixture). Say so; never crash, never read it as zero.
+            trace.append(f"exposure[{layer}] absent from this AOI bundle — not counted")
             continue
         total = geostore.count_features(aoi, layer)["count"]
         r = geostore.count_in_hazard(aoi, hz, layer, min_severity=min_sev)
@@ -407,6 +418,20 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
                         if silent else "")),
             "method": r["method"],
         }
+        # A contributed point layer carries ITS provenance, not OSM's: who keeps
+        # the list, when it was updated, and — until approved — who staged it.
+        from ..graph.geo import vectors as _vectors
+        ventry = _vectors.visible().get(layer)
+        if ventry:
+            cit["source"] = ventry.get("source") or cit["source"]
+            cit["title"] = f"{ventry.get('title') or layer} vs {hz}"
+            cit["pub_date"] = ventry.get("vintage")
+            cit["validation"] = "contributed-point-layer, deterministic crossing"
+            cit["text"] += (f" Points: {ventry.get('title')} ({ventry.get('source')}, "
+                            f"vintage {ventry.get('vintage')}), a contributed layer.")
+            if ventry.get("staged_by"):
+                cit["staged_by"] = ventry["staged_by"]
+                cit["contribution_id"] = ventry.get("contribution_id")
         sr = _series(sid, r["by_severity"], legend, f"{layer} by hazard class")
         if sr:
             cit["series"] = sr
@@ -439,7 +464,9 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     # citations, exactly which vulnerability layers went in and how few they are.
     risk_key, risk_weights = _l2_risk(aoi, hz, trace, gaps)
     if risk_key:
-        for layer in _ASSETS:
+        for layer in _asset_layers():
+            if layer not in aoi:
+                continue
             if layer in declined:
                 continue
             rk = geostore.count_in_hazard(aoi, risk_key, layer, min_severity=min_sev)
