@@ -429,6 +429,9 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
             cit["validation"] = "contributed-point-layer, deterministic crossing"
             cit["text"] += (f" Points: {ventry.get('title')} ({ventry.get('source')}, "
                             f"vintage {ventry.get('vintage')}), a contributed layer.")
+            if ventry.get("review"):
+                cit["review_status"] = ventry["review"]
+                cit["text"] += f" Review: {ventry['review']}."
             if ventry.get("staged_by"):
                 cit["staged_by"] = ventry["staged_by"]
                 cit["contribution_id"] = ventry.get("contribution_id")

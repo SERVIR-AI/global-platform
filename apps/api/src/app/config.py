@@ -203,6 +203,12 @@ class Settings(BaseSettings):
     # reviewable over the MCP until GRP_REVIEWERS names someone.
     grp_allow_anonymous: bool = False
 
+    # Land every contribution the moment it stages, with NO human review — for a
+    # live session where a hub adds sources and must see them cited at once. The
+    # record and the pack both say the source was auto-approved. Off by default;
+    # never leave it on in a deployment that serves decisions.
+    grp_auto_approve: bool = False
+
     # Largest file a contribution may fetch from a URL (bytes). The server sits
     # on a shared network: fetches are also refused for private addresses
     # (contrib/fetch_policy.py), independent of this cap.

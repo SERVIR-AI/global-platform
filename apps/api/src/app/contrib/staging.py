@@ -1053,6 +1053,8 @@ def _land_vector(rec: dict) -> dict:
     entry = {k: v for k, v in preview["entry"].items()
              if k not in ("staged_by", "contributor_label")}
     entry["local_path"] = f"vectors/{layer}.geojson"
+    if rec.get("auto_approved"):
+        entry["review"] = "auto-approved — no human reviewed this layer"
     vectors.register(layer, entry)
     _ensure_staged_vectors_loaded()
     STAGED_VECTORS.pop(layer, None)
@@ -1211,6 +1213,28 @@ def submit(kind: str, manifest: dict, caller: identity.Caller | None = None) -> 
     finally:
         identity.unbind(token)
     rec = store.update_contribution(ident, {"preview": preview})
+    from ..config import get_settings
+    if get_settings().grp_auto_approve:
+        # A live session: land it now, and let the record, the reply and the
+        # citation all say that no human reviewed it. Landing failure leaves it
+        # staged for a reviewer rather than pretending.
+        try:
+            landing = spec["land"]({**rec, "auto_approved": True})
+        except Exception as exc:
+            _notify(f"Auto-approve could not land {kind} {ident}: {exc}")
+            return {**_public(rec), "status": "staged",
+                    "auto_approve": f"staging succeeded but landing failed ({exc}); "
+                                    "left staged for a reviewer"}
+        rec = store.update_contribution(ident, {
+            "status": "approved", "landing": landing, "reviewer_id": "auto-approve",
+            "reviewer_label": "auto-approve (GRP_AUTO_APPROVE on — no human reviewed this)",
+            "decision_note": "auto-approved: this deployment lands contributions without review"})
+        _notify(f"New {kind} contribution AUTO-APPROVED for {caller.label}: "
+                f"{rec['title']} (id {ident})")
+        return {**_public(rec), "status": "approved",
+                "review": "AUTO-APPROVED — this deployment is configured to land "
+                          "contributions without human review; the record says so",
+                "next": "it is live for every caller now — ask a question that uses it"}
     _notify(f"New {kind} contribution staged by {caller.label}: "
             f"{rec['title']} (id {ident}) — awaiting review")
     return {**_public(rec), "status": "staged",
