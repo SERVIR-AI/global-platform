@@ -64,28 +64,43 @@ def people_in_hazard(aoi, hazard, pop_layer, min_severity=1):
         transform, crs, shape_ = hz.transform, hz.crs, hz.shape
     haz[~np.isfinite(haz)] = 0
     pop_on_grid = np.zeros(shape_, dtype="float64")
-    try:
-        resampling = rasterio.warp.Resampling.sum
-        method = "resample:sum (count-preserving)"
-    except AttributeError:                       # older GDAL: no sum resampling
-        resampling = rasterio.warp.Resampling.nearest
-        method = "resample:nearest (approximate for mismatched grids)"
     with rasterio.open(ingest.source_raster(pop_layer)) as src:
-        try:
+        same_grid = (src.crs == crs
+                     and abs(abs(src.res[0]) - abs(transform.a)) < 1e-7
+                     and abs(abs(src.res[1]) - abs(transform.e)) < 1e-7)
+        if same_grid:
+            # Same CRS and pixel size: read the source window that covers the
+            # hazard clip and lay it on directly. No resampling, so no mass is
+            # lost — GDAL's sum resampling dropped a third of a town's residents
+            # between two equal-resolution grids, and put none on the flooded cells.
+            from rasterio.windows import from_bounds
+            h, w = shape_
+            left, top = transform * (0, 0)
+            right, bottom = transform * (w, h)
+            win = from_bounds(left, bottom, right, top, src.transform)
+            r0, c0 = int(round(win.row_off)), int(round(win.col_off))
+            full = rasterio.windows.Window(0, 0, src.width, src.height)
+            req = rasterio.windows.Window(c0, r0, w, h)
+            try:
+                got = req.intersection(full)
+            except rasterio.errors.WindowError:
+                got = None
+            if got is not None and got.width > 0 and got.height > 0:
+                arr = src.read(1, window=got).astype("float64")
+                rr = int(got.row_off) - r0
+                cc = int(got.col_off) - c0
+                pop_on_grid[rr:rr + arr.shape[0], cc:cc + arr.shape[1]] = arr
+            method = "aligned window read (same grid; no resampling)"
+        else:
+            resampling = getattr(rasterio.warp.Resampling, "sum",
+                                 rasterio.warp.Resampling.nearest)
+            method = ("resample:sum (count-preserving)" if resampling.name == "sum"
+                      else "resample:nearest (approximate)")
             rasterio.warp.reproject(
                 source=rasterio.band(src, 1), destination=pop_on_grid,
                 src_transform=src.transform, src_crs=src.crs,
                 dst_transform=transform, dst_crs=crs,
                 src_nodata=src.nodata, dst_nodata=0.0, resampling=resampling)
-        except Exception:
-            # sum resampling can refuse some drivers; fall back rather than fail
-            rasterio.warp.reproject(
-                source=rasterio.band(src, 1), destination=pop_on_grid,
-                src_transform=src.transform, src_crs=src.crs,
-                dst_transform=transform, dst_crs=crs,
-                src_nodata=src.nodata, dst_nodata=0.0,
-                resampling=rasterio.warp.Resampling.nearest)
-            method = "resample:nearest (sum unavailable)"
     pop_on_grid[~np.isfinite(pop_on_grid)] = 0
     pop_on_grid[pop_on_grid < 0] = 0
     inside = rasterio.features.geometry_mask([boundary.__geo_interface__], out_shape=shape_,
