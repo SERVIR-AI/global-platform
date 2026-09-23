@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adding your flood-preparedness sources — Runbook</title>
+<meta name="description" content="A guide for hub teams: add evacuation centres, vulnerable-people layers, flood depth maps, damage tables, reports and a population count grid to the Global Risk Platform from a chat, with no VPN.">
+<style>
+:root{
+  --paper:#FCFCFA; --ground:#F2F2EE; --ink:#141A1F; --body:#2E353C; --muted:#6A7178;
+  --rule:#E0E0D8; --rule-soft:#EAEAE3;
+  --accent:#0E5C6B; --accent-soft:#E3F0F2;
+  --gap:#9A5B12; --gap-soft:#F7EEDF;
+  --good:#256B4E; --good-soft:#E3F0E9;
+  --stop:#8C2F2F; --code-bg:#F4F4EF;
+  --shadow:0 1px 2px rgba(20,26,31,.05),0 8px 24px -12px rgba(20,26,31,.12);
+  --display:Georgia,"Iowan Old Style",ui-serif,serif;
+  --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#11151A; --ground:#161B21; --ink:#EDEFF1; --body:#C4CBD2; --muted:#8B949D;
+    --rule:#252C34; --rule-soft:#1E242B;
+    --accent:#5FBECF; --accent-soft:#122A31;
+    --gap:#D2A05A; --gap-soft:#2B2418;
+    --good:#6DC49B; --good-soft:#152A21;
+    --stop:#E08585; --code-bg:#171D24;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px -12px rgba(0,0,0,.5);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#11151A; --ground:#161B21; --ink:#EDEFF1; --body:#C4CBD2; --muted:#8B949D;
+  --rule:#252C34; --rule-soft:#1E242B;
+  --accent:#5FBECF; --accent-soft:#122A31;
+  --gap:#D2A05A; --gap-soft:#2B2418;
+  --good:#6DC49B; --good-soft:#152A21;
+  --stop:#E08585; --code-bg:#171D24;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px -12px rgba(0,0,0,.5);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:1.5rem}
+body{margin:0;background:var(--paper);color:var(--body);
+  font-family:var(--sans);font-size:16.5px;line-height:1.65;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:0 1.25rem;
+  display:grid;grid-template-columns:238px minmax(0,1fr);gap:3rem;align-items:start}
+@media (max-width:900px){.wrap{grid-template-columns:1fr;gap:0}}
+
+/* masthead */
+header.top{border-bottom:1px solid var(--rule);background:var(--ground)}
+.top-inner{max-width:1180px;margin:0 auto;padding:1.6rem 1.25rem 1.4rem;
+  display:flex;flex-wrap:wrap;gap:1rem;align-items:baseline;justify-content:space-between}
+.brand{font-family:var(--display);font-size:1.42rem;color:var(--ink);margin:0;letter-spacing:-.01em}
+.brand small{display:block;font-family:var(--sans);font-size:.76rem;font-weight:600;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--accent);margin-bottom:.3rem}
+.endpoint{font-family:var(--mono);font-size:.78rem;color:var(--muted);
+  background:var(--paper);border:1px solid var(--rule);border-radius:5px;padding:.35rem .6rem}
+
+/* nav */
+nav{position:sticky;top:1.5rem;padding:2rem 0;font-size:.86rem;max-height:100vh;overflow-y:auto}
+@media (max-width:900px){nav{position:static;max-height:none;border-bottom:1px solid var(--rule);padding-bottom:1.25rem}}
+nav h4{font-size:.7rem;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);
+  margin:1.5rem 0 .5rem;font-weight:700}
+nav h4:first-child{margin-top:0}
+nav a{display:block;color:var(--body);text-decoration:none;padding:.24rem 0;border-left:2px solid transparent;padding-left:.7rem}
+nav a:hover{color:var(--accent);border-left-color:var(--accent)}
+
+main{padding:2.4rem 0 5rem;min-width:0}
+section{margin-bottom:3.4rem;scroll-margin-top:1.5rem}
+h2{font-family:var(--display);font-size:1.72rem;color:var(--ink);margin:0 0 .3rem;
+  letter-spacing:-.015em;text-wrap:balance}
+h2 .num{font-family:var(--mono);font-size:.82rem;color:var(--accent);
+  display:block;margin-bottom:.35rem;letter-spacing:.05em}
+h3{font-family:var(--sans);font-size:1.06rem;color:var(--ink);margin:2rem 0 .6rem;font-weight:650}
+h4{font-size:.93rem;color:var(--ink);margin:1.4rem 0 .4rem;font-weight:650}
+p{margin:.75rem 0;max-width:68ch}
+.lede{font-size:1.06rem;color:var(--muted);max-width:64ch;margin-bottom:1.6rem}
+ul,ol{max-width:68ch;padding-left:1.2rem}
+li{margin:.35rem 0}
+a{color:var(--accent)}
+strong{color:var(--ink);font-weight:650}
+code{font-family:var(--mono);font-size:.855em;background:var(--code-bg);
+  border:1px solid var(--rule-soft);border-radius:4px;padding:.1em .38em;color:var(--ink)}
+pre{background:var(--code-bg);border:1px solid var(--rule);border-radius:8px;
+  padding:.95rem 1.05rem;overflow-x:auto;margin:.9rem 0;box-shadow:var(--shadow)}
+pre code{background:none;border:none;padding:0;font-size:.83rem;line-height:1.6;color:var(--ink)}
+.tablewrap{overflow-x:auto;margin:1rem 0;border:1px solid var(--rule);border-radius:8px}
+table{border-collapse:collapse;width:100%;font-size:.87rem;min-width:520px}
+th,td{text-align:left;padding:.6rem .8rem;border-bottom:1px solid var(--rule-soft);vertical-align:top}
+th{background:var(--ground);font-weight:650;color:var(--ink);font-size:.78rem;
+  letter-spacing:.05em;text-transform:uppercase;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+td code{font-size:.82em;white-space:nowrap}
+
+.note{border-left:3px solid var(--accent);background:var(--accent-soft);
+  padding:.85rem 1.1rem;border-radius:0 7px 7px 0;margin:1.15rem 0;max-width:68ch}
+.note.gap{border-left-color:var(--gap);background:var(--gap-soft)}
+.note.good{border-left-color:var(--good);background:var(--good-soft)}
+.note p{margin:.3rem 0}
+.note .label{font-size:.7rem;letter-spacing:.11em;text-transform:uppercase;
+  font-weight:700;color:var(--accent);display:block;margin-bottom:.2rem}
+.note.gap .label{color:var(--gap)} .note.good .label{color:var(--good)}
+
+.pill{display:inline-block;font-family:var(--mono);font-size:.7rem;padding:.14em .5em;
+  border-radius:4px;font-weight:600;white-space:nowrap}
+.pill.ok{background:var(--good-soft);color:var(--good);border:1px solid var(--good)}
+.pill.gapp{background:var(--gap-soft);color:var(--gap);border:1px solid var(--gap)}
+
+.steps{counter-reset:s;list-style:none;padding-left:0}
+.steps>li{counter-increment:s;position:relative;padding-left:2.4rem;margin:1.5rem 0}
+.steps>li::before{content:counter(s);position:absolute;left:0;top:.05rem;
+  width:1.65rem;height:1.65rem;border-radius:50%;background:var(--accent);color:var(--paper);
+  font-family:var(--mono);font-size:.78rem;font-weight:700;
+  display:flex;align-items:center;justify-content:center}
+footer{border-top:1px solid var(--rule);margin-top:3rem;padding:1.6rem 0;
+  color:var(--muted);font-size:.83rem}
+.toggle{background:none;border:1px solid var(--rule);color:var(--muted);cursor:pointer;
+  border-radius:5px;padding:.3rem .6rem;font-size:.75rem;font-family:var(--sans)}
+.toggle:hover{color:var(--accent);border-color:var(--accent)}
+</style>
+<style>
+.say{border:1px solid var(--rule);border-left:3px solid var(--accent);background:var(--accent-soft);
+  border-radius:0 8px 8px 0;padding:.8rem 1rem;margin:1rem 0;max-width:70ch}
+.say.ask{border-left-color:var(--good);background:var(--good-soft)}
+.say-k{display:block;font-size:.7rem;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);margin-bottom:.3rem}
+.say p{margin:0;max-width:none}
+h4{margin-top:1.6rem}
+</style>
+</head>
+<body>
+<header class="top"><div class="top-inner">
+  <h1 class="brand"><small>Runbook · First Slice</small>Adding your flood-preparedness sources</h1>
+  <span class="endpoint">https://servirplatform.sig-gis.com/mcp</span>
+</div></header>
+<div class="wrap">
+<nav>
+  <h4>Start here</h4>
+  <a href="#how">How adding a source works</a>
+  <a href="#before">Before you paste anything</a>
+  <h4>Your datasets</h4>
+  <a href="#centres">Evacuation centres</a>
+  <a href="#vulnerable">Vulnerable people</a>
+  <a href="#depth">Flood depth map</a>
+  <a href="#tables">Damage &amp; cost tables</a>
+  <a href="#documents">Reports</a>
+  <a href="#people">People in the flood zone</a>
+  <h4>Afterwards</h4>
+  <a href="#check">Checking what landed</a>
+  <a href="#notyet">Not yet</a>
+  <a href="#after">After the session</a>
+  <h4>&nbsp;</h4>
+  <a href="./">← Main runbook</a>
+</nav>
+<main>
+
+<section id="how">
+<h2><span class="num">01</span>How adding a source works</h2>
+<p class="lede">This guide walks you through adding your own data to the platform's risk pack so that it can answer the questions on the story map: which evacuation centres would be at risk in a 100-year flood, how many people live in the flood zone, and where the most vulnerable people are. You do all of it from a chat with the platform — Claude Desktop or Claude Code with the SERVIR connector attached — using your own login. You do not need VPN access, a shell account, or the source code.</p>
+<p>Every dataset enters the platform through the same door: a <strong>contribution</strong>. You describe the dataset in a short manifest — what it is, who made it, when, under what licence — and give the platform a link it can download. The platform fetches the file, checks it against what you declared, and stages it. During this session the platform is configured to <strong>auto-approve</strong>, which means your contribution lands the moment it stages and is immediately usable in answers. Every answer built on an auto-approved source says so plainly in its citation (<em>"auto-approved — no human reviewed this layer"</em>), so nobody downstream mistakes it for a reviewed source.</p>
+<p>You can describe the manifest in plain words and let Claude assemble it, or paste the manifest as a YAML block — the same file a developer would otherwise place on the server by hand — with a <code>kind:</code> line at the top. Both go through <code>contribute_submit</code>, and both are checked the same way. If anything is missing or wrong, the platform declines and names every problem at once, with the full list of fields it expects, so you can fix the manifest and resubmit.</p>
+</section>
+
+<section id="before">
+<h2><span class="num">02</span>Before you paste anything</h2>
+<p><strong>Links must point at a file, not a folder.</strong> The platform downloads the file itself, so a Google Drive <em>folder</em> link — the kind on the mural — will not work; it returns a web page. Use a per-file direct-download link in this form, where <code>&lt;FILE_ID&gt;</code> is the long identifier in the file's share link:</p>
+<pre><code>https://drive.google.com/uc?export=download&amp;id=&lt;FILE_ID&gt;</code></pre>
+<p>Google Drive interposes a virus-scan page for files larger than roughly 100&nbsp;MB. For large rasters, host the file somewhere that serves it directly — a GitHub release, an S3 bucket, or your own web server.</p>
+<p><strong>Rasters must be in EPSG:4326 and, with one exception, already reclassified into classes 1 to 5.</strong> The platform's hazard layers are class maps: every pixel is a whole number from 0 (no hazard) to 5 (very high), and the exposure counts and the risk formula both work on those classes. A flood-depth map in metres has to be converted to depth bands before you upload it — a one-line reclassify in QGIS or GDAL — using the bands in section 05. The one exception is a <strong>population count</strong> grid, which stays as raw counts of people per pixel (section 08).</p>
+<p><strong>Point layers must be a GeoJSON FeatureCollection of Point features</strong>, with coordinates as longitude then latitude.</p>
+<p><strong>Every field in a manifest is provenance.</strong> The platform asks for a licence, a vintage and a source because every answer it gives will cite them. If a licence is genuinely unknown, write <code>unstated</code> — the platform accepts that; it does not accept silence.</p>
+</section>
+
+<section id="centres">
+<h2><span class="num">03</span>Evacuation centres — the headline question</h2>
+<p class="lede">This is the dataset that makes the story map's first question answerable: <em>how many evacuation centres in my area of interest would be at risk in a 100-year flood?</em> Once your centres are in, the platform counts them against the flood layer exactly as it already counts hospitals and schools, and reports how many fall in each severity class.</p>
+<div class="say"><span class="say-k">What to say to Claude</span><p>Add our evacuation centres to the risk pack using <code>contribute_submit</code> with kind <code>vector</code>. The layer name is <code>evacuation_centres</code>. The GeoJSON is at &lt;DIRECT URL&gt;. The title is "Evacuation centres, Thailand (DDPM)", the source is "Thailand DDPM, compiled by ADPC", the licence is CC-BY-4.0, the vintage is 2026-09, the countries are [Thailand], and the name field is <code>name</code>. Description: one point per designated evacuation centre as listed by DDPM in September 2026, with capacity where known.</p></div>
+<h4>Or paste this manifest directly</h4>
+<pre><code>kind: vector
+layer: evacuation_centres
+url: https://drive.google.com/uc?export=download&amp;id=&lt;FILE_ID&gt;
+title: Evacuation centres, Thailand (DDPM)
+description: One point per designated evacuation centre as listed by DDPM in September 2026; capacity where known.
+source: Thailand DDPM, compiled by ADPC
+license: CC-BY-4.0
+vintage: &quot;2026-09&quot;
+countries: [Thailand]
+name_field: name</code></pre>
+<p><strong>What you will see:</strong> the reply says <code>status: approved</code> and names the layer. The layer is now a countable asset in every risk answer.</p>
+<div class="say ask"><span class="say-k">Then ask</span><p>How many evacuation centres in Bang Sue District, Bangkok would be at risk in a 100-year flood, and which ones?</p></div>
+<p>The answer will carry a citation of the form <em>"N of M evacuation_centres in Bang Sue District fall in flood_rp100 hazard class ≥ 1 … by severity: class 2 (Low, 0.5–1 m): 3; class 3 (Moderate, 1–1.5 m): 2 … Points: Evacuation centres, Thailand (DDPM), vintage 2026-09 … Review: auto-approved"</em>, and a second citation giving the same centres by Layer-2 risk level.</p>
+</section>
+
+<section id="vulnerable">
+<h2><span class="num">04</span>Vulnerable people — a weight in the risk formula</h2>
+<p class="lede">Your vulnerable-people layer is a normalised index from 0 to 1. To take part in the platform's risk formula it must first be reclassified into quintile classes 1 to 5 (0 for no data). Once it lands, you add it to the flood recipe with a <strong>weights</strong> contribution, and from then on every flood risk level in Thailand is computed with your layer inside it. The pack states the weights it used, so a reader can see that your layer carried the weight you gave it.</p>
+<div class="say"><span class="say-k">What to say to Claude</span><p>Add our vulnerable-people layer using <code>contribute_submit</code> with kind <code>raster</code>. The layer is <code>vulnerability_vulnerable_people</code>, the GeoTIFF is at &lt;DIRECT URL&gt;. Title "Vulnerable people, Thailand (normalised, reclassed 1–5)", source "ADPC, from census and DDPM vulnerability index", licence CC-BY-4.0, vintage 2026-09. Legend: 1 Very low, 2 Low, 3 Moderate, 4 High, 5 Very high. Declared contract: dtype uint8, valid_min 0, valid_max 5, nodata 0. Description: share of population in vulnerable groups (elderly, disabled, under five), normalised 0–1 and reclassed to quintiles.</p></div>
+<pre><code>kind: raster
+layer: vulnerability_vulnerable_people
+url: https://drive.google.com/uc?export=download&amp;id=&lt;FILE_ID&gt;
+title: Vulnerable people, Thailand (normalised, reclassed 1-5)
+description: Share of population in vulnerable groups (elderly, disabled, under five), normalised 0-1 and reclassed to quintiles 1-5; 0 means no data.
+source: ADPC, from census and DDPM vulnerability index
+license: CC-BY-4.0
+vintage: &quot;2026-09&quot;
+legend: {1: Very low, 2: Low, 3: Moderate, 4: High, 5: Very high}
+declared: {dtype: uint8, valid_min: 0, valid_max: 5, nodata: 0}</code></pre>
+<p>The <code>declared</code> block is a contract: it is what you say the file <em>is</em>, and the platform checks the file against it before accepting. If the file's values fall outside the declared range, the contribution is declined with the observed values shown, so you can correct either the file or the declaration.</p>
+<h4>Then weight it into the flood recipe</h4>
+<div class="say"><span class="say-k">What to say to Claude</span><p>Adjust the flood weights using <code>contribute_submit</code> with kind <code>weights</code>: hazard <code>flood</code>, weights <code>vulnerability_vulnerable_people</code> 0.5, <code>vulnerability_pop_all_total</code> 0.2, <code>vulnerability_reclass_blddensity</code> 0.2, <code>vulnerability_reclass_road</code> 0.1. Rationale: for evacuation planning, the vulnerable share of the population matters more than raw density.</p></div>
+<pre><code>kind: weights
+hazard: flood
+weights:
+  vulnerability_vulnerable_people: 0.5
+  vulnerability_pop_all_total: 0.2
+  vulnerability_reclass_blddensity: 0.2
+  vulnerability_reclass_road: 0.1
+rationale: For evacuation planning the vulnerable share of population matters more than raw density; building and road access remain as secondary factors.</code></pre>
+<p>The weights must sum to 1.0, and the rationale is required because it is the only evidence the numbers rest on — a reader of any answer computed with these weights can see why they were chosen.</p>
+<div class="say ask"><span class="say-k">Then ask</span><p>Where are vulnerable people concentrated in Bang Sue District, and which at-risk evacuation centres sit near them in a 100-year flood?</p></div>
+</section>
+
+<section id="depth">
+<h2><span class="num">05</span>Your own 100-year flood depth map</h2>
+<p class="lede">The platform already holds a regional 100-year flood layer, <code>hazard_flood_rp100</code>. Your Thailand-specific depth map can sit beside it under its own name, so answers can use either. Two things to know before uploading.</p>
+<p>First, <strong>reclassify depth into bands</strong>. Use these bands so the legend matches the platform's existing flood layers, and so severity classes mean the same thing across layers:</p>
+<div class="tablewrap"><table><thead><tr><th>Class</th><th>Depth</th></tr></thead><tbody>
+<tr><td>0</td><td>dry / no data</td></tr><tr><td>1</td><td>under 0.5 m</td></tr><tr><td>2</td><td>0.5 to 1 m</td></tr>
+<tr><td>3</td><td>1 to 1.5 m</td></tr><tr><td>4</td><td>1.5 to 2.5 m</td></tr><tr><td>5</td><td>over 2.5 m</td></tr>
+</tbody></table></div>
+<p>Second, <strong>name it so the platform can find its base hazard</strong>. The platform reads a trailing <code>_rp100</code> as "the 100-year return period of the hazard before it", so <code>hazard_flood_thailand_rp100</code> belongs to a base hazard called <code>flood_thailand</code>. That base has no risk recipe yet, so until you add one (a <code>weights</code> contribution for hazard <code>flood_thailand</code>, with the same weights as flood), answers built on this layer will report exposure counts and <em>declare</em> that no risk-level recipe exists — rather than compute one silently.</p>
+<pre><code>kind: raster
+layer: hazard_flood_thailand_rp100
+url: https://drive.google.com/uc?export=download&amp;id=&lt;FILE_ID&gt;
+title: Flood depth, 1-in-100 year, Thailand (reclassed 1-5)
+description: Modelled 100-year flood depth reclassed to five depth bands; 0 means dry. Model and run year are given in usage_notes.
+source: ADPC hydrological model, Thailand
+license: CC-BY-4.0
+vintage: &quot;2026-08&quot;
+legend: {1: &quot;Very low (&lt;0.5 m)&quot;, 2: &quot;Low (0.5-1 m)&quot;, 3: &quot;Moderate (1-1.5 m)&quot;, 4: &quot;High (1.5-2.5 m)&quot;, 5: &quot;Very high (&gt;2.5 m)&quot;}
+declared: {dtype: int8, valid_min: 0, valid_max: 5, nodata: 0}</code></pre>
+<div class="say ask"><span class="say-k">Then ask</span><p>Using the Thailand RP100 depth layer, what is exposed in Bang Sue District?</p></div>
+</section>
+
+<section id="tables">
+<h2><span class="num">06</span>Damage and cost tables</h2>
+<p class="lede">Tables are the easiest kind to add, because you can paste the CSV straight into the chat — no link needed. A depth-damage table, for instance, lets a later analysis convert flood depth into a fraction of replacement cost.</p>
+<div class="say"><span class="say-k">What to say to Claude</span><p>Add a depth-damage table using <code>contribute_submit</code> with kind <code>table</code>, for the risk pack. Dataset <code>flood_depth_damage_th</code>, cadence irregular, units "fraction of replacement cost", columns depth_m from Depth_m, residential from Residential, commercial from Commercial. Source "JRC Global Flood Depth-Damage Functions 2018, Asia curves", licence CC-BY-4.0, vintage 2018-01, validation peer-reviewed. Here is the CSV: …</p></div>
+<pre><code>kind: table
+dataset: flood_depth_damage_th
+title: Flood depth-damage functions, Asia (JRC 2018)
+description: Damage as a fraction of replacement cost by flood depth, residential and commercial, JRC 2018 Asia curves.
+source: JRC Global Flood Depth-Damage Functions 2018
+validation: peer-reviewed
+license: CC-BY-4.0
+vintage: &quot;2018-01&quot;
+cadence: irregular
+columns: {depth_m: Depth_m, residential: Residential, commercial: Commercial}
+units: fraction of replacement cost
+pack: risk
+csv_text: |
+  Depth_m,Residential,Commercial
+  0.5,0.25,0.20
+  1.0,0.40,0.35
+  1.5,0.50,0.45
+  2.0,0.60,0.55
+  3.0,0.75,0.70</code></pre>
+<p>Once landed, the table is available through <code>feeds_query</code> under its dataset name, and any answer that uses it cites the table with its source and vintage.</p>
+</section>
+
+<section id="documents">
+<h2><span class="num">07</span>Reports and assessments</h2>
+<p class="lede">Documents — a DDPM flood situation report, a post-event assessment, a planning guideline — go into the risk pack's document library, where the platform retrieves relevant passages by meaning and cites them with a link to the archived original.</p>
+<div class="say"><span class="say-k">What to say to Claude</span><p>Archive the DDPM 2025 flood situation report using <code>contribute_submit</code> with kind <code>document</code>, pack risk. The PDF is at &lt;URL&gt;, source "Thailand DDPM", title "Flood situation report 2025", published 2025-11, temporal retrospective, validation official-statistic, countries [Thailand].</p></div>
+<pre><code>kind: document
+pack: risk
+url: https://&lt;host&gt;/ddpm-flood-situation-2025.pdf
+source: Thailand DDPM
+title: Flood situation report 2025
+pub_date: &quot;2025-11&quot;
+temporal: retrospective
+validation: official-statistic
+countries: [Thailand]</code></pre>
+<p>The <code>temporal</code> field matters: only a document marked <code>forecast</code> may be cited for an outlook statement, so a retrospective report can never be quoted as a prediction.</p>
+</section>
+
+<section id="people">
+<h2><span class="num">08</span>How many people live in the flood zone</h2>
+<p class="lede">This is the question the platform could not answer until now. Its population layers were <em>class</em> maps — how dense a cell is, on a scale of 1 to 5 — which can weight a risk level but cannot be added up into a number of people. A <strong>population count</strong> grid changes that: every pixel holds the number of residents, and the platform sums them inside your area and inside each hazard class.</p>
+<p>Use a count grid such as WorldPop's <code>tha_ppp_2020.tif</code> (100 m, EPSG:4326, freely available), or your own census-based grid. Do <strong>not</strong> reclassify it — the platform needs the raw counts — and you do not need a legend, because there are no classes to label. The layer name must begin with <code>population_</code>.</p>
+<div class="say"><span class="say-k">What to say to Claude</span><p>Add our population grid using <code>contribute_submit</code> with kind <code>raster</code>. The layer is <code>population_worldpop_th</code>, the GeoTIFF is at &lt;DIRECT URL&gt;. Title "Population count, Thailand (WorldPop 2020, all ages)", source "WorldPop, ppp_2020", licence CC-BY-4.0, vintage 2020-01. Declared contract: dtype float32, valid_min 0, valid_max 200000. Description: residents per 100 m pixel, all ages; a count grid, not classes.</p></div>
+<pre><code>kind: raster
+layer: population_worldpop_th
+url: https://drive.google.com/uc?export=download&amp;id=&lt;FILE_ID&gt;
+title: Population count, Thailand (WorldPop 2020, all ages)
+description: Residents per ~100 m pixel, all ages; a count grid, not classes.
+source: WorldPop, ppp_2020
+license: CC-BY-4.0
+vintage: &quot;2020-01&quot;
+declared: {dtype: float32, valid_min: 0, valid_max: 200000}</code></pre>
+<div class="say ask"><span class="say-k">Then ask</span><p>How many people in Bang Sue District live in the 100-year flood zone, by severity?</p></div>
+<p>The answer carries a citation of the form <em>"150,000 of 155,476 people in Bang Sue District live in flood hazard class ≥ 1. By severity — class 3 (Moderate): 62,561; class 4 (High): 66,869 …"</em>, beside the asset counts. A population count can never be placed in the weights recipe — the platform refuses it — because a count is something you add up, not something you weight.</p>
+</section>
+
+<section id="check">
+<h2><span class="num">09</span>Checking what you have added</h2>
+<p><code>contribute_status</code> lists your own contributions and their state. During this session each one will read <code>approved</code>, with the reviewer recorded as <code>auto-approve</code> so that the record is honest about how it landed. <code>platform_capabilities</code> lists every layer, feed and document the platform currently holds, including yours.</p>
+</section>
+
+<section id="notyet">
+<h2><span class="num">10</span>What the platform does not yet do</h2>
+<p class="lede">So you are not surprised.</p>
+<p><strong>A headcount of <em>vulnerable</em> people.</strong> The platform now sums a population count grid (section 08) and accepts a vulnerable-share raster (section 04), but it does not yet multiply the two before summing. That is the next step and it is small; until then, the answer to "how many vulnerable people are in the flood zone" is the total headcount alongside the vulnerable-share map.</p>
+<p><strong>Flood depth in metres, unreclassified.</strong> A depth map must be reclassified into the bands in section 05 before upload. A reclassify-on-upload step, where you declare the bands and the platform converts the file, is planned.</p>
+<p><strong>Your own administrative boundary.</strong> Area boundaries come from OpenStreetMap, which covers Thai districts and sub-districts, so this does not block the First Slice. Uploading a boundary shapefile is not yet a contribution kind.</p>
+<p><strong>Exports, the one-page summary, and pin-drop suitability checks.</strong> These are features of the application built on top of the platform rather than data you can add. Map export uses files the platform already holds; the one-page document is produced from the brief by the chat client or the application; suitability of a dropped point needs the headcount above plus a distance rule.</p>
+</section>
+
+<section id="after">
+<h2><span class="num">11</span>After the session</h2>
+<p>Auto-approve is a switch for this session only. Once it is turned off, a new contribution stages as a preview — visible to its contributor and to reviewers, cited with a PREVIEW note — until a reviewer approves it, and only then becomes citable by everyone. Anything landed today under auto-approve stays landed; a reviewer can withdraw a test dataset with <code>contribute_review</code>.</p>
+</section>
+
+</main>
+</div>
+</body>
+</html>
