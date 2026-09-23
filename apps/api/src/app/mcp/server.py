@@ -372,7 +372,7 @@ from ..contrib import staging as _staging  # noqa: E402  (after mcp exists)
 
 
 @mcp.tool(description=_staging.describe_submit())
-def contribute_submit(kind: str, manifest: dict) -> dict:
+def contribute_submit(kind: str = "", manifest: dict | str | None = None) -> dict:
     return _staging.submit(kind, manifest)
 
 

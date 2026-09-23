@@ -1186,9 +1186,36 @@ def _not_reviewer(caller: identity.Caller) -> dict:
 
 # --------------------------------------------------------------------------- API
 
-def submit(kind: str, manifest: dict, caller: identity.Caller | None = None) -> dict:
+def _manifest_from_text(text: str) -> tuple[dict | None, str | None]:
+    """A manifest pasted as YAML or JSON text — the same file a developer would put
+    under conf/, submitted over the MCP instead of over a VPN. A top-level `kind`
+    key may name the kind so the whole config travels as one block."""
+    import yaml
+    try:
+        doc = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        return None, f"manifest text is not valid YAML/JSON: {exc}"
+    if not isinstance(doc, dict):
+        return None, "manifest text must be a mapping of provenance fields"
+    return doc, None
+
+
+def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
     """Validate, store as pending, stage for preview. Declines name every problem."""
     caller = caller or identity.current()
+    if isinstance(manifest, str):
+        manifest, why = _manifest_from_text(manifest)
+        if why:
+            return {"status": "declined", "kind": kind, "problems": [why]}
+    if isinstance(manifest, dict) and manifest.get("kind") and not kind:
+        manifest = dict(manifest)
+        kind = str(manifest.pop("kind"))
+    elif isinstance(manifest, dict) and "kind" in manifest:
+        manifest = {k: v for k, v in manifest.items() if k != "kind"}
+    if manifest is None:
+        return {"status": "declined", "kind": kind,
+                "problems": ["missing manifest — a mapping of provenance fields, or the same "
+                             "as YAML/JSON text with a top-level `kind`"]}
     if kind not in _KINDS:
         return {"status": "declined", "kind": kind,
                 "problems": [f"unknown kind {kind!r} — over the MCP you can contribute: "
