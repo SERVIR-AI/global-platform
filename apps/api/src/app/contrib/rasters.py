@@ -101,7 +101,7 @@ def add(manifest: dict, dry_run: bool = False) -> dict:
     # X2b's first version silently deleted them).
     row = {"local_path": f"tiffs/{layer}.tif",
            "title": manifest["title"], "description": manifest["description"],
-           "legend": manifest["legend"], "source": manifest["source"],
+           "legend": (manifest.get("legend") or {}), "source": manifest["source"],
            "license": manifest["license"], "vintage": manifest["vintage"],
            **({"usage_notes": manifest["usage_notes"]}
               if manifest.get("usage_notes") else {}),

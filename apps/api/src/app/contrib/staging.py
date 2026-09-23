@@ -686,7 +686,7 @@ def _stage_raster(rec: dict, prepared: dict) -> dict:
     dest = get_settings().tiffs_dir / f"staged-{cid}.tif"
     os.replace(prepared["tmp"], dest)
     entry = {"local_path": f"tiffs/staged-{cid}.tif", "title": m["title"],
-             "description": m["description"], "legend": m["legend"], "source": m["source"],
+             "description": m["description"], "legend": (m.get("legend") or {}), "source": m["source"],
              "license": m["license"], "vintage": m["vintage"],
              **({"usage_notes": m["usage_notes"]} if m.get("usage_notes") else {}),
              "contributed": True, "staged_by": rec["contributor_id"], "contribution_id": cid,
