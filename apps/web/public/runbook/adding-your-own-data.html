@@ -145,6 +145,7 @@ h4{margin-top:1.6rem}
   <a href="#tables">Damage &amp; cost tables</a>
   <a href="#documents">Reports</a>
   <a href="#people">People in the flood zone</a>
+  <a href="#api">From your own app — the API</a>
   <h4>Afterwards</h4>
   <a href="#check">Checking what landed</a>
   <a href="#notyet">Not yet</a>
@@ -302,13 +303,29 @@ declared: {dtype: float32, valid_min: 0, valid_max: 200000}</code></pre>
 <p>The answer carries a citation of the form <em>"150,000 of 155,476 people in Bang Sue District live in flood hazard class ≥ 1. By severity — class 3 (Moderate): 62,561; class 4 (High): 66,869 …"</em>, beside the asset counts. A population count can never be placed in the weights recipe — the platform refuses it — because a count is something you add up, not something you weight.</p>
 </section>
 
+<section id="api">
+<h2><span class="num">10</span>From your own application — the upload API</h2>
+<p class="lede">Everything above can also be done by your server, with no chat client and no VPN. The same manifest, POSTed to one endpoint, with the same login the platform already uses.</p>
+<p><code>POST https://servirplatform.sig-gis.com/api/contribute</code> takes the manifest as the request body — YAML or JSON, with the <code>kind:</code> line at the top — or as a multipart form field named <code>file</code>. It runs exactly the same checks as <code>contribute_submit</code> in a chat and returns exactly the same JSON: <code>status: approved</code> (during this session) or <code>staged</code>, with a <code>contribution_id</code>; or <code>status: declined</code> with every problem named and the full list of expected fields.</p>
+<pre><code>curl -X POST https://servirplatform.sig-gis.com/api/contribute \
+  -H &quot;Authorization: Bearer $TOKEN&quot; \
+  -H &quot;Content-Type: application/x-yaml&quot; \
+  --data-binary @evacuation_centres.yml</code></pre>
+<p><strong>The token.</strong> <code>$TOKEN</code> is an AuthKit access token for a person on the platform — the same kind of login the MCP uses. Your application obtains it by sending the user through the platform's login (the OAuth flow, with your app's callback URL registered), and it identifies <em>who</em> is contributing: the contribution is recorded under that person, and only they and reviewers can see it until it is approved. A request with no token, or an expired one, receives <code>401</code> with a <code>WWW-Authenticate</code> header pointing at the login metadata. There is no service-account or shared-key login yet; a machine acting on its own behalf is a known gap.</p>
+<p><strong>Polling.</strong> Your server can check a contribution later:</p>
+<pre><code>curl https://servirplatform.sig-gis.com/api/contribute/&lt;contribution_id&gt; \
+  -H &quot;Authorization: Bearer $TOKEN&quot;</code></pre>
+<p>This returns the record — its status, title and, once landed, what it became — for a contribution that person can see.</p>
+<p><strong>What does not change.</strong> The URL in the manifest still has to be a direct-download link the platform can fetch <em>at the moment you POST</em>: the file is downloaded, checked against what you declared, and stored then and there, so a short-lived signed URL is fine as long as it is live for the request. The size limit is the platform's fetch cap, not your upload size — the manifest itself is small.</p>
+</section>
+
 <section id="check">
-<h2><span class="num">09</span>Checking what you have added</h2>
+<h2><span class="num">11</span>Checking what you have added</h2>
 <p><code>contribute_status</code> lists your own contributions and their state. During this session each one will read <code>approved</code>, with the reviewer recorded as <code>auto-approve</code> so that the record is honest about how it landed. <code>platform_capabilities</code> lists every layer, feed and document the platform currently holds, including yours.</p>
 </section>
 
 <section id="notyet">
-<h2><span class="num">10</span>What the platform does not yet do</h2>
+<h2><span class="num">12</span>What the platform does not yet do</h2>
 <p class="lede">So you are not surprised.</p>
 <p><strong>A headcount of <em>vulnerable</em> people.</strong> The platform now sums a population count grid (section 08) and accepts a vulnerable-share raster (section 04), but it does not yet multiply the two before summing. That is the next step and it is small; until then, the answer to "how many vulnerable people are in the flood zone" is the total headcount alongside the vulnerable-share map.</p>
 <p><strong>Flood depth in metres, unreclassified.</strong> A depth map must be reclassified into the bands in section 05 before upload. A reclassify-on-upload step, where you declare the bands and the platform converts the file, is planned.</p>
@@ -317,7 +334,7 @@ declared: {dtype: float32, valid_min: 0, valid_max: 200000}</code></pre>
 </section>
 
 <section id="after">
-<h2><span class="num">11</span>After the session</h2>
+<h2><span class="num">13</span>After the session</h2>
 <p>Auto-approve is a switch for this session only. Once it is turned off, a new contribution stages as a preview — visible to its contributor and to reviewers, cited with a PREVIEW note — until a reviewer approves it, and only then becomes citable by everyone. Anything landed today under auto-approve stays landed; a reviewer can withdraw a test dataset with <code>contribute_review</code>.</p>
 </section>
 
