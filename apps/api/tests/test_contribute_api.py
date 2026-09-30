@@ -124,3 +124,16 @@ def test_oauth_on_accepts_a_verified_bearer_and_attributes_it(isolated, monkeypa
     rec = store.load_contribution(r.json()["contribution_id"])
     assert rec["contributor_id"] == "user_TEST123"
     assert rec["contributor_label"] == "hub@example.test"
+
+
+def test_no_token_at_all_still_gets_the_challenge(monkeypatch):
+    """The session gate answers before the route; a server client must still be
+    told where to log in."""
+    s = get_settings()
+    monkeypatch.setattr(s, "grp_oauth_enabled", True)
+    monkeypatch.setattr(s, "grp_public_url", "https://example.test")
+    from app import main as main_mod
+    client = TestClient(main_mod.app)
+    r = client.post("/api/contribute", content="kind: vector", headers={"content-type": "application/x-yaml"})
+    assert r.status_code == 401
+    assert "oauth-protected-resource/mcp" in r.headers.get("www-authenticate", "")

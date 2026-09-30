@@ -135,8 +135,16 @@ class SessionGate:
                 location = f"/auth/login?next={quote(path)}"
                 await RedirectResponse(location, status_code=302)(scope, receive, send)
             else:
+                headers = {}
+                if path.startswith("/api/contribute"):
+                    # A server, not a browser: tell it where to log in, the
+                    # same way the MCP transport does, instead of a bare 401.
+                    base = (get_settings().grp_public_url or "").rstrip("/")
+                    headers["WWW-Authenticate"] = (
+                        f'Bearer resource_metadata="{base}/.well-known/'
+                        'oauth-protected-resource/mcp"')
                 await JSONResponse({"detail": "login required"},
-                                   status_code=401)(scope, receive, send)
+                                   status_code=401, headers=headers)(scope, receive, send)
             return
         await self.app(scope, receive, send)
 
