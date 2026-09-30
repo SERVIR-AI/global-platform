@@ -56,7 +56,8 @@ def test_status_can_be_polled(isolated):
                         headers={"content-type": "application/x-yaml"}).json()["contribution_id"]
     r = isolated.get(f"/api/contribute/{cid}")
     assert r.status_code == 200
-    assert r.json()["contribution_id"] == cid
+    assert r.json()["status"] == "ok"
+    assert r.json()["contribution"]["contribution_id"] == cid
 
 
 def test_multipart_file_works_too(isolated):
