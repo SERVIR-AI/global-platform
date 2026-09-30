@@ -150,6 +150,13 @@ class SessionGate:
             return True
         if path.startswith(("/mcp", "/auth/", "/.well-known/")):
             return True
+        # The contribution API is the REST twin of contribute_submit for a hub's
+        # OWN server: no browser, no cookie, the same AuthKit bearer token the
+        # MCP transport accepts. The route verifies the token itself (and 401s
+        # with the same challenge); the gate only lets a bearer reach it.
+        if path.startswith("/api/contribute") and \
+                _header(scope, b"authorization").lower().startswith(b"bearer "):
+            return True
         method = scope.get("method")
         # The SPA host: anonymous GETs render the shell and its signed-out
         # landing page; only the /api data behind it stays gated.
