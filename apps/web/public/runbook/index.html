@@ -153,6 +153,7 @@ footer{border-top:1px solid var(--rule);margin-top:3rem;padding:1.6rem 0;
   <a href="#recipes">Recipes</a>
   <a href="#contribute">Adding sources</a>
   <a href="adding-your-own-data.html">Adding your own data — hub guide →</a>
+  <a href="#changes">Changes &amp; corrections (Sep 2026)</a>
   <a href="#trouble">Troubleshooting</a>
   <a href="#limits">Limits</a>
   <h4>Lookups</h4>
@@ -781,6 +782,21 @@ Then tell me which platform URL your trust chrome resolves against.</code></pre>
   same institution as the groundedness gate, pointed at contributions: full provenance or a
   loud refusal that names <em>every</em> problem at once. Nothing lands half-described.</p>
 
+  <h3>Over the network, with no VPN — the three ways that reach the deployed platform</h3>
+  <p>Everything below this block is the <em>developer path</em>: files on the host, commands at the
+  repository root, a restart. Hub teams do not need any of it. The same manifests reach the deployed
+  platform over the network, authenticated as you:</p>
+  <ol>
+  <li><strong>In a chat.</strong> Describe the source in plain words to Claude with the connector attached, or paste the manifest as a YAML block with a <code>kind:</code> line at the top. Either way <code>contribute_submit</code> runs the gate and replies with <code>approved</code>/<code>staged</code> or a decline that names every problem. The hub guide has a worked manifest for each dataset: <a href="adding-your-own-data.html">Adding your own data</a>.</li>
+  <li><strong>From your own server — the upload API.</strong> <code>POST /api/contribute</code> takes the manifest as the request body (YAML or JSON) or as a multipart <code>file</code>, with the same bearer token the MCP transport accepts. Same gate, same reply, same attribution; <code>GET /api/contribute/&lt;id&gt;</code> to poll.</li>
+  <li><strong>From a terminal — <code>grp-login</code>.</strong> Nothing used to hand a token to a person. <a href="samples/grp-login.py">grp-login.py</a> (standard library only) does the platform's login from a shell: <code>start</code> prints a link and a code, you approve in a browser, <code>finish</code> saves the token to <code>~/.grp/token.json</code> without printing it, <code>token</code> prints it for a shell substitution, <code>check</code> asks the platform whether it accepts it. The token is yours; contributions made with it are recorded under your name.</li>
+  </ol>
+  <pre><code>curl -X POST https://servirplatform.sig-gis.com/api/contribute \
+  -H &quot;Authorization: Bearer $(python3 grp-login.py token)&quot; \
+  -H &quot;Content-Type: application/x-yaml&quot; \
+  --data-binary @manifest.yml</code></pre>
+  <p>The URL in a manifest must be fetchable <em>at the moment you submit</em>: the file is downloaded, verified against what you declared, and stored then and there. A short-lived signed URL is fine as long as it is live for the request; a Google Drive <em>folder</em> link is not a file and is refused.</p>
+
   <div class="note good">
     <span class="label">The rules that hold everywhere</span>
     <p>Required provenance always includes the publisher, a title, a date, and a validation
@@ -1053,6 +1069,43 @@ uv run --project apps/api python -m app.contrib.cli remove-pack &lt;pack-id&gt;<
     name instead of pretending. Every step of this sequence was run against the live platform
     before it went in this runbook.</p>
   </div>
+</section>
+
+<section id="changes">
+  <h2><span class="num">15</span>Changes &amp; corrections — 23 to 30 September 2026</h2>
+  <p class="lede">What landed after the hub training sessions, and where what was said on those calls differs from how the platform actually behaves. Both are here so nobody designs around a statement that is not true.</p>
+
+  <h3>What changed</h3>
+  <div class="tablewrap"><table><thead><tr><th>Change</th><th>What it means for you</th></tr></thead><tbody>
+  <tr><td>New contribution kind <code>vector</code></td><td>A GeoJSON FeatureCollection of <strong>Point</strong> features — evacuation centres, shelters, clinics — lands as a countable asset beside hospitals and schools. The risk pack reports "N of M &lt;layer&gt; in flood class ≥ k", and the Layer-2 risk-level crossing covers it too.</td></tr>
+  <tr><td><code>vulnerability_*</code> rasters accepted</td><td>A reclassed 1–5 vulnerability layer lands and can be weighted into a hazard's recipe with a <code>weights</code> contribution.</td></tr>
+  <tr><td><code>population_*</code> count grids, and <em>people exposed</em></td><td>A raw population-count raster (residents per pixel, float, no legend) lands, and the pack sums it inside the area and each hazard class: "N of M people live in flood class ≥ k". A count grid can never be placed in a weights recipe.</td></tr>
+  <tr><td>Manifests as pasted YAML or JSON</td><td><code>contribute_submit</code> accepts the manifest as text with a top-level <code>kind:</code> — the same file a developer would put under <code>conf/</code>.</td></tr>
+  <tr><td><code>POST /api/contribute</code></td><td>The upload API above. Attributed to the token's owner; <code>401</code> with a <code>WWW-Authenticate</code> challenge when there is no valid token.</td></tr>
+  <tr><td><code>grp-login</code></td><td>A token for a person with only a terminal, via the standard device-authorization login.</td></tr>
+  <tr><td>Session switch: auto-approve</td><td>For a live session the operator can set the platform to land every contribution the moment it stages. The reply, the record and every citation say <em>auto-approved — no human reviewed this</em>. Off by default.</td></tr>
+  <tr><td>Current-season retrieval</td><td>Food-security packs run a current-season query as well as the forecast and past-events ones; the Kenya brief gained the May-2026 GIEWS assessment it had been missing.</td></tr>
+  <tr><td>Contributed tables are portable</td><td>A landed table's path is recorded relative to the cache, so a table landed on one host no longer goes dark on another.</td></tr>
+  </tbody></table></div>
+
+  <h3>Said on the calls — and how it actually behaves</h3>
+  <div class="tablewrap"><table><thead><tr><th>What was said</th><th>What is true</th><th>Why it matters</th></tr></thead><tbody>
+  <tr><td>"The file is not downloaded when you submit the manifest; it is pulled at query time and cached with a 20-day TTL."</td><td>The file is fetched, verified against the declared contract, and stored <strong>at submit</strong>. No lazy fetch, no TTL.</td><td>A short-lived signed URL is fine. A cache-warming route is unnecessary. The file is on the platform from the moment it is accepted — that is the real shape of the privacy question.</td></tr>
+  <tr><td>"You can give a file path on the server instead of a URL."</td><td>Refused over the MCP and the API by design: the platform cannot read your disk. Only the developer path on the host takes a path.</td><td>Design for URLs.</td></tr>
+  <tr><td>"Any vector — GeoJSON, shapefiles."</td><td><code>vector</code> is a GeoJSON FeatureCollection of <strong>Points</strong>. No shapefiles; no lines or polygons yet.</td><td>Evacuation centres are fine. Roads or building footprints as vectors are not, today.</td></tr>
+  <tr><td>"It rejects a vector if there is no OpenStreetMap data for that country."</td><td>No such check. <code>countries</code> is optional metadata.</td><td>Do not build a pre-validator around it.</td></tr>
+  <tr><td>"There is a ten-word minimum on descriptions."</td><td>No such check. <code>usage_notes</code> has a 500-character <em>maximum</em>.</td><td>Same.</td></tr>
+  <tr><td>"It surfaces an archived and a live copy and flags if they differ."</td><td>Both links exist on a citation. Nothing compares them.</td><td>Change detection is not built; re-ask to re-fetch.</td></tr>
+  <tr><td>"The embedded UI does a live pull."</td><td>An embed is bound to a receipt, and a receipt is a snapshot. A new layer appears when you ask again and get a new receipt.</td><td>Call the loop on each user action; do not cache receipt ids in an app.</td></tr>
+  <tr><td>"The programmatic upload API is behind the VPN."</td><td>It is public now, behind the same login as the MCP.</td><td>See above.</td></tr>
+  </tbody></table></div>
+
+  <h3>Still not built — so it is not a surprise</h3>
+  <ul>
+  <li><strong>Machine-to-machine access.</strong> Every token is a person's. A server with no human behind it — a nightly job — has no way in yet.</li>
+  <li><strong>Per-user privacy and roles.</strong> Everyone authenticated sees every landed source; only <em>staged</em> ones are scoped to contributor and reviewers.</li>
+  <li><strong>Raster tile URLs, refresh-frequency, auto-refreshing embeds, a vulnerable-people headcount, reclassify-on-upload for depth maps, shapefiles.</strong> Asked for; not landed yet.</li>
+  </ul>
 </section>
 
 <section id="trouble">
