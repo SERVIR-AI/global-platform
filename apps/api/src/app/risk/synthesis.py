@@ -283,7 +283,14 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     min_sev = int(extras.get("min_severity") or 1)
     legend = tiffs.legend(hz)
 
-    aoi = ingest.ensure_aoi(place=place)
+    geometry = extras.get("geometry")
+    if geometry is not None:
+        # The caller holds the authoritative boundary — a GADM district, a hub's
+        # own admin polygon — so the geocoder is not consulted and `place` is the
+        # label the citations carry. This is the join another system makes.
+        aoi = ingest.ensure_aoi(geometry=geometry, name=place or None)
+    else:
+        aoi = ingest.ensure_aoi(place=place)
     trace.append(f"aoi[{aoi.get('name', place)}] {aoi.get('area_km2')} km2 via {aoi.get('how')}")
     aoi[hz] = ingest.hazard_clip(aoi, hz)
     trace.append(f"clip[{hz}]")

@@ -208,9 +208,13 @@ def assemble_pack(country: str | None = None, crop: str | None = None,
                   min_severity: int | None = None,
                   override: list[dict] | None = None,
                   override_country: str | None = None,
-                  override_crop: str | None = None) -> dict:
+                  override_crop: str | None = None,
+                  geometry: dict | None = None) -> dict:
     """Assembles a deterministic, citable EVIDENCE PACK for a country/crop and mints
-    a `pack_id`. This is the hand-off seam of the platform: YOUR LLM writes the
+    a `pack_id`. For the risk pack, pass `geometry` (a GeoJSON Polygon/MultiPolygon in
+    EPSG:4326, or a [minLon,minLat,maxLon,maxLat] bbox) to analyse an area YOU hold the
+    boundary for — an admin district from another system, a hub's own polygon; `place`
+    is then its label. Without it, `place` is geocoded. This is the hand-off seam of the platform: YOUR LLM writes the
     brief from this pack (cite the numbered items as [n]), then calls
     verify_groundedness(draft, pack_id) to gate it. No LLM runs inside this tool.
 
@@ -225,7 +229,7 @@ def assemble_pack(country: str | None = None, crop: str | None = None,
     will demand — draft those exact section headers so the gate passes in one shot.
     status "declined" -> `note` (missing key / torn corpus / bad override).
     """
-    return assemble.assemble(country=country, crop=crop, focus=focus, pack=pack,
+    return assemble.assemble(geometry=geometry, country=country, crop=crop, focus=focus, pack=pack,
                              place=place, hazard=hazard, min_severity=min_severity,
                              override=override, override_country=override_country,
                              override_crop=override_crop)

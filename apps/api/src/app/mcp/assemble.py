@@ -21,7 +21,8 @@ def assemble(country: str | None = None, crop: str | None = None,
              min_severity: int | None = None,
              override: list[dict] | None = None,
              override_country: str | None = None,
-             override_crop: str | None = None) -> dict:
+             override_crop: str | None = None,
+             geometry: dict | None = None) -> dict:
     """Gather one pack's evidence into a numbered, gap-declaring pack; mint and
     persist a pack_id. Back-compat: bare (country, crop) calls stay food-security,
     and FS packs keep top-level country/crop keys — Desktop configs and the embed
@@ -50,6 +51,8 @@ def assemble(country: str | None = None, crop: str | None = None,
     trace: list[str] = []
     extras = {"override": override, "override_country": override_country,
               "override_crop": override_crop, "min_severity": min_severity}
+    if geometry is not None:
+        extras["geometry"] = geometry   # the caller's own boundary; see gather_risk_evidence
     t_gather = time.perf_counter()
     try:
         citations, gaps, stats = spec["gather"](target, focus, trace, extras)

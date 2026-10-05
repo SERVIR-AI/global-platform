@@ -400,7 +400,7 @@ def resolve_place(place):
             "area_cap_km2": AREA_CAP_KM2}
 
 
-def ensure_aoi(place=None, geometry=None, layers=None):
+def ensure_aoi(place=None, geometry=None, layers=None, name=None):
     """Return a cached bundle of file paths for an AOI — resolved from a `place` name, or
     from a user-drawn `geometry` (GeoJSON Polygon or [minLon,minLat,maxLon,maxLat] bbox,
     EPSG:4326).
@@ -448,13 +448,18 @@ def ensure_aoi(place=None, geometry=None, layers=None):
         cached = None
     if cached is not None:
         info = cached
+        if geometry is not None and name and info.get("name") != name:
+            # The same polygon, now with the caller's label: a district named by
+            # the system that holds its boundary must not be cited as "drawn area".
+            info["name"], info["how"] = name, "supplied polygon"
+            json.dump(info, open(meta, "w"), indent=2)
         boundary = shape(json.load(open(os.path.join(adir, "admin.geojson")))["features"][0]["geometry"])
     else:
         if geometry is not None:
             km2 = boundary.area * 111.0 * 108.0
             if km2 > AREA_CAP_KM2:
                 raise ValueError(f"drawn area is too large (>{AREA_CAP_KM2:.0f} km²) — draw a smaller box")
-            name, how = "drawn area", "drawn"
+            name, how = (name or "drawn area"), ("drawn" if not name else "supplied polygon")
         else:
             km2, name, boundary, how = _boundary(place)
         print(f"   [ingest: resolving '{name}' (~{km2:.0f} km²)…]")
