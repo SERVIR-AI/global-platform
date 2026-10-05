@@ -49,71 +49,66 @@ def count_in_hazard(aoi, hazard, layer, min_severity=1):
 def people_in_hazard(aoi, hazard, pop_layer, min_severity=1):
     """Sum a population-COUNT raster inside `aoi` by `hazard` severity class.
 
-    The platform's class layers say how dense a cell is; this says how many people
-    are in it. The count grid is resampled onto the hazard clip's grid with a
-    sum-preserving method where the toolchain allows it, masked to the AOI polygon,
-    and summed per class. Returns whole people, rounded.
+    The counts are never resampled: moving people between cells invents or loses
+    them (GDAL's sum resampling once reported "0 of 0 people" over a town). The
+    hazard CLASSES are reprojected onto the count grid instead — nearest, so a
+    class never blends — and the counts are summed where they already are. The
+    method text declares the hazard grid's resolution and its offset from the
+    count grid, because at the scale of one cell the headcount is only as sharp
+    as the coarser grid.
     """
     import numpy as np
     import rasterio.features
     import rasterio.warp
+    from rasterio.windows import from_bounds
     from . import ingest
     boundary = _boundary(aoi)
     with rasterio.open(aoi[hazard]) as hz:
-        haz = hz.read(1).astype("float64")
-        transform, crs, shape_ = hz.transform, hz.crs, hz.shape
-    haz[~np.isfinite(haz)] = 0
-    pop_on_grid = np.zeros(shape_, dtype="float64")
-    with rasterio.open(ingest.source_raster(pop_layer)) as src:
-        same_grid = (src.crs == crs
-                     and abs(abs(src.res[0]) - abs(transform.a)) < 1e-7
-                     and abs(abs(src.res[1]) - abs(transform.e)) < 1e-7)
-        if same_grid:
-            # Same CRS and pixel size: read the source window that covers the
-            # hazard clip and lay it on directly. No resampling, so no mass is
-            # lost — GDAL's sum resampling dropped a third of a town's residents
-            # between two equal-resolution grids, and put none on the flooded cells.
-            from rasterio.windows import from_bounds
-            h, w = shape_
-            left, top = transform * (0, 0)
-            right, bottom = transform * (w, h)
-            win = from_bounds(left, bottom, right, top, src.transform)
-            r0, c0 = int(round(win.row_off)), int(round(win.col_off))
-            full = rasterio.windows.Window(0, 0, src.width, src.height)
-            req = rasterio.windows.Window(c0, r0, w, h)
-            try:
-                got = req.intersection(full)
-            except rasterio.errors.WindowError:
-                got = None
-            if got is not None and got.width > 0 and got.height > 0:
-                arr = src.read(1, window=got).astype("float64")
-                rr = int(got.row_off) - r0
-                cc = int(got.col_off) - c0
-                pop_on_grid[rr:rr + arr.shape[0], cc:cc + arr.shape[1]] = arr
-            method = "aligned window read (same grid; no resampling)"
-        else:
-            resampling = getattr(rasterio.warp.Resampling, "sum",
-                                 rasterio.warp.Resampling.nearest)
-            method = ("resample:sum (count-preserving)" if resampling.name == "sum"
-                      else "resample:nearest (approximate)")
-            rasterio.warp.reproject(
-                source=rasterio.band(src, 1), destination=pop_on_grid,
-                src_transform=src.transform, src_crs=src.crs,
-                dst_transform=transform, dst_crs=crs,
-                src_nodata=src.nodata, dst_nodata=0.0, resampling=resampling)
-    pop_on_grid[~np.isfinite(pop_on_grid)] = 0
-    pop_on_grid[pop_on_grid < 0] = 0
-    inside = rasterio.features.geometry_mask([boundary.__geo_interface__], out_shape=shape_,
-                                             transform=transform, invert=True)
-    total = float(pop_on_grid[inside].sum())
-    by_severity = {}
-    for s in range(1, 6):
-        by_severity[s] = int(round(float(pop_on_grid[inside & (haz == s)].sum())))
+        haz = hz.read(1)
+        haz = np.where(np.isfinite(haz), haz, 0).astype("int16")
+        hz_T, hz_crs, hz_res = hz.transform, hz.crs, abs(hz.res[0])
+        h, w = haz.shape
+        left, top = hz_T * (0, 0)
+        right, bottom = hz_T * (w, h)
+    with rasterio.open(ingest.source_raster(pop_layer)) as pop:
+        win = from_bounds(left, bottom, right, top, pop.transform).round_offsets().round_lengths()
+        full = rasterio.windows.Window(0, 0, pop.width, pop.height)
+        try:
+            win = win.intersection(full)
+        except rasterio.errors.WindowError:
+            win = None
+        if win is None or win.width <= 0 or win.height <= 0:
+            raise ValueError(f"{aoi.get('name', 'this area')} lies outside {pop_layer}'s coverage")
+        counts = pop.read(1, window=win).astype("float64")
+        pop_T, pop_crs, pop_res = pop.window_transform(win), pop.crs, abs(pop.res[0])
+    counts[~np.isfinite(counts)] = 0
+    counts[counts < 0] = 0
+    classes = np.zeros(counts.shape, dtype="int16")
+    rasterio.warp.reproject(haz, classes, src_transform=hz_T, src_crs=hz_crs,
+                            dst_transform=pop_T, dst_crs=pop_crs, dst_nodata=0,
+                            resampling=rasterio.warp.Resampling.nearest)
+    inside = rasterio.features.geometry_mask([boundary.__geo_interface__],
+                                             out_shape=counts.shape, transform=pop_T, invert=True)
+    total = float(counts[inside].sum())
+    by_severity = {s: int(round(float(counts[inside & (classes == s)].sum()))) for s in range(1, 6)}
     count = sum(c for s, c in by_severity.items() if s >= min_severity)
+    # Honesty about the grids: resolution ratio and sub-cell offset.
+    ratio = hz_res / pop_res if pop_res else 1.0
+    off_x = abs(((hz_T.c - pop_T.c) / pop_T.a) % 1.0)
+    off_y = abs(((hz_T.f - pop_T.f) / pop_T.e) % 1.0)
+    off = max(min(off_x, 1 - off_x), min(off_y, 1 - off_y))
+    note = (f"hazard classes reprojected (nearest) onto the {pop_res * 111000:.0f} m count grid; "
+            f"hazard grid is {hz_res * 111000:.0f} m")
+    if ratio > 1.5:
+        note += (f" — {ratio:.0f}x coarser than the counts, so class membership is "
+                 f"decided at the hazard grid's scale")
+    if off > 0.1 and ratio < 1.5:
+        note += (f"; the two grids are offset by {off:.1f} of a cell, so people in cells on "
+                 "a class boundary can move by one cell")
     return {"count": int(count), "total": int(round(total)), "by_severity": by_severity,
             "legend": tiffs.legend(hazard), "hazard": hazard, "layer": pop_layer,
             "place": aoi["name"], "min_severity": min_severity,
-            "source": f"{hazard}.tif × {pop_layer}", "method": f"people_in_hazard; {method}"}
+            "source": f"{hazard}.tif × {pop_layer}", "method": f"people_in_hazard; {note}"}
 
 def roads_in_hazard(aoi, hazard, min_severity=1):
     """Length (km) of road in `aoi` by `hazard` severity class (1-5)."""
