@@ -31,6 +31,17 @@ def catalog(include_staged: bool = True):
     return cat
 
 
+def stack_root(row):
+    """Where a stack's files live: the env override, else the row's root, resolved
+    against the repo root when relative."""
+    import os
+    root = (os.environ.get(str(row.get("data_root_env") or "")) or row.get("data_root") or "")
+    if root and not os.path.isabs(root):
+        root = os.path.join(os.path.dirname(os.path.dirname(
+            str(get_settings().tiffs_config_path))), root)
+    return root
+
+
 def _expand_stacks(cat):
     """A `kind: stack` row (one legend, one contract, one file per year) becomes one
     ordinary row per year, so every raster primitive works on `landcover_hkh_2022`
@@ -45,10 +56,9 @@ def _expand_stacks(cat):
     for sid, row in list(cat.items()):
         if row.get("kind") != "stack":
             continue
-        root = (os.environ.get(str(row.get("data_root_env") or "")) or row.get("data_root") or "")
-        if root and not os.path.isabs(root):
-            root = os.path.join(os.path.dirname(os.path.dirname(
-                str(get_settings().tiffs_config_path))), root)
+        if not row.get("file_pattern"):
+            continue            # a contributed stack: its years were landed as rows already
+        root = stack_root(row)
         inherited = {k: row[k] for k in ("legend", "source", "license", "vintage", "url",
                                          "pub_date", "authority", "accuracy",
                                          "outside_values", "usage_notes") if k in row}

@@ -306,7 +306,7 @@ function chartSVG(sr, i, st) {
         fill="currentColor" opacity=".55">${esc(pts[pts.length - 1].t)}</text>
     </svg>
     <div class="readout"><b>${esc(sp.t)}</b> &nbsp;${esc(sp.v)} ${esc(sp.c || "")}${dtxt}
-      <span class="meta">— click anywhere on the chart to read a ${cat ? "class" : "month"}</span></div>
+      <span class="meta">— click anywhere on the chart to read a ${cat ? "class" : (/^\d{4}$/.test(String(pts[0].t)) ? "year" : "month")}</span></div>
     <div class="stats">${s.n} pts · min ${f2(s.min)} · max ${f2(s.max)} · mean ${f2(s.mean)}</div>`;
 }
 function tableHTML(pts) {
@@ -325,9 +325,14 @@ function chartInner(sr, i) {
   const live = st.src === "live" && st.hist && st.hist.points;
   const histErr = st.hist && st.hist.err;
   const cat = !!sr.categorical;
+  const yearly = sr.period === "year";          // one point per year: no month chips
   const chips = cat ? [
     chip(i, "table", "table", st.table),
     (sr.bands && sr.bands.length) ? chip(i, "bands", "thresholds", st.bands) : "",
+  ] : yearly ? [
+    chip(i, "range-10", "10y", st.range === 10),
+    chip(i, "range-0", "all", st.range === 0),
+    chip(i, "table", "table", st.table),
   ] : [
     chip(i, "src-pack", "pack (" + (sr.points || []).length + ")", st.src === "pack"),
     serverToolsOK() ? chip(i, "src-live", st.loading ? "loading…" : "full history",
@@ -619,12 +624,15 @@ function mapCard(m) {
     `<span class="pill" style="border-color:${esc(legend[k].color || "")};
        color:${esc(legend[k].color || "")}">${esc(k)}: ${esc(legend[k].label || "")}</span>`).join(" ");
   return `<div class="card chart">
-    <div class="meta"><b>${esc(m.place || "Area")}</b> · ${esc(String(m.hazard || "").replace("hazard_", ""))} hazard
-      ${m.metric && m.metric.value != null ? " · " + esc(m.metric.value) + " exposed" : ""}</div>
+    <div class="meta"><b>${esc(m.place || "Area")}</b> · ${m.layer_label
+        ? esc(m.layer_label)
+        : esc(String(m.hazard || "").replace("hazard_", "")) + " hazard"}
+      ${m.metric && m.metric.value != null ? " · " + esc(m.metric.value)
+        + (m.metric.label ? " " + esc(m.metric.unit || "") + " " + esc(m.metric.label) : " exposed") : ""}</div>
     <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img"
          aria-label="recorded hazard map">${hz}${aoi}${assets}</svg>
     <div class="stats">${chips}</div>
-    <div class="stats">recorded at pack time — the live, zoomable map is the hazard_map
+    <div class="stats">${m.caption ? esc(m.caption) + " — " : ""}recorded at pack time — the live, zoomable map is the hazard_map
       embed this receipt's render_with names</div>
   </div>`;
 }

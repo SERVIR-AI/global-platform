@@ -114,6 +114,33 @@ def _read_clip(path):
         return ds.read(1), ds.transform, ds.crs
 
 
+def clip_level(path):
+    """The overview level a clip was read at (1 = full resolution), from its tags."""
+    try:
+        with rasterio.open(path) as ds:
+            return int(ds.tags().get("overview_level") or 1)
+    except Exception:
+        return 1
+
+
+def category_grid(clip_path, outside_values, cells=56):
+    """The clip downsampled to a small digit grid for the panel's inline map:
+    legend classes 1-9 stay themselves, the outside/nodata values become 0, so a
+    nodata 15 is never painted as a class."""
+    try:
+        with rasterio.open(clip_path) as src:
+            h = max(1, min(cells, src.height))
+            w = max(1, min(cells, src.width))
+            arr = src.read(1, out_shape=(h, w))
+            b = src.bounds
+        arr = np.where(np.isin(arr, list(outside_values)), 0, arr)
+        arr = np.clip(arr, 0, 9)
+        return {"w": w, "h": h, "cells": "".join(str(int(v)) for v in arr.ravel()),
+                "bounds": [b.left, b.bottom, b.right, b.top]}
+    except Exception:
+        return None
+
+
 def class_areas(clip_path, boundary, legend, outside_values):
     """Area of every legend class inside `boundary`, from the clipped window.
 
@@ -163,14 +190,27 @@ def align(arr_b, transform_b, crs_b, shape_a, transform_a, crs_a, nodata):
     return out
 
 
-def change(clip_a, clip_b, boundary, legend, outside_values):
+def change(clip_a, clip_b, boundary, legend, outside_values, focus_class=None, out_path=None):
     """Class change between two years on the COMMON classified mask: pixels that
-    carry a legend class in both years. Everything else is reported, not dropped."""
+    carry a legend class in both years. Everything else is reported, not dropped.
+    With `focus_class` and `out_path`, also writes a three-value change raster for
+    that class (1 stable, 2 loss, 3 gain; nodata elsewhere) beside the clips."""
     a, ta, ca = _read_clip(clip_a)
     b, tb, cb = _read_clip(clip_b)
     nod = list(outside_values)[-1]
     b = align(b, tb, cb, a.shape, ta, ca, nod)
     inside = _inside(boundary, a.shape, ta)
+    if focus_class is not None and out_path:
+        common_px = inside & ~np.isin(a, list(outside_values)) & ~np.isin(b, list(outside_values))
+        code = np.full(a.shape, 15, dtype="uint8")
+        code[common_px & (a == focus_class) & (b == focus_class)] = 1
+        code[common_px & (a == focus_class) & (b != focus_class)] = 2
+        code[common_px & (a != focus_class) & (b == focus_class)] = 3
+        with rasterio.open(out_path, "w", driver="GTiff", width=a.shape[1], height=a.shape[0],
+                           count=1, dtype="uint8", crs=ca, transform=ta, nodata=15,
+                           compress="lzw") as dst:
+            dst.write(code, 1)
+            dst.update_tags(overview_level=clip_level(clip_a), focus_class=int(focus_class))
     areas = row_pixel_areas_km2(ta, a.shape[0])
     w_all = np.broadcast_to(areas[:, None], a.shape)
     out_a, out_b = np.isin(a, list(outside_values)), np.isin(b, list(outside_values))

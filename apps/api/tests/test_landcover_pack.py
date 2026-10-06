@@ -74,7 +74,7 @@ def lc_env(tmp_path, monkeypatch):
         [LEFT + 2 * PX, TOP - 2 * PX], [LEFT + 10 * PX, TOP - 2 * PX],
         [LEFT + 10 * PX, TOP - 10 * PX], [LEFT + 2 * PX, TOP - 10 * PX], [LEFT + 2 * PX, TOP - 2 * PX]]]}
 
-    def fake_ensure_aoi(place=None, geometry=None, layers=None, name=None):
+    def fake_ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=None):
         adir = tmp_path / "cache" / "test-aoi"
         adir.mkdir(parents=True, exist_ok=True)
         (adir / "admin.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": [
@@ -137,7 +137,7 @@ def test_change_on_common_mask(lc_env, log):
     assert p["status"] == "ok", p.get("note")
     kinds = [c["kind"] for c in p["citations"]]
     assert kinds == ["class_area", "class_area", "class_change", "class_transitions",
-                     "landcover_layer", "landcover_layer", "method", "gaps"]
+                     "class_series", "landcover_layer", "landcover_layer", "method", "gaps"]
     ch = next(c for c in p["citations"] if c["kind"] == "class_change")
     log("OUTPUT", ch["text"][:400])
     # inside the AOI: col 5 Forest->Built-up (8 px), cols 6-8 Cropland->Forest (24 px) changed; 32 unchanged

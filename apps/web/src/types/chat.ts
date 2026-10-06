@@ -61,6 +61,8 @@ export interface ChatRequest {
 export interface Metric {
   value?: number;
   unit?: string;
+  /** What `value` counts, when the pack says so (e.g. "Forest"); absent = exposed assets. */
+  label?: string | null;
   total?: number;
   min_severity?: number;
   by_severity?: Record<string, number>;

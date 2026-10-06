@@ -196,7 +196,27 @@ landcover_hkh:
   extent:
     lon: [50.08, 109.38]
     lat: [10.54, 43.21]
+  colors:                      # map legend; the panel and embed paint classes with these
+    1: "#4f8fd6"
+    2: "#cfe3f5"
+    3: "#2e7d32"
+    4: "#c9b27c"
+    5: "#d64545"
+    6: "#e6c84a"
+    7: "#b07b4f"
+    8: "#8c8c8c"
+    9: "#9bcb6b"
   layer_pattern: landcover_hkh_{year}
   file_pattern: RLCMS/hkh_lc-{year}.tif
   data_root: landcover/OneDrive_2_10-6-2026.zip
   data_root_env: LANDCOVER_HKH_ROOT
+  # Point sets that ride this stack. The shapefile is converted once into a compact
+  # platform-owned file under cache/vectors/ (python -m app.land_cover.fire build);
+  # until then the pack declares the layer as registered but not built.
+  points:
+    hkh_fire:
+      title: MODIS active-fire detections over the HKH, 2001-2025 (NASA FIRMS, processed by ICIMOD)
+      source: "NASA FIRMS MODIS Collection 6 active-fire detections (Terra and Aqua), each stamped by ICIMOD's forest-fire system with the 2022 RLCMS land-cover class at the detection point"
+      license: NASA FIRMS data are free and open (acknowledgement requested); the stamped class follows the stack's CC-BY-4.0
+      file_pattern: ForestFire/hkh_fire
+      derived: hkh_fire_points.npz

@@ -24,7 +24,11 @@ export type VizPayload = Pick<
   /** What the drawn raster actually IS. The risk pack draws a vulnerability-weighted
    * risk grid when it can compute one, and the hazard clip when it cannot; labelling
    * a risk grid "hazard" would misstate the evidence. Absent = hazard severity. */
-  layer_kind?: 'risk_level' | 'hazard_severity';
+  layer_kind?: 'risk_level' | 'hazard_severity' | 'categorical' | string;
+  /** A pack may say in words what the drawn layer is ("Land cover 2022 (...)") and how to
+   * read it; absent, the hazard wording below applies. */
+  layer_label?: string | null;
+  caption?: string | null;
 };
 
 const EmbedMap: FC<{ viz: VizPayload }> = ({ viz }) => {
@@ -60,14 +64,20 @@ const EmbedMap: FC<{ viz: VizPayload }> = ({ viz }) => {
     <div className="flex h-full w-full flex-col">
       <div className="px-3 py-2 text-sm">
         <span className="font-semibold">{viz.place ?? 'Area of interest'}</span>
-        {hazardName && (
-          <span className="opacity-70"> · {hazardName} {isRisk ? 'risk level' : 'hazard'}</span>
+        {viz.layer_label ? (
+          <span className="opacity-70"> · {viz.layer_label}</span>
+        ) : (
+          hazardName && (
+            <span className="opacity-70"> · {hazardName} {isRisk ? 'risk level' : 'hazard'}</span>
+          )
         )}
         {viz.metric?.value != null && (
           <span className="opacity-70">
             {' '}
-            · {viz.metric.value} {viz.metric.unit === 'km' ? 'km of roads' : viz.layer}{' '}
-            {isRisk ? 'at risk' : 'exposed'}
+            · {viz.metric.value}{' '}
+            {typeof viz.metric.label === 'string'
+              ? `${viz.metric.unit ?? ''} ${viz.metric.label}`
+              : `${viz.metric.unit === 'km' ? 'km of roads' : viz.layer} ${isRisk ? 'at risk' : 'exposed'}`}
           </span>
         )}
       </div>
@@ -83,9 +93,11 @@ const EmbedMap: FC<{ viz: VizPayload }> = ({ viz }) => {
         </div>
       )}
       <div className="px-3 pb-2 text-[11px] opacity-60">
-        {isRisk
-          ? 'Classes are risk levels: hazard severity weighted by vulnerability, not hazard alone.'
-          : 'Classes are the hazard provider\u2019s severity classes.'}{' '}
+        {viz.caption
+          ? viz.caption
+          : isRisk
+            ? 'Classes are risk levels: hazard severity weighted by vulnerability, not hazard alone.'
+            : 'Classes are the hazard provider\u2019s severity classes.'}{' '}
         Rendered from the receipt&apos;s recorded evidence pack — resolved live, not frozen.
       </div>
     </div>

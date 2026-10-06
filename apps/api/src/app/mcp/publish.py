@@ -57,6 +57,10 @@ def _panel_map(pack: dict) -> dict | None:
         return None
     hl = viz.get("hazard_layer") or {}
     m = {"place": viz.get("place"), "hazard": viz.get("hazard"),
+         # a pack may say what the drawn layer IS instead of letting the panel
+         # assume a hazard (the land-cover pack draws classes, not severities)
+         "layer_kind": viz.get("layer_kind"), "layer_label": viz.get("layer_label"),
+         "caption": viz.get("caption"),
          "bounds": viz.get("bounds"), "legend": viz.get("legend"),
          "aoi": _coarse(viz.get("aoi"), 2e-3),
          "hazard_grid": viz.get("hazard_grid"),
