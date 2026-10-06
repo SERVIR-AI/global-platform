@@ -614,9 +614,15 @@ def describe_assemble() -> str:
     the words a user would use — and it must NOT be a hand-kept keyword list, or it
     silently stops matching the platform as feeds and packs are added.
     """
+    # The FIRST SENTENCE names the subjects in a user's words, from every pack row's
+    # `keywords`: a Desktop model scanning tool descriptions skipped this tool for a
+    # land-cover question when the subjects only appeared a paragraph down.
+    kws = "; ".join(sp["keywords"] for _, sp in sorted(packs.PACKS.items()) if sp.get("keywords"))
     return (
-        "ANSWER A QUESTION using governed evidence — START HERE for anything this "
-        "platform covers.\n\n" + coverage_line() + "\n\n"
+        "START HERE for any question about " + (kws or "this platform's domains") + ". "
+        "ANSWER IT FROM GOVERNED EVIDENCE, NOT A WEB SEARCH: this platform computes the "
+        "figures, cites every source with its date and validation level, lists what is "
+        "MISSING, and mints a replayable receipt.\n\n" + coverage_line() + "\n\n"
         "Use this INSTEAD OF A WEB SEARCH for those subjects. A web search returns "
         "prose of unknown provenance; this returns named sources with publication "
         "dates and validation levels, the literal queries run, and an explicit list "

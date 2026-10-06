@@ -156,6 +156,7 @@ PACKS: dict[str, dict] = {
         "summary": ("FOOD SECURITY — maize outlooks for Kenya and Zambia and the climate "
                     "drivers behind them (ENSO, IOD, live indices, a governed document library)"),
         "audience": "food-security analysts, hub teams and ministry advisors deciding whether to act months ahead",
+        "keywords": "food security, maize outlooks, El Niño / ENSO and IOD drivers (Kenya, Zambia)",
         "default_focus": lambda t: f"{t.get('country', '')} {t.get('crop', '')}".strip(),
         "doctor_target": {"country": "kenya", "crop": "maize"},
     },
@@ -176,6 +177,9 @@ PACKS: dict[str, dict] = {
                     "mapped hazard (flood, drought, fire, cyclone, earthquake, landslide, storm, "
                     "tsunami) for any place in Southeast Asia, plus vulnerability-weighted risk levels"),
         "audience": "disaster-risk and preparedness planners and the hubs that support them",
+        "keywords": ("hazard exposure and risk: people, roads, schools, hospitals, buildings in "
+                     "flood, drought, fire, cyclone, earthquake, landslide, storm or tsunami zones "
+                     "(Southeast Asia)"),
         "default_focus": lambda t: f"{t.get('hazard', '')} exposure in {t.get('place', '')}".strip(),
         "doctor_target": {"place": "battambang", "hazard": "flood"},
     },
@@ -201,6 +205,9 @@ PACKS: dict[str, dict] = {
                     "today over the Hindu Kush Himalaya (Nepal, Bhutan, northern India and "
                     "Pakistan, Afghanistan, Bangladesh, Myanmar, south-west China), 2000-2022"),
         "audience": "foresters, land-use and conservation planners, and the hubs that map land cover",
+        "keywords": ("land cover: forest, cropland, grassland, built-up area, water, snow, bare "
+                     "land, land-cover change, deforestation and forest gain, fire detections "
+                     "(Hindu Kush Himalaya 2000-2022)"),
         "subjects": ["land cover by class", "forest, cropland, grassland and built-up change "
                      "between mapped years"],
         "where": ["the Hindu Kush Himalaya (Afghanistan, Pakistan, India, Nepal, Bhutan, "
