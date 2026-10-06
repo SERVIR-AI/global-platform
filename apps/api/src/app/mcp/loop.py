@@ -166,12 +166,12 @@ def after_record(receipt_id: str) -> dict:
 ENTRY_HINT = {
     "note": ("These are raw lookup results — evidence, not a governed answer. If you "
              "are answering a user's question with them, go through the loop instead: "
-             "assemble_pack gathers the same evidence WITH the forecast/retrospective "
-             "split, the crop calendar, the live conditions feed and the declared "
-             "gaps, and it mints the pack_id that publish_answer needs to gate and "
-             "receipt your brief."),
+             "assemble_pack gathers the pack's full evidence with its declared gaps "
+             "(food security: country + crop; hazard risk: place + hazard; land cover: "
+             "place + year [+ year_to, classes]), and it mints the pack_id that "
+             "publish_answer needs to gate and receipt your brief."),
     "call": {"tool": "assemble_pack",
-             "args": {"country": "<country>", "crop": "<crop>",
+             "args": {"<the pack's target params, e.g.>": "country+crop | place+hazard | place+year",
                       "focus": "<what the user actually asked>"}},
 }
 

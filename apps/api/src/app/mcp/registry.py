@@ -589,13 +589,22 @@ def coverage_line() -> str:
     pubs = c["publishers"]
     shown = ", ".join(pubs[:6])
     more = f" and {len(pubs) - 6} others" if len(pubs) > 6 else ""
-    # A pack row may declare its own `subjects` and `where`; they ride the same
-    # generated line, so a new domain advertises itself with no edit here.
-    extra = "; ".join(f"{', '.join(sp['subjects'])} in {' and '.join(sp.get('where') or ['its registered footprint'])}"
-                      for _, sp in sorted(packs.PACKS.items()) if sp.get("subjects"))
-    return (f"Covers {what} and food security in {where}, and the climate drivers behind "
-            f"them ({subj})" + (f"; also {extra}" if extra else "")
-            + f". Sources include {shown}{more}.")
+    # Lead with every DOMAIN, one clause each from its pack row (`summary`), so a
+    # model asked about a forest or a flood sees itself in the first sentence. A
+    # Desktop model with web search enabled skipped these tools for a land-cover
+    # question when this line opened with maize and ENSO. Packs without a summary
+    # still get their subjects/where; the live feed list follows for food security.
+    domains = []
+    for pid, sp in sorted(packs.PACKS.items()):
+        if sp.get("summary"):
+            domains.append(sp["summary"])
+        elif sp.get("subjects"):
+            domains.append(f"{', '.join(sp['subjects'])} in "
+                           f"{' and '.join(sp.get('where') or ['its registered footprint'])}")
+    lead = ("Covers " + "; ".join(domains) + ". " if domains else
+            f"Covers {what} and food security in {where}. ")
+    return (lead + f"Food-security specifics: {what} in {where}, and the climate drivers "
+            f"behind them ({subj}). Sources include {shown}{more}.")
 
 
 def describe_assemble() -> str:

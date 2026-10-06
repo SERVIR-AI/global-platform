@@ -57,9 +57,30 @@ def _http_transport() -> dict:
 # Orientation shown to a connecting LLM at initialize — so it isn't a headless
 # chicken. DESCRIBE the two consumption patterns; don't enforce (no mode switch).
 # Kept terse: every connection pays its token cost.
-INSTRUCTIONS = """The Global Risk Platform — a GOVERNED TOOLKIT for food-security \
-decision support, not a chatbot. Every insight carries its evidence; declines say \
-why; answers are replayable; a groundedness gate blocks ungrounded briefs.
+def _domains_line() -> str:
+    """One clause per domain pack, read from the registry so a new pack introduces
+    itself at connect time with no edit here."""
+    from . import packs as _packs
+    parts = [sp["summary"] for _, sp in sorted(_packs.PACKS.items()) if sp.get("summary")]
+    return "; ".join(parts) if parts else "food-security decision support"
+
+
+def _audiences_line() -> str:
+    from . import packs as _packs
+    parts = [sp["audience"] for _, sp in sorted(_packs.PACKS.items()) if sp.get("audience")]
+    return "; ".join(parts) if parts else \
+        "food-security analysts, hub teams and ministry advisors deciding whether to act months ahead"
+
+
+INSTRUCTIONS = f"""The Global Risk Platform — a GOVERNED TOOLKIT for decision support across \
+three domains, not a chatbot: {_domains_line()}. Every insight carries its evidence; \
+declines say why; answers are replayable; a groundedness gate blocks ungrounded briefs.
+
+WHEN A QUESTION IS ABOUT ONE OF THESE DOMAINS, THIS PLATFORM ANSWERS IT: call \
+`assemble_pack` FIRST, with the pack's target (country+crop, place+hazard, or \
+place+year). Do not web-search for figures this platform computes — a web search \
+returns prose of unknown provenance; the pack returns computed, cited, replayable \
+evidence and the exact section headers your brief must use.
 
 Two ways to use it:
 - BUILD-TIME: the user asks you to BUILD a tool/app. Produce a REUSABLE artifact \
@@ -76,8 +97,7 @@ contribution gate. If someone asks to SEE the evidence behind an answer, \
 Measured: small models asked these very questions answered from memory instead of \
 opening the tool, so reach for them by name.
 
-KNOW WHO THIS IS FOR, AND SHOW THEM. The people using this are food-security \
-analysts, hub teams and ministry advisors deciding whether to act months ahead. \
+KNOW WHO THIS IS FOR, AND SHOW THEM. The people using this are {_audiences_line()}. \
 What helps them is SEEING the evidence chain — how old each source is, which are \
 live pulls, what is missing — not reading it as prose. You do not need to be asked \
 for a visual. Assume one helps, and produce it.

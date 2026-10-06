@@ -153,6 +153,9 @@ PACKS: dict[str, dict] = {
         "gather": _gather_food_security,
         "sections": _fs_sections,
         "corpus": "food-security",
+        "summary": ("FOOD SECURITY — maize outlooks for Kenya and Zambia and the climate "
+                    "drivers behind them (ENSO, IOD, live indices, a governed document library)"),
+        "audience": "food-security analysts, hub teams and ministry advisors deciding whether to act months ahead",
         "default_focus": lambda t: f"{t.get('country', '')} {t.get('crop', '')}".strip(),
         "doctor_target": {"country": "kenya", "crop": "maize"},
     },
@@ -169,6 +172,10 @@ PACKS: dict[str, dict] = {
         # any technical limit. Named, so the same contribution path works for both.
         "corpus": "risk",
         "manifest": _risk_manifest,
+        "summary": ("HAZARD RISK — people, roads, schools, hospitals and buildings exposed to a "
+                    "mapped hazard (flood, drought, fire, cyclone, earthquake, landslide, storm, "
+                    "tsunami) for any place in Southeast Asia, plus vulnerability-weighted risk levels"),
+        "audience": "disaster-risk and preparedness planners and the hubs that support them",
         "default_focus": lambda t: f"{t.get('hazard', '')} exposure in {t.get('place', '')}".strip(),
         "doctor_target": {"place": "battambang", "hazard": "flood"},
     },
@@ -188,6 +195,12 @@ PACKS: dict[str, dict] = {
         "sections": _lc_sections,
         "corpus": "land-cover",
         "manifest": _lc_manifest,
+        "summary": ("LAND COVER — how much of a district, province, park or country is forest, "
+                    "cropland, grassland, built-up, water, snow, rock or bare soil in a mapped "
+                    "year; change and transitions between years; fire detections by class; "
+                    "today over the Hindu Kush Himalaya (Nepal, Bhutan, northern India and "
+                    "Pakistan, Afghanistan, Bangladesh, Myanmar, south-west China), 2000-2022"),
+        "audience": "foresters, land-use and conservation planners, and the hubs that map land cover",
         "subjects": ["land cover by class", "forest, cropland, grassland and built-up change "
                      "between mapped years"],
         "where": ["the Hindu Kush Himalaya (Afghanistan, Pakistan, India, Nepal, Bhutan, "
