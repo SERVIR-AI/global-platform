@@ -151,3 +151,52 @@ risk_flood:
     3: Moderate
     4: High
     5: Very High
+
+# ---------------------------------------------------------------------------
+# LAND-COVER STACKS — one legend, one contract, one file per year. A `kind: stack`
+# row is expanded by tiffs.catalog() into one internal row per year
+# (landcover_hkh_2022, ...); the contract lives once under `stacks:` in
+# conf/raster_schema.yml. `data_root` is a directory of the files or a zip whose
+# entries are STORED (read in place through GDAL's /vsizip/); the environment
+# variable in `data_root_env` overrides it per machine. Relative roots resolve
+# against the repo root.
+landcover_hkh:
+  kind: stack
+  role: landcover
+  internal: true
+  title: HKH land cover 2000-2022 (ICIMOD RLCMS, 30 m, 9 classes)
+  description: >
+    Annual land-cover maps of the Hindu Kush Himalaya from ICIMOD's Regional Land
+    Cover Monitoring System: one categorical 30 m raster per year, 2000-2022 except
+    2012, classes 1-9. Pixel value 0 (2000-2019 files) and the nodata value 15
+    (2020-2022 files) both mean outside the product footprint or unclassified.
+    Not a hazard layer: the land-cover pack counts its classes inside an area.
+  source: "ICIMOD (2022). Land cover of HKH region [Data set]. ICIMOD. https://doi.org/10.26066/RDS.1972511"
+  url: https://doi.org/10.26066/RDS.1972511
+  pub_date: "2022-11-09"
+  vintage: 2022-11
+  license: CC-BY-4.0
+  authority: regional hub product (ICIMOD, SERVIR-HKH), co-developed with national agencies; no national land-cover map is registered on this platform
+  accuracy: unstated
+  legend:
+    1: Water body
+    2: Snow and glacier
+    3: Forest
+    4: Riverbed
+    5: Built-up area
+    6: Cropland
+    7: Bare soil
+    8: Bare rock
+    9: Grassland
+  outside_values: [0, 15]
+  years: [2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011,
+          2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022]
+  missing_years:
+    2012: no map published by the producer
+  extent:
+    lon: [50.08, 109.38]
+    lat: [10.54, 43.21]
+  layer_pattern: landcover_hkh_{year}
+  file_pattern: RLCMS/hkh_lc-{year}.tif
+  data_root: landcover/OneDrive_2_10-6-2026.zip
+  data_root_env: LANDCOVER_HKH_ROOT

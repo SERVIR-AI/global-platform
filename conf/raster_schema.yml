@@ -217,3 +217,16 @@ layers:
     valid_min: 0
     valid_max: 5
     units: class
+
+# Contracts for yearly raster STACKS (conf/tiffs.yml `kind: stack`): one contract
+# serves every year of the series. schema_for('landcover_hkh_2022') resolves here.
+stacks:
+  landcover_hkh:
+    role: landcover
+    dtype: uint8
+    valid_min: 0
+    valid_max: 9
+    units: class            # producer's 9-class legend; 0 / nodata 15 = outside footprint
+    scale: 1
+    nodata: 15
+    pixel_size_deg: 0.000269494585   # ~30 m at the equator
