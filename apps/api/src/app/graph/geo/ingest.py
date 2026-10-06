@@ -104,13 +104,41 @@ def _slug(place):
     return re.sub(r"[^a-z0-9]+", "-", place.lower()).strip("-")
 
 
-def _boundary(place):
+def _est_km2(geom):
+    """Planar area estimate in km² for a lon/lat shape, scaled by the cosine of its
+    latitude. The old constants (111 x 108) were tuned to ~13 N and overstated a
+    Himalayan province by ~9%."""
+    lat = geom.centroid.y if not geom.is_empty else 0.0
+    return geom.area * 111.32 * 111.32 * max(math.cos(math.radians(lat)), 0.05)
+
+
+# Boundaries a question can be about. OpenStreetMap tags parks and reserves as their
+# own boundary types; a land-cover question about a national park needs the park.
+_BOUNDARY_KINDS = {"administrative": "admin boundary",
+                   "national_park": "protected-area boundary",
+                   "protected_area": "protected-area boundary"}
+
+
+def _boundary_kind(d):
+    gj = d.get("geojson", {})
+    if gj.get("type") not in ("Polygon", "MultiPolygon"):
+        return None
+    if d.get("class") == "boundary":
+        return _BOUNDARY_KINDS.get(d.get("type"))
+    if d.get("class") == "leisure" and d.get("type") == "nature_reserve":
+        return "protected-area boundary"
+    return None
+
+
+def _boundary(place, cap=None):
     """Resolve `place` to (km², name, geometry, how): the most complete admin boundary
-    under the area cap; if none fits but Nominatim recognised the place, retry with the
+    under the area cap (`cap` overrides AREA_CAP_KM2 for callers that can analyse
+    larger areas — raster counting, not OSM fetching); if none fits but Nominatim recognised the place, retry with the
     canonical name it returned (recovers typo'd cities, e.g. 'Batambang' -> Battambang);
     otherwise a radius box around the centre point. `how` records which path was taken.
     Raises only when nothing is found."""
     results = _search(place)
+    area_cap = AREA_CAP_KM2 if cap is None else float(cap)
     if not results:
         raise ValueError(f"could not find '{place}' (try 'City, Country')")
 
@@ -137,12 +165,12 @@ def _boundary(place):
     # bare ("Battambang, Cambodia") means the settlement — so the larger cap that
     # makes province-scale planning possible must NOT quietly promote every city
     # query to its province. The wording decides which cap applies.
-    cap = AREA_CAP_KM2 if _names_admin_level(place) else ASSET_CAP_KM2
-    hit = _under_cap_admin(results, cap)
-    if hit is None and cap != AREA_CAP_KM2:
-        hit = _under_cap_admin(results, AREA_CAP_KM2)   # nothing small enough; take what fits
+    level_cap = area_cap if _names_admin_level(place) else min(ASSET_CAP_KM2, area_cap)
+    hit = _under_cap_admin(results, level_cap)
+    if hit is None and level_cap != area_cap:
+        hit = _under_cap_admin(results, area_cap)   # nothing small enough; take what fits
     if hit:
-        how = f"admin boundary ~{hit[0]:.0f} km²"
+        how = f"{hit[3]} ~{hit[0]:.0f} km²"
         # A planner asking about a province must not be handed the town of the same
         # name without being told. The cap picks the largest area that FITS, so when
         # a bigger administrative area of the same name also matched, say what was
@@ -152,7 +180,7 @@ def _boundary(place):
         if bigger and bigger[0] > hit[0] * 1.5:
             km2, d, _g = bigger
             level = d.get("addresstype") or d.get("type") or "area"
-            if km2 <= AREA_CAP_KM2:
+            if km2 <= area_cap:
                 # We CAN analyse the larger one — the caller just did not ask for it.
                 # Say exactly what to type, because the difference between a town and
                 # its province is the difference between two different answers.
@@ -165,16 +193,17 @@ def _boundary(place):
             else:
                 how += (f" — this is the SMALLER {hit[1]}; the {level} of the same "
                         f"name (~{km2:.0f} km²) is over the "
-                        f"{AREA_CAP_KM2:.0f} km² analysis cap and was NOT analysed")
-        return (*hit, how)
+                        f"{area_cap:.0f} km² analysis cap and was NOT analysed")
+        return (hit[0], hit[1], hit[2], how)
 
     center = _best_center(results)
     canonical = center["display_name"].split(",")[0]
     if canonical.strip().lower() != place.strip().lower():   # typo -> retry corrected name
         retry = _search(canonical)
-        hit = _under_cap_admin(retry)
+        hit = _under_cap_admin(retry, area_cap)
         if hit:
-            return (*hit, f"admin boundary ~{hit[0]:.0f} km² (corrected '{place}' -> '{canonical}')")
+            return (hit[0], hit[1], hit[2],
+                    f"{hit[3]} ~{hit[0]:.0f} km² (corrected '{place}' -> '{canonical}')")
         if retry:
             center = _best_center(retry)
 
@@ -192,13 +221,13 @@ def _boundary(place):
         admin_name = d["display_name"].split(",")[0]
         name = f"{admin_name}: {RADIUS_KM:.0f} km box at its centre"
         how = (f"{RADIUS_KM:.0f} km radius box at the centre of {admin_name} "
-               f"(~{km2:.0f} km², over the {AREA_CAP_KM2:.0f} km² cap) — "
+               f"(~{km2:.0f} km², over the {area_cap:.0f} km² cap) — "
                "NOT the whole administrative area")
     else:
         name = f"{center['display_name'].split(',')[0]} (~{RADIUS_KM:.0f} km radius)"
         how = (f"{RADIUS_KM:.0f} km radius box around "
                f"{center['display_name'].split(',')[0]} (no admin boundary found)")
-    return (g.area * 111.0 * 108.0, name, g, how)
+    return (_est_km2(g), name, g, how)
 
 
 def _search(place):
@@ -223,12 +252,12 @@ def _under_cap_admin(results, cap=None):
     cap = AREA_CAP_KM2 if cap is None else cap
     under = []
     for d in results:
-        gj = d.get("geojson", {})
-        if d.get("class") == "boundary" and d.get("type") == "administrative" \
-                and gj.get("type") in ("Polygon", "MultiPolygon"):
-            km2 = shape(gj).area * 111.0 * 108.0
+        kind = _boundary_kind(d)
+        if kind:
+            g = shape(d["geojson"])
+            km2 = _est_km2(g)
             if km2 <= cap:
-                under.append((km2, d["display_name"].split(",")[0], shape(gj)))
+                under.append((km2, d["display_name"].split(",")[0], g, kind))
     return max(under, key=lambda c: c[0]) if under else None
 
 
@@ -280,10 +309,9 @@ def _admin_over_cap(results):
     """
     admins = []
     for d in results:
-        gj = d.get("geojson", {})
-        if d.get("class") == "boundary" and d.get("type") == "administrative" \
-                and gj.get("type") in ("Polygon", "MultiPolygon"):
-            admins.append((shape(gj).area * 111.0 * 108.0, d, shape(gj)))
+        if _boundary_kind(d):
+            g = shape(d["geojson"])
+            admins.append((_est_km2(g), d, g))
     return max(admins, key=lambda c: c[0]) if admins else None
 
 
@@ -407,7 +435,7 @@ def resolve_place(place):
             "area_cap_km2": AREA_CAP_KM2}
 
 
-def ensure_aoi(place=None, geometry=None, layers=None, name=None):
+def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=None):
     """Return a cached bundle of file paths for an AOI — resolved from a `place` name, or
     from a user-drawn `geometry` (GeoJSON Polygon or [minLon,minLat,maxLon,maxLat] bbox,
     EPSG:4326).
@@ -421,12 +449,20 @@ def ensure_aoi(place=None, geometry=None, layers=None, name=None):
     # None = every OSM asset layer; an empty tuple = none at all (a raster-only pack
     # needs the boundary, not a multi-minute Overpass pull it will never read).
     needed = ASSET_LAYERS if layers is None else tuple(layers)
+    # A caller that only counts raster pixels may analyse far larger areas than one
+    # that fetches OSM assets. The cap is part of the cache identity: a country
+    # resolved to its full polygon under one cap must never be served to a caller
+    # whose cap would have refused it, nor the 12 km fallback box to one that
+    # could have taken the polygon.
+    cap = AREA_CAP_KM2 if area_cap_km2 is None else float(area_cap_km2)
     cache = str(get_settings().cache_dir)
     if geometry is not None:
         boundary = _to_polygon(geometry)
         slug = "draw-" + hashlib.sha1(boundary.wkt.encode()).hexdigest()[:12]
     else:
         slug = _slug(place) or "_"
+    if cap != AREA_CAP_KM2:
+        slug += f"-cap{int(cap)}"
     adir = os.path.join(cache, slug)
     meta = os.path.join(adir, "meta.json")
 
@@ -465,12 +501,12 @@ def ensure_aoi(place=None, geometry=None, layers=None, name=None):
         boundary = shape(json.load(open(os.path.join(adir, "admin.geojson")))["features"][0]["geometry"])
     else:
         if geometry is not None:
-            km2 = boundary.area * 111.0 * 108.0
-            if km2 > AREA_CAP_KM2:
-                raise ValueError(f"drawn area is too large (>{AREA_CAP_KM2:.0f} km²) — draw a smaller box")
+            km2 = _est_km2(boundary)
+            if km2 > cap:
+                raise ValueError(f"drawn area is too large (>{cap:.0f} km²) — draw a smaller box")
             name, how = (name or "drawn area"), ("drawn" if not name else "supplied polygon")
         else:
-            km2, name, boundary, how = _boundary(place)
+            km2, name, boundary, how = _boundary(place, cap)
         print(f"   [ingest: resolving '{name}' (~{km2:.0f} km²)…]")
         os.makedirs(adir, exist_ok=True)
         _write(adir, "admin", [_feature(boundary, {"name": name})])
@@ -589,8 +625,13 @@ def _contributed_layers():
     return list(vectors.visible())
 
 
-def hazard_clip(aoi, layer):
-    """Clip `layer`'s severity raster to the AOI bundle; cache per (AOI, layer); return path."""
+def hazard_clip(aoi, layer, max_pixels=None):
+    """Clip `layer`'s raster to the AOI bundle; cache per (AOI, layer); return path.
+
+    `max_pixels` is a read budget: a window over it is read through the file's
+    overviews at the smallest power-of-two level that fits, the clip's transform is
+    scaled to match, and the level is written into the clip's tags so a consumer
+    can SAY what it read. Without a budget the window is read at full resolution."""
     adir = os.path.dirname(aoi["admin"])
     clip = os.path.join(adir, f"{layer}.tif")
     was_cached = os.path.exists(clip)
@@ -619,11 +660,24 @@ def hazard_clip(aoi, layer):
                     f"{aoi.get('name', 'this area')} lies outside {layer}'s coverage "
                     "— the catalog raster does not extend there, so exposure cannot "
                     "be computed against it")
-            arr = src.read(1, window=win)
+            level = 1
+            n_px = float(win.width) * float(win.height)
+            if max_pixels and n_px > float(max_pixels):
+                level = int(2 ** math.ceil(math.log2(math.sqrt(n_px / float(max_pixels)))))
+            transform = src.window_transform(win)
+            if level > 1:
+                out_shape = (max(1, math.ceil(win.height / level)),
+                             max(1, math.ceil(win.width / level)))
+                arr = src.read(1, window=win, out_shape=out_shape)   # nearest: classes never blend
+                transform = rasterio.Affine(transform.a * level, transform.b, transform.c,
+                                            transform.d, transform.e * level, transform.f)
+            else:
+                arr = src.read(1, window=win)
             prof = src.profile | {"height": arr.shape[0], "width": arr.shape[1],
-                                  "transform": src.window_transform(win), "compress": "lzw"}
+                                  "transform": transform, "compress": "lzw"}
             with rasterio.open(clip, "w", **prof) as dst:
                 dst.write(arr, 1)
+                dst.update_tags(overview_level=level)
     return clip
 
 
