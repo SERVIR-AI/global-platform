@@ -1,6 +1,6 @@
 """FastMCP server — the bones as MCP tools. Run over stdio:
     uv run python -m app.mcp.server
-Tools are thin carriers over the food-security functions; logic lives in the
+Tools are thin carriers over the domain packs' functions; logic lives in the
 called modules, not here (the tool-vs-prompt litmus, ARCHITECTURE §1).
 """
 
@@ -137,7 +137,8 @@ Never paint "verified"/"passed" into an artifact. Show it through `ui_embed`, wh
 re-resolves live against the platform, or state it as UNVERIFIED and link the \
 receipt resolver (rule 5).
 
-Canonical loop, THREE steps: assemble_pack(country, crop) -> YOUR LLM drafts a \
+Canonical loop, THREE steps: assemble_pack(<the pack's target: country+crop, \
+place+hazard, or place+year>) -> YOUR LLM drafts a \
 brief from the pack, citing [n] in the pack's required_sections -> \
 publish_answer(pack_id, draft, question), which gates the draft, mints the receipt \
 and returns the evidence view in one call. NEVER show the user a brief that has not \
@@ -145,7 +146,7 @@ been through publish_answer: drafting it into the conversation skips the gate an
 leaves nothing replayable. (verify_groundedness + record_receipt do the same two \
 things separately if you want them apart.) Use platform_capabilities to scope \
 honestly, corpus_search/corpus_document for evidence with provenance, context_get \
-for the (adjustable) crop calendar.
+for the (adjustable) crop calendar when the question is food security.
 
 If the user asks how to use this server, read the `servirplatform://how-to-use` resource (a \
 human-readable guide) — or run the `explain_platform` prompt — and answer from it."""
@@ -540,24 +541,29 @@ def how_to_use() -> str:
     """How to use the Global Risk Platform (human-readable) — attach/open in the host."""
     return """# How to use the Global Risk Platform
 
-A **governed toolkit** for food-security decision support — not a chatbot. Every
-insight carries its evidence, declines say why, and a groundedness gate blocks
-ungrounded briefs. You use it in one of two ways.
+A **governed toolkit** for decision support across its domain packs — food security,
+hazard risk and land cover today — not a chatbot. Every insight carries its evidence,
+declines say why, and a groundedness gate blocks ungrounded briefs. You use it in one
+of two ways.
 
 ## Build-time — build your own tool on ours
 Ask your AI client to *build* something. It produces a reusable app/script that
 calls these tools, so the guardrails live in your tool, not in a one-off chat.
 - Claude Code: run the `build_a_tool` prompt (`/` menu) or just say
-  "build me a bulletin tool for a country and crop".
+  "build me a bulletin tool for a country and crop", "a flood-exposure checker for
+  any district", or "a forest-change report for any Nepal district".
 - Claude Desktop: pick **build_a_tool** from the prompt (+) menu.
 
 ## Run-time — get one governed answer now
 Ask a question. The assistant runs the loop and returns a grounded, cited brief.
 - Use the `run_analysis` prompt, or ask e.g. "what should I expect for maize in
-  Kenya this season?"
+  Kenya this season?", "how many people in Banan District are in the 100-year flood
+  zone?", or "how much of Bagmati Province was forest in 2022, and how did it change
+  since 2000?"
 
 ## The canonical loop (what a good answer does)
-platform_capabilities (scope honestly) → assemble_pack(country, crop) → your LLM
+platform_capabilities (scope honestly) → assemble_pack(the pack's target:
+country+crop | place+hazard | place+year) → your LLM
 drafts a brief from the pack citing [n] in its required_sections →
 verify_groundedness(draft, pack_id) → publish only if it passes →
 record_receipt mints a replayable receipt.
@@ -570,14 +576,15 @@ server, so it's always accurate.
 
 
 @mcp.prompt()
-def build_a_tool(goal: str = "a food-security bulletin generator") -> str:
+def build_a_tool(goal: str = "a bulletin generator for one of the platform's domains") -> str:
     """BUILD-TIME: scaffold a reusable app/tool on the servirplatform platform (not a one-off run)."""
     return (f"Build a REUSABLE tool that: {goal}.\n\n"
             "Use the servirplatform MCP server. Produce a standalone artifact (a script/app) written "
             "as SOURCE FILES IN MY PROJECT that I can run, version and deploy — not a "
             "hosted preview. Do NOT just run the pipeline once in chat. Follow the "
             "canonical loop: call platform_capabilities first (scope honestly, surface "
-            "declared gaps), assemble_pack(country, crop), have the tool's own LLM draft "
+            "declared gaps), assemble_pack with the pack's target (country+crop, "
+            "place+hazard or place+year), have the tool's own LLM draft "
             "a brief from the pack citing [n] in the pack's required_sections, then "
             "verify_groundedness(draft, pack_id) and publish ONLY if it passes. "
             "INSTRUMENT IT: read servirplatform://skill/trace-emit first and make every "
