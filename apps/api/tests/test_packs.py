@@ -62,7 +62,11 @@ def test_params_no_pack_claims_resolve_to_no_pack(log):
     that never existed — infer must return None, and assemble turns None into a
     decline listing every pack (covered by the toy-pack test's decline path)."""
     assert packs.infer(None, frobnicate="x") is None
-    assert packs.infer(None, place="battambang") == "risk"
+    # `place` now serves two packs; the required keys decide, and a bare place
+    # satisfies neither fully -> ambiguous -> decline listing the packs.
+    assert packs.infer(None, place="battambang") is None
+    assert packs.infer(None, place="battambang", hazard="flood") == "risk"
+    assert packs.infer(None, place="Bagmati Province", year="2022") == "land-cover"
     assert packs.infer(None, country="Kenya") == "food-security"
     assert packs.infer(None) == "food-security"          # bare call stays FS
     log("CHECK", "inference: claimed params route, unclaimed decline, bare = FS")

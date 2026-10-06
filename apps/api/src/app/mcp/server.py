@@ -209,12 +209,17 @@ def assemble_pack(country: str | None = None, crop: str | None = None,
                   override: list[dict] | None = None,
                   override_country: str | None = None,
                   override_crop: str | None = None,
-                  geometry: dict | None = None) -> dict:
-    """Assembles a deterministic, citable EVIDENCE PACK for a country/crop and mints
-    a `pack_id`. For the risk pack, pass `geometry` (a GeoJSON Polygon/MultiPolygon in
-    EPSG:4326, or a [minLon,minLat,maxLon,maxLat] bbox) to analyse an area YOU hold the
-    boundary for — an admin district from another system, a hub's own polygon; `place`
-    is then its label. Without it, `place` is geocoded. This is the hand-off seam of the platform: YOUR LLM writes the
+                  geometry: dict | None = None,
+                  year: int | str | None = None, year_to: int | str | None = None,
+                  classes: list[str] | None = None) -> dict:
+    """Assembles a deterministic, citable EVIDENCE PACK for one domain pack's target
+    (country/crop; place/hazard; place/year) and mints a `pack_id`. For the risk and
+    land-cover packs, pass `geometry` (a GeoJSON Polygon/MultiPolygon in EPSG:4326, or a
+    [minLon,minLat,maxLon,maxLat] bbox) to analyse an area YOU hold the boundary for — an
+    admin district from another system, a hub's own polygon; `place` is then its label.
+    Without it, `place` is geocoded. Land cover: `year` picks the map; add `year_to` for
+    change and transitions between two mapped years, and `classes` to detail named
+    classes. This is the hand-off seam of the platform: YOUR LLM writes the
     brief from this pack (cite the numbered items as [n]), then calls
     verify_groundedness(draft, pack_id) to gate it. No LLM runs inside this tool.
 
@@ -232,7 +237,8 @@ def assemble_pack(country: str | None = None, crop: str | None = None,
     return assemble.assemble(geometry=geometry, country=country, crop=crop, focus=focus, pack=pack,
                              place=place, hazard=hazard, min_severity=min_severity,
                              override=override, override_country=override_country,
-                             override_crop=override_crop)
+                             override_crop=override_crop,
+                             year=year, year_to=year_to, classes=classes)
 
 
 @mcp.tool()

@@ -22,7 +22,9 @@ def assemble(country: str | None = None, crop: str | None = None,
              override: list[dict] | None = None,
              override_country: str | None = None,
              override_crop: str | None = None,
-             geometry: dict | None = None) -> dict:
+             geometry: dict | None = None,
+             year: int | str | None = None, year_to: int | str | None = None,
+             classes: list[str] | None = None) -> dict:
     """Gather one pack's evidence into a numbered, gap-declaring pack; mint and
     persist a pack_id. Back-compat: bare (country, crop) calls stay food-security,
     and FS packs keep top-level country/crop keys — Desktop configs and the embed
@@ -32,7 +34,10 @@ def assemble(country: str | None = None, crop: str | None = None,
                 "note": "override must be a list of {season, planting:[m,m], harvest:[m,m]}"}
     params = {"country": (country or "").strip(), "crop": (crop or "").strip(),
               "place": (place or "").strip(), "hazard": (hazard or "").strip(),
-              "min_severity": min_severity}
+              "min_severity": min_severity,
+              "year": str(year).strip() if year not in (None, "") else "",
+              "year_to": str(year_to).strip() if year_to not in (None, "") else "",
+              "classes": list(classes) if classes else []}
     pack_id_name = packs.infer(pack, **params)
     if pack_id_name is None or pack_id_name not in packs.PACKS:
         return {"status": "declined",

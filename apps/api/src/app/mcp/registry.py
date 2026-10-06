@@ -576,8 +576,13 @@ def coverage_line() -> str:
     pubs = c["publishers"]
     shown = ", ".join(pubs[:6])
     more = f" and {len(pubs) - 6} others" if len(pubs) > 6 else ""
+    # A pack row may declare its own `subjects` and `where`; they ride the same
+    # generated line, so a new domain advertises itself with no edit here.
+    extra = "; ".join(f"{', '.join(sp['subjects'])} in {' and '.join(sp.get('where') or ['its registered footprint'])}"
+                      for _, sp in sorted(packs.PACKS.items()) if sp.get("subjects"))
     return (f"Covers {what} and food security in {where}, and the climate drivers behind "
-            f"them ({subj}). Sources include {shown}{more}.")
+            f"them ({subj})" + (f"; also {extra}" if extra else "")
+            + f". Sources include {shown}{more}.")
 
 
 def describe_assemble() -> str:

@@ -42,21 +42,41 @@ def _risk_sections() -> list[str]:
     return list(risk_synthesis.SECTIONS)
 
 
-def _risk_corpus_state() -> dict:
-    """Real state of the risk document library, not a literal. It is a named corpus
-    that starts empty and fills by contribution, exactly like the food-security one."""
+def corpus_state(name: str) -> dict:
+    """Real state of a pack's document library, not a literal. Every pack's corpus
+    is named, starts empty and fills by contribution."""
     try:
         from ..rag.store import Corpus
-        docs = Corpus("risk").documents()
+        docs = Corpus(name).documents()
     except Exception as exc:
-        return {"status": "unavailable", "name": "risk",
+        return {"status": "unavailable", "name": name,
                 "reason": f"{type(exc).__name__}: {exc}"}
     if not docs:
-        return {"status": "empty", "name": "risk", "documents": 0,
+        return {"status": "empty", "name": name, "documents": 0,
                 "note": ("the library exists and accepts contributions; nothing has been "
                          "contributed yet, so no publication can be cited alongside the "
                          "computed numbers")}
-    return {"status": "available", "name": "risk", "documents": len(docs)}
+    return {"status": "available", "name": name, "documents": len(docs)}
+
+
+def _risk_corpus_state() -> dict:
+    return corpus_state("risk")
+
+
+def _gather_land_cover(target: dict, focus: str, trace: list,
+                       extras: dict) -> tuple[list, list, dict]:
+    from ..land_cover import synthesis
+    return synthesis.gather_land_cover_evidence(target, focus, trace, extras)
+
+
+def _lc_sections() -> list[str]:
+    from ..land_cover import synthesis
+    return list(synthesis.SECTIONS)
+
+
+def _lc_manifest() -> dict:
+    from ..land_cover import synthesis
+    return synthesis.manifest()
 
 
 def _is_synthetic(row: dict) -> bool:
@@ -152,6 +172,34 @@ PACKS: dict[str, dict] = {
         "default_focus": lambda t: f"{t.get('hazard', '')} exposure in {t.get('place', '')}".strip(),
         "doctor_target": {"place": "battambang", "hazard": "flood"},
     },
+    "land-cover": {
+        "display_name": "Land Cover Platform",
+        "version": "v0",
+        # `year` is required: without it a bare `place` would satisfy this pack too
+        # and every risk call without a hazard would become ambiguous.
+        "target_keys": ("place", "year", "year_to", "classes"),
+        "optional_keys": ("year_to", "classes"),
+        "target_doc": {"place": "district, province or park name inside a registered "
+                                "land-cover stack's footprint (or pass geometry; place is then its label)",
+                       "year": "a mapped year, e.g. 2022",
+                       "year_to": "optional later year — adds change and transitions",
+                       "classes": "optional class names to detail, e.g. [\"Forest\"]"},
+        "gather": _gather_land_cover,
+        "sections": _lc_sections,
+        "corpus": "land-cover",
+        "manifest": _lc_manifest,
+        "subjects": ["land cover by class", "forest, cropland, grassland and built-up change "
+                     "between mapped years"],
+        "where": ["the Hindu Kush Himalaya (Afghanistan, Pakistan, India, Nepal, Bhutan, "
+                  "Bangladesh, Myanmar and south-west China)"],
+        "default_focus": lambda t: (f"land cover of {t.get('place', '')} in {t.get('year', '')}"
+                                    + (f" against {t['year_to']}" if t.get("year_to") else "")).strip(),
+        "doctor_target": {"place": "Bagmati Province, Nepal", "year": "2022"},
+        "usage_notes": ("Pixel counts of a 30 m land-cover map, not a model. Quote the figures "
+                        "with their year and the mask the pack declares; change between two "
+                        "years includes classifier disagreement, so read trends over several "
+                        "years. No accuracy figure exists on this platform: say so."),
+    },
 }
 
 # Load errors from dropped-in pack modules, surfaced by doctor and capabilities —
@@ -203,6 +251,15 @@ def infer(pack: str | None, **params) -> str | None:
     supplied = {k for k, v in params.items() if v}
     hits = [pid for pid, spec in PACKS.items()
             if supplied & set(spec["target_keys"])]
+    if len(hits) > 1:
+        # Packs may share a key (`place` serves risk and land cover). The call that
+        # supplies every REQUIRED key of exactly one pack meant that pack; a call
+        # that fully satisfies none, or several, stays ambiguous and declines.
+        full = [pid for pid in hits
+                if all(k in supplied for k in PACKS[pid]["target_keys"]
+                       if k not in PACKS[pid].get("optional_keys", ()))]
+        if len(full) == 1:
+            return full[0]
     if len(hits) == 1:
         return hits[0]
     claimed = {k for spec in PACKS.values() for k in spec["target_keys"]}
