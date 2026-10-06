@@ -22,7 +22,7 @@ _DECLARED_REQUIRED = ("dtype", "valid_min", "valid_max")
 def _role(layer: str) -> str:
     """The namespace IS the role. A vulnerability_* layer feeds the Layer-2 recipe
     as a weighted input; the gate used to refuse the very prefix the engine reads."""
-    for prefix in ("hazard_", "risk_", "vulnerability_", "population_"):
+    for prefix in ("hazard_", "risk_", "vulnerability_", "population_", "landcover_"):
         if layer.startswith(prefix):
             return prefix[:-1]
     return "risk"
@@ -41,8 +41,23 @@ def validate_manifest(m: dict) -> list[str]:
             continue          # a count raster has no classes to label
         if not m.get(k):
             fails.append(f"missing required field '{k}'")
-    if layer and not layer.startswith(("hazard_", "risk_", "vulnerability_", "population_")):
-        fails.append("layer must be namespaced hazard_*, risk_*, vulnerability_* or population_*")
+    if layer and not layer.startswith(("hazard_", "risk_", "vulnerability_", "population_",
+                                        "landcover_")):
+        fails.append("layer must be namespaced hazard_*, risk_*, vulnerability_* or population_* "
+                     "(or landcover_<stack>_<year> for one year of a land-cover stack)")
+    if layer.startswith("landcover_"):
+        # One year of a yearly categorical STACK: the year names its stack so the
+        # series' legend and years live once, and the layer name must be what the
+        # stack's year pattern resolves to.
+        for k in ("stack", "year"):
+            if not m.get(k):
+                fails.append(f"missing required field '{k}' — a land-cover year names its "
+                             "stack (landcover_<name>) and its map year")
+        if m.get("stack") and not str(m["stack"]).startswith("landcover_"):
+            fails.append("stack must be namespaced landcover_<name>")
+        if m.get("stack") and m.get("year") and layer != f"{m['stack']}_{m['year']}":
+            fails.append(f"layer must be '{m['stack']}_{m['year']}' (<stack>_<year>) so the "
+                         "stack resolves it by year")
     if m.get("file") and not Path(str(m["file"])).is_file():
         fails.append(f"file {m['file']!r} does not exist")
     if m.get("legend") is not None and not isinstance(m.get("legend"), dict):
@@ -91,6 +106,13 @@ def add(manifest: dict, dry_run: bool = False) -> dict:
         return {"status": "valid (dry-run, nothing written)", "verified": True,
                 "observed": obs}
 
+    cat_path = Path(settings.tiffs_contrib_path)
+    cat = (yaml.safe_load(cat_path.read_text()) or {}) if cat_path.exists() else {}
+    if decl.get("role") == "landcover":
+        conflict = _stack_conflict(cat, manifest)
+        if conflict:
+            return {"status": "declined", "verified": True, "failures": [conflict], "observed": obs}
+
     dest = Path(settings.tiffs_dir) / f"{layer}.tif"
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(manifest["file"], dest)
@@ -106,9 +128,9 @@ def add(manifest: dict, dry_run: bool = False) -> dict:
            **({"usage_notes": manifest["usage_notes"]}
               if manifest.get("usage_notes") else {}),
            "contributed": True}
-    cat_path = Path(settings.tiffs_contrib_path)
-    cat = (yaml.safe_load(cat_path.read_text()) or {}) if cat_path.exists() else {}
     cat[layer] = row
+    if decl.get("role") == "landcover":
+        _land_stack_year(cat, layer, manifest, dest)
     cat_path.write_text("# Contributed raster rows — machine-owned; written by the\n"
                         "# contribution gate. Hand-edit conf/tiffs.yml, never this.\n"
                         + yaml.safe_dump(cat, sort_keys=False, allow_unicode=True))
@@ -122,3 +144,54 @@ def add(manifest: dict, dry_run: bool = False) -> dict:
     return {"status": "landed", "layer": layer, "verified": True,
             "file": str(dest), "observed": obs,
             "passport": {k: row[k] for k in ("title", "source", "license", "vintage")}}
+
+
+def _norm_legend(legend):
+    return {int(k): str(v).strip() for k, v in (legend or {}).items()}
+
+
+def _stack_conflict(cat, manifest):
+    """A year joining an existing stack must share its legend — one legend per series
+    is the whole point of a stack. Returns the failure text, or None."""
+    st = cat.get(str(manifest.get("stack")))
+    if not st or st.get("kind") != "stack":
+        return None
+    have, want = _norm_legend(st.get("legend")), _norm_legend(manifest.get("legend"))
+    if have != want:
+        return (f"legend disagrees with stack {manifest['stack']!r}: the stack maps "
+                f"{have}, this year declares {want} — one legend per stack; register a new "
+                "stack for a different classification")
+    if int(manifest["year"]) in [int(y) for y in st.get("years") or []]:
+        return (f"stack {manifest['stack']!r} already has a {manifest['year']} map — "
+                "contributions add years, they do not overwrite them")
+    return None
+
+
+def _land_stack_year(cat, layer, manifest, dest):
+    """A landed land-cover year joins (or starts) its STACK row in the contributed
+    catalog: the series' legend, years and extent live once; the per-year row points
+    at its file and carries the stack id so every primitive can find its contract."""
+    from ..graph.geo import stacks as _stacks
+    sid, year = str(manifest["stack"]), int(manifest["year"])
+    b = _stacks.header(str(dest))["bounds"]
+    row = cat[layer]
+    row.update({"stack": sid, "year": year, "role": "landcover", "internal": True})
+    for k in ("authority", "accuracy", "outside_values"):
+        if manifest.get(k) is not None:
+            row[k] = manifest[k]
+    st = cat.get(sid) or {
+        "kind": "stack", "role": "landcover", "internal": True, "contributed": True,
+        "title": manifest.get("stack_title") or f"{sid} land cover",
+        "description": manifest["description"], "source": manifest["source"],
+        "license": manifest["license"], "legend": manifest.get("legend") or {},
+        "outside_values": manifest.get("outside_values") or [0],
+        "authority": manifest.get("authority") or "contributed; authority unstated",
+        "accuracy": manifest.get("accuracy") or "unstated",
+        **({"colors": manifest["colors"]} if manifest.get("colors") else {}),
+        "layer_pattern": f"{sid}_{{year}}", "years": [],
+        "extent": {"lon": [b[0], b[2]], "lat": [b[1], b[3]]}}
+    st["years"] = sorted(set(int(y) for y in st.get("years") or []) | {year})
+    ext = st.get("extent") or {"lon": [b[0], b[2]], "lat": [b[1], b[3]]}
+    st["extent"] = {"lon": [min(ext["lon"][0], b[0]), max(ext["lon"][1], b[2])],
+                    "lat": [min(ext["lat"][0], b[1]), max(ext["lat"][1], b[3])]}
+    cat[sid] = st

@@ -308,6 +308,19 @@ COMPOSITIONS = {
         "for": ("consumers with no model credentials or no place to run code "
                 "(dashboards, cron, REST) — the accompanied path"),
     },
+    "landcover.brief": {
+        "description": "Question -> governed 4-section cited land-cover brief for a place "
+                       "x year (x a later year): class areas, change and transitions "
+                       "counted deterministically, drafted, groundedness-gated, receipt minted.",
+        "params": ["question", "provider?", "model?"],
+        "runs_llm_server_side": True,
+        "llm": ("the PLATFORM's model and key; the LLM only parses the target and "
+                "phrases the brief — every figure is a pixel count. To use YOUR model, "
+                "run the loop instead: assemble_pack(pack='land-cover', place=..., "
+                "year=..., year_to=...) -> you draft -> publish_answer."),
+        "for": ("consumers with no model credentials or no place to run code "
+                "(dashboards, cron, REST) — the accompanied path"),
+    },
 }
 
 

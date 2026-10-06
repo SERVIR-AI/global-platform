@@ -38,8 +38,17 @@ def _run_risk_brief(question, override, override_country, override_crop,
 # name -> runner. A composition needs BOTH a metadata entry (registry.COMPOSITIONS,
 # for capabilities) and a runner here; a metadata entry without one is declined as
 # not-implemented rather than silently running someone else's pipeline.
+def _run_landcover_brief(question, override, override_country, override_crop,
+                         provider, model) -> dict:
+    """Runner for `landcover.brief`; the calendar params are food-security concepts
+    and are ignored here."""
+    from ..land_cover import synthesis as lc_synthesis
+    return lc_synthesis.synthesize(question, provider=provider, model=model)
+
+
 _RUNNERS = {"foodsecurity.brief": _run_foodsecurity_brief,
-            "risk.brief": _run_risk_brief}
+            "risk.brief": _run_risk_brief,
+            "landcover.brief": _run_landcover_brief}
 
 
 def run(composition: str = "foodsecurity.brief", question: str = "",

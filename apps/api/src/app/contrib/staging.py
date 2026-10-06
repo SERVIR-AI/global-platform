@@ -372,6 +372,8 @@ def _ensure_staged_loaded() -> None:
         pv = rec.get("preview") or {}
         if pv.get("layer") and pv.get("entry") and pv["layer"] not in STAGED_RASTERS:
             STAGED_RASTERS[pv["layer"]] = {"entry": pv["entry"], "contract": pv.get("contract") or {}}
+            if pv["entry"].get("stack"):
+                _stage_stack_row(pv["entry"], rec["contributor_id"], rec["contribution_id"])
     try:
         wts = store.list_contributions(status="pending", kind="weights")
     except Exception:
@@ -594,6 +596,14 @@ RASTER_FIELDS = {
     },
     "optional": {
         "usage_notes": "a few lines the consuming analyst reads in the hazard passport (max 500 chars)",
+        "stack": "for a landcover_* year: the stack it belongs to (landcover_<name>); the layer "
+                 "must be named <stack>_<year>",
+        "year": "for a landcover_* year: the map year",
+        "stack_title": "for the FIRST year of a new stack: the series' title",
+        "outside_values": "pixel values meaning outside-footprint or unclassified (default [0])",
+        "authority": "who stands behind the map: national agency, regional hub product, ...",
+        "accuracy": "documented accuracy, or 'unstated' (never invent one)",
+        "colors": "optional {class: '#rrggbb'} for the map legend",
     },
 }
 _RASTER_KNOWN = set(RASTER_FIELDS["required"]) | set(RASTER_FIELDS["optional"])
@@ -694,6 +704,13 @@ def _stage_raster(rec: dict, prepared: dict) -> dict:
     from . import rasters as _r
     contract = {**m["declared"], "role": _r._role(layer)}
     _ensure_staged_loaded()
+    if contract["role"] == "landcover":
+        from ..graph.geo import stacks as _stacks
+        entry.update({"stack": str(m["stack"]), "year": int(m["year"]), "role": "landcover",
+                      "bounds": _stacks.header(str(dest))["bounds"],
+                      **{k: m[k] for k in ("stack_title", "authority", "accuracy",
+                                           "outside_values", "colors") if m.get(k) is not None}})
+        _stage_stack_row(entry, rec["contributor_id"], cid)
     STAGED_RASTERS[layer] = {"entry": entry, "contract": contract}
     _purge_clips(layer)
     short = layer.split("_", 1)[1] if "_" in layer else layer
@@ -715,6 +732,7 @@ def _land_raster(rec: dict) -> dict:
     if out["status"] == "declined":
         STAGED_RASTERS[m["layer"]] = {"entry": preview["entry"], "contract": preview["contract"]}
         raise Declined("; ".join(out["failures"]))
+    _unstage_stack_year(preview.get("entry") or {})
     try:
         os.unlink(preview["staged_file"])
     except OSError:
@@ -730,6 +748,7 @@ def _retire_raster(rec: dict) -> dict:
     layer = preview.get("layer", "")
     _ensure_staged_loaded()
     STAGED_RASTERS.pop(layer, None)
+    _unstage_stack_year(preview.get("entry") or {})
     _purge_clips(layer)
     path = Path(preview.get("staged_file") or "")
     if path.is_file():
@@ -737,6 +756,46 @@ def _retire_raster(rec: dict) -> dict:
         path.rename(retired)
         return {"removed": True, "staged_file": f"moved aside to {retired.name}", "note": _HISTORY}
     return {"removed": False, "note": "no staged file remains"}
+
+
+def _stage_stack_row(entry: dict, staged_by: str, cid: str) -> None:
+    """A staged land-cover year also stages its STACK row (legend, years, extent), so
+    the contributor's preview resolves the year through the same machinery the landed
+    one will. Rebuilt from the year's entry after a restart; dropped with the year."""
+    sid, year = str(entry["stack"]), int(entry["year"])
+    b = entry.get("bounds") or [0, 0, 0, 0]
+    row = STAGED_RASTERS.get(sid)
+    if row is None or row["entry"].get("kind") != "stack":
+        row = {"entry": {"kind": "stack", "role": "landcover", "internal": True,
+                         "title": entry.get("stack_title") or f"{sid} land cover",
+                         "description": entry.get("description", ""), "source": entry.get("source"),
+                         "license": entry.get("license"), "legend": entry.get("legend") or {},
+                         "outside_values": entry.get("outside_values") or [0],
+                         "authority": entry.get("authority") or "contributed; authority unstated",
+                         "accuracy": entry.get("accuracy") or "unstated",
+                         **({"colors": entry["colors"]} if entry.get("colors") else {}),
+                         "layer_pattern": f"{sid}_{{year}}", "years": [],
+                         "extent": {"lon": [b[0], b[2]], "lat": [b[1], b[3]]},
+                         "staged_by": staged_by, "contribution_id": cid},
+               "contract": None}
+        STAGED_RASTERS[sid] = row
+    st = row["entry"]
+    st["years"] = sorted(set(int(y) for y in st.get("years") or []) | {year})
+    ext = st["extent"]
+    st["extent"] = {"lon": [min(ext["lon"][0], b[0]), max(ext["lon"][1], b[2])],
+                    "lat": [min(ext["lat"][0], b[1]), max(ext["lat"][1], b[3])]}
+
+
+def _unstage_stack_year(entry: dict) -> None:
+    sid, year = entry.get("stack"), entry.get("year")
+    row = STAGED_RASTERS.get(str(sid)) if sid else None
+    if not row or row["entry"].get("kind") != "stack":
+        return
+    years = [y for y in row["entry"].get("years", []) if int(y) != int(year)]
+    if years:
+        row["entry"]["years"] = years
+    else:
+        STAGED_RASTERS.pop(str(sid), None)
 
 
 def visible_staged_rasters() -> dict:
@@ -751,7 +810,8 @@ def visible_staged_contracts() -> dict:
     _ensure_staged_loaded()
     caller = identity.current()
     return {layer: row["contract"] for layer, row in STAGED_RASTERS.items()
-            if caller.may_see(row["entry"].get("staged_by"))}
+            if row.get("contract") is not None          # a staged STACK row has no contract of its own
+            and caller.may_see(row["entry"].get("staged_by"))}
 
 
 # --------------------------------------------------------------------------- weights
