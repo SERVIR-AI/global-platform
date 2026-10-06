@@ -27,7 +27,42 @@ def catalog(include_staged: bool = True):
             cat.update({k: v for k, v in staging.visible_staged_rasters().items() if k not in cat})
         except Exception:                       # the catalog never fails on staging
             pass
+    _expand_stacks(cat)
     return cat
+
+
+def _expand_stacks(cat):
+    """A `kind: stack` row (one legend, one contract, one file per year) becomes one
+    ordinary row per year, so every raster primitive works on `landcover_hkh_2022`
+    without knowing it belongs to a series. The stack row itself stays in the catalog
+    (stacks.py reads it); per-year rows are `internal`, so they never reach the
+    route node's layer menu. A per-year row carries `path` — the file as GDAL opens
+    it: a plain path under the stack's directory, or `/vsizip/<zip>/<entry>` when the
+    stack is delivered as a zip whose entries are stored uncompressed (read in place,
+    no 10 GB copy). The directory can be overridden by the environment variable the
+    row names in `data_root_env`, so one catalog serves a laptop and a server."""
+    import os
+    for sid, row in list(cat.items()):
+        if row.get("kind") != "stack":
+            continue
+        root = (os.environ.get(str(row.get("data_root_env") or "")) or row.get("data_root") or "")
+        if root and not os.path.isabs(root):
+            root = os.path.join(os.path.dirname(os.path.dirname(
+                str(get_settings().tiffs_config_path))), root)
+        inherited = {k: row[k] for k in ("legend", "source", "license", "vintage", "url",
+                                         "pub_date", "authority", "accuracy",
+                                         "outside_values", "usage_notes") if k in row}
+        for y in row.get("years") or []:
+            key = str(row["layer_pattern"]).format(year=int(y))
+            if key in cat:
+                continue
+            entry_in = str(row["file_pattern"]).format(year=int(y))
+            path = (f"/vsizip/{root}/{entry_in}" if root.lower().endswith(".zip")
+                    else os.path.join(root, entry_in))
+            cat[key] = {"stack": sid, "year": int(y), "internal": True, "path": path,
+                        "local_path": f"stacks/{os.path.basename(entry_in)}",
+                        "title": f"{row.get('title', sid)} — {int(y)}",
+                        "description": row.get("description", ""), **inherited}
 
 
 def entry(layer):

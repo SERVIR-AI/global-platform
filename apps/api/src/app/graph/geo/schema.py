@@ -38,6 +38,13 @@ def schema_for(name):
     key = name[:-4] if name.endswith(".tif") else name
     entry = layers.get(key) if key in layers else layers.get(name)
     if entry is None:
+        # A year of a raster STACK is contracted once, under `stacks:` — one legend,
+        # one contract for every year (tiffs._expand_stacks tags the row with its stack).
+        from . import tiffs
+        row = tiffs.catalog().get(key) or {}
+        if row.get("stack"):
+            entry = (doc.get("stacks") or {}).get(row["stack"])
+    if entry is None:
         return None
     return {**doc.get("defaults", {}), **entry}
 

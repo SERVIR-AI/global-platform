@@ -357,9 +357,16 @@ def source_raster(layer="hazard_flood"):
     settings = get_settings()
     try:
         meta = tiffs.entry(layer)
+        if meta.get("kind") == "stack":
+            raise ValueError(f"{layer} is a stack of yearly rasters, not one file — "
+                             "name a year (stacks.layer_for)")
+        if meta.get("path"):           # a stack year: opened where it lives, never copied
+            return meta["path"]
         fname = os.path.basename(meta["local_path"])
         fallback_url = meta.get("download_url")
-    except ValueError:                 # not a tiffs.yml layer -> treat as a catalog filename/stem
+    except ValueError as exc:          # not a tiffs.yml layer -> treat as a catalog filename/stem
+        if "is a stack" in str(exc):
+            raise
         fname = layer if layer.endswith(".tif") else f"{layer}.tif"
         fallback_url = None
     path = os.path.join(settings.tiffs_dir, fname)
@@ -411,7 +418,9 @@ def ensure_aoi(place=None, geometry=None, layers=None, name=None):
     (roads, not buildings) is the main lever on drawn-AOI latency: each Overpass
     round-trip can stall for tens of seconds, so doing fewer of them is what matters.
     """
-    needed = tuple(layers) if layers else ASSET_LAYERS
+    # None = every OSM asset layer; an empty tuple = none at all (a raster-only pack
+    # needs the boundary, not a multi-minute Overpass pull it will never read).
+    needed = ASSET_LAYERS if layers is None else tuple(layers)
     cache = str(get_settings().cache_dir)
     if geometry is not None:
         boundary = _to_polygon(geometry)
