@@ -426,6 +426,14 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
     source = f"{row.get('source', sid)} (platform computation)"
     layer = stacks.layer_for(sid, year)
     layer_to = stacks.layer_for(sid, year_to) if year_to else None
+    # A registered year whose file is not on this server declines in words, not a traceback:
+    # a second host gets the code and the catalog before (or without) the 14 GB of maps.
+    inst = stacks.installed(sid)
+    absent = [y for y in (year, year_to) if y and not inst.get(y, False)]
+    if absent:
+        raise ValueError(f"{row.get('title', sid)}: the map for {', '.join(str(y) for y in absent)} "
+                         f"is not installed on this server ({sum(inst.values())} of {len(inst)} "
+                         f"declared years are)")
     hits, unknown = _match_classes(wanted, legend)
 
     clip, level = _clip(aoi, layer, trace)
@@ -496,7 +504,10 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
                        [15])
         # A time series for the classes the caller named, when the span allows one.
         if hits and year_to - year >= 2:
-            years_in = [y for y in stacks.years(row) if year <= y <= year_to]
+            years_in = [y for y in stacks.years(row) if year <= y <= year_to and inst.get(y, False)]
+            skipped = [y for y in stacks.years(row) if year <= y <= year_to and not inst.get(y, False)]
+            if skipped:
+                trace.append(f"series: years not installed on this server, skipped: {skipped}")
             per_year = {year: st, year_to: st_to}
             for y in years_in:
                 if y in per_year:
