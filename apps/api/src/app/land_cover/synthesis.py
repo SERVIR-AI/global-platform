@@ -640,11 +640,13 @@ def manifest() -> dict:
 
 _PARSE_SYSTEM = (
     "You extract the target of a land-cover question for a counting service. Call "
-    "set_landcover_target with the place (a district, province, park or country), the map "
-    "year the question is about, a later year when it compares two dates or asks about change "
-    "since a year, and the land-cover classes it names (for example Forest, Cropland, Grassland, "
-    "Built-up area). Do not answer the question. If it is not about land cover in a place, reply "
-    "in words without calling the tool.")
+    "set_landcover_target with the place (a district, province, park or country), the year(s) "
+    "and the land-cover classes it names (for example Forest, Cropland, Grassland, Built-up "
+    "area). A single map year goes in `year`. When the question compares two dates or asks "
+    "about change since a year, put the EARLIER year in `year` and the LATER year in `year_to` "
+    "whatever order the question names them ('forest in 2022, and how it changed since 2000' is "
+    "year 2000, year_to 2022). Do not answer the question. If it is not about land cover in a "
+    "place, reply in words without calling the tool.")
 
 _PARSE_TOOLS = [{
     "type": "function",
@@ -655,8 +657,8 @@ _PARSE_TOOLS = [{
             "type": "object",
             "properties": {
                 "place": {"type": "string", "description": "named area"},
-                "year": {"type": "integer", "description": "the map year, or the first of two"},
-                "year_to": {"type": "integer", "description": "the later year, for change"},
+                "year": {"type": "integer", "description": "the only year, or the EARLIER of two"},
+                "year_to": {"type": "integer", "description": "the LATER year, for change"},
                 "classes": {"type": "array", "items": {"type": "string"}},
                 "focus": {"type": "string"},
             },
@@ -719,6 +721,12 @@ def synthesize(question: str, provider: str | None = None, model: str | None = N
     target = {"place": str(args.get("place") or "").strip(), "year": args.get("year")}
     if args.get("year_to"):
         target["year_to"] = args["year_to"]
+        # "in 2022 ... since 2000": the model may put the first-named year in `year`. The
+        # pack wants the earlier year first; reorder here and say so in the trace.
+        if isinstance(target["year"], int) and isinstance(target["year_to"], int) \
+                and target["year_to"] < target["year"]:
+            target["year"], target["year_to"] = target["year_to"], target["year"]
+            trace.append("parse -> years reordered, earlier first")
     if args.get("classes"):
         target["classes"] = list(args["classes"])
     focus = (args.get("focus") or question).strip()
