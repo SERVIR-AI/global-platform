@@ -167,6 +167,7 @@ def _live_components() -> dict:
                 "last_modified": c["provenance"]["last_modified"],
                 "cache": c.get("cache"),
                 "sets": [{"name": s["name"], "node_id": s["node_id"],
+                          **{k: s[k] for k in ("usage", "docs") if s.get(k)},
                           "variants": [{k: v for k, v in var.items() if k != "label"}
                                        for var in s["variants"]]}
                          for s in c["sets"]],
@@ -206,6 +207,9 @@ def _design_file_component(name: str, **want) -> dict | None:
     img = figma.render([chosen["node_id"]], "svg")
     return {"status": "ok", "name": name, "source": "figma-live",
             "variant": {k: v for k, v in chosen.items() if k != "node_id"},
+            # The designers' usage rules, verbatim from the component's description in
+            # the design file — the only place those rules are written down.
+            **{k: s[k] for k in ("usage", "docs") if s.get(k)},
             "svg_url": img["images"].get(chosen["node_id"]),
             "caveat": img["caveat"],
             "trust_class": "presentational",

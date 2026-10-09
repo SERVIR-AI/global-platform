@@ -221,23 +221,36 @@ def _read_components_uncached(file_key: str | None = None, token: str | None = N
     doc = _get(f"files/{file_key}", token)
     nodes = _walk(doc["document"], [])
     parent = {c.get("id"): n.get("id") for n in nodes for c in n.get("children", [])}
+    # The designers' own usage rules live in the component description ("Internal
+    # spacing: 30% of the Symbol size ..."), keyed by node id at the file's top level.
+    meta = {**(doc.get("componentSets") or {}), **(doc.get("components") or {})}
+
+    def _usage(node_id):
+        m = meta.get(node_id) or {}
+        out = {}
+        if (m.get("description") or "").strip():
+            out["usage"] = m["description"].strip()
+        links = [l.get("uri") for l in (m.get("documentationLinks") or []) if l.get("uri")]
+        if links:
+            out["docs"] = links
+        return out
 
     sets: dict[str, dict] = {}
     for n in nodes:
         if n.get("type") == "COMPONENT_SET":
             sets[n.get("id")] = {"name": n.get("name"), "node_id": n.get("id"),
-                                 "variants": []}
+                                 "variants": [], **_usage(n.get("id"))}
     for n in nodes:
         if n.get("type") != "COMPONENT":
             continue
         pid = parent.get(n.get("id"))
         entry = {"node_id": n.get("id"), "label": n.get("name"),
-                 **_variants(n.get("name", ""))}
+                 **_variants(n.get("name", "")), **_usage(n.get("id"))}
         if pid in sets:
             sets[pid]["variants"].append(entry)
         else:                                   # a standalone component, no set
             sets.setdefault(n.get("id"), {"name": n.get("name"), "node_id": n.get("id"),
-                                      "variants": []})["variants"].append(entry)
+                                      "variants": [], **_usage(n.get("id"))})["variants"].append(entry)
 
     return {"source": "figma", "sets": sorted(sets.values(), key=lambda s: s["name"] or ""),
             "provenance": {"file": doc.get("name"), "file_key": file_key,
