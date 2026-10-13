@@ -7,7 +7,8 @@ export type ChatProvider = 'claude' | 'gemini' | 'openai';
 export type ChatRole = 'system' | 'user' | 'assistant';
 
 /** Asset layer the metric was computed over. */
-export type AssetLayer = 'roads' | 'hospitals' | 'schools' | 'buildings';
+/** Built-in layers by name; a contributed point layer (an evacuation-centre list) is any other string. */
+export type AssetLayer = 'roads' | 'hospitals' | 'schools' | 'buildings' | (string & {});
 
 /** `[minLon, minLat, maxLon, maxLat]` in EPSG:4326. */
 export type Bbox = [number, number, number, number];
@@ -183,6 +184,10 @@ export interface ChatResponse {
   aoi?: AoiFeature | null;
   /** GeoJSON FeatureCollection of assets, each `properties.severity` 0–5. */
   features?: AssetFeatureCollection | null;
+  /** Every other counted point layer (a contributed evacuation-centre list beside the
+   * schools), keyed by layer name; each feature carries `properties.name` when the
+   * layer has names, and explicit `hazard_class` / `risk_level` beside `severity`. */
+  point_layers?: Record<string, AssetFeatureCollection> | null;
   /** Hazard raster: `{ raster_url, geojson, crs }`. */
   hazard_layer?: HazardLayer | null;
   created_at?: string;

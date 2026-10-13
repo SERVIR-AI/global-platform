@@ -9,7 +9,12 @@ from . import registry, store
 
 _PLACE = {"type": "string", "description": "City or district, e.g. 'Battambang' or 'Siem Reap, Cambodia'"}
 _SEVERITY = {"type": "integer", "default": 1, "description": "only count hazard severity >= this (1-5)"}
-_POI = {"type": "string", "enum": list(registry.COUNTABLE)}
+
+
+def _poi():
+    """Built-in point layers PLUS every contributed one the caller may see — built
+    when the schema is, not at import, so a layer landed this morning is askable."""
+    return {"type": "string", "enum": list(registry.countable())}
 
 
 def _hazard(layers):
@@ -22,15 +27,18 @@ def schema(hazard_layers):
     """OpenAI tool schemas, with the available hazard-layer keys injected into the
     operations that read a hazard raster."""
     hazard = _hazard(hazard_layers)
+    poi = _poi()
     tools = [
         {"name": "count_features",
-         "description": "Count hospitals or schools in a place.",
+         "description": "Count hospitals, schools, buildings or any contributed point layer "
+                        "(e.g. evacuation centres) in a place.",
          "parameters": {"type": "object", "required": ["place", "layer"], "properties": {
-             "place": _PLACE, "layer": _POI}}},
+             "place": _PLACE, "layer": poi}}},
         {"name": "count_in_hazard",
-         "description": "Count hospitals or schools within a hazard zone of a place.",
+         "description": "Count hospitals, schools, buildings or any contributed point layer "
+                        "within a hazard zone of a place.",
          "parameters": {"type": "object", "required": ["place", "layer", "hazard_layers"], "properties": {
-             "place": _PLACE, "layer": _POI, "hazard_layers": hazard, "min_severity": _SEVERITY}}},
+             "place": _PLACE, "layer": poi, "hazard_layers": hazard, "min_severity": _SEVERITY}}},
         {"name": "roads_in_hazard",
          "description": "Length and share of road within a hazard zone of a place.",
          "parameters": {"type": "object", "required": ["place", "hazard_layers"], "properties": {

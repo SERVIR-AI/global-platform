@@ -281,6 +281,10 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
             + ", ".join(sorted(k.removeprefix("hazard_")
                                for k in tiffs.catalog() if k.startswith("hazard_"))))
     min_sev = int(extras.get("min_severity") or 1)
+    map_layer = extras.get("map_layer")
+    if map_layer and map_layer not in _asset_layers():
+        raise ValueError(f"unknown map_layer {map_layer!r} — one of: "
+                         + ", ".join(_asset_layers()))
     legend = tiffs.legend(hz)
 
     geometry = extras.get("geometry")
@@ -392,6 +396,8 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     # counted. A count of zero and a count that does not exist look identical in a
     # table and mean opposite things.
     declined = (aoi.get("assets_declined") or {}).get("layers") or []
+    assets: dict = {}
+    hz_sev = geostore._Severity(aoi[hz])
     if declined:
         gaps.insert(0, (
             f"{', '.join(declined)} were NOT counted for "
@@ -410,6 +416,13 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
         r = geostore.count_in_hazard(aoi, hz, layer, min_severity=min_sev)
         counts[layer] = {"exposed": r["count"], "total": total,
                          "by_severity": r["by_severity"]}
+        # The places behind the count. A count of "8 of 8 centres" that cannot
+        # name a single centre is a number a planner cannot act on; the names
+        # and coordinates were on the platform all along.
+        from ..graph.geo import vectors as _vectors
+        _ventry = _vectors.visible().get(layer) or {}
+        assets[layer] = _asset_places(aoi, layer, hz_sev, min_sev,
+                                      _ventry.get("name_field"), total, r["count"])
         n += 1
         sid = f"exposure_{layer}"
         cit = {
@@ -442,6 +455,14 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
             if ventry.get("staged_by"):
                 cit["staged_by"] = ventry["staged_by"]
                 cit["contribution_id"] = ventry.get("contribution_id")
+        named = [it["name"] for it in assets[layer].get("items", []) if it.get("name")]
+        if named:
+            rest = assets[layer]["exposed"] - len(named[:5])
+            cit["text"] += (" Named: " + "; ".join(named[:5])
+                            + (f" (+{rest} more)" if rest > 0 else "")
+                            + ". The full list with coordinates and classes is "
+                            f"stats.assets.{layer}.")
+        cit["places_in"] = f"stats.assets.{layer}"
         sr = _series(sid, r["by_severity"], legend, f"{layer} by hazard class")
         if sr:
             cit["series"] = sr
@@ -519,6 +540,7 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     # citations, exactly which vulnerability layers went in and how few they are.
     risk_key, risk_weights = _l2_risk(aoi, hz, trace, gaps)
     if risk_key:
+        rk_sev = geostore._Severity(aoi[risk_key])
         for layer in _asset_layers():
             if layer not in aoi:
                 continue
@@ -527,6 +549,8 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
             rk = geostore.count_in_hazard(aoi, risk_key, layer, min_severity=min_sev)
             counts[layer]["at_risk"] = rk["count"]
             counts[layer]["by_risk"] = rk["by_severity"]
+            for it in (assets.get(layer) or {}).get("items", []):
+                it["risk_level"] = rk_sev.severity(it["lon"], it["lat"])
             n += 1
             cit = {
                 "n": n, "kind": "risk_level", "retrieval": "computed-at-pack-time",
@@ -740,7 +764,12 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     # asked for — and falls back to the hazard clip when it was not. Both grids ride
     # along so a consumer can show either; the payload shape is unchanged.
     shown = risk_key or hz
-    drawn = _headline_layer(counts, risk_key)
+    drawn = _headline_layer(counts, risk_key, preferred=map_layer)
+    if map_layer and drawn != map_layer:
+        gaps.append(f"map_layer {map_layer!r} was not counted for this area (declined or "
+                    f"absent), so the map draws {drawn!r} instead")
+    point_layers = [l for l in assets if l != "buildings" and l in aoi
+                    and (counts.get(l) or {}).get("total")]
     stats = {"queries": None, "place": aoi.get("name", place), "hazard": hz,
              # How the area of interest was decided, as a field rather than something
              # a consumer has to infer. A hub product built a "check the platform used
@@ -751,9 +780,14 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
                      "area_km2": aoi.get("area_km2"), "how": aoi.get("how"),
                      "is_admin_boundary": str(aoi.get("how", "")).startswith("admin boundary")},
              "min_severity": min_sev, "counts": counts,
+             # Every counted point layer's places: id, name, lon, lat,
+             # hazard_class and (when computed) risk_level — bounded per layer.
+             "assets": assets,
              "risk_layer": risk_key, "displayed_layer": shown,
              "viz": _bounded_viz(viz.build_payload(aoi, {
                  "hazard": shown, "method": "count_in_hazard", "layer": drawn,
+                 "hazard_grid_layer": hz, "risk_grid_layer": risk_key,
+                 "point_layers": point_layers,
                  "place": aoi.get("name", place), "min_severity": min_sev,
                  "count": counts[drawn].get("at_risk" if risk_key else "exposed"),
                  "by_severity": counts[drawn].get(
@@ -806,8 +840,57 @@ def _readable_as_of(value):
     return value
 
 
-def _headline_layer(counts, risk_key):
+_PLACES_CAP = 200
+
+
+def _asset_places(aoi, layer, hz_sev, min_sev, name_field, total, exposed):
+    """The places behind a count: every point of `layer` in the hazard zone, with
+    its name (the contributor's `name_field`, else `name`), coordinates and hazard
+    class — most severe first, capped at _PLACES_CAP with the cap declared.
+    Building centroids carry no names and come in thousands: counts only."""
+    out = {"total": total, "exposed": exposed, "items": [], "truncated": False}
+    if layer == "buildings":
+        out["items_omitted"] = "unnamed building centroids — counts only"
+        return out
+    from shapely.geometry import Point
+    key = name_field or "name"
+    out["name_field"] = key
+    items = []
+    try:
+        feats = geostore._features(aoi[layer])
+        boundary = geostore._boundary(aoi)
+    except (OSError, ValueError, KeyError):
+        return out
+    for i, ft in enumerate(feats):
+        g = ft.get("geometry") or {}
+        if g.get("type") != "Point":
+            continue
+        x, y = g["coordinates"][:2]
+        if not boundary.contains(Point(x, y)):   # exactly count_in_hazard's test
+            continue
+        cls = hz_sev.severity(x, y)
+        if cls < min_sev:
+            continue
+        props = ft.get("properties") or {}
+        items.append({"id": ft.get("id") or props.get("id") or props.get("osm_id") or i,
+                      "name": (str(props.get(key)).strip() if props.get(key) not in (None, "") else None),
+                      "lon": round(float(x), 6), "lat": round(float(y), 6),
+                      "hazard_class": int(cls)})
+    items.sort(key=lambda it: (-it["hazard_class"], it["name"] or ""))
+    out["truncated"] = len(items) > _PLACES_CAP
+    out["items"] = items[:_PLACES_CAP]
+    return out
+
+
+def _headline_layer(counts, risk_key, preferred=None):
     """Which asset class the map should draw.
+
+    A contributed point layer — a hub's evacuation centres, its civil-defence
+    posts — is eligible: it was counted, so it can be drawn. It used to be that
+    only the three OSM classes ever reached the map, and a count of "8 of 8
+    centres" came with a picture of two hospitals. The caller may name the layer
+    (`map_layer`); otherwise the most consequential class that carries exposure
+    leads, with unnamed building centroids last.
 
     It used to be hospitals, always. When no hospital was exposed the map drew six
     grey dots and captioned itself "0 hospitals at risk" over an area where 98
@@ -817,11 +900,15 @@ def _headline_layer(counts, risk_key):
     as a clear area rather than switching classes for no reason.
     """
     key = "at_risk" if risk_key else "exposed"
-    for layer in ("hospitals", "schools", "buildings"):
+    if preferred and preferred in counts:
+        return preferred
+    contributed = [l for l in counts if l not in _ASSETS and l != "roads"
+                   and not str(l).startswith("people:")]
+    for layer in ("hospitals", "schools", *contributed, "buildings"):
         c = counts.get(layer) or {}
         if (c.get(key) or 0) > 0:
             return layer
-    return "hospitals"
+    return "hospitals" if "hospitals" in counts else next(iter(counts), "hospitals")
 
 
 def _severity_grid(clip_path: str, cells: int = 56) -> dict | None:

@@ -187,11 +187,23 @@ export const buildChatLayers = (item: ChatRequest | ChatResponse): ChatLayer[] =
       layers.push({
         layer: vectorLayer(item.features, severityStyle(legend)),
         type: vectorType(item.features),
-        name: 'Assets',
+        name: item.layer ? `Assets: ${item.layer}` : 'Assets',
         description: 'Exposed assets within the area.',
         visible: true,
         opacity: VECTOR_OPACITY,
       });
+    // Every other counted point layer rides along, named, so a contributed
+    // evacuation-centre list is a toggle beside the schools, not a number alone.
+    for (const [name, fc] of Object.entries(item.point_layers ?? {}))
+      if (fc?.features?.length)
+        layers.push({
+          layer: vectorLayer(fc, severityStyle(legend)),
+          type: vectorType(fc),
+          name,
+          description: `${fc.features.length} ${name} in the hazard zone.`,
+          visible: true,
+          opacity: VECTOR_OPACITY,
+        });
   } else if (item.geometry) {
     layers.push({
       layer: geometryLayer(item.geometry),

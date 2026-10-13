@@ -23,6 +23,7 @@ def assemble(country: str | None = None, crop: str | None = None,
              override_country: str | None = None,
              override_crop: str | None = None,
              geometry: dict | None = None,
+             map_layer: str | None = None,
              year: int | str | None = None, year_to: int | str | None = None,
              classes: list[str] | None = None) -> dict:
     """Gather one pack's evidence into a numbered, gap-declaring pack; mint and
@@ -58,6 +59,8 @@ def assemble(country: str | None = None, crop: str | None = None,
               "override_crop": override_crop, "min_severity": min_severity}
     if geometry is not None:
         extras["geometry"] = geometry   # the caller's own boundary; see gather_risk_evidence
+    if map_layer:
+        extras["map_layer"] = map_layer  # which counted point layer the map should draw
     t_gather = time.perf_counter()
     try:
         citations, gaps, stats = spec["gather"](target, focus, trace, extras)

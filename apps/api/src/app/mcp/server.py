@@ -231,6 +231,7 @@ def assemble_pack(country: str | None = None, crop: str | None = None,
                   override_country: str | None = None,
                   override_crop: str | None = None,
                   geometry: dict | None = None,
+                  map_layer: str | None = None,
                   year: int | str | None = None, year_to: int | str | None = None,
                   classes: list[str] | None = None) -> dict:
     """Assembles a deterministic, citable EVIDENCE PACK for one domain pack's target
@@ -238,6 +239,10 @@ def assemble_pack(country: str | None = None, crop: str | None = None,
     land-cover packs, pass `geometry` (a GeoJSON Polygon/MultiPolygon in EPSG:4326, or a
     [minLon,minLat,maxLon,maxLat] bbox) to analyse an area YOU hold the boundary for — an
     admin district from another system, a hub's own polygon; `place` is then its label.
+    `map_layer` names which counted point layer the map draws — hospitals, schools,
+    buildings, or a contributed layer such as evacuation_centres; unnamed ones are
+    declined by name. Whatever is drawn, every counted layer's places — name,
+    coordinates, hazard class, risk level — are in `stats.assets`.
     Without it, `place` is geocoded. Land cover: `year` picks the map; add `year_to` for
     change and transitions between two mapped years, and `classes` to detail named
     classes. This is the hand-off seam of the platform: YOUR LLM writes the
@@ -255,7 +260,7 @@ def assemble_pack(country: str | None = None, crop: str | None = None,
     will demand — draft those exact section headers so the gate passes in one shot.
     status "declined" -> `note` (missing key / torn corpus / bad override).
     """
-    return assemble.assemble(geometry=geometry, country=country, crop=crop, focus=focus, pack=pack,
+    return assemble.assemble(geometry=geometry, map_layer=map_layer, country=country, crop=crop, focus=focus, pack=pack,
                              place=place, hazard=hazard, min_severity=min_severity,
                              override=override, override_country=override_country,
                              override_crop=override_crop,

@@ -19,7 +19,7 @@ import 'ol/ol.css';
 /** The slice of ChatResponse that pack.viz carries (same field names by design). */
 export type VizPayload = Pick<
   ChatResponse,
-  'place' | 'hazard' | 'layer' | 'metric' | 'legend' | 'bounds' | 'aoi' | 'features' | 'hazard_layer'
+  'place' | 'hazard' | 'layer' | 'metric' | 'legend' | 'bounds' | 'aoi' | 'features' | 'hazard_layer' | 'point_layers'
 > & {
   /** What the drawn raster actually IS. The risk pack draws a vulnerability-weighted
    * risk grid when it can compute one, and the hazard clip when it cannot; labelling

@@ -40,9 +40,27 @@ def _insight(pack_id: str, draft: str) -> dict:
                if c.get("kind") in ("conditions", "calendar")}
     return {"brief": draft, "series": series, "context": context,
             **({"map": _panel_map(pack)} if _panel_map(pack) else {}),
+            **({"places": _insight_places(pack)} if _insight_places(pack) else {}),
             "pack": pack.get("pack"), "target": pack.get("target"),
             **({"country": pack.get("country"), "crop": pack.get("crop")}
                if pack.get("country") or pack.get("crop") else {})}
+
+
+def _insight_places(pack: dict, per_layer: int = 50) -> dict | None:
+    """The places behind each count — name, coordinates, hazard class, risk
+    level — as the pack recorded them, bounded per layer so the result stays
+    proportionate; `truncated` and the totals say when the list is a sample."""
+    assets = ((pack.get("stats") or {}).get("assets")) or {}
+    out = {}
+    for layer, a in assets.items():
+        items = a.get("items") or []
+        if not items:
+            continue
+        out[layer] = {"exposed": a.get("exposed"), "total": a.get("total"),
+                      "name_field": a.get("name_field"),
+                      "items": items[:per_layer],
+                      "truncated": bool(a.get("truncated")) or len(items) > per_layer}
+    return out or None
 
 
 def _panel_map(pack: dict) -> dict | None:
@@ -64,11 +82,24 @@ def _panel_map(pack: dict) -> dict | None:
          "bounds": viz.get("bounds"), "legend": viz.get("legend"),
          "aoi": _coarse(viz.get("aoi"), 2e-3),
          "hazard_grid": viz.get("hazard_grid"),
-         "assets": viz.get("features"), "metric": viz.get("metric")}
-    if len(_json.dumps(m)) > 34_000:
+         "assets": viz.get("features"), "assets_layer": viz.get("layer"),
+         "point_layers": viz.get("point_layers") or None, "metric": viz.get("metric")}
+    # Shed weight in the order a planner would: unnamed building centroids first,
+    # then the pixel grid, then the secondary layers — never the whole map while
+    # a named point layer could still be drawn. Bang Khu Rat lost its entire map
+    # because 468 building centroids were the only thing the headline could be.
+    big = lambda: len(_json.dumps(m)) > 34_000
+    if big() and m.get("assets_layer") == "buildings":
+        m["assets"] = None
+        m["assets_note"] = "building centroids omitted at panel size — counts remain"
+    if big():
         m["hazard_grid"] = None               # keep AOI+assets; drop the heavy layer
-        if len(_json.dumps(m)) > 34_000:
-            return None
+    if big() and m.get("point_layers"):
+        m["point_layers"] = {k: v for k, v in m["point_layers"].items() if k != "buildings"} or None
+    if big():
+        m["point_layers"] = None
+    if big():
+        return None
     return m
 
 

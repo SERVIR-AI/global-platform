@@ -45,9 +45,12 @@ def _aoi_feature(aoi):
     return {**feat, "properties": {**feat.get("properties", {}), "source": source}}, bounds
 
 
-def _asset_features(aoi, method, layer, sev):
-    """Each asset as a GeoJSON Feature tagged with properties.severity (0 = none).
-    Roads keep their geometry, tagged by the max severity they cross."""
+def _asset_features(aoi, method, layer, sev, hz_sev=None, rk_sev=None, cap=None):
+    """Each asset as a GeoJSON Feature tagged with properties.severity (0 = none) —
+    the class of whichever grid is DISPLAYED — plus, when the grids are given,
+    explicit `hazard_class` and `risk_level`, so a reader never has to guess which
+    one `severity` is. Roads keep their geometry, tagged by the max severity they
+    cross. `cap` keeps a secondary layer proportionate (most severe first)."""
     out = []
     if method == "roads_in_hazard":
         for ft in _features(aoi["roads"]):
@@ -59,11 +62,26 @@ def _asset_features(aoi, method, layer, sev):
             out.append({"type": "Feature", "geometry": ft["geometry"],
                         "properties": {**ft.get("properties", {}), "severity": s}})
     else:
+        # Only points INSIDE the boundary: the same test count_in_hazard applies,
+        # so the drawn set and the counted set are one set and metric.total is
+        # the count's total. A bundle fetched by bbox carries points past the
+        # boundary; they used to be drawn (grey) and never counted.
+        from shapely.geometry import Point
+        boundary = store._boundary(aoi)
         for ft in _features(aoi[layer]):
-            x, y = ft["geometry"]["coordinates"]
+            x, y = ft["geometry"]["coordinates"][:2]
+            if not boundary.contains(Point(x, y)):
+                continue
             s = sev.severity(x, y) if sev else 0
-            out.append({"type": "Feature", "geometry": ft["geometry"],
-                        "properties": {**ft.get("properties", {}), "severity": s}})
+            props = {**ft.get("properties", {}), "severity": s}
+            if hz_sev is not None:
+                props["hazard_class"] = hz_sev.severity(x, y)
+            if rk_sev is not None:
+                props["risk_level"] = rk_sev.severity(x, y)
+            out.append({"type": "Feature", "geometry": ft["geometry"], "properties": props})
+        if cap is not None and len(out) > cap:
+            out.sort(key=lambda f: -(f["properties"].get("severity") or 0))
+            out = out[:cap]
     return {"type": "FeatureCollection", "features": out}
 
 
@@ -92,7 +110,16 @@ def build_payload(aoi, result):
 
     aoi_feature, bounds = _aoi_feature(aoi)
     sev = store._Severity(aoi[hazard]) if hazard and hazard in aoi else None
-    features = _asset_features(aoi, method, layer, sev)
+    hz_name, rk_name = result.get("hazard_grid_layer"), result.get("risk_grid_layer")
+    hz_sev = store._Severity(aoi[hz_name]) if hz_name and hz_name in aoi else None
+    rk_sev = store._Severity(aoi[rk_name]) if rk_name and rk_name in aoi else None
+    features = _asset_features(aoi, method, layer, sev, hz_sev, rk_sev)
+    # Every other counted point layer rides along, bounded, so a map can show a
+    # hub's evacuation centres beside the schools instead of one or the other.
+    point_layers = {}
+    for name in result.get("point_layers") or []:
+        if name in aoi and name != layer:
+            point_layers[name] = _asset_features(aoi, "count_in_hazard", name, sev, hz_sev, rk_sev, cap=200)
 
     metric = {
         "value": result.get("length_km", result.get("count")),
@@ -119,5 +146,6 @@ def build_payload(aoi, result):
         "bounds": bounds,
         "aoi": aoi_feature,
         "features": features,
+        "point_layers": point_layers,
         "hazard_layer": hazard_layer,
     }

@@ -618,8 +618,22 @@ function mapCard(m) {
     const sev = f.properties?.severity || 0;
     return `<circle cx="${xy[0]}" cy="${xy[1]}" r="3.5"
         fill="${sev > 0 ? esc(color(sev)) : "#8a8a86"}"
-        stroke="currentColor" stroke-width=".8"/>`;
+        stroke="currentColor" stroke-width=".8"><title>${esc(m.assets_layer || "")}${f.properties?.name ? ": " + esc(f.properties.name) : ""}</title></circle>`;
   }).join("");
+  // Every other counted point layer — a hub's evacuation centres beside the
+  // schools — as diamonds, named on hover, so no count is a number without a place.
+  const extra = Object.entries(m.point_layers || {}).map(([name, fc]) =>
+    (((fc || {}).features) || []).map(f => {
+      const g = f.geometry || {};
+      if (g.type !== "Point") return "";
+      const xy = prj(g.coordinates[0], g.coordinates[1]).split(",");
+      const sev = f.properties?.severity || 0;
+      return `<rect x="${(+xy[0] - 3).toFixed(1)}" y="${(+xy[1] - 3).toFixed(1)}" width="6" height="6"
+          transform="rotate(45 ${xy[0]} ${xy[1]})"
+          fill="${sev > 0 ? esc(color(sev)) : "#8a8a86"}" stroke="currentColor" stroke-width=".8"><title>${esc(name)}${f.properties?.name ? ": " + esc(f.properties.name) : ""}</title></rect>`;
+    }).join("")).join("");
+  const layerChips = Object.entries(m.point_layers || {}).map(([name, fc]) =>
+    `<span class="pill">◆ ${esc(name)}: ${(((fc || {}).features) || []).length}</span>`).join(" ");
   const chips = Object.keys(legend).sort().map(k =>
     `<span class="pill" style="border-color:${esc(legend[k].color || "")};
        color:${esc(legend[k].color || "")}">${esc(k)}: ${esc(legend[k].label || "")}</span>`).join(" ");
@@ -630,8 +644,8 @@ function mapCard(m) {
       ${m.metric && m.metric.value != null ? " · " + esc(m.metric.value)
         + (m.metric.label ? " " + esc(m.metric.unit || "") + " " + esc(m.metric.label) : " exposed") : ""}</div>
     <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img"
-         aria-label="recorded hazard map">${hz}${aoi}${assets}</svg>
-    <div class="stats">${chips}</div>
+         aria-label="recorded hazard map">${hz}${aoi}${assets}${extra}</svg>
+    <div class="stats">${chips}${m.assets_layer ? ` <span class="pill">● ${esc(m.assets_layer)}</span>` : ""} ${layerChips}</div>
     <div class="stats">${m.caption ? esc(m.caption) + " — " : ""}recorded at pack time — the live, zoomable map is the hazard_map
       embed this receipt's render_with names</div>
   </div>`;
