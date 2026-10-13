@@ -28,6 +28,23 @@ hazards:
   drought:    {hazard: hazard_drought,    risk: risk_drought}
   fire:       {hazard: hazard_fire,       risk: risk_fire}
 
+# The regional (ASEAN) vulnerability indicator scheme names eleven indicator families. A
+# weighted layer represents the family whose pattern its name matches, so every brief can say
+# which families the recipe in force represents and which are absent — derived, never typed.
+# A contributed layer that matches no pattern is reported as outside the scheme, not dropped.
+indicator_families:
+  population density:        'pop_all|pop_density|popdens'
+  population by age and sex: 'pop_[fm]_|agesex|age_sex|_[FM]_\d'
+  building density:          'blddens|building_density'
+  building height:           'bldheight|building_height'
+  land cover:                'landcover|land_cover|lulc|_tcc'
+  distance to road:          'road'
+  distance to shelter:       'shelter'
+  distance to hospital:      'hospital'
+  distance to school:        'school'
+  GDP per capita:            'gdp'
+  crop damage cost:          'crop|damage'
+
 # Per-hazard {reclassed-vulnerability-layer: weight}, summing to 1.0. STARTING recipes over the
 # three readily-cached reclassed layers (population density, building density, distance-to-road),
 # with per-hazard emphasis. Expand with bldheight/tcc/gdp/landcover once those are pre-cached and

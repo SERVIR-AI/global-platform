@@ -818,8 +818,9 @@ def visible_staged_contracts() -> dict:
 
 WEIGHTS_FIELDS = {
     "required": {
-        "hazard": "which hazard's recipe to adjust, e.g. flood (a return-period layer "
-                  "inherits its base hazard's weights)",
+        "hazard": "which hazard the weights are for, e.g. flood — any hazard_* layer in the "
+                  "catalog, a contributed one included; a hazard with no recipe yet gets one "
+                  "from this contribution (a return-period layer inherits its base hazard's)",
         "weights": "mapping of vulnerability layer -> weight, summing to 1.0, e.g. "
                    "{vulnerability_pop_all_total: 0.5, vulnerability_reclass_blddensity: 0.3, "
                    "vulnerability_reclass_road: 0.2}",
@@ -838,14 +839,21 @@ _WEIGHT_TOLERANCE = 0.001
 STAGED_WEIGHTS: dict[str, dict] = {}
 
 
+_VULNERABILITY_ROLES = ("vulnerability_reclass", "vulnerability")   # hand-authored | gate-assigned
+
+
 def available_vulnerability_layers() -> list[str]:
     """The reclassed vulnerability layers a weight may name, read from the live
-    raster contracts rather than a hardcoded list."""
+    raster contracts rather than a hardcoded list. The hand-authored contracts
+    call the role `vulnerability_reclass`; the gate names a contributed layer's
+    role after its namespace, `vulnerability` — two names for one role, five days
+    apart, and the weights kind only knew the first, so every contributed
+    vulnerability layer was "unknown" to the one kind the field doc promised."""
     try:
         from ..graph.geo import schema
         doc = schema._doc()
         return sorted(k for k, v in (doc.get("layers") or {}).items()
-                      if (v or {}).get("role") == "vulnerability_reclass")
+                      if (v or {}).get("role") in _VULNERABILITY_ROLES)
     except Exception:
         return []
 
@@ -864,11 +872,16 @@ def _validate_weights(manifest) -> list[str]:
         problems.append("missing required field 'hazard'")
     else:
         key = hazard.removeprefix("hazard_")
-        if not combine.weights_for(f"hazard_{key}"):
-            known = sorted((combine._recipe().get("weights") or {}))
-            problems.append(f"no risk recipe for hazard {key!r} — one of: {', '.join(known)}")
+        # Any hazard in the catalog, contributed ones included. A hazard with no
+        # recipe yet is not refused — this contribution becomes its recipe. The
+        # old rule ("no risk recipe for hazard — one of: <the nine typed in
+        # conf/risk_l2.yml>") meant a contributed hazard could never reach
+        # Layer-2 through the one kind built to adjust it.
         if tiffs.resolve(key) is None:
-            problems.append(f"no hazard layer named {key!r} in the catalog")
+            known = sorted(l.removeprefix("hazard_") for l in tiffs.catalog()
+                           if l.startswith("hazard_"))
+            problems.append(f"no hazard layer named {key!r} in the catalog — one of: "
+                            + ", ".join(known))
     if not str(m.get("rationale") or "").strip():
         problems.append("missing required field 'rationale' — a weight with no stated "
                         "reason cannot be reviewed, and a risk level is only as good "

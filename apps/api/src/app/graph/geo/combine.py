@@ -43,6 +43,29 @@ def _recipe():
     return base
 
 
+def indicator_families() -> dict:
+    """{family: name pattern} — the regional scheme's indicator families, from the
+    recipe file, so a brief can say which families a recipe represents."""
+    return dict(_recipe().get("indicator_families") or {})
+
+
+def families_covered(weights: dict) -> tuple[list, list, list]:
+    """(covered, absent, outside): the scheme families the weighted layers represent,
+    the ones they do not, and the layers that match no family at all — derived from
+    the recipe in force, never typed."""
+    import re
+    fams = indicator_families()
+    covered, outside = [], []
+    for lay in weights or {}:
+        hit = [f for f, pat in fams.items() if re.search(str(pat), str(lay), re.I)]
+        if hit:
+            covered += [f for f in hit if f not in covered]
+        else:
+            outside.append(str(lay))
+    absent = [f for f in fams if f not in covered]
+    return covered, absent, outside
+
+
 def adjustment_for(hazard):
     """Who last changed this hazard's weights and when, or None if they are the
     platform's own. A risk brief has to say which it is reading."""

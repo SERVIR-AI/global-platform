@@ -69,6 +69,46 @@ def master_path(entry: dict) -> Path:
     return Path(get_settings().cache_dir) / entry["local_path"]
 
 
+_COUNTRY_ALIASES = {"vietnam": "viet nam", "laos": "lao pdr", "lao people's democratic republic": "lao pdr",
+                    "burma": "myanmar", "brunei darussalam": "brunei", "timor-leste": "east timor",
+                    "kingdom of cambodia": "cambodia", "kingdom of thailand": "thailand",
+                    "republic of the philippines": "philippines", "republic of indonesia": "indonesia"}
+
+
+def _country_key(name) -> str:
+    k = " ".join(str(name or "").lower().replace("_", " ").split())
+    return _COUNTRY_ALIASES.get(k, k)
+
+
+def not_applicable(entry: dict, boundary, country: str | None = None) -> dict | None:
+    """Why a layer must NOT be clipped into this area, or None when it covers it.
+
+    Two tests, cheapest first. (1) The layer's points lie wholly outside the area's
+    bounding box (the observed bbox the gate records). (2) The contributor DECLARED
+    the layer's countries and this area's country is not among them. The second is
+    the one that matters: Thailand's bounding box contains most of Cambodia, so a
+    Thai shelter list passes the bbox test for Battambang — and it was being clipped
+    into an empty file there and cited as "0 of 0 shelters", a real-looking zero for
+    a layer that never covered the place. The gate collected `countries` and `bbox`
+    for exactly this and nothing read them. With neither a bbox nor a declaration
+    we cannot tell, so the layer clips as before."""
+    bbox = entry.get("bbox")
+    if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+        minx, miny, maxx, maxy = boundary.bounds
+        if bbox[2] < minx or bbox[0] > maxx or bbox[3] < miny or bbox[1] > maxy:
+            where = (", ".join(str(c) for c in entry["countries"]) if entry.get("countries")
+                     else f"lon {bbox[0]:.2f} to {bbox[2]:.2f}, lat {bbox[1]:.2f} to {bbox[3]:.2f}")
+            return {"reason": f"its points lie wholly outside this area (the layer covers {where})",
+                    "covers": where, "bbox": list(bbox), "countries": entry.get("countries")}
+    declared = [str(c) for c in (entry.get("countries") or []) if str(c).strip()]
+    if country and declared and _country_key(country) not in {_country_key(c) for c in declared}:
+        where = ", ".join(declared)
+        return {"reason": f"it declares {where} and this area is in {country}",
+                "covers": where, "bbox": list(bbox) if bbox else None, "countries": declared,
+                "area_country": country}
+    return None
+
+
 def clip_into(adir: str, boundary, layer: str, entry: dict) -> int:
     """Write {adir}/{layer}.geojson holding the master's points inside `boundary`.
     Returns how many. A layer with no points inside still writes an empty file,

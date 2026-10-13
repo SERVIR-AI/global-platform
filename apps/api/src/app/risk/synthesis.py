@@ -142,6 +142,32 @@ def _document_hits(place, hz, focus, trace, gaps):
     return corpus, hits
 
 
+def _l2_coverage_gap(hz, risk_weights) -> list:
+    """What the risk level rests on, derived from the recipe that produced it. This
+    used to be one fixed sentence — "only 3 vulnerability layers … 8 absent …
+    platform starting values" — written the day three layers existed, and it
+    would have stayed in every brief after a hub widened or re-weighted the
+    recipe through the gate: a cited gap the pack's own method contradicted."""
+    if not risk_weights:
+        return []                      # no Layer-2: _l2_risk already declared why
+    from ..graph.geo import combine
+    covered, absent, outside = combine.families_covered(risk_weights)
+    n_fam = len(combine.indicator_families())
+    if combine.staged_weights_row(hz):
+        who = "the weights are a staged, unreviewed proposal"
+    elif combine.adjustment_for(hz):
+        who = "the weights were adjusted by a contributor"
+    else:
+        who = "the weights are platform starting values"
+    return [f"risk levels use {len(risk_weights)} vulnerability layer(s) "
+            f"({', '.join(risk_weights)}) representing {len(covered)} of the {n_fam} indicator "
+            "families the regional scheme defines"
+            + (f" — absent: {', '.join(absent)}" if absent else "")
+            + (f"; outside the scheme: {', '.join(outside)}" if outside else "")
+            + f"; {who}, uncalibrated against observed loss — treat a risk level as a "
+              "screening signal, not an assessment"]
+
+
 def _weights_provenance(hz) -> str:
     """Whose weights these are. A hub-adjusted recipe and the platform's defaults are
     different claims, and a brief that reads the same either way is hiding the one
@@ -407,6 +433,16 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     for layer in _asset_layers():
         if layer in declined:
             continue
+        na = (aoi.get("vectors_not_applicable") or {}).get(layer)
+        if na:
+            # The layer does not cover this place. A gap, in words — not a count,
+            # and above all not a zero.
+            from ..graph.geo import vectors as _vectors
+            title = (_vectors.visible().get(layer) or {}).get("title") or layer
+            gaps.append(f"{title} ({layer}) was not counted for {aoi.get('name', place)}: "
+                        f"{na['reason']}. This is not a zero: the layer does not cover the place.")
+            trace.append(f"exposure[{layer}] not applicable here — covers {na['covers']}")
+            continue
         if layer not in aoi:
             # A contributed layer the bundle was built without (an older cache, a
             # fixture). Say so; never crash, never read it as zero.
@@ -637,17 +673,22 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
                 f"{lay} ({m.get('title') or 'no title recorded'}; source "
                 f"{m.get('source') or 'unattributed'}; licence {m.get('license') or 'unstated'}; "
                 f"vintage {m.get('vintage') or 'unrecorded'})")
+        covered, absent, outside = combine.families_covered(risk_weights)
+        n_fam = len(combine.indicator_families())
         citations.append({
             "n": n, "kind": "vulnerability_layers", "retrieval": "computed-at-pack-time",
             "source": "platform raster catalog", "title": "vulnerability layers used",
             "validation": "unvalidated",
-            "text": (f"{len(risk_weights)} vulnerability layers entered this risk level: "
+            "text": (f"{len(risk_weights)} vulnerability layer(s) entered this risk level: "
                      + "; ".join(vuln_bits)
                      + ". The regional indicator scheme this platform is being built "
-                     "against names 11 indicator families, so 8 are absent here: "
-                     "population by age and sex, building height, land cover, distance "
-                     "to shelter, distance to hospital, distance to school, GDP per "
-                     "capita, and crop damage cost."),
+                     f"against names {n_fam} indicator families; this recipe represents "
+                     f"{len(covered)} ({', '.join(covered) or 'none'})"
+                     + (f" and leaves {len(absent)} absent: {', '.join(absent)}" if absent
+                        else " — every family is represented")
+                     + (f". Outside the scheme's families: {', '.join(outside)}" if outside else "")
+                     + "."),
+            "families_covered": covered, "families_absent": absent,
         })
 
     # --- the hazard layer's passport: declared contract vs observed clip ------
@@ -737,11 +778,7 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     # --- what is missing, said as content --------------------------------------
     rp = re.search(r"_rp(\d+)$", hz)
     gaps[:0] = ([] if meta.get("vintage") else [
-        "this raster records no publication date, version or licence"]) + [
-        "risk levels use only 3 vulnerability layers (population, building density, "
-        "distance to road) of the 11 indicator families the regional scheme defines, "
-        "and the weights are platform starting values, uncalibrated against observed "
-        "loss — treat a risk level as a screening signal, not an assessment",
+        "this raster records no publication date, version or licence"]) + _l2_coverage_gap(hz, risk_weights) + [
         "no loss or damage estimate: nothing converts exposure or risk level into "
         "people affected, hectares, or cost",
     ] + ([f"this is the {rp.group(1)}-year return period — a "

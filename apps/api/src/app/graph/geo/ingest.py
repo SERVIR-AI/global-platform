@@ -247,6 +247,23 @@ def _search(place):
     return results
 
 
+def _reverse_country(lon, lat):
+    """The country at a point, from Nominatim's reverse geocoder (English), or None
+    when it cannot be had — a declared-coverage test that cannot run is skipped,
+    never guessed."""
+    try:
+        r = requests.get(f"{NOMINATIM}/reverse", headers=HEADERS, timeout=15, params={
+            "lat": lat, "lon": lon, "format": "json", "zoom": 3, "accept-language": "en"})
+        r.raise_for_status()
+        d = r.json() or {}
+        c = ((d.get("address") or {}).get("country")
+             or str(d.get("display_name") or "").rsplit(",", 1)[-1].strip())
+        emit({"kind": "api", "api": "Nominatim", "op": "reverse", "country": c or None})
+        return c or None
+    except Exception:
+        return None
+
+
 def _under_cap_admin(results, cap=None):
     """The most complete admin boundary under `cap` (default the analysis cap), or None."""
     cap = AREA_CAP_KM2 if cap is None else cap
@@ -556,9 +573,29 @@ def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=N
     # their master file into this AOI beside the OSM layers, under their own name,
     # so the same exposure count reaches them. Never declined by area: a hub's own
     # list is small and already local, unlike an Overpass pull.
+    # A layer whose points lie wholly outside this area is NOT clipped: an empty
+    # clip reads as "0 of 0" downstream, and a Thai list was being cited as a
+    # clean zero in every Cambodian district. Decided per call from the entry's
+    # observed bbox (never persisted, so a re-contributed layer is re-judged).
     from . import vectors as _vectors
-    for layer, entry in _vectors.visible().items():
+    visible = _vectors.visible()
+    # The area's country, asked once (reverse geocode of the centroid) and kept in
+    # meta.json — and asked at all only when a contributed layer declares its
+    # countries, because that is the one reader.
+    if any(e.get("countries") for e in visible.values()) and not info.get("country"):
+        c = _reverse_country(boundary.centroid.x, boundary.centroid.y)
+        if c:
+            info["country"] = c
+            fetched = True
+    not_applicable = {}
+    for layer, entry in visible.items():
         dest = os.path.join(adir, f"{layer}.geojson")
+        na = _vectors.not_applicable(entry, boundary, info.get("country"))
+        if na:
+            not_applicable[layer] = na
+            emit({"kind": "cache", "what": "contributed_layer", "layer": layer,
+                  "not_applicable": na["reason"]})
+            continue
         emit({"kind": "cache", "what": "contributed_layer", "layer": layer,
               "dest": short_path(dest), "was_cached": os.path.exists(dest)})
         if os.path.exists(dest):
@@ -568,7 +605,10 @@ def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=N
         fetched = True
     if fetched:
         json.dump(info, open(meta, "w"), indent=2)
-    return _bundle(adir, info)
+    bundle = _bundle(adir, info, skip=not_applicable)
+    if not_applicable:
+        bundle["vectors_not_applicable"] = not_applicable
+    return bundle
 
 def _fetch_layer(layer, bbox, boundary):
     """Fetch one OSM asset layer within `bbox`, clipped/filtered to `boundary`."""
@@ -604,20 +644,24 @@ def _fetch_layer(layer, bbox, boundary):
     raise ValueError(f"unknown asset layer: {layer}")
 
 
-def _bundle(adir, info):
+def _bundle(adir, info, skip=()):
     """Rebuild file paths from the AOI dir, so the cache is portable across dirs/machines
-    (meta.json holds only metadata — name/area/how/counts — never absolute paths)."""
+    (meta.json holds only metadata — name/area/how/counts — never absolute paths).
+    `skip` names contributed layers that do not cover this area: no path, so no reader
+    can open an empty clip and call it zero."""
     return {"name": info["name"], "area_km2": info["area_km2"],
             "how": info.get("how"), "counts": info["counts"],
             # Which asset layers were never fetched because the area is too large.
             # Carried so a brief can DECLARE them instead of counting them as zero.
             "assets_declined": info.get("assets_declined"),
+            "country": info.get("country"),
             "admin": os.path.join(adir, "admin.geojson"),
             "roads": os.path.join(adir, "roads.geojson"),
             "hospitals": os.path.join(adir, "hospitals.geojson"),
             "schools": os.path.join(adir, "schools.geojson"),
             "buildings": os.path.join(adir, "buildings.geojson"),
-            **{ly: os.path.join(adir, f"{ly}.geojson") for ly in _contributed_layers()}}
+            **{ly: os.path.join(adir, f"{ly}.geojson") for ly in _contributed_layers()
+               if ly not in skip}}
 
 
 def _contributed_layers():

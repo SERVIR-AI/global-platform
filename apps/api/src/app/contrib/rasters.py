@@ -19,6 +19,9 @@ REQUIRED = ("layer", "file", "title", "description", "source", "license",
 _DECLARED_REQUIRED = ("dtype", "valid_min", "valid_max")
 
 
+CLASS_MAX = 5     # the class contract every reader indexes by: 1..5, 0 = nodata
+
+
 def _role(layer: str) -> str:
     """The namespace IS the role. A vulnerability_* layer feeds the Layer-2 recipe
     as a weighted input; the gate used to refuse the very prefix the engine reads."""
@@ -70,6 +73,18 @@ def validate_manifest(m: dict) -> list[str]:
                              "file gets verified AGAINST; observation cannot write it")
     elif decl is not None:
         fails.append("declared must be a mapping (dtype/valid_min/valid_max/...)")
+    if isinstance(decl, dict) and layer.startswith(("hazard_", "risk_", "vulnerability_")):
+        # Classes are the contract every reader indexes by. A hazard declared
+        # 0..300 landed, and the first count died on class 300 — the gate holds
+        # the line, in words, before a file is fetched.
+        try:
+            vmin, vmax = float(decl.get("valid_min")), float(decl.get("valid_max"))
+        except (TypeError, ValueError):
+            vmin = vmax = None
+        if vmax is not None and (vmax > CLASS_MAX or vmin < 0):
+            fails.append(f"declared valid range {vmin:g}..{vmax:g}: a {layer.split('_', 1)[0]}_* "
+                         f"layer carries integer classes 1..{CLASS_MAX} (0 = nodata) — reclassify "
+                         "a continuous raster into those classes before contributing it")
     from . import notes
     fails += notes.validate(m.get("usage_notes"))
     return fails

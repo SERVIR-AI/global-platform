@@ -5,6 +5,7 @@ takes an already-fetched `aoi` bundle (see ingest.ensure_aoi); fetching the data
 and computing over it are kept separate so the graph can run them as two nodes.
 """
 import json
+import os
 import math
 import warnings
 
@@ -65,7 +66,10 @@ def people_in_hazard(aoi, hazard, pop_layer, min_severity=1):
     boundary = _boundary(aoi)
     with rasterio.open(aoi[hazard]) as hz:
         haz = hz.read(1)
-        haz = np.where(np.isfinite(haz), haz, 0).astype("int16")
+        haz = np.where(np.isfinite(haz), haz, 0)
+        if haz.size and float(haz.max()) > CLASS_MAX:
+            _class_or_raise(aoi[hazard], float(haz.max()))
+        haz = haz.astype("int16")
         hz_T, hz_crs, hz_res = hz.transform, hz.crs, abs(hz.res[0])
         h, w = haz.shape
         left, top = hz_T * (0, 0)
@@ -135,6 +139,20 @@ def roads_in_hazard(aoi, hazard, min_severity=1):
             "source": f"{hazard}.tif × roads", "method": "roads_in_hazard"}
 
 
+CLASS_MAX = 5     # the class contract: 1..5, 0 = nodata; a reader never indexes past it
+
+
+def _class_or_raise(path, v):
+    """A sampled value as a class. Above the contract it is refused in words, not
+    indexed: a hazard holding 300 used to die on `by_severity[300]` as a KeyError
+    the pack did not catch. Negatives were always nodata and stay so."""
+    if v > CLASS_MAX or (v > 0 and v != int(v)):
+        raise ValueError(f"{os.path.basename(str(path))} holds the value {v!r} inside this area "
+                         f"— the hazard contract is integer classes 1..{CLASS_MAX} (0 = nodata); "
+                         "reclassify the layer before it is used")
+    return max(int(v), 0)
+
+
 class _Severity:
     """Hazard severity raster: class 0 (none) .. 5 (extreme) at a coordinate."""
     def __init__(self, path):
@@ -150,7 +168,7 @@ class _Severity:
             v = self.arr[row, col]
             if v != v:               # NaN — nodata in float rasters (e.g. fire) -> no hazard
                 return 0
-            return max(int(v), 0)
+            return _class_or_raise(self.src.name, v)
         return 0
 
 

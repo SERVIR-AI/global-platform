@@ -86,6 +86,22 @@ def _is_synthetic(row: dict) -> bool:
     return "synthetic" in blob or "demonstration layer" in blob
 
 
+def _vulnerability_coverage_line() -> str:
+    """How much of the regional indicator scheme the recipes in force represent —
+    read from the recipe, so a hub's wider recipe changes this sentence."""
+    from ..graph.geo import combine
+    try:
+        recipes = combine._recipe().get("weights") or {}
+        layers = sorted({l for w in recipes.values() for l in (w or {})})
+        covered, absent, _outside = combine.families_covered({l: 1 for l in layers})
+        n = len(combine.indicator_families())
+        return (f"vulnerability recipes use {len(layers)} layer(s) across hazards, representing "
+                f"{len(covered)} of the {n} indicator families the regional scheme names"
+                + (f" (absent: {', '.join(absent)})" if absent else ""))
+    except Exception as exc:
+        return f"vulnerability coverage could not be read from the recipe ({type(exc).__name__})"
+
+
 def _risk_manifest() -> dict:
     """Honest v0: what the risk pack ships and what it does not. Real state where
     derivable, gaps declared in one place."""
@@ -129,7 +145,7 @@ def _risk_manifest() -> dict:
                    "min_severity": "optional, 1-5, default 1"},
         "gaps": [
             "L1 precomputed risk layers exist in the catalog but are not offered here",
-            "vulnerability uses 3 layers of the 11 the regional indicator scheme names",
+            _vulnerability_coverage_line(),
             "raster vintages/licences unrecorded for the layers that predate the "
             "contribution gate",
             "BYOD uploads are session-scoped and cannot enter a pack",
