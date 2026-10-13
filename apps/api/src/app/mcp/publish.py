@@ -84,14 +84,27 @@ def _panel_map(pack: dict) -> dict | None:
          "hazard_grid": viz.get("hazard_grid"),
          "assets": viz.get("features"), "assets_layer": viz.get("layer"),
          "point_layers": viz.get("point_layers") or None, "metric": viz.get("metric")}
-    # Shed weight in the order a planner would: unnamed building centroids first,
-    # then the pixel grid, then the secondary layers — never the whole map while
-    # a named point layer could still be drawn. Bang Khu Rat lost its entire map
-    # because 468 building centroids were the only thing the headline could be.
+    # Shed weight in the order a planner would: a dense headline layer first —
+    # unnamed building centroids go entirely, any other layer keeps its most
+    # severe points — then the pixel grid, then the secondary layers; never the
+    # whole map while a named point could still be drawn. Bang Khu Rat lost its
+    # entire map because 468 building centroids were the only thing the headline
+    # could be, and the first fix shed only a layer literally called
+    # "buildings" — a hub's 3,000 wells as the headline would have lost the map
+    # the same way.
     big = lambda: len(_json.dumps(m)) > 34_000
+    feats = ((m.get("assets") or {}).get("features")) or []
     if big() and m.get("assets_layer") == "buildings":
         m["assets"] = None
         m["assets_note"] = "building centroids omitted at panel size — counts remain"
+    elif big() and len(feats) > 200:
+        keep = sorted(feats, key=lambda f: -((f.get("properties") or {}).get("severity") or 0))[:200]
+        m["assets"] = {"type": "FeatureCollection", "features": keep}
+        m["assets_note"] = (f"{len(keep)} of {len(feats)} {m.get('assets_layer')} drawn at panel size "
+                            "(most severe first) — counts and stats.assets remain complete")
+    if big() and m.get("assets"):
+        m["assets"] = None
+        m["assets_note"] = f"{m.get('assets_layer')} points omitted at panel size — counts remain"
     if big():
         m["hazard_grid"] = None               # keep AOI+assets; drop the heavy layer
     if big() and m.get("point_layers"):

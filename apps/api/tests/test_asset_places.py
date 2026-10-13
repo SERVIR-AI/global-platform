@@ -149,3 +149,23 @@ def test_the_web_chat_can_be_asked_about_a_contributed_layer(hub_aoi):
     enum = tools[1]["function"]["parameters"]["properties"]["layer"]["enum"]
     assert "evac_centres" in enum and "hospitals" in enum
     assert "contributed" in tools[1]["function"]["description"]
+
+
+def test_the_panel_map_keeps_a_dense_contributed_headline_layer_too():
+    """The buildings rule by NAME was the same bug one layer over: a hub's dense
+    layer drawn as the headline lost the whole map. Any dense headline layer is
+    thinned to its most severe points, and the note says so by name."""
+    many = {"type": "FeatureCollection", "features": [
+        _pt(100.35 + i * 1e-5, 13.91, name=f"well {i}", severity=(i % 5) + 1) for i in range(3000)]}
+    pack = {"viz": {"place": "Somewhere", "hazard": "hazard_flood", "layer": "wells",
+                    "features": many, "point_layers": {"hospitals": {"type": "FeatureCollection", "features": [
+                        _pt(100.35, 13.91, name="District hospital", severity=4)]}},
+                    "hazard_grid": {"w": 56, "h": 56, "cells": "3" * 3136},
+                    "aoi": {"type": "Feature", "geometry": {"type": "Point", "coordinates": [100.35, 13.91]}},
+                    "bounds": [100.3, 13.9, 100.4, 13.95], "legend": {}}}
+    m = publish._panel_map(pack)
+    assert m is not None
+    assert len(m["assets"]["features"]) == 200
+    assert all(f["properties"]["severity"] == 5 for f in m["assets"]["features"])
+    assert "200 of 3000 wells" in m["assets_note"]
+    assert m["point_layers"]["hospitals"]["features"][0]["properties"]["name"] == "District hospital"
