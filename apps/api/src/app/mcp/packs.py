@@ -206,7 +206,8 @@ def _lc_stacks_words() -> tuple[str, str]:
             span = f"{min(ys)}-{max(ys)}" if ys else ""
         except Exception:
             span = ""
-        where.append(f"{row.get('title') or sid}" + (f", {span}" if span else ""))
+        title = str(row.get("title") or sid)
+        where.append(title + (f", {span}" if span and span not in title else ""))
     return ", ".join(classes), "; ".join(where)
 
 
