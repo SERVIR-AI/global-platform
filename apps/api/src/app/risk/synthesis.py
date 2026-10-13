@@ -840,7 +840,10 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
              # Every counted point layer's places: id, name, lon, lat,
              # hazard_class and (when computed) risk_level — bounded per layer.
              "assets": assets,
-             "risk_layer": risk_key, "displayed_layer": shown,
+             # `displayed_layer` is the GRID the map shows (risk when computed, else the
+             # hazard clip); `drawn_layer` is the POINT layer drawn on it — a hub read
+             # the first as the second and thought map_layer had done nothing.
+             "risk_layer": risk_key, "displayed_layer": shown, "drawn_layer": drawn,
              "viz": _bounded_viz(viz.build_payload(aoi, {
                  "hazard": shown, "method": "count_in_hazard", "layer": drawn,
                  "hazard_grid_layer": hz, "risk_grid_layer": risk_key,
@@ -929,9 +932,10 @@ def _asset_places(aoi, layer, hz_sev, min_sev, name_field, total, exposed):
         if cls < min_sev:
             continue
         props = ft.get("properties") or {}
-        items.append({"id": ft.get("id") or props.get("id") or props.get("osm_id") or i,
+        ident = viz.ident(props)
+        items.append({"id": ft.get("id") if ft.get("id") not in (None, "") else (ident if ident is not None else i),
                       "name": (str(props.get(key)).strip() if props.get(key) not in (None, "") else None),
-                      "lon": round(float(x), 6), "lat": round(float(y), 6),
+                      "lon": round(float(x), 7), "lat": round(float(y), 7),
                       "hazard_class": int(cls)})
     items.sort(key=lambda it: (-it["hazard_class"], it["name"] or ""))
     out["truncated"] = len(items) > _PLACES_CAP

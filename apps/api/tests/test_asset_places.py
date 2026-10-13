@@ -169,3 +169,48 @@ def test_the_panel_map_keeps_a_dense_contributed_headline_layer_too():
     assert all(f["properties"]["severity"] == 5 for f in m["assets"]["features"])
     assert "200 of 3000 wells" in m["assets_note"]
     assert m["point_layers"]["hospitals"]["features"][0]["properties"]["name"] == "District hospital"
+
+
+def test_the_panel_map_keeps_the_named_headline_when_secondary_layers_are_heavy():
+    """Mueang Nonthaburi on the host: 6 hospitals as the headline, 84 secondary
+    points carrying a dozen contributor fields each — the panel dropped the six
+    hospitals first and returned a map with nothing but a boundary on it."""
+    verbose = {f"field_{i}": "ข้อมูลประกอบ " * 4 for i in range(12)}
+    hosp = {"type": "FeatureCollection", "features": [
+        _pt(100.5 + i * 1e-3, 13.85, name=f"โรงพยาบาล {i}", severity=3, hazard_class=5, risk_level=3) for i in range(6)]}
+    evac = {"type": "FeatureCollection", "features": [
+        _pt(100.48 + i * 1e-3, 13.84, name=f"ศูนย์ {i}", centre_id=f"DDPM-{i}", severity=5, **verbose) for i in range(38)]}
+    schools = {"type": "FeatureCollection", "features": [
+        _pt(100.46 + i * 1e-3, 13.83, name=f"โรงเรียน {i}", severity=2, **verbose) for i in range(38)]}
+    cd = {"type": "FeatureCollection", "features": [
+        _pt(100.44 + i * 1e-3, 13.82, name=f"อปพร {i}", severity=5, **verbose) for i in range(8)]}
+    pack = {"viz": {"place": "Mueang Nonthaburi", "hazard": "hazard_flood_rp100", "layer": "hospitals",
+                    "features": hosp, "point_layers": {"evacuation_centres": evac, "schools": schools, "civil_defence": cd},
+                    "hazard_grid": {"w": 56, "h": 56, "cells": "3" * 3136},
+                    "aoi": {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[100.42, 13.80], [100.56, 13.80], [100.56, 13.90], [100.42, 13.90], [100.42, 13.80]]]}},
+                    "bounds": [100.42, 13.80, 100.56, 13.90], "legend": {}}}
+    m = publish._panel_map(pack)
+    assert m is not None
+    assert len(m["assets"]["features"]) == 6                      # the headline survives
+    assert sorted(m["point_layers"]) == ["civil_defence", "evacuation_centres", "schools"]
+    f = m["point_layers"]["evacuation_centres"]["features"][0]["properties"]
+    assert f["name"].startswith("ศูนย์") and f["id"].startswith("DDPM-") and "field_0" not in f   # lean copy
+    assert m["hazard_grid"] is not None                            # it all fits once the copy is lean
+    assert "assets_note" not in m and "point_layers_note" not in m
+
+
+def test_the_place_list_carries_the_contributors_own_id_and_full_precision(hub_aoi, tmp_path):
+    hub_aoi["evac_centres"] = _write(tmp_path, "evac3", [
+        _pt(0.0012345, 0.0045678, centre_name="Wat hall", centre_id="DDPM-SHELTER-4741")])
+    p = assemble.assemble(place="Testville", hazard="flood")
+    it = p["stats"]["assets"]["evac_centres"]["items"][0]
+    assert it["id"] == "DDPM-SHELTER-4741" and it["name"] == "Wat hall"
+    assert it["lon"] == 0.0012345 and it["lat"] == 0.0045678
+    assert p["stats"]["drawn_layer"] in p["stats"]["assets"]
+
+
+def test_an_osm_point_names_itself_from_any_name_tag():
+    from app.graph.geo import ingest
+    assert ingest._osm_name({"name": "โรงเรียนวัดละหาร"}) == "โรงเรียนวัดละหาร"
+    assert ingest._osm_name({"name:th": "โรงเรียนบางบัวทอง"}) == "โรงเรียนบางบัวทอง"
+    assert ingest._osm_name({"amenity": "school"}) == ""

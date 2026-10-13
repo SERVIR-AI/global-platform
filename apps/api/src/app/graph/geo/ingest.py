@@ -616,6 +616,17 @@ def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=N
         bundle["vectors_not_applicable"] = not_applicable
     return bundle
 
+def _osm_name(tags: dict) -> str:
+    """The name OSM gives a point, under whichever tag it carries it. 8 of 12
+    schools in one Thai district had no `name` and came back nameless; some
+    carry name:th, name:en, official_name or alt_name instead."""
+    for k in ("name", "name:en", "name:th", "official_name", "alt_name", "int_name"):
+        v = tags.get(k)
+        if v not in (None, ""):
+            return str(v)
+    return ""
+
+
 def _fetch_layer(layer, bbox, boundary):
     """Fetch one OSM asset layer within `bbox`, clipped/filtered to `boundary`."""
     t = OVERPASS_SERVER_TIMEOUT
@@ -638,7 +649,7 @@ def _fetch_layer(layer, bbox, boundary):
             lat = e.get("lat") or (e.get("center") or {}).get("lat")
             lon = e.get("lon") or (e.get("center") or {}).get("lon")
             if lat is not None and boundary.contains(Point(lon, lat)):
-                out.append(_feature(Point(lon, lat), {"name": e.get("tags", {}).get("name", "")}))
+                out.append(_feature(Point(lon, lat), {"name": _osm_name(e.get("tags") or {})}))
         return out
     if layer == "buildings":
         out = []

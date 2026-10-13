@@ -84,36 +84,83 @@ def _panel_map(pack: dict) -> dict | None:
          "hazard_grid": viz.get("hazard_grid"),
          "assets": viz.get("features"), "assets_layer": viz.get("layer"),
          "point_layers": viz.get("point_layers") or None, "metric": viz.get("metric")}
-    # Shed weight in the order a planner would: a dense headline layer first —
-    # unnamed building centroids go entirely, any other layer keeps its most
-    # severe points — then the pixel grid, then the secondary layers; never the
-    # whole map while a named point could still be drawn. Bang Khu Rat lost its
-    # entire map because 468 building centroids were the only thing the headline
-    # could be, and the first fix shed only a layer literally called
-    # "buildings" — a hub's 3,000 wells as the headline would have lost the map
-    # the same way.
+    # The panel copy carries only what the panel draws and names by. A hub's
+    # evacuation list carries a dozen fields per point, and 84 secondary points
+    # with their full properties pushed a district map past the cap — at which
+    # point the old order dropped the SIX named hospitals of the headline before
+    # touching the heavy secondary layers, and the hub got a map with nothing on
+    # it but a boundary. Lean copies first; then shed by value: unnamed building
+    # centroids, the pixel grid, the largest secondary layer at a time, and the
+    # headline last of all. The full properties stay in the pack and the embed.
     big = lambda: len(_json.dumps(m)) > 34_000
-    feats = ((m.get("assets") or {}).get("features")) or []
-    if big() and m.get("assets_layer") == "buildings":
+    layer = m.get("assets_layer")
+    n_head = len(((m.get("assets") or {}).get("features")) or [])
+    if layer == "buildings" and n_head > 200:
+        # A sample of unnamed centroids is a misleading picture, not a thinner
+        # one: at panel size a dense buildings headline is counts only.
+        m["assets"] = None
+        m["assets_note"] = f"{n_head} building centroids omitted at panel size — counts remain"
+    if m.get("assets"):
+        lean, n, trunc = _lean(m["assets"], cap=200)
+        m["assets"] = lean
+        if trunc:
+            m["assets_note"] = (f"200 of {n} {layer} drawn at panel size (most severe first) "
+                                "— counts and stats.assets remain complete")
+    if m.get("point_layers"):
+        lean_layers = {}
+        for k, fc in m["point_layers"].items():
+            if k == "buildings":
+                continue
+            lean_layers[k], _n, _t = _lean(fc, cap=200)
+        m["point_layers"] = lean_layers or None
+    if big() and layer == "buildings":
         m["assets"] = None
         m["assets_note"] = "building centroids omitted at panel size — counts remain"
-    elif big() and len(feats) > 200:
-        keep = sorted(feats, key=lambda f: -((f.get("properties") or {}).get("severity") or 0))[:200]
-        m["assets"] = {"type": "FeatureCollection", "features": keep}
-        m["assets_note"] = (f"{len(keep)} of {len(feats)} {m.get('assets_layer')} drawn at panel size "
-                            "(most severe first) — counts and stats.assets remain complete")
+    if big():
+        m["hazard_grid"] = None               # the pixel picture goes before any named point
+    dropped = []
+    while big() and m.get("point_layers"):
+        k = max(m["point_layers"], key=lambda k: len(m["point_layers"][k]["features"]))
+        dropped.append(f"{k} ({len(m['point_layers'][k]['features'])} points)")
+        del m["point_layers"][k]
+        if not m["point_layers"]:
+            m["point_layers"] = None
+    if dropped:
+        m["point_layers_note"] = ("omitted at panel size — counts and stats.assets remain: "
+                                  + ", ".join(dropped))
+    if big() and m.get("assets"):
+        lean, n, _t = _lean(m["assets"], cap=50)
+        m["assets"] = lean
+        m["assets_note"] = (f"50 of {n} {layer} drawn at panel size (most severe first) "
+                            "— counts and stats.assets remain complete")
     if big() and m.get("assets"):
         m["assets"] = None
-        m["assets_note"] = f"{m.get('assets_layer')} points omitted at panel size — counts remain"
-    if big():
-        m["hazard_grid"] = None               # keep AOI+assets; drop the heavy layer
-    if big() and m.get("point_layers"):
-        m["point_layers"] = {k: v for k, v in m["point_layers"].items() if k != "buildings"} or None
-    if big():
-        m["point_layers"] = None
+        m["assets_note"] = f"{layer} points omitted at panel size — counts remain"
     if big():
         return None
     return m
+
+
+_PANEL_PROPS = ("name", "hazard_class", "risk_level", "severity")
+
+
+def _lean(fc: dict, cap: int | None = None) -> tuple[dict, int, bool]:
+    """(collection, total, truncated): the features with only the properties the
+    panel draws and names by — plus the contributor's own id — most severe first,
+    at most `cap`."""
+    from ..graph.geo import viz as _viz
+    feats = (fc or {}).get("features") or []
+    out = []
+    for f in feats:
+        p = f.get("properties") or {}
+        q = {k: p[k] for k in _PANEL_PROPS if k in p}
+        ident = _viz.ident(p)
+        if ident is not None:
+            q["id"] = ident
+        out.append({"type": "Feature", "geometry": f.get("geometry"), "properties": q})
+    out.sort(key=lambda f: -((f["properties"].get("severity") or 0)))
+    truncated = cap is not None and len(out) > cap
+    return {"type": "FeatureCollection", "features": out[:cap] if cap else out}, len(feats), truncated
 
 
 def _coarse(gj, tol: float):

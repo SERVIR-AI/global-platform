@@ -45,6 +45,24 @@ def _aoi_feature(aoi):
     return {**feat, "properties": {**feat.get("properties", {}), "source": source}}, bounds
 
 
+_ID_KEYS = ("id", "osm_id", "centre_id", "center_id", "shelter_id", "site_id", "station_id",
+            "facility_id", "code", "ref")
+
+
+def ident(props: dict):
+    """The property that identifies a point to its contributor — a shelter's
+    DDPM-SHELTER-4741, an OSM id — or None. A hub's acceptance test looked for the
+    shelter code and found it only on the map feature, never in stats.assets."""
+    p = props or {}
+    for k in _ID_KEYS:
+        if p.get(k) not in (None, ""):
+            return p[k]
+    for k, v in p.items():
+        if str(k).lower().endswith("_id") and v not in (None, ""):
+            return v
+    return None
+
+
 def _asset_features(aoi, method, layer, sev, hz_sev=None, rk_sev=None, cap=None):
     """Each asset as a GeoJSON Feature tagged with properties.severity (0 = none) —
     the class of whichever grid is DISPLAYED — plus, when the grids are given,
