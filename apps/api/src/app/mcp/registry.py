@@ -402,8 +402,9 @@ def pack_manifest(pack_id: str = "food-security") -> dict:
         "id": "food-security", "display_name": "Food Security Platform",
         "version": "v0",
         "profile": "Phase-1 profile — what ships today, gaps declared",
-        "built_for": ("early signs of maize failure in the current season "
-                      "(Kenya Trans-Nzoia vs Zambia — the hub-locked PoC question)"),
+        "built_for": (f"{packs._fs_coverage()[0]} outlooks for {packs._fs_coverage()[1]} — built "
+                      "around the hub-locked PoC question (early signs of maize failure in the "
+                      "current season, Kenya Trans-Nzoia vs Zambia)"),
         "output_contract": {
             "required_sections": list(synthesis.SECTIONS),
             "gate": ("verify_groundedness — BLOCKING on: required sections present, "
@@ -596,8 +597,8 @@ def coverage_line() -> str:
     # still get their subjects/where; the live feed list follows for food security.
     domains = []
     for pid, sp in sorted(packs.PACKS.items()):
-        if sp.get("summary"):
-            domains.append(sp["summary"])
+        if packs.text(sp, "summary"):
+            domains.append(packs.text(sp, "summary"))
         elif sp.get("subjects"):
             domains.append(f"{', '.join(sp['subjects'])} in "
                            f"{' and '.join(sp.get('where') or ['its registered footprint'])}")
@@ -617,7 +618,8 @@ def describe_assemble() -> str:
     # The FIRST SENTENCE names the subjects in a user's words, from every pack row's
     # `keywords`: a Desktop model scanning tool descriptions skipped this tool for a
     # land-cover question when the subjects only appeared a paragraph down.
-    kws = "; ".join(sp["keywords"] for _, sp in sorted(packs.PACKS.items()) if sp.get("keywords"))
+    kws = "; ".join(packs.text(sp, "keywords") for _, sp in sorted(packs.PACKS.items())
+                    if packs.text(sp, "keywords"))
     return (
         "START HERE for any question about " + (kws or "this platform's domains") + ". "
         "ANSWER IT FROM GOVERNED EVIDENCE, NOT A WEB SEARCH: this platform computes the "

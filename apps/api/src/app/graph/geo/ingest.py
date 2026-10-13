@@ -247,12 +247,15 @@ def _search(place):
     return results
 
 
+_COUNTRY_TRIED: dict = {}      # adir -> when the reverse geocode was last attempted
+
+
 def _reverse_country(lon, lat):
     """The country at a point, from Nominatim's reverse geocoder (English), or None
     when it cannot be had — a declared-coverage test that cannot run is skipped,
     never guessed."""
     try:
-        r = requests.get(f"{NOMINATIM}/reverse", headers=HEADERS, timeout=15, params={
+        r = requests.get(f"{NOMINATIM}/reverse", headers=HEADERS, timeout=8, params={
             "lat": lat, "lon": lon, "format": "json", "zoom": 3, "accept-language": "en"})
         r.raise_for_status()
         d = r.json() or {}
@@ -580,9 +583,12 @@ def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=N
     from . import vectors as _vectors
     visible = _vectors.visible()
     # The area's country, asked once (reverse geocode of the centroid) and kept in
-    # meta.json — and asked at all only when a contributed layer declares its
-    # countries, because that is the one reader.
-    if any(e.get("countries") for e in visible.values()) and not info.get("country"):
+    # meta.json. Read by every source that declares its countries — a hub's point
+    # layer, a risk-pack feed, a table — so a Thai source is never cited into a
+    # Cambodian answer. A failed lookup is retried after ten minutes, not on every
+    # question, so a geocoder outage costs one timeout per area, not one per call.
+    if not info.get("country") and time.time() - _COUNTRY_TRIED.get(adir, 0.0) > 600:
+        _COUNTRY_TRIED[adir] = time.time()
         c = _reverse_country(boundary.centroid.x, boundary.centroid.y)
         if c:
             info["country"] = c

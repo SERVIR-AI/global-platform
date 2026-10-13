@@ -59,7 +59,7 @@ def validate_manifest(m: dict) -> list[str]:
     return fails
 
 
-def add(manifest: dict, dry_run: bool = False) -> dict:
+def add(manifest: dict, dry_run: bool = False, review: str | None = None) -> dict:
     """Gate then land: validate -> archive the file + sha -> write the feed row."""
     from ..config import get_settings
 
@@ -101,6 +101,7 @@ def add(manifest: dict, dry_run: bool = False) -> dict:
             # Which domain pack may cite it. Without this every contributed table
             # defaulted to food-security and could never enter a risk answer.
             "pack": manifest.get("pack", "food-security"),
+            **({"review": review} if review else {}),
             **({"usage_notes": manifest["usage_notes"]}
                if manifest.get("usage_notes") else {}),
             # The marker remove-feed keys on: only rows the gate wrote are

@@ -75,7 +75,7 @@ def _validate_document(manifest) -> list[str]:
 
 def _document_meta(m: dict) -> dict:
     meta = {k: m[k] for k in ("source", "title", "pub_date", "temporal", "validation", "url")}
-    meta |= {k: m[k] for k in ("event", "countries", "crops", "doc_type", "usage_notes")
+    meta |= {k: m[k] for k in ("event", "countries", "crops", "doc_type", "usage_notes", "review")
              if m.get(k)}
     return meta
 
@@ -142,6 +142,9 @@ def _land_document(rec: dict) -> dict:
         fname = m.get("filename") or fname
     text = docloader.extract_text(raw, fname)
     meta = _document_meta(m)
+    note = _review_note(rec, "document")
+    if note:
+        meta["review"] = note
     out = corpus.ingest(text, meta, raw=raw, filename=fname, replace_staged=True)
     if out["doc_id"] != doc_id:
         raise Declined(f"re-extraction produced doc_id {out['doc_id']}, not the staged "
@@ -210,7 +213,7 @@ def _validate_table(manifest) -> list[str]:
     if not isinstance(manifest, dict):
         return ["manifest must be a mapping of provenance fields"]
     m = dict(manifest)
-    problems = []
+    problems = _pack_binding_problems(m.get("pack"), "table")
     if m.pop("file", None):
         problems.append("'file' is not accepted over the MCP — the platform cannot read "
                         "your disk; paste the table as csv_text or give a url")
@@ -321,7 +324,7 @@ def _land_table(rec: dict) -> dict:
     preview = rec["preview"]
     manifest = {**{k: v for k, v in rec["manifest"].items() if k not in ("csv_text", "url")},
                 "file": preview["staged_copy"]}
-    out = tables.add(manifest)
+    out = tables.add(manifest, review=_review_note(rec, "table"))
     if out["status"] == "declined":
         raise Declined("; ".join(out["failures"]))
     registry.reload_declarative_feeds()
@@ -468,12 +471,36 @@ _FEED_ADAPTERS = ("generic_table", "generic_json")
 _FEED_KNOWN = set(FEED_FIELDS["required"]) | set(FEED_FIELDS["optional"])
 
 
+def _pack_binding_problems(pack, noun: str) -> list[str]:
+    """`pack` names who may cite this source. Checked against the packs that exist
+    AND cite sources: a feed bound to 'land-cover', to a contributed pack id, or to
+    a typo ('Risk') used to stage, land, report live=true — and never be cited by
+    anyone, with nothing saying why."""
+    from ..mcp import packs as _packs
+    pk = str(pack or "food-security").strip()
+    citing = sorted(p for p, sp in _packs.PACKS.items() if sp.get("cites_sources"))
+    if pk not in _packs.PACKS:
+        return [f"unknown pack {pk!r} — one of: {', '.join(citing)}"]
+    if pk not in citing:
+        return [f"the {pk} pack cites no feeds or tables, so this {noun} would land and never "
+                f"be read — bind it to one of: {', '.join(citing)}"]
+    return []
+
+
+def _review_note(rec: dict, noun: str) -> str | None:
+    """The sentence an auto-approved contribution carries into every citation built
+    on it. It used to be written for point layers only; an auto-approved hazard
+    raster, table, feed, document or recipe cited with the same passport as a
+    reviewed one."""
+    return f"auto-approved — no human reviewed this {noun}" if rec.get("auto_approved") else None
+
+
 def _validate_feed(manifest) -> list[str]:
     from . import feedspecs
     if not isinstance(manifest, dict):
         return ["manifest must be a mapping of feed settings"]
     m = dict(manifest)
-    problems = []
+    problems = _pack_binding_problems(m.get("pack"), "feed")
     if m.pop("file", None) or (isinstance(m.get("fetch"), dict) and m["fetch"].get("path")):
         problems.append("a feed reads an upstream URL; for a file you have, contribute it as a "
                         "table (kind table, csv_text or url)")
@@ -555,7 +582,8 @@ def _land_feed(rec: dict) -> dict:
     taken = _table_name_taken(m["dataset"]) if m["dataset"] not in STAGED_FEEDS else None
     if taken:
         raise Declined(taken)
-    spec = {**m, "contributed": True}
+    note = _review_note(rec, "feed")
+    spec = {**m, "contributed": True, **({"review": note} if note else {})}
     path = get_settings().feeds_conf_dir / f"{m['dataset']}.yml"
     if path.exists():
         raise Declined(f"{path.name} already exists — contributions never overwrite")
@@ -728,7 +756,7 @@ def _land_raster(rec: dict) -> dict:
     manifest = {**{k: v for k, v in m.items() if k != "url"}, "file": preview["staged_file"]}
     _ensure_staged_loaded()
     STAGED_RASTERS.pop(m["layer"], None)          # so the gate's own taken-check sees the catalog only
-    out = rasters.add(manifest)
+    out = rasters.add(manifest, review=_review_note(rec, "layer"))
     if out["status"] == "declined":
         STAGED_RASTERS[m["layer"]] = {"entry": preview["entry"], "contract": preview["contract"]}
         raise Declined("; ".join(out["failures"]))
@@ -964,6 +992,7 @@ def _land_weights(rec: dict) -> dict:
         "by": rec["contributor_label"], "contribution_id": rec["contribution_id"],
         "rationale": rec["manifest"].get("rationale"),
         "replaced": pv["before"],
+        **({"review": _review_note(rec, "recipe")} if rec.get("auto_approved") else {}),
         **({"usage_notes": rec["manifest"]["usage_notes"]}
            if rec["manifest"].get("usage_notes") else {})}
     path.write_text(

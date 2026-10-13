@@ -196,7 +196,8 @@ def _weights_provenance(hz) -> str:
     if not adj:
         return ("The weights are platform starting values, not calibrated against "
                 "observed loss.")
-    bits = [f"These weights were adjusted by {adj.get('by', 'a contributor')} and "
+    bits = [(f"Review: {adj['review']}. " if adj.get("review") else "")
+            + f"These weights were adjusted by {adj.get('by', 'a contributor')} and "
             f"approved through the contribution gate, replacing the platform defaults "
             f"{adj.get('replaced')}."]
     if adj.get("rationale"):
@@ -228,7 +229,7 @@ def _feed_speaks_to(spec: dict, hazard: str) -> bool:
     return base.lower() in names or str(hazard).lower() in names
 
 
-def _pack_feeds(place, trace, gaps, hazard=None):
+def _pack_feeds(place, trace, gaps, hazard=None, country=None):
     """Every feed bound to the risk pack, queried and returned with its passport.
 
     The risk gatherer read no feeds at all, so a contributed table or API feed could
@@ -244,10 +245,17 @@ def _pack_feeds(place, trace, gaps, hazard=None):
                      if k not in rows})
     except Exception:
         pass
-    out, off_topic = [], []
+    from ..graph.geo import vectors as _vectors
+    out, off_topic, off_country = [], [], []
     for ds in sorted(rows):
         if hazard and not _feed_speaks_to(rows[ds], hazard):
             off_topic.append(ds)
+            continue
+        # A source that declares its countries is cited only where it speaks. The
+        # field text promised this; a Thai gauge was being cited into every
+        # Cambodian and Philippine flood brief regardless.
+        if not _vectors.country_matches(rows[ds].get("countries"), country):
+            off_country.append(ds)
             continue
         res = feeds.query(ds, {"limit": 3})
         if res.get("status") != "ok":
@@ -261,6 +269,11 @@ def _pack_feeds(place, trace, gaps, hazard=None):
         gaps.append(f"{len(off_topic)} feed(s) bound to this pack were NOT cited "
                     f"because they declare other hazards ({', '.join(off_topic)}). "
                     "They are available through feeds_query if you want them.")
+    if off_country:
+        trace.append(f"feeds[skipped:{','.join(off_country)}] declare other countries")
+        gaps.append(f"{len(off_country)} feed(s) bound to this pack were NOT cited "
+                    f"because they declare other countries than {country} "
+                    f"({', '.join(off_country)}). They are available through feeds_query.")
     return out
 
 
@@ -363,6 +376,7 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
             "pub_date": m.get("pub_date"), "validation": m.get("validation"),
             "temporal": m.get("temporal"), "url": m.get("url"), "score": h["score"],
             "doc_id": h["doc_id"], "chunk_id": h["id"],
+            **({"review_status": m["review"]} if m.get("review") else {}),
             "archived_copy": (f"/api/rag/{RISK_CORPUS}/document/{h['doc_id']}"
                               if corpus and corpus.raw_path(h["doc_id"]) else None),
             "usage_notes": m.get("usage_notes"),
@@ -373,7 +387,7 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
         trace.append(f"documents[{len(doc_hits)}] cited")
 
     # --- feeds bound to this pack --------------------------------------------
-    for ds, spec, res in _pack_feeds(place, trace, gaps, hazard=hz):
+    for ds, spec, res in _pack_feeds(place, trace, gaps, hazard=hz, country=aoi.get("country")):
         records = res.get("records") or []
         pp = res.get("passport") or {}
         n += 1
@@ -412,7 +426,9 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
             **({"staged_by": spec["staged_by"],
                 "contribution_id": spec.get("contribution_id")}
                if spec.get("staged_by") else {}),
+            **({"review_status": spec["review"]} if spec.get("review") else {}),
             "text": (body + f"{res.get('summary', '')}"
+                     + (f" Review: {spec['review']}." if spec.get("review") else "")
                      + (f" Contributor guidance: {spec['usage_notes']}"
                         if spec.get("usage_notes") else "")),
         })
@@ -526,6 +542,7 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
         cit = {
             "n": n, "kind": "exposure", "retrieval": "computed-at-pack-time",
             "source": ent.get("source") or r["source"],
+            **({"review_status": ent["review"]} if ent.get("review") else {}),
             "title": f"people ({ent.get('title') or layer}) vs {hz}",
             "pub_date": ent.get("vintage"),
             "validation": "deterministic-computation",
@@ -672,7 +689,8 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
             vuln_bits.append(
                 f"{lay} ({m.get('title') or 'no title recorded'}; source "
                 f"{m.get('source') or 'unattributed'}; licence {m.get('license') or 'unstated'}; "
-                f"vintage {m.get('vintage') or 'unrecorded'})")
+                f"vintage {m.get('vintage') or 'unrecorded'}"
+                + (f"; review: {m['review']}" if m.get("review") else "") + ")")
         covered, absent, outside = combine.families_covered(risk_weights)
         n_fam = len(combine.indicator_families())
         citations.append({
@@ -729,6 +747,8 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
             f"{obs.get('sampled_distinct')} distinct values (sampled).")
     if meta.get("usage_notes"):
         passport_bits.append(f"Contributor guidance: {meta['usage_notes']}")
+    if meta.get("review"):
+        passport_bits.append(f"Review: {meta['review']}.")
     passport_bits.append("Legend: "
                          + "; ".join(f"{k}={v}" for k, v in sorted(legend.items())))
     # "checked" must mean CHECKED: compare declared vs observed, never co-print

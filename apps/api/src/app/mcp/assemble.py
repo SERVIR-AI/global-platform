@@ -25,7 +25,8 @@ def assemble(country: str | None = None, crop: str | None = None,
              geometry: dict | None = None,
              map_layer: str | None = None,
              year: int | str | None = None, year_to: int | str | None = None,
-             classes: list[str] | None = None) -> dict:
+             classes: list[str] | None = None,
+             stack: str | None = None) -> dict:
     """Gather one pack's evidence into a numbered, gap-declaring pack; mint and
     persist a pack_id. Back-compat: bare (country, crop) calls stay food-security,
     and FS packs keep top-level country/crop keys — Desktop configs and the embed
@@ -38,7 +39,8 @@ def assemble(country: str | None = None, crop: str | None = None,
               "min_severity": min_severity,
               "year": str(year).strip() if year not in (None, "") else "",
               "year_to": str(year_to).strip() if year_to not in (None, "") else "",
-              "classes": list(classes) if classes else []}
+              "classes": list(classes) if classes else [],
+              "stack": (stack or "").strip()}
     pack_id_name = packs.infer(pack, **params)
     if pack_id_name is None or pack_id_name not in packs.PACKS:
         return {"status": "declined",

@@ -85,25 +85,45 @@ def landcover_stacks():
     return {k: v for k, v in stacks.rows().items() if v.get("role") == ROLE}
 
 
-def _pick_stack(boundary):
-    """The registered land-cover stack whose footprint holds the area."""
+def _pick_stack(boundary, wanted=None):
+    """(stack_id, row, others): the registered land-cover stack to read for this
+    area, and every OTHER registered stack that also covers it. The first
+    registered covering stack is read unless the caller names one (`stack`); the
+    others are declared as a gap, never silently ignored. It used to return the
+    first match and say nothing: a hub's national 10 m stack over Nepal would have
+    sat unread beside the 30 m regional one, with no answer ever mentioning it."""
     rows = landcover_stacks()
     if not rows:
         raise ValueError("no land-cover stack is registered on this platform — a hub "
                          "contributes one as a `kind: stack` catalog row")
     minx, miny, maxx, maxy = boundary.bounds
+    covering = []
     for sid, row in rows.items():
         ext = row.get("extent") or {}
         lon, lat = ext.get("lon"), ext.get("lat")
-        if not lon or not lat:
-            return sid, row
-        if maxx >= lon[0] and minx <= lon[1] and maxy >= lat[0] and miny <= lat[1]:
-            return sid, row
-    sid, row = next(iter(rows.items()))
-    ext = row.get("extent") or {}
-    raise ValueError(
-        f"this area lies outside every registered land-cover stack — {row.get('title', sid)} "
-        f"covers lon {ext.get('lon')} and lat {ext.get('lat')}; nothing can be counted there")
+        if not lon or not lat:           # extent undeclared: cannot rule it out
+            covering.append((sid, row))
+        elif maxx >= lon[0] and minx <= lon[1] and maxy >= lat[0] and miny <= lat[1]:
+            covering.append((sid, row))
+    if wanted:
+        w = str(wanted).strip()
+        if w not in rows:
+            raise ValueError(f"no land-cover stack named {w!r} is registered — one of: "
+                             + ", ".join(sorted(rows)))
+        if w not in {sid for sid, _ in covering}:
+            raise ValueError(f"{rows[w].get('title', w)} ({w}) does not cover this area; "
+                             "covering stacks: "
+                             + (", ".join(sid for sid, _ in covering) or "none"))
+        others = [(sid, row) for sid, row in covering if sid != w]
+        return w, rows[w], others
+    if not covering:
+        sid, row = next(iter(rows.items()))
+        ext = row.get("extent") or {}
+        raise ValueError(
+            f"this area lies outside every registered land-cover stack — {row.get('title', sid)} "
+            f"covers lon {ext.get('lon')} and lat {ext.get('lat')}; nothing can be counted there")
+    sid, row = covering[0]
+    return sid, row, covering[1:]
 
 
 _BOUNDARY_OK = ("admin boundary", "protected-area boundary", "supplied polygon", "drawn")
@@ -420,7 +440,7 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
 
     aoi, boundary, how = _resolve_aoi(place, extras, trace)
     name = aoi.get("name", place)
-    sid, row = _pick_stack(boundary)
+    sid, row, other_stacks = _pick_stack(boundary, wanted=target.get("stack"))
     legend, outside, colors = _legend(row), _outside(row), None
     colors = _colors(row, legend)
     source = f"{row.get('source', sid)} (platform computation)"
@@ -447,6 +467,11 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
             "the mapped footprint — this product does not cover it, so no class area exists to report")
 
     citations, gaps = [], list(STANDING_GAPS)
+    if other_stacks:
+        gaps.append(f"{len(other_stacks)} other registered land-cover stack(s) also cover "
+                    f"{name}: " + "; ".join(f"{r.get('title', s)} ({s})" for s, r in other_stacks)
+                    + f". This answer reads {row.get('title', sid)} ({sid}); pass stack=<id> "
+                    "to read another.")
     n = 1
     citations.append(_class_area_citation(n, name, year, row, st, level, source))
     legend_entries = {str(k): {"label": v, "color": colors[k]} for k, v in legend.items()}

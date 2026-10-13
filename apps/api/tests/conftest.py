@@ -89,6 +89,13 @@ def make_client():
 
 
 @pytest.fixture(autouse=True)
+def _no_reverse_geocode(monkeypatch):
+    """ensure_aoi asks Nominatim for an area's country once; the suite never does."""
+    from app.graph.geo import ingest
+    monkeypatch.setattr(ingest, "_reverse_country", lambda lon, lat: None)
+
+
+@pytest.fixture(autouse=True)
 def _redirect_traces(tmp_path, monkeypatch):
     """Keep trace writes out of the repo's cache/ during tests."""
     monkeypatch.setattr(get_settings(), "traces_dir", tmp_path / "traces")

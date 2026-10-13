@@ -80,6 +80,16 @@ def _country_key(name) -> str:
     return _COUNTRY_ALIASES.get(k, k)
 
 
+def country_matches(declared, country) -> bool:
+    """Does a source that declares `declared` countries speak to `country`? Either
+    side unknown -> yes (global as far as the platform knows). Names are matched
+    forgivingly (Viet Nam / Vietnam, Lao PDR / Laos, "Kingdom of ...")."""
+    names = [str(c) for c in (declared or []) if str(c).strip()]
+    if not country or not names:
+        return True
+    return _country_key(country) in {_country_key(c) for c in names}
+
+
 def not_applicable(entry: dict, boundary, country: str | None = None) -> dict | None:
     """Why a layer must NOT be clipped into this area, or None when it covers it.
 
@@ -101,7 +111,7 @@ def not_applicable(entry: dict, boundary, country: str | None = None) -> dict | 
             return {"reason": f"its points lie wholly outside this area (the layer covers {where})",
                     "covers": where, "bbox": list(bbox), "countries": entry.get("countries")}
     declared = [str(c) for c in (entry.get("countries") or []) if str(c).strip()]
-    if country and declared and _country_key(country) not in {_country_key(c) for c in declared}:
+    if not country_matches(declared, country):
         where = ", ".join(declared)
         return {"reason": f"it declares {where} and this area is in {country}",
                 "covers": where, "bbox": list(bbox) if bbox else None, "countries": declared,

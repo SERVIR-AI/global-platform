@@ -163,15 +163,16 @@ def after_record(receipt_id: str) -> dict:
 # that on a plain question: corpus_search, then a confident answer written straight
 # from the passages, with no pack, no gate and no receipt. The lookup tools are
 # legitimate on their own, so this is a route in, not a demand.
+from . import packs as _packs   # the target shapes below are generated from the pack rows
+
 ENTRY_HINT = {
     "note": ("These are raw lookup results — evidence, not a governed answer. If you "
              "are answering a user's question with them, go through the loop instead: "
              "assemble_pack gathers the pack's full evidence with its declared gaps "
-             "(food security: country + crop; hazard risk: place + hazard; land cover: "
-             "place + year [+ year_to, classes]), and it mints the pack_id that "
+             "(" + _packs.target_shapes_long() + "), and it mints the pack_id that "
              "publish_answer needs to gate and receipt your brief."),
     "call": {"tool": "assemble_pack",
-             "args": {"<the pack's target params, e.g.>": "country+crop | place+hazard | place+year",
+             "args": {"<the pack's target params, e.g.>": _packs.target_shapes(),
                       "focus": "<what the user actually asked>"}},
 }
 

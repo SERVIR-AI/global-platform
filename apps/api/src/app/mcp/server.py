@@ -61,8 +61,20 @@ def _domains_line() -> str:
     """One clause per domain pack, read from the registry so a new pack introduces
     itself at connect time with no edit here."""
     from . import packs as _packs
-    parts = [sp["summary"] for _, sp in sorted(_packs.PACKS.items()) if sp.get("summary")]
+    parts = [_packs.text(sp, "summary") for _, sp in sorted(_packs.PACKS.items())
+             if _packs.text(sp, "summary")]
     return "; ".join(parts) if parts else "food-security decision support"
+
+
+def _domain_count() -> str:
+    from . import packs as _packs
+    n = len(_packs.PACKS)
+    return {1: "one", 2: "two", 3: "three", 4: "four", 5: "five"}.get(n, str(n))
+
+
+def _target_shapes(sep: str = " | ") -> str:
+    from . import packs as _packs
+    return _packs.target_shapes(sep)
 
 
 def _audiences_line() -> str:
@@ -73,12 +85,12 @@ def _audiences_line() -> str:
 
 
 INSTRUCTIONS = f"""The Global Risk Platform — a GOVERNED TOOLKIT for decision support across \
-three domains, not a chatbot: {_domains_line()}. Every insight carries its evidence; \
+{_domain_count()} domains, not a chatbot: {_domains_line()}. Every insight carries its evidence; \
 declines say why; answers are replayable; a groundedness gate blocks ungrounded briefs.
 
 WHEN A QUESTION IS ABOUT ONE OF THESE DOMAINS, THIS PLATFORM ANSWERS IT: call \
-`assemble_pack` FIRST, with the pack's target (country+crop, place+hazard, or \
-place+year). Do not web-search for figures this platform computes — a web search \
+`assemble_pack` FIRST, with the pack's target ({_target_shapes(", ")}). Do not \
+web-search for figures this platform computes — a web search \
 returns prose of unknown provenance; the pack returns computed, cited, replayable \
 evidence and the exact section headers your brief must use.
 
@@ -137,8 +149,8 @@ Never paint "verified"/"passed" into an artifact. Show it through `ui_embed`, wh
 re-resolves live against the platform, or state it as UNVERIFIED and link the \
 receipt resolver (rule 5).
 
-Canonical loop, THREE steps: assemble_pack(<the pack's target: country+crop, \
-place+hazard, or place+year>) -> YOUR LLM drafts a \
+Canonical loop, THREE steps: assemble_pack(<the pack's target: {_target_shapes(", ")}>) \
+-> YOUR LLM drafts a \
 brief from the pack, citing [n] in the pack's required_sections -> \
 publish_answer(pack_id, draft, question), which gates the draft, mints the receipt \
 and returns the evidence view in one call. NEVER show the user a brief that has not \
@@ -233,7 +245,8 @@ def assemble_pack(country: str | None = None, crop: str | None = None,
                   geometry: dict | None = None,
                   map_layer: str | None = None,
                   year: int | str | None = None, year_to: int | str | None = None,
-                  classes: list[str] | None = None) -> dict:
+                  classes: list[str] | None = None,
+                  stack: str | None = None) -> dict:
     """Assembles a deterministic, citable EVIDENCE PACK for one domain pack's target
     (country/crop; place/hazard; place/year) and mints a `pack_id`. For the risk and
     land-cover packs, pass `geometry` (a GeoJSON Polygon/MultiPolygon in EPSG:4326, or a
@@ -245,7 +258,8 @@ def assemble_pack(country: str | None = None, crop: str | None = None,
     coordinates, hazard class, risk level — are in `stats.assets`.
     Without it, `place` is geocoded. Land cover: `year` picks the map; add `year_to` for
     change and transitions between two mapped years, and `classes` to detail named
-    classes. This is the hand-off seam of the platform: YOUR LLM writes the
+    classes; `stack` picks a registered stack when more than one covers the place
+    (the pack's gaps name the alternatives). This is the hand-off seam of the platform: YOUR LLM writes the
     brief from this pack (cite the numbered items as [n]), then calls
     verify_groundedness(draft, pack_id) to gate it. No LLM runs inside this tool.
 
@@ -260,7 +274,7 @@ def assemble_pack(country: str | None = None, crop: str | None = None,
     will demand — draft those exact section headers so the gate passes in one shot.
     status "declined" -> `note` (missing key / torn corpus / bad override).
     """
-    return assemble.assemble(geometry=geometry, map_layer=map_layer, country=country, crop=crop, focus=focus, pack=pack,
+    return assemble.assemble(geometry=geometry, map_layer=map_layer, stack=stack, country=country, crop=crop, focus=focus, pack=pack,
                              place=place, hazard=hazard, min_severity=min_severity,
                              override=override, override_country=override_country,
                              override_crop=override_crop,
@@ -568,7 +582,7 @@ Ask a question. The assistant runs the loop and returns a grounded, cited brief.
 
 ## The canonical loop (what a good answer does)
 platform_capabilities (scope honestly) → assemble_pack(the pack's target:
-country+crop | place+hazard | place+year) → your LLM
+one pack's target params — platform_capabilities lists them) → your LLM
 drafts a brief from the pack citing [n] in its required_sections →
 verify_groundedness(draft, pack_id) → publish only if it passes →
 record_receipt mints a replayable receipt.
@@ -588,8 +602,8 @@ def build_a_tool(goal: str = "a bulletin generator for one of the platform's dom
             "as SOURCE FILES IN MY PROJECT that I can run, version and deploy — not a "
             "hosted preview. Do NOT just run the pipeline once in chat. Follow the "
             "canonical loop: call platform_capabilities first (scope honestly, surface "
-            "declared gaps), assemble_pack with the pack's target (country+crop, "
-            "place+hazard or place+year), have the tool's own LLM draft "
+            "declared gaps), assemble_pack with the pack's target (" + _target_shapes(", ")
+            + "), have the tool's own LLM draft "
             "a brief from the pack citing [n] in the pack's required_sections, then "
             "verify_groundedness(draft, pack_id) and publish ONLY if it passes. "
             "INSTRUMENT IT: read servirplatform://skill/trace-emit first and make every "

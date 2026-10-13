@@ -86,6 +86,165 @@ def _is_synthetic(row: dict) -> bool:
     return "synthetic" in blob or "demonstration layer" in blob
 
 
+def text(spec: dict, key: str) -> str:
+    """A pack row's text field, which may be a callable that reads live state —
+    the catalog, the registry, the library — so the sentence a consumer model
+    routes on names what the platform holds TODAY, not what it held the day the
+    row was typed. Hand-typed summaries never advertised the seven return-period
+    flood layers, flash flood, a contributed hazard, or any country a hub added
+    documents for."""
+    v = spec.get(key)
+    if callable(v):
+        try:
+            return str(v() or "")
+        except Exception:
+            return ""
+    return str(v or "")
+
+
+def _risk_hazard_words() -> str:
+    """The hazards the catalog serves, in words: return-period floods collapsed to
+    one clause, synthetic demonstration layers left out."""
+    import re
+    from ..graph.geo import tiffs
+    try:
+        cat = tiffs.catalog()
+    except Exception:
+        return "mapped hazards"
+    stems, rps = [], []
+    for k, row in cat.items():
+        if not k.startswith("hazard_") or (row or {}).get("internal") or _is_synthetic(row or {}):
+            continue
+        stem = k[len("hazard_"):]
+        m = re.match(r"^(.*)_rp(\d+)$", stem)
+        if m:
+            rps.append((m.group(1), int(m.group(2))))
+            continue
+        if stem not in stems:
+            stems.append(stem)
+    words = list(stems)
+    by_base: dict = {}
+    for base, n in rps:
+        by_base.setdefault(base, []).append(n)
+    for base, ns in by_base.items():
+        words.append(f"{base} at {min(ns)}- to {max(ns)}-year return periods")
+    return ", ".join(words) if words else "mapped hazards"
+
+
+def _risk_asset_words() -> str:
+    """What can be counted under a hazard: people when a count grid is landed, the
+    built-in OSM classes, and every contributed point layer by its title."""
+    from ..graph.geo import registry as geo_registry, tiffs, vectors
+    words = []
+    try:
+        if any(k.startswith("population_") for k in tiffs.catalog()):
+            words.append("people")
+    except Exception:
+        pass
+    words += ["roads", "schools", "hospitals", "buildings"]
+    try:
+        vis = vectors.visible()
+        for layer in geo_registry.countable():
+            if layer in vis:
+                words.append(str(vis[layer].get("title") or layer).lower())
+    except Exception:
+        pass
+    return ", ".join(words[:-1]) + " and " + words[-1]
+
+
+def _risk_summary() -> str:
+    return (f"HAZARD RISK — {_risk_asset_words()} exposed to a mapped hazard ({_risk_hazard_words()}) "
+            "for any place in Southeast Asia, plus vulnerability-weighted risk levels")
+
+
+def _risk_keywords() -> str:
+    return (f"hazard exposure and risk: {_risk_asset_words()} in {_risk_hazard_words()} zones "
+            "(Southeast Asia)")
+
+
+def _fs_coverage() -> tuple[str, str]:
+    from . import registry
+    try:
+        c = registry.coverage()
+    except Exception:
+        c = {}
+    crops = ", ".join(c.get("crops") or []) or "crop"
+    where = " and ".join(c.get("countries") or []) or "the countries hubs contribute documents for"
+    return crops, where
+
+
+def _fs_summary() -> str:
+    crops, where = _fs_coverage()
+    return (f"FOOD SECURITY — {crops} outlooks for {where} and the climate drivers behind them "
+            "(ENSO, IOD, live indices, a governed document library)")
+
+
+def _fs_keywords() -> str:
+    crops, where = _fs_coverage()
+    return f"food security, {crops} outlooks, El Niño / ENSO and IOD drivers ({where})"
+
+
+def _lc_stacks_words() -> tuple[str, str]:
+    """(classes, where) from the registered stacks' legends, titles and years."""
+    try:
+        from ..land_cover.synthesis import landcover_stacks
+        from ..graph.geo import stacks as _stacks
+        rows = landcover_stacks()
+    except Exception:
+        rows = {}
+    if not rows:
+        return "land-cover classes", "no land-cover stack is registered yet"
+    classes, where = [], []
+    for sid, row in rows.items():
+        for _k, label in sorted(((int(k), v) for k, v in (row.get("legend") or {}).items()),
+                                key=lambda kv: kv[0]):
+            lab = str(label).lower()
+            if lab not in classes:
+                classes.append(lab)
+        try:
+            ys = _stacks.years(row)
+            span = f"{min(ys)}-{max(ys)}" if ys else ""
+        except Exception:
+            span = ""
+        where.append(f"{row.get('title') or sid}" + (f", {span}" if span else ""))
+    return ", ".join(classes), "; ".join(where)
+
+
+def _lc_summary() -> str:
+    classes, where = _lc_stacks_words()
+    return (f"LAND COVER — how much of a district, province, park or country is {classes} in a "
+            f"mapped year; change and transitions between years; fire detections by class; "
+            f"today over {where}")
+
+
+def _lc_keywords() -> str:
+    classes, where = _lc_stacks_words()
+    return (f"land cover: {classes}, land-cover change, deforestation and forest gain, "
+            f"fire detections ({where})")
+
+
+def target_shapes(sep: str = " | ") -> str:
+    """'country+crop | place+hazard | place+year' — generated from every pack's
+    required target keys, so a fourth pack appears without an edit."""
+    parts = []
+    for _pid, sp in PACKS.items():          # declaration order: the order the packs introduce themselves
+        req = [k for k in sp["target_keys"] if k not in sp.get("optional_keys", ())]
+        parts.append("+".join(req))
+    return sep.join(parts)
+
+
+def target_shapes_long() -> str:
+    """'food security: country + crop; risk: place + hazard; land cover: place + year
+    [+ year_to, classes, stack]' — generated."""
+    parts = []
+    for _pid, sp in PACKS.items():
+        req = [k for k in sp["target_keys"] if k not in sp.get("optional_keys", ())]
+        opt = [k for k in sp["target_keys"] if k in sp.get("optional_keys", ())]
+        parts.append(f"{sp.get('display_name', _pid).replace(' Platform', '').lower()}: "
+                     + " + ".join(req) + (f" [+ {', '.join(opt)}]" if opt else ""))
+    return "; ".join(parts)
+
+
 def _vulnerability_coverage_line() -> str:
     """How much of the regional indicator scheme the recipes in force represent —
     read from the recipe, so a hub's wider recipe changes this sentence."""
@@ -169,10 +328,10 @@ PACKS: dict[str, dict] = {
         "gather": _gather_food_security,
         "sections": _fs_sections,
         "corpus": "food-security",
-        "summary": ("FOOD SECURITY — maize outlooks for Kenya and Zambia and the climate "
-                    "drivers behind them (ENSO, IOD, live indices, a governed document library)"),
+        "cites_sources": ("feeds", "tables"),
+        "summary": lambda: _fs_summary(),
         "audience": "food-security analysts, hub teams and ministry advisors deciding whether to act months ahead",
-        "keywords": "food security, maize outlooks, El Niño / ENSO and IOD drivers (Kenya, Zambia)",
+        "keywords": lambda: _fs_keywords(),
         "default_focus": lambda t: f"{t.get('country', '')} {t.get('crop', '')}".strip(),
         "doctor_target": {"country": "kenya", "crop": "maize"},
     },
@@ -189,13 +348,10 @@ PACKS: dict[str, dict] = {
         # any technical limit. Named, so the same contribution path works for both.
         "corpus": "risk",
         "manifest": _risk_manifest,
-        "summary": ("HAZARD RISK — people, roads, schools, hospitals and buildings exposed to a "
-                    "mapped hazard (flood, drought, fire, cyclone, earthquake, landslide, storm, "
-                    "tsunami) for any place in Southeast Asia, plus vulnerability-weighted risk levels"),
+        "cites_sources": ("feeds", "tables"),
+        "summary": lambda: _risk_summary(),
         "audience": "disaster-risk and preparedness planners and the hubs that support them",
-        "keywords": ("hazard exposure and risk: people, roads, schools, hospitals, buildings in "
-                     "flood, drought, fire, cyclone, earthquake, landslide, storm or tsunami zones "
-                     "(Southeast Asia)"),
+        "keywords": lambda: _risk_keywords(),
         "default_focus": lambda t: f"{t.get('hazard', '')} exposure in {t.get('place', '')}".strip(),
         "doctor_target": {"place": "battambang", "hazard": "flood"},
     },
@@ -204,26 +360,22 @@ PACKS: dict[str, dict] = {
         "version": "v0",
         # `year` is required: without it a bare `place` would satisfy this pack too
         # and every risk call without a hazard would become ambiguous.
-        "target_keys": ("place", "year", "year_to", "classes"),
-        "optional_keys": ("year_to", "classes"),
+        "target_keys": ("place", "year", "year_to", "classes", "stack"),
+        "optional_keys": ("year_to", "classes", "stack"),
         "target_doc": {"place": "district, province or park name inside a registered "
                                 "land-cover stack's footprint (or pass geometry; place is then its label)",
                        "year": "a mapped year, e.g. 2022",
                        "year_to": "optional later year — adds change and transitions",
-                       "classes": "optional class names to detail, e.g. [\"Forest\"]"},
+                       "classes": "optional class names to detail, e.g. [\"Forest\"]",
+                       "stack": "optional: which registered stack to read when more than one "
+                                "covers the place (the pack names the alternatives in its gaps)"},
         "gather": _gather_land_cover,
         "sections": _lc_sections,
         "corpus": "land-cover",
         "manifest": _lc_manifest,
-        "summary": ("LAND COVER — how much of a district, province, park or country is forest, "
-                    "cropland, grassland, built-up, water, snow, rock or bare soil in a mapped "
-                    "year; change and transitions between years; fire detections by class; "
-                    "today over the Hindu Kush Himalaya (Nepal, Bhutan, northern India and "
-                    "Pakistan, Afghanistan, Bangladesh, Myanmar, south-west China), 2000-2022"),
+        "summary": lambda: _lc_summary(),
         "audience": "foresters, land-use and conservation planners, and the hubs that map land cover",
-        "keywords": ("land cover: forest, cropland, grassland, built-up area, water, snow, bare "
-                     "land, land-cover change, deforestation and forest gain, fire detections "
-                     "(Hindu Kush Himalaya 2000-2022)"),
+        "keywords": lambda: _lc_keywords(),
         "subjects": ["land cover by class", "forest, cropland, grassland and built-up change "
                      "between mapped years"],
         "where": ["the Hindu Kush Himalaya (Afghanistan, Pakistan, India, Nepal, Bhutan, "

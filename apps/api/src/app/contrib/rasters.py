@@ -90,7 +90,7 @@ def validate_manifest(m: dict) -> list[str]:
     return fails
 
 
-def add(manifest: dict, dry_run: bool = False) -> dict:
+def add(manifest: dict, dry_run: bool = False, review: str | None = None) -> dict:
     """Gate then land: validate -> verify file against the DECLARED contract ->
     copy into TIFFS_DIR -> append tiffs.yml row + raster_schema.yml contract.
     A mismatch refuses and writes NOTHING."""
@@ -142,6 +142,7 @@ def add(manifest: dict, dry_run: bool = False) -> dict:
            "license": manifest["license"], "vintage": manifest["vintage"],
            **({"usage_notes": manifest["usage_notes"]}
               if manifest.get("usage_notes") else {}),
+           **({"review": review} if review else {}),
            "contributed": True}
     cat[layer] = row
     if decl.get("role") == "landcover":

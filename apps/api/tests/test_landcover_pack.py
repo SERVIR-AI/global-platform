@@ -198,3 +198,26 @@ def test_registry_and_description(lc_env):
     m = registry.pack_manifest("land-cover")
     assert m["id"] == "land-cover" and "landcover_test" in m["sources"]["stacks"]
     assert m["sources"]["stacks"]["landcover_test"]["years_available"] == [2000, 2021, 2022]
+
+
+def test_a_second_covering_stack_is_declared_and_selectable(lc_env, log):
+    """A hub's finer stack over the same footprint used to sit unread behind the
+    first registered one, with no answer ever naming it."""
+    from app.config import get_settings
+    conf = get_settings().tiffs_config_path
+    doc = json.loads(conf.read_text())
+    fine = dict(doc["landcover_test"], title="Fine test land cover (synthetic, 10 m)", years=[2022])
+    doc["landcover_test_fine"] = fine
+    conf.write_text(json.dumps(doc))
+    p = assemble.assemble(place="Test District", year=2022)
+    assert p["status"] == "ok", p.get("note")
+    gap = next(g for g in p["gaps"] if "also cover" in g)
+    log("OUTPUT", gap[:160])
+    assert "Fine test land cover" in gap and "pass stack=<id>" in gap
+    chosen = assemble.assemble(place="Test District", year=2022, stack="landcover_test_fine")
+    assert chosen["status"] == "ok", chosen.get("note")
+    assert "Fine test land cover" in json.dumps(chosen["citations"], ensure_ascii=False)
+    assert any("This answer reads Fine test land cover" in g and "Test land cover (synthetic) (landcover_test)" in g
+               for g in chosen["gaps"])                       # the other one is now the alternative
+    bad = assemble.assemble(place="Test District", year=2022, stack="landcover_mars")
+    assert bad["status"] == "declined" and "landcover_test_fine" in bad["note"]

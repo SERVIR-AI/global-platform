@@ -37,11 +37,27 @@ _PARSE_TOOLS = [{
     },
 }]
 
-_PARSE_SYSTEM = (
-    "You route questions for a food-security briefing service (crop conditions, seasonal "
-    "forecasts, El Nino impacts, food security in East/Southern Africa). If the question is "
-    "in scope, call plan_brief with its crop/country/focus. If out of scope, do not call the "
-    "tool — reply with one sentence saying why you cannot brief on it.")
+def _parse_system() -> str:
+    """The routing prompt, with the library's actual coverage in it. It used to
+    freeze "El Nino impacts, food security in East/Southern Africa": a hub's own
+    Cambodia rice bulletins would have been declined out of scope by the router
+    before the library was read."""
+    from ..mcp import registry
+    try:
+        c = registry.coverage()
+    except Exception:
+        c = {}
+    crops = ", ".join(c.get("crops") or []) or "crops"
+    where = ", ".join(c.get("countries") or []) or "the countries hubs contribute documents for"
+    return (
+        "You route questions for a food-security briefing service: crop conditions, seasonal "
+        "forecasts, climate-driver (ENSO, IOD) impacts and food security. The document library "
+        f"currently holds {crops} in {where}; any crop or country a hub has contributed "
+        "documents for is in scope, and a question about crop conditions or food security "
+        "anywhere is in scope — the evidence pack says what the library lacks. If the question "
+        "is in scope, call plan_brief with its crop/country/focus. If it is not about food "
+        "security or crop conditions at all, do not call the tool — reply with one sentence "
+        "saying why you cannot brief on it.")
 
 SECTIONS = ("## What history says", "## The current signal",
             "## What's missing and how to weigh it", "## Season timing caveat")
@@ -138,7 +154,7 @@ def _usage(resp) -> dict:
 def _parse(client, model, question, trace, usage):
     resp = client.chat.completions.create(
         model=model, max_tokens=300, tools=_PARSE_TOOLS,
-        messages=[{"role": "system", "content": _PARSE_SYSTEM},
+        messages=[{"role": "system", "content": _parse_system()},
                   {"role": "user", "content": question}])
     usage.append(_usage(resp))
     msg = resp.choices[0].message
@@ -236,8 +252,15 @@ def _driver_citations(trace):
         return " | ".join(parts)[:budget]
 
     out, gaps = [], []
-    rows = sorted((n, s) for n, s in registry.FEEDS.items()
-                  if s.get("status") == "available" and s.get("brief_role") == "driver")
+    specs = {n: s for n, s in registry.FEEDS.items()
+             if s.get("status") == "available" and s.get("brief_role") == "driver"}
+    try:          # a contributor's own STAGED driver previews AS a driver, not as a table
+        from ..contrib import staging
+        specs.update({n: s for n, s in staging.visible_staged_feeds_for_pack("food-security").items()
+                      if s.get("brief_role") == "driver" and n not in specs})
+    except Exception:
+        pass
+    rows = sorted(specs.items())
     for name, spec in rows:
         res = feeds.query(name)
         if res.get("status") != "ok":
@@ -268,6 +291,9 @@ def _driver_citations(trace):
         # exactly as it was; this is an addition, not a change to what is cited.
         series = _series(name, res.get("records"))
         out.append({"kind": "index", "brief_role": "driver", "retrieval": "pulled-at-pack-time",
+                    **({"review_status": spec["review"]} if spec.get("review") else {}),
+                    **({"staged_by": spec["staged_by"], "contribution_id": spec.get("contribution_id")}
+                       if spec.get("staged_by") else {}),
                     **({"series": series} if series else {}),
                     "source": spec.get("source"), "title": spec.get("title") or spec.get("description", name),
                     "pub_date": res.get("as_of"), "validation": spec.get("validation"),
@@ -315,6 +341,28 @@ def _series(name: str, records) -> dict | None:
     return out
 
 
+_CONTEXT_ONLY = ("calendar", "index", "gaps")
+
+
+def _has_evidence(citations: list, country: str | None = None) -> bool:
+    """Can these citations carry a brief? Context alone cannot: a calendar, the
+    global driver indices, the gaps entry. A source BOUND to this pack can when
+    it is ABOUT the place asked — a hub's Malawi rainfall table declaring
+    countries [Malawi] is evidence about Malawi — but it shares the `index` kind
+    with the drivers and used to be barred with them, so a fresh library declined
+    "No evidence available" over a country-matching table. A pack source that
+    declares no countries is global as far as the platform knows, and a global
+    table can no more carry a brief about one country than an ocean index can."""
+    from ..graph.geo import vectors as _vectors
+    for c in citations:
+        if c.get("kind") not in _CONTEXT_ONLY:
+            return True
+        if (c.get("brief_role") == "pack-source" and country and c.get("countries")
+                and _vectors.country_matches(c["countries"], country)):
+            return True
+    return False
+
+
 def _source_speaks_to(spec: dict, country: str | None) -> bool:
     """Is this pack-bound source about the country being asked about?
 
@@ -327,12 +375,9 @@ def _source_speaks_to(spec: dict, country: str | None) -> bool:
     A source that declares its countries is filtered on them. One that declares
     none is global as far as the platform knows, so it is still included.
     """
-    if not country:
-        return True
+    from ..graph.geo import vectors as _vectors
     declared = spec.get("countries") or ([spec["country"]] if spec.get("country") else None)
-    if not declared:
-        return True
-    return country.strip().lower() in {str(c).strip().lower() for c in declared}
+    return _vectors.country_matches(declared, country)
 
 
 def _pack_bound_sources(trace, gaps, country=None):
@@ -389,6 +434,7 @@ def _pack_bound_sources(trace, gaps, country=None):
             # different kinds of evidence, and a reader should be able to tell
             # which one they are looking at.
             "brief_role": "pack-source",
+            "countries": spec.get("countries"),
             "source": pp.get("source") or spec.get("source"),
             "title": spec.get("title", ds),
             "validation": pp.get("validation") or spec.get("validation", "unvalidated"),
@@ -396,7 +442,9 @@ def _pack_bound_sources(trace, gaps, country=None):
             **({"staged_by": spec["staged_by"],
                 "contribution_id": spec.get("contribution_id")}
                if spec.get("staged_by") else {}),
+            **({"review_status": spec["review"]} if spec.get("review") else {}),
             "text": body + ". " + (res.get("summary") or "")
+                    + (f" Review: {spec['review']}." if spec.get("review") else "")
                     + (f" Contributor guidance: {spec['usage_notes']}"
                        if spec.get("usage_notes") else ""),
         })
@@ -529,6 +577,7 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
             # cannot see a geography mismatch it is about to write over.
             "countries": m.get("countries"),
             "doc_id": h["doc_id"], "chunk_id": h["id"],
+            **({"review_status": m["review"]} if m.get("review") else {}),
             "archived_copy": (f"/api/food-security/rag/document/{h['doc_id']}"
                               if corpus.raw_path(h["doc_id"]) else None),
             "usage_notes": m.get("usage_notes"),
@@ -956,8 +1005,7 @@ def synthesize(question, provider=None, model=None, calendar=None,
     # they establish the ocean state and nothing about that place. Letting them
     # clear the bar would let the engine answer "maize in Kenya" out of an ENSO
     # index alone, which is exactly the inference the use case forbids in Phase 1.
-    _CONTEXT_ONLY = ("calendar", "index", "gaps")
-    if not any(c["kind"] not in _CONTEXT_ONLY for c in citations):
+    if not _has_evidence(citations, parsed.get("country")):
         trace.append("evidence -> empty; declining without a synthesis call")
         return _declined(
             "No evidence available: " + "; ".join(gaps), trace=trace, usage=usage,

@@ -170,3 +170,90 @@ def test_a_contributed_hazard_can_get_a_recipe(monkeypatch, log):
     assert any("no hazard layer named 'volcano'" in p and "heatdays" in p for p in unknown)
     prepared = staging._prepare_weights({"hazard": "heatdays", "weights": {"vulnerability_pop_all_total": 1.0}})
     assert prepared["before"] == {} and prepared["after"] == {"vulnerability_pop_all_total": 1.0}
+
+
+# ----------------------------------------------------------------- H5: gate vs consumer
+def test_a_feed_or_table_bound_to_a_pack_that_cites_nothing_is_declined(log):
+    for pack, needle in (("land-cover", "cites no feeds or tables"), ("Risk", "unknown pack 'Risk'"),
+                         ("asean-pack", "unknown pack")):
+        f = staging._validate_feed({"dataset": "x", "pack": pack})
+        t = staging._validate_table({"dataset": "x", "pack": pack, "csv_text": "a,b\n1,2"})
+        log("OUTPUT", f"{pack}: {[x for x in f if 'pack' in x][:1]}")
+        assert any(needle in x for x in f) and any(needle in x for x in t)
+    assert not any("pack" in x for x in staging._validate_feed({"dataset": "x", "pack": "risk"}))
+
+
+def test_risk_feeds_are_cited_only_where_they_speak(monkeypatch, log):
+    from app.mcp import feeds, registry
+    monkeypatch.setattr(registry, "FEEDS", {
+        "thai_gauge": {"pack": "risk", "status": "available", "countries": ["Thailand"], "title": "Thai gauge"},
+        "global_quakes": {"pack": "risk", "status": "available", "title": "USGS"}})
+    monkeypatch.setattr(staging, "visible_staged_feeds_for_pack", lambda pack: {})
+    monkeypatch.setattr(feeds, "query", lambda ds, q=None: {"status": "ok", "records": [{"v": 1}],
+                                                            "count": 1, "as_of": None, "passport": {}})
+    trace, gaps = [], []
+    out = risk._pack_feeds("Battambang", trace, gaps, country="Cambodia")
+    log("OUTPUT", f"cited={[d for d, _, _ in out]} gap={gaps[-1][:90] if gaps else None}")
+    assert [d for d, _, _ in out] == ["global_quakes"]
+    assert any("declare other countries than Cambodia (thai_gauge)" in g for g in gaps)
+    out = risk._pack_feeds("Bangkok", [], [], country="Thailand")
+    assert sorted(d for d, _, _ in out) == ["global_quakes", "thai_gauge"]
+    out = risk._pack_feeds("Somewhere", [], [], country=None)          # unknown: everything, as before
+    assert len(out) == 2
+
+
+def test_a_pack_bound_table_clears_the_food_security_evidence_bar():
+    from app.food_security import synthesis as fs
+    assert not fs._has_evidence([{"kind": "index", "brief_role": "driver"}, {"kind": "calendar"}], "Malawi")
+    malawi_table = {"kind": "index", "brief_role": "pack-source", "countries": ["Malawi"]}
+    assert fs._has_evidence([malawi_table], "Malawi")
+    assert not fs._has_evidence([{"kind": "index", "brief_role": "pack-source"}], "Malawi")   # global: context
+    assert not fs._has_evidence([{**malawi_table, "countries": ["Thailand"]}], "Malawi")
+    assert fs._has_evidence([{"kind": "document"}], None)
+
+
+def test_every_kind_carries_the_auto_approve_note_into_its_citation(monkeypatch, log):
+    assert staging._review_note({"auto_approved": True}, "table") == "auto-approved — no human reviewed this table"
+    assert staging._review_note({}, "table") is None
+    monkeypatch.setattr(combine, "staged_weights_row", lambda hz: None)
+    monkeypatch.setattr(combine, "adjustment_for", lambda hz: {"by": "a hub", "review": "auto-approved — no human reviewed this recipe"})
+    prov = risk._weights_provenance("hazard_flood")
+    log("OUTPUT", prov[:120])
+    assert prov.startswith("Review: auto-approved")
+    # a staged driver feed previews AS a driver, carrying who staged it
+    from app.food_security import synthesis as fs
+    from app.mcp import feeds, registry
+    monkeypatch.setattr(registry, "FEEDS", {})
+    monkeypatch.setattr(staging, "visible_staged_feeds_for_pack", lambda pack: {
+        "oni_hub": {"brief_role": "driver", "status": "available", "staged_by": "user_1",
+                    "contribution_id": "abc", "source": "NOAA", "title": "ONI (hub copy)",
+                    "review": "auto-approved — no human reviewed this feed"}})
+    monkeypatch.setattr(feeds, "query", lambda ds, q=None: {"status": "ok", "as_of": "2026-09",
+                                                            "records": [{"period": "ASO 2026", "oni": 0.4}],
+                                                            "passport": {}, "count": 1})
+    res = fs._driver_citations([])
+    cits = res[0] if isinstance(res, tuple) else res
+    assert cits and cits[0]["brief_role"] == "driver" and cits[0]["staged_by"] == "user_1"
+    assert cits[0]["review_status"].startswith("auto-approved")
+
+
+# ----------------------------------------------------------------- H6: text derived from the catalog
+def test_pack_summaries_name_what_the_catalog_holds_today(monkeypatch, log):
+    from app.graph.geo import tiffs
+    monkeypatch.setattr(tiffs, "catalog", lambda include_staged=True: {
+        "hazard_flood": {}, "hazard_heatdays": {"title": "heat days"}, "hazard_flood_rp10": {},
+        "hazard_flood_rp500": {}, "population_worldpop": {}, "hazard_demo": {"description": "SYNTHETIC DEMONSTRATION LAYER"}})
+    monkeypatch.setattr(packs, "_is_synthetic", lambda row: "SYNTHETIC" in str(row.get("description", "")))
+    summary = packs.text(packs.PACKS["risk"], "summary")
+    log("OUTPUT", summary[:200])
+    assert "heatdays" in summary and "flood at 10- to 500-year return periods" in summary
+    assert "demo" not in summary and summary.startswith("HAZARD RISK — people, roads")
+    from app.mcp import registry
+    monkeypatch.setattr(registry, "coverage", lambda: {"crops": ["maize", "sorghum"], "countries": ["Kenya", "Malawi"],
+                                                       "subjects": [], "publishers": []})
+    fs_summary = packs.text(packs.PACKS["food-security"], "summary")
+    assert "sorghum" in fs_summary and "Malawi" in fs_summary
+    from app.food_security import synthesis as fs
+    assert "Malawi" in fs._parse_system() and "anywhere is in scope" in fs._parse_system()
+    assert packs.target_shapes() == "country+crop | place+hazard | place+year"
+    assert "land cover: place + year [+ year_to, classes, stack]" in packs.target_shapes_long()
