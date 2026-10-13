@@ -270,9 +270,10 @@ csv_text: |
   2.0,0.60,0.55
   3.0,0.75,0.70</code></pre>
 <p>Once landed, the table is available through <code>feeds_query</code> under its dataset name, and any answer that uses it cites the table with its source and vintage.</p>
+<p><strong>Where a table or feed is cited.</strong> <code>pack</code> must name a pack that cites sources (<code>risk</code> or <code>food-security</code>); any other value, including a typo, is declined at submit rather than landing unread. If you declare <code>countries</code>, the source is cited only in answers about those countries — a Thai depth-damage table is not cited into a Cambodian flood brief — and the answer's gaps say it was left out and why. A source that declares no countries is treated as global and cited everywhere the pack applies.</p>
 </section>
 
-<section id="documents">
+<section id="reports">
 <h2><span class="num">07</span>Reports and assessments</h2>
 <p class="lede">Documents — a DDPM flood situation report, a post-event assessment, a planning guideline — go into the risk pack's document library, where the platform retrieves relevant passages by meaning and cites them with a link to the archived original.</p>
 <div class="say"><span class="say-k">What to say to Claude</span><p>Archive the DDPM 2025 flood situation report using <code>contribute_submit</code> with kind <code>document</code>, pack risk. The PDF is at &lt;URL&gt;, source "Thailand DDPM", title "Flood situation report 2025", published 2025-11, temporal retrospective, validation official-statistic, countries [Thailand].</p></div>
