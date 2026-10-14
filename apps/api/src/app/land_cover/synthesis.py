@@ -352,6 +352,11 @@ def _passport_citation(n, sid, row, layer, year, clip, level, legend, gaps):
                 "no accuracy figure is cited.")
     validation = "unvalidated"
     if contract and obs and obs.get("sampled_min") is not None:
+        # The clip was read at an overview: its cells are `level` source cells wide.
+        # The contract describes the FILE, so compare the file's pixel size — an
+        # overview read is not a contract failure.
+        if level > 1 and obs.get("pixel_size_deg"):
+            obs = {**obs, "pixel_size_deg": obs["pixel_size_deg"] / level}
         mism = verify._check(contract, obs)
         if mism:
             validation = "structural-contract-FAILED"
@@ -361,6 +366,9 @@ def _passport_citation(n, sid, row, layer, year, clip, level, legend, gaps):
             validation = "structural-contract-checked"
     if notes:
         bits.append("Verification notes: " + "; ".join(notes) + ".")
+    review = meta.get("review") or row.get("review")
+    if review:
+        bits.append(f"Review: {review}.")
     bits.append("Legend: " + "; ".join(f"{k}={v}" for k, v in sorted(legend.items())) + ".")
     return {"n": n, "kind": "landcover_layer", "retrieval": "computed-at-pack-time",
             "source": row.get("source", "catalog (unattributed)"),
@@ -369,6 +377,7 @@ def _passport_citation(n, sid, row, layer, year, clip, level, legend, gaps):
             **({"pub_date": row["pub_date"]} if row.get("pub_date") else {}),
             **({"staged_by": meta["staged_by"], "contribution_id": meta.get("contribution_id")}
                if meta.get("staged_by") else {}),
+            **({"review_status": review} if review else {}),
             "authority": row.get("authority"), "residency": "platform-hosted",
             "text": " ".join(bits)}
 
