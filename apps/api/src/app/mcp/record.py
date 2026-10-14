@@ -42,6 +42,13 @@ def _render_with(pack: dict, rid: str) -> dict:
                       # needs something to click.
                       "url": _embed_url("hazard_map", rid),
                       "note": "the recorded AOI, assets and hazard layer for this receipt"}
+    if pack.get("layers"):
+        out["layers"] = {"where": "the pack's `layers` block (also insight.layers from "
+                                  "publish_answer)",
+                         "layers": sorted(pack["layers"]),
+                         "note": "one grid per layer, clipped to the pack's area, with its "
+                                 "unit, source, vintage, validation and no-data; draw it with "
+                                 "the declared range or legend, never an invented scale"}
     if pack.get("pack", "food-security") == "food-security":
         out["provenance"] = {"tool": "ui_embed", "component": "provenance_graph",
                              "receipt_id": rid}
@@ -72,6 +79,14 @@ def replay_view(receipt: dict) -> dict:
             "public_resolver": _resolver_url(rid)}
     if pack.get("viz") is not None:
         view["map_url"] = _embed_url("hazard_map", rid)
+    if pack.get("layers"):
+        # Recompute each layer's fingerprint from the stored pack alone: the values a
+        # receipt names are checkable, not only recorded.
+        from ..graph.geo import layer_values
+        view["layers_verified"] = {
+            name: (rec.get("values_sha256") == layer_values.values_sha256(
+                name, rec, rec.get("area_sha256")))
+            for name, rec in pack["layers"].items()}
     return view
 
 
@@ -89,7 +104,8 @@ def _embed_url(component: str, rid: str) -> str | None:
 def _default_question(pack: dict) -> str:
     t = pack.get("target") or {}
     if t:
-        return " ".join(str(v) for v in t.values())
+        return " ".join(str(v) for v in t.values()
+                        if v not in (None, "") and not isinstance(v, (list, dict)))
     return f"{pack.get('crop')} in {pack.get('country')}"
 
 
@@ -141,6 +157,13 @@ def _sources(pack: dict) -> list[dict]:
                  "temporal": c.get("temporal"), "score": c.get("score"),
                  "residency": c.get("residency"), "authority": c.get("authority"),
                  "usage_notes": c.get("usage_notes"),
+                 # a layer-values source names its layer and fingerprints the values
+                 # the pack returned, so they can be checked against this receipt
+                 "layer": c.get("layer"), "values_sha256": c.get("values_sha256"),
+                 # an auto-approved or otherwise annotated source says so in the receipt,
+                 # not only a staged one — review is off by default for now
+                 **({"review_status": c["review_status"]}
+                    if c.get("review_status") and not c.get("staged_by") else {}),
                  # how this evidence was obtained, and whether it can be re-read
                  "query_receipt": c.get("query"),
                  # WHICH source is unreviewed. The receipt carried `staged_by` at the

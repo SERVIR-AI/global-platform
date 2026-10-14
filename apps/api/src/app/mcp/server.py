@@ -267,12 +267,17 @@ def assemble_pack(country: str | None = None, crop: str | None = None,
                   map_layer: str | None = None,
                   year: int | str | None = None, year_to: int | str | None = None,
                   classes: list[str] | None = None,
-                  stack: str | None = None) -> dict:
+                  stack: str | None = None,
+                  layers: list[str] | None = None) -> dict:
     """Assembles a deterministic, citable EVIDENCE PACK for one domain pack's target
-    (country/crop; place/hazard; place/year) and mints a `pack_id`. For the risk and
-    land-cover packs, pass `geometry` (a GeoJSON Polygon/MultiPolygon in EPSG:4326, or a
+    (country/crop; place/hazard; place/year) and mints a `pack_id`. For a pack whose
+    target is a place, pass `geometry` (a GeoJSON Polygon/MultiPolygon in EPSG:4326, or a
     [minLon,minLat,maxLon,maxLat] bbox) to analyse an area YOU hold the boundary for — an
     admin district from another system, a hub's own polygon; `place` is then its label.
+    `layers` names registered raster layers whose VALUES the pack returns for its area
+    (`layers.<name>`: a grid clipped to the area, unit, source, vintage, validation,
+    nodata, summary) — any pack, any registered or contributed layer; omit it for the
+    pack's own defaults (risk: the recipe's vulnerability layers), pass [] for none.
     `map_layer` names which counted point layer the map draws — hospitals, schools,
     buildings, or a contributed layer such as evacuation_centres; unnamed ones are
     declined by name. Whatever is drawn, every counted layer's places — name,
@@ -299,7 +304,8 @@ def assemble_pack(country: str | None = None, crop: str | None = None,
                              place=place, hazard=hazard, min_severity=min_severity,
                              override=override, override_country=override_country,
                              override_crop=override_crop,
-                             year=year, year_to=year_to, classes=classes)
+                             year=year, year_to=year_to, classes=classes,
+                             layers=layers)
 
 
 @mcp.tool()

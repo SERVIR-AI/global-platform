@@ -124,7 +124,10 @@ def test_class_areas_one_year(lc_env, log):
     assert "Classes absent from this area: Water body" in c1["text"]
     assert p["stats"]["classes_km2"]["Forest"] == round(exp, 1)
     kinds = [c["kind"] for c in p["citations"]]
-    assert kinds == ["class_area", "landcover_layer", "method", "gaps"]
+    # the year map the class areas were counted from rides along as layer values
+    assert kinds == ["class_area", "landcover_layer", "method", "layer_values", "gaps"]
+    lv = p["layers"]["landcover_test_2000"]
+    assert lv["summary"]["cells_in_area"] == 64 and "counted from" in lv["why"]
     passport = p["citations"][1]
     assert passport["validation"] == "structural-contract-checked"
     assert "Accuracy: unstated" in passport["text"]
@@ -137,7 +140,9 @@ def test_change_on_common_mask(lc_env, log):
     assert p["status"] == "ok", p.get("note")
     kinds = [c["kind"] for c in p["citations"]]
     assert kinds == ["class_area", "class_area", "class_change", "class_transitions",
-                     "class_series", "landcover_layer", "landcover_layer", "method", "gaps"]
+                     "class_series", "landcover_layer", "landcover_layer", "method",
+                     "layer_values", "layer_values", "gaps"]
+    assert sorted(p["layers"]) == ["landcover_test_2000", "landcover_test_2022"]
     ch = next(c for c in p["citations"] if c["kind"] == "class_change")
     log("OUTPUT", ch["text"][:400])
     # inside the AOI: col 5 Forest->Built-up (8 px), cols 6-8 Cropland->Forest (24 px) changed; 32 unchanged

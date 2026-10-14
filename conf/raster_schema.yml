@@ -16,6 +16,19 @@ defaults:
   crs: EPSG:4326
   float_tol: 0.0001
 
+# What a role's values mean when they are read back (layer values in a pack): `zero`
+# says whether 0 is a reading or "no value"; `scale: nominal` marks class codes that are
+# names, not amounts, so nothing averages them. A role not listed counts 0 as a value.
+# The L2 engine drops a 0 from its vulnerability inputs (rule R6) and writes 0 where no
+# risk was computed. The gate names a contributed vulnerability_* layer's role
+# `vulnerability` — the same role as the hand-authored `vulnerability_reclass`.
+roles:
+  hazard:                {zero: value}    # 0 = outside the hazard: a real reading
+  vulnerability_reclass: {zero: nodata}   # 0 = no class
+  vulnerability:         {zero: nodata}   # 0 = no class (contributed vulnerability_*)
+  risk:                  {zero: nodata}   # 0 = not computed
+  landcover:             {zero: nodata, scale: nominal}   # 0 = outside the footprint
+
 layers:
   # --- Layer-2 flood ingredient set (already-reclassed 1-5) ---
   hazard_flood:

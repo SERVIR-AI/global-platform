@@ -598,7 +598,13 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
              "km2_outside": round(st["km2_outside"], 1),
              **({"change": change_stats} if change_stats else {}),
              **({"fire": fire_stats} if fire_stats else {}),
-             "viz": viz}
+             "viz": viz,
+             # for the assemble seam's layer-values step: the area this pack read and
+             # the map(s) its class areas are counted from
+             "_area": ingest.area_of(aoi),
+             "_layer_defaults": [
+                 {"layer": ly, "why": f"the {y} map these class areas are counted from"}
+                 for y, ly in ((year, layer), (year_to, layer_to)) if ly]}
     return citations, gaps, stats
 
 

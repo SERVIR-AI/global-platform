@@ -41,6 +41,7 @@ def _insight(pack_id: str, draft: str) -> dict:
     return {"brief": draft, "series": series, "context": context,
             **({"map": _panel_map(pack)} if _panel_map(pack) else {}),
             **({"places": _insight_places(pack)} if _insight_places(pack) else {}),
+            **({"layers": _insight_layers(pack)} if pack.get("layers") else {}),
             "pack": pack.get("pack"), "target": pack.get("target"),
             **({"country": pack.get("country"), "crop": pack.get("crop")}
                if pack.get("country") or pack.get("crop") else {})}
@@ -61,6 +62,57 @@ def _insight_places(pack: dict, per_layer: int = 50) -> dict | None:
                       "items": items[:per_layer],
                       "truncated": bool(a.get("truncated")) or len(items) > per_layer}
     return out or None
+
+
+def _insight_layers(pack: dict, budget: int = 12_000) -> list[dict]:
+    """Each layer the pack read — what it is, what it holds over the area, and its
+    grid — at panel size. Its own budget, so the map's shedding order is untouched;
+    over it, grids are thinned, then dropped (defaults before requested), and every
+    layer's row stays with a note: no layer disappears silently. The full grids stay
+    in the pack."""
+    import json as _json
+
+    from ..graph.geo import layer_values
+    rows = []
+    for name, rec in (pack.get("layers") or {}).items():
+        s = rec.get("summary") or {}
+        rng = rec.get("declared_range")
+        rows.append({
+            "layer": name, "n": rec.get("n"), "title": rec.get("title"),
+            "why": rec.get("why"), "unit": rec.get("unit_note"),
+            "source": rec.get("source"), "vintage": rec.get("vintage"),
+            "validation": rec.get("validation"), "staged": bool(rec.get("staged_by")),
+            "review": rec.get("review"),
+            "caveats": [c for c in (
+                (rec.get("read_level") or {}).get("note"),
+                ("grid downsampled from {}x{} cells".format(*rec["downsampled"]["from"])
+                 if rec.get("downsampled") else None)) if c],
+            "legend": rec.get("legend"), "scale": rec.get("scale"),
+            "colors": rec.get("colors"),
+            # a declared range is a validation limit; only a class layer is drawn across
+            # it — a continuous layer (people per pixel) is shaded across what is there
+            "range": ({"lo": rng[0], "hi": rng[1], "from": "declared"}
+                      if rng and None not in rng and (rec.get("legend") or rec.get("unit") == "class")
+                      else {"lo": s.get("min"), "hi": s.get("max"), "from": "observed"}),
+            "summary": {k: s.get(k) for k in ("min", "max", "mean", "distinct", "uniform",
+                                              "cells_with_value", "cells_in_area")},
+            "grid": rec.get("grid")})
+    size = lambda: len(_json.dumps(rows))
+    while size() > budget and any(r.get("grid") and min(r["grid"]["w"], r["grid"]["h"]) > 8
+                                  for r in rows):
+        for r in rows:
+            g = r.get("grid")
+            if g and min(g["w"], g["h"]) > 8:
+                r["grid"] = layer_values.thin(g)
+                r["note"] = "grid thinned at panel size — the full grid is in the pack's `layers`"
+    for requested in (False, True):
+        for r in sorted(rows, key=lambda r: -len(_json.dumps(r.get("grid")))):
+            if size() <= budget:
+                break
+            if r.get("grid") and (r.get("why") == "requested by name") == requested:
+                r["grid"] = None
+                r["note"] = "grid omitted at panel size — the full grid is in the pack's `layers`"
+    return rows
 
 
 def _panel_map(pack: dict) -> dict | None:

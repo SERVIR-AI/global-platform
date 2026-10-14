@@ -861,6 +861,18 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
         rgrid = _severity_grid(aoi[risk_key])
         if rgrid:
             stats["viz"]["risk_grid"] = rgrid
+    # For the assemble seam's layer-values step (mcp/layers.py): the area this pack
+    # used, and the layers its risk level rests on — the recipe in force, staged or not.
+    stats["_area"] = ingest.area_of(aoi)
+    recipe = risk_weights or combine.weights_for(hz)     # in force even if L2 failed
+    if recipe:
+        staged = combine.staged_weights_row(hz)
+        stats["_layer_defaults"] = [
+            {"layer": lay, "why": f"weight {w} in the {hz.removeprefix('hazard_')} risk recipe "
+                                  + ("of your STAGED, unreviewed proposal" if staged else "in force")
+                                  + ("" if risk_key else "; the risk level itself could not be "
+                                     "computed")}
+            for lay, w in recipe.items()]
     return citations, gaps, stats
 
 

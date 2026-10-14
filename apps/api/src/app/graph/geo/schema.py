@@ -52,3 +52,18 @@ def schema_for(name):
 def names():
     """Every layer name declared in the schema."""
     return list(_doc().get("layers", {}))
+
+
+def roles():
+    """{role: rule} — what a role's values mean when they are read back, e.g. whether
+    0 is "no value". Data (conf/raster_schema.yml `roles`, plus any the contributed
+    contracts file declares), so a role a contributor introduces states its own rule
+    instead of inheriting a guess; the hand-authored rule wins on a clash."""
+    out = dict(_doc().get("roles") or {})
+    try:
+        with open(get_settings().raster_schema_contrib_path) as f:
+            contrib = (yaml.safe_load(f) or {}).get("roles") or {}
+        out.update({k: v for k, v in contrib.items() if k not in out})
+    except FileNotFoundError:
+        pass
+    return out

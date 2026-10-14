@@ -637,6 +637,19 @@ def describe_assemble() -> str:
         "(bare country/crop stays food-security): "
         + "; ".join(f"`{pid}` ({', '.join(sp['target_keys'])})"
                     for pid, sp in sorted(packs.PACKS.items())) + ".\n\n"
+        "LAYER VALUES, for any pack with an area: the pack's `layers` block gives each "
+        "registered raster layer's VALUES over that area — a grid clipped to the boundary "
+        "(downsampled for large areas, said in the record), with unit, source, vintage, "
+        "validation and no-data, and one citation [n] stating its summary numbers. By "
+        "default a pack returns the layers its own computation rests on, where it has any"
+        + ("".join([" (", "; ".join(f"{pid}: {sp['default_layers_doc']}"
+                                    for pid, sp in sorted(packs.PACKS.items())
+                                    if sp.get("default_layers_doc")), ")"])
+           if any(sp.get("default_layers_doc") for sp in packs.PACKS.values()) else "")
+        + "; name any registered or contributed layer with layers=[...] (an "
+        "unknown name declines with the registered list); layers=[] for none. Use it to "
+        "SHOW where vulnerable people or assets are, instead of drawing from local files "
+        "with no receipt.\n\n"
         "STEP 1 OF 3 — the pack is evidence, NOT a finished answer. You then draft "
         "from it, call verify_groundedness(draft, pack_id) to gate the draft, and "
         "call record_receipt(pack_id, report_id) to mint the receipt. An answer that "

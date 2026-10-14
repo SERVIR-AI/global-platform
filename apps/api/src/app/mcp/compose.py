@@ -90,6 +90,8 @@ def run(composition: str = "foodsecurity.brief", question: str = "",
     # the FS constant is only the fallback for the historic FS runner shape.
     sections = out.get("required_sections") or list(synthesis.SECTIONS)
     viz = stats.pop("viz", None) if isinstance(stats, dict) else None
+    from . import layers as _layers
+    _layers.strip_reserved(stats)       # an area's coordinates must not ride stats
     pack_id = store.save_pack({
         "country": parsed.get("country"), "crop": parsed.get("crop"),
         "focus": parsed.get("focus"), "citations": citations,

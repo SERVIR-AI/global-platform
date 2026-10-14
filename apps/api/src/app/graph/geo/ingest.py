@@ -434,6 +434,21 @@ def source_raster(layer="hazard_flood"):
     return path
 
 
+def area_of(aoi) -> dict | None:
+    """The area a pack actually used, as data: {name, how, area_km2, geometry}. The
+    geometry is GeoJSON, not the bundle path — a path points into one machine's cache,
+    and a pack must stay meaningful on another host. Any pack that resolved an area
+    reports it this way, so platform steps that need the area never ask which pack it
+    was."""
+    try:
+        with open(aoi["admin"]) as f:
+            geom = json.load(f)["features"][0]["geometry"]
+    except (KeyError, IndexError, OSError, ValueError, TypeError):
+        return None
+    return {"name": aoi.get("name"), "how": aoi.get("how"),
+            "area_km2": aoi.get("area_km2"), "geometry": geom}
+
+
 def resolve_place(place):
     """Resolve a place name to the area the platform would actually analyse.
 

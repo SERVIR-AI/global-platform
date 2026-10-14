@@ -650,6 +650,87 @@ function mapCard(m) {
       embed this receipt's render_with names</div>
   </div>`;
 }
+// Values of the registered layers the pack read over its area (insight.layers): one
+// small multiple per layer, shaded across its declared range (else the observed one)
+// in the text colour, so the ramp follows the theme and invents no palette.
+const SYMS = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+function layerCells(g) {
+  const out = [];
+  if (!g || g.cells == null) return out;
+  for (let i = 0; i < g.w * g.h; i++) {
+    let v = null;
+    if (g.encoding === "palette") {
+      const ch = g.cells[i];
+      if (ch && ch !== ".") v = (g.palette || [])[SYMS.indexOf(ch)];
+    } else {
+      v = g.cells[i];
+    }
+    out.push(v == null ? null : +v);
+  }
+  return out;
+}
+// Class codes that are names (land cover) get distinct colours — the row's own when it
+// declares them, else display-only hues — never a light-to-dark order they do not have.
+const CAT = ["#2f6f9f", "#c9762c", "#4f8a3c", "#8f4fa0", "#b8a33a", "#3f9a9a", "#a04f62",
+             "#6f6f6f", "#2a8f5f", "#9a6a3c"];
+function catColor(r, v) {
+  const c = (r.colors || {})[String(v)];
+  return c || CAT[Math.abs(Math.round(+v)) % CAT.length];
+}
+function layersCard(rows, aoi) {
+  const tile = r => {
+    const g = r.grid, s = r.summary || {}, rg = r.range || {}, leg = r.legend || {};
+    const nominal = r.scale === "nominal";
+    const lo = rg.lo != null ? +rg.lo : s.min, hi = rg.hi != null ? +rg.hi : s.max;
+    let svg = "";
+    if (g && g.bounds && g.w && g.h) {
+      const b = g.bounds, W = 200;
+      const spanX = Math.max(b[2] - b[0], 1e-9), spanY = Math.max(b[3] - b[1], 1e-9);
+      const H = Math.max(60, Math.min(220, Math.round(W * spanY / spanX)));
+      const cw = W / g.w, ch = H / g.h, vals = layerCells(g), parts = [];
+      for (let i = 0; i < vals.length; i++) {
+        const v = vals[i];
+        if (v == null) continue;
+        const t = hi > lo ? Math.max(0, Math.min(1, (v - lo) / (hi - lo))) : 1;
+        const rr = Math.floor(i / g.w), cc = i % g.w;
+        const fill = nominal ? esc(catColor(r, v)) : "currentColor";
+        const op = nominal ? 0.85 : 0.12 + 0.78 * t;
+        const label = leg[String(v)] ? " " + leg[String(v)] : "";
+        parts.push(`<rect x="${(cc * cw).toFixed(1)}" y="${(rr * ch).toFixed(1)}"
+          width="${(cw + 0.3).toFixed(1)}" height="${(ch + 0.3).toFixed(1)}"
+          fill="${fill}" fill-opacity="${op.toFixed(2)}"><title>${esc(v)}${esc(label)}</title></rect>`);
+      }
+      const prj = (lon, lat) => ((lon - b[0]) / spanX * W).toFixed(1) + ","
+        + ((b[3] - lat) / spanY * H).toFixed(1);
+      const outline = aoi ? `<path d="${geomPaths(aoi.geometry || aoi, prj)}" fill="none"
+          stroke="currentColor" stroke-width="1.2" opacity=".9"/>` : "";
+      svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img"
+          aria-label="${esc(r.title || r.layer)} values">${parts.join("")}${outline}</svg>`;
+    }
+    return `<div class="card">
+      <b>[${esc(r.n)}] ${esc(r.title || r.layer)}</b>
+      <div class="meta">${esc(r.why || "")}</div>
+      ${svg}
+      ${s.uniform ? `<div class="livewarn">One value (${esc(s.min)}) across the whole area: this
+        layer cannot show where inside it anything varies.</div>` : ""}
+      <div class="stats">${s.cells_with_value ? `min ${esc(s.min)} · max ${esc(s.max)} · mean
+        ${esc(s.mean)} · ${esc(s.distinct)} distinct` : "no value anywhere inside the area"}</div>
+      ${nominal
+        ? `<div class="stats">${((g && g.palette) || []).map(v => `<span class="pill"
+            style="border-color:${esc(catColor(r, v))};color:${esc(catColor(r, v))}">${esc(v)}${leg[String(v)] ? ": " + esc(leg[String(v)]) : ""}</span>`).join(" ")}</div>`
+        : `<div class="stats">shade ${esc(lo)} → ${esc(hi)} (${esc(rg.from || "observed")} range) ·
+        ${esc(r.unit || "units not declared")}</div>`}
+      ${(r.caveats || []).map(c => `<div class="stats">${esc(c)}</div>`).join("")}
+      <div class="meta">${r.staged ? `<span class="pill arch">staged, unreviewed</span>`
+        : (r.review ? `<span class="pill arch">${esc(r.review)}</span>` : "")}
+        ${esc(r.source || "source unrecorded")} · ${esc(r.vintage || "undated")} ·
+        ${esc(r.validation || "unvalidated")}</div>
+      ${r.note ? `<div class="meta">${esc(r.note)}</div>` : ""}
+    </div>`;
+  };
+  return `<h2 class="sec">Layer values over the area</h2>
+    <div class="grid">${rows.map(tile).join("")}</div>`;
+}
 // The platform's own execution trace for this answer (publish_answer.trace):
 // assemble -> draft (consumer's, declared unobserved) -> verify -> record. Rendered
 // collapsed: it is the governance detail, not the headline. The draft step is the
@@ -687,6 +768,7 @@ function render(d){
     ${globalBar(series)}
     ${_ov && series.filter(sr => !sr.categorical).length > 1 ? overlayCard(series) : ""}
     ${ins.map ? mapCard(ins.map) : ""}
+    ${(ins.layers || []).length ? layersCard(ins.layers, ins.map && ins.map.aoi) : ""}
     ${shown.map((sr, i) => chart(sr, i)).join("")}
     <div id="ana">${anaHTML()}</div>
     ${hidden.map(sr => `<div class="meta oneline"><b>${esc(sr.title||sr.id)}</b> ·

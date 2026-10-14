@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from ..llm import MissingAPIKey
 from ..rag.store import CorpusError
-from . import context, loop, packs, store
+from . import context, layers as layers_step, loop, packs, store
 
 
 def assemble(country: str | None = None, crop: str | None = None,
@@ -26,7 +26,8 @@ def assemble(country: str | None = None, crop: str | None = None,
              map_layer: str | None = None,
              year: int | str | None = None, year_to: int | str | None = None,
              classes: list[str] | None = None,
-             stack: str | None = None) -> dict:
+             stack: str | None = None,
+             layers: list[str] | None = None) -> dict:
     """Gather one pack's evidence into a numbered, gap-declaring pack; mint and
     persist a pack_id. Back-compat: bare (country, crop) calls stay food-security,
     and FS packs keep top-level country/crop keys — Desktop configs and the embed
@@ -55,6 +56,11 @@ def assemble(country: str | None = None, crop: str | None = None,
     if target is None:
         return {"status": "declined", "note": why,
                 "available_packs": packs.available()}
+    # Layer names are checked before the gather — an unknown name is a decline, said
+    # with the registered list, never a slow pack with a silent hole in it.
+    bad_layers = layers_step.check(layers)
+    if bad_layers:
+        return {"status": "declined", "note": bad_layers}
     focus = (focus or spec["default_focus"](target)).strip()
     trace: list[str] = []
     extras = {"override": override, "override_country": override_country,
@@ -83,6 +89,13 @@ def assemble(country: str | None = None, crop: str | None = None,
                         "gap — retrying later may succeed."}
     except CorpusError as exc:
         return {"status": "declined", "note": str(exc)}
+    # Values of registered raster layers over the area this pack used — the same step
+    # for every pack; it numbers its citations after the gatherer's, before the gaps.
+    layer_block, layer_area = layers_step.attach(spec, target, stats, citations, gaps,
+                                                 layers, extras)
+    if layers is not None:
+        target = {**target, "layers": [n for n in dict.fromkeys(
+            str(x).strip() for x in layers) if n]}
     gaps_cit = packs.gaps_citation(citations, gaps)
     citations = [*citations, gaps_cit]
     pack_body = {"pack": pack_id_name, "target": target, "focus": focus,
@@ -100,6 +113,11 @@ def assemble(country: str | None = None, crop: str | None = None,
                  # execution provenance for the loop trace publish_answer surfaces
                  "exec": {"assembled_at": datetime.now(timezone.utc).isoformat(),
                           "gather_ms": round((time.perf_counter() - t_gather) * 1000, 1)}}
+    if layer_block:
+        # Values per layer, beside the citations that state them. Kept out of
+        # `stats`: the gate scans stats for numbers (see mcp/layers.py).
+        pack_body["layers"] = layer_block
+        pack_body["layers_area"] = layer_area      # persisted with the pack, not returned
     if stats.get("viz") is not None:                # a pack may carry embed data
         pack_body["viz"] = stats["viz"]
         pack_body["stats"].pop("viz", None)
@@ -117,7 +135,7 @@ def assemble(country: str | None = None, crop: str | None = None,
     # The viz payload is PERSISTED for the embed resolver, never returned inline:
     # 850 KB of hazard polygons in a tool result is 850 KB in the consumer LLM's
     # context, paying tokens to carry pixels it cannot see (adversarial review).
-    response = {k: v for k, v in pack_body.items() if k != "viz"}
+    response = {k: v for k, v in pack_body.items() if k not in ("viz", "layers_area")}
     if "viz" in pack_body:
         response["viz_recorded"] = ("map payload recorded with the pack — rendered "
                                     "by the hazard_map embed for this receipt")

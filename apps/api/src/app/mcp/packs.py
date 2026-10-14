@@ -354,6 +354,7 @@ PACKS: dict[str, dict] = {
         "audience": "disaster-risk and preparedness planners and the hubs that support them",
         "keywords": lambda: _risk_keywords(),
         "default_focus": lambda t: f"{t.get('hazard', '')} exposure in {t.get('place', '')}".strip(),
+        "default_layers_doc": "its recipe's vulnerability layers",
         "doctor_target": {"place": "battambang", "hazard": "flood"},
     },
     "land-cover": {
@@ -384,6 +385,7 @@ PACKS: dict[str, dict] = {
         "default_focus": lambda t: (f"land cover of {t.get('place', '')} in {t.get('year', '')}"
                                     + (f" against {t['year_to']}" if t.get("year_to") else "")).strip(),
         "doctor_target": {"place": "Bagmati Province, Nepal", "year": "2022"},
+        "default_layers_doc": "the year maps its class areas are counted from",
         "usage_notes": ("Pixel counts of a 30 m land-cover map, not a model. Quote the figures "
                         "with their year and the mask the pack declares; change between two "
                         "years includes classifier disagreement, so read trends over several "
