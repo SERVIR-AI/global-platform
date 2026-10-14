@@ -1846,13 +1846,20 @@ def _notify(text: str) -> None:
 # --------------------------------------------------------------------------- tool text
 
 def describe_submit() -> str:
+    from ..config import get_settings
+    auto = get_settings().grp_auto_approve
     lines = ["Contribute a source to the platform from this conversation — no server access, "
              "no config files. The submission is validated against the same gate the "
-             "platform's own contribution commands use; a clean one is STAGED: stored for "
-             "review and served to you (and to reviewers) on every query path — search, "
-             "inventory, feeds, evidence packs — under the same relevance ranking as any other "
-             "source, so you test exactly what an analyst will see. It goes live for everyone "
-             "only when a reviewer approves it.",
+             "platform's own contribution commands use. "
+             + ("This deployment AUTO-APPROVES: a clean submission lands at once and is live "
+                "for every caller, and its record and every citation built on it say that no "
+                "human reviewed it. (Human review is switched off here, not removed.)"
+                if auto else
+                "A clean one is STAGED: stored for review and served to you (and to "
+                "reviewers) on every query path — search, inventory, feeds, evidence packs — "
+                "under the same relevance ranking as any other source, so you test exactly "
+                "what an analyst will see. It goes live for everyone only when a reviewer "
+                "approves it."),
              "",
              "kind: one of " + ", ".join(KINDS) + ".",
              "manifest: the provenance fields for that kind. Ask the contributor for anything "
@@ -1863,15 +1870,23 @@ def describe_submit() -> str:
         lines.append(f"\n{kind} — required: " + "; ".join(f"{k} ({v})" for k, v in fields["required"].items()))
         lines.append(f"{kind} — optional: " + "; ".join(f"{k} ({v})" for k, v in fields["optional"].items()))
     lines += ["",
-              "Returns {status: staged, contribution_id, preview{doc_id,...}, next} (the record "
-              "then shows status pending in contribute_status until a reviewer decides) or "
-              "{status: declined, problems: [...]} naming every problem at once — fix them all "
+              ("Returns {status: approved, contribution_id, preview, landing, review, next} — "
+               "live now for every caller (if landing fails it is left {status: staged, "
+               "auto_approve: why} for a reviewer) — or "
+               if auto else
+               "Returns {status: staged, contribution_id, preview{doc_id,...}, next} (the record "
+               "then shows status pending in contribute_status until a reviewer decides) or ")
+              + "{status: declined, problems: [...]} naming every problem at once — fix them all "
               "and resubmit. Rules: contributions never overwrite an existing source; a "
               "document already in the library is declined by its doc_id; a table's or feed's "
-              "dataset name must be new. A staged table or feed is queried with "
-              "feeds_query(dataset) like any feed and appears under `staged_feeds` in "
-              "platform_capabilities for its owner. A feed is test-queried once before it is "
-              "staged, so a wrong index name or dead URL is refused with the adapter's reason. "
-              "A raster is fetched and verified against its declared contract before staging; "
-              "staged, it is a hazard the risk pack can assemble against for its owner."]
+              "dataset name must be new; `amend` corrects an approved layer's record, never its "
+              "file or contract. A feed is test-queried once before it is accepted, so a wrong "
+              "index name or dead URL is refused with the adapter's reason. A raster is fetched "
+              "and verified against its declared contract before it is accepted. "
+              + ("Accepted, a table or feed is queried with feeds_query(dataset) and a raster is "
+                 "readable by every pack at once."
+                 if auto else
+                 "A staged table or feed is queried with feeds_query(dataset) like any feed and "
+                 "appears under `staged_feeds` in platform_capabilities for its owner; staged, a "
+                 "raster is a layer the packs read for its owner.")]
     return "\n".join(lines)

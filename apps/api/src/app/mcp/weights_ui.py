@@ -95,9 +95,7 @@ against observed loss."></textarea>
   <button id="reset" class="ghost">Reset</button>
 </div>
 <div class="msg" id="msg" hidden></div>
-<div class="foot">Nothing here changes a number on its own. Proposing sends a contribution
-through the same gate every source goes through: yours to preview, live for everyone only
-once a reviewer approves.</div>
+<div class="foot">__GATE_FOOTER__</div>
 <script>
 let _id = 0, _ready = false, _caps = {}, _data = null;
 const _pending = new Map(), _calls = new Map();
@@ -197,6 +195,10 @@ document.getElementById("go").onclick = () => {
     if (d.status === "staged") {
       msg("Staged as " + d.contribution_id + ". Your own risk answers use these weights now; "
         + "everyone else keeps the ones in force until a reviewer approves.", "ok");
+    } else if (d.status === "approved") {
+      msg("Live now as " + d.contribution_id + ": every risk answer for this hazard uses "
+        + "these weights. This deployment auto-approves, so no person reviewed the change, "
+        + "and the recipe and every answer built on it say so.", "ok");
     } else {
       msg((d.problems || [d.note || "declined"]).join("\\n"), "err");
       document.getElementById("go").disabled = false;
@@ -238,8 +240,24 @@ request("ui/initialize", INIT);
 """
 
 
+def _auto() -> bool:
+    from ..config import get_settings
+    return bool(get_settings().grp_auto_approve)
+
+
+def _gate_footer() -> str:
+    if _auto():
+        return ("Proposing sends a contribution through the same gate every source goes "
+                "through. This deployment AUTO-APPROVES: a valid proposal is live for everyone "
+                "at once, recorded as not reviewed by a person.")
+    return ("Nothing here changes a number on its own. Proposing sends a contribution through "
+            "the same gate every source goes through: yours to preview, live for everyone only "
+            "once a reviewer approves.")
+
+
 def html() -> str:
-    return template().replace("__TOKENS_CSS__", _tokens_css())
+    return (template().replace("__TOKENS_CSS__", _tokens_css())
+            .replace("__GATE_FOOTER__", _gate_footer()))
 
 
 def payload(hazard: str | None = None) -> dict:
@@ -271,8 +289,12 @@ def payload(hazard: str | None = None) -> dict:
         "staged_for_you": staged,
         "crossing_rule": recipe.get("crossing"),
         "note": ("Weights are shares of one vulnerability score and must sum to 1. "
-                 "Changing them changes every risk level computed for that hazard, so a "
-                 "proposal is staged for its author and live only once a reviewer approves."),
+                 "Changing them changes every risk level computed for that hazard, "
+                 + ("and this deployment auto-approves: a valid proposal is live for "
+                    "everyone at once, recorded as not reviewed by a person."
+                    if _auto() else
+                    "so a proposal is staged for its author and live only once a reviewer "
+                    "approves.")),
     }
 
 
@@ -282,9 +304,13 @@ def describe() -> str:
             "weight may name.\n\n"
             "In a host that renders MCP Apps this opens a picker with a slider per layer "
             "that keeps the shares summing to 1, and a box for the reason. Proposing from "
-            "it calls contribute_submit(kind='weights'), so the change is staged, visible "
-            "in the author's own risk answers, and in force for everyone only after a "
-            "reviewer approves. Elsewhere it is a plain reading of the recipe; contribute "
+            "it calls contribute_submit(kind='weights'), "
+            + ("and this deployment auto-approves: a valid change is in force for everyone "
+               "at once and recorded as not reviewed by a person. "
+               if _auto() else
+               "so the change is staged, visible in the author's own risk answers, and in "
+               "force for everyone only after a reviewer approves. ")
+            + "Elsewhere it is a plain reading of the recipe; contribute "
             "the same way by calling contribute_submit yourself.\n\n"
             "Pass a hazard name to open on it. Returns {hazard, hazards, recipes, "
             "available_layers, adjusted, staged_for_you, crossing_rule}.")

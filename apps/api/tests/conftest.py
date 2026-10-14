@@ -15,6 +15,9 @@ import pytest
 # Tests that exercise OAuth build their own apps with explicit settings.
 os.environ["GRP_OAUTH_ENABLED"] = "0"
 os.environ.pop("GRP_AUTHKIT_CLIENT_ID", None)
+# Auto-approve is ON by default in the product for now; the suite exercises the human
+# review path (stage -> preview -> approve/reject) unless a test switches it on.
+os.environ["GRP_AUTO_APPROVE"] = "0"
 import rasterio
 from rasterio.transform import from_bounds
 
