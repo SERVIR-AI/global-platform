@@ -111,6 +111,15 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None) -> dic
     decl = {**manifest["declared"]}
     decl.setdefault("role", _role(layer))
     obs = verify.windowed_stats(str(manifest["file"]))
+    # How coarse the values really are, measured at full resolution — advisory, shown
+    # to the contributor and the reviewer before approval. A layer described as one
+    # value per sub-district that repeats one value across a whole district landed
+    # unquestioned because nothing ever looked.
+    from ..graph.geo import layer_values
+    gran = layer_values.granularity(str(manifest["file"]), decl,
+                                    row={"outside_values": manifest.get("outside_values")})
+    if gran:
+        obs["granularity"] = gran
     mismatches = verify._check({**(schema_mod._doc().get("defaults") or {}), **decl}, obs)
     if mismatches:
         return {"status": "declined", "verified": False,

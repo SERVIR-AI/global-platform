@@ -59,6 +59,9 @@ def visible() -> dict:
     try:
         from ...contrib import staging
         out.update(staging.visible_staged_vectors())
+        for k in staging.visible_staged_amends():
+            if k in out:
+                out[k] = staging.amended_row(k, out[k])
     except Exception:
         pass
     return out

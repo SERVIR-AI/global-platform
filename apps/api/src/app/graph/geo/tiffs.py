@@ -25,6 +25,10 @@ def catalog(include_staged: bool = True):
         try:
             from ...contrib import staging
             cat.update({k: v for k, v in staging.visible_staged_rasters().items() if k not in cat})
+            # a correction of a landed row the caller staged: their own view only
+            for k in staging.visible_staged_amends():
+                if k in cat:
+                    cat[k] = staging.amended_row(k, cat[k])
         except Exception:                       # the catalog never fails on staging
             pass
     _expand_stacks(cat)

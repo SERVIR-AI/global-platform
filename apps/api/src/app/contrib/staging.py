@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from ..mcp import store
 from . import fetch_policy, identity, sources
 
-KINDS = ("document", "table", "feed", "raster", "vector", "weights")
+KINDS = ("document", "table", "feed", "raster", "vector", "weights", "amend")
 STATUSES = ("pending", "approved", "rejected", "withdrawn", "failed")
 PENDING_CAP = 20               # open contributions per contributor
 HOURLY_CAP = 30                # submissions per contributor per hour
@@ -390,6 +390,18 @@ def _ensure_staged_loaded() -> None:
                 "contributor_label": rec.get("contributor_label"),
                 "rationale": (rec.get("manifest") or {}).get("rationale"),
                 "usage_notes": (rec.get("manifest") or {}).get("usage_notes")}
+    try:
+        amends = store.list_contributions(status="pending", kind="amend")
+    except Exception:
+        return
+    for rec in amends:
+        pv = rec.get("preview") or {}
+        if pv.get("layer") and pv["layer"] not in STAGED_AMENDS:
+            STAGED_AMENDS[pv["layer"]] = {
+                "target_kind": pv.get("target_kind"), "fields": pv.get("after") or {},
+                "staged_by": rec["contributor_id"], "contribution_id": rec["contribution_id"],
+                "contributor_label": rec.get("contributor_label"),
+                "rationale": (rec.get("manifest") or {}).get("rationale")}
 
 
 def visible_staged_feed(dataset: str) -> dict | None:
@@ -620,7 +632,9 @@ RASTER_FIELDS = {
         "legend": "mapping class number -> label, e.g. {1: Very Low, ..., 5: Very High} "
                   "(not required for a population_* count grid)",
         "declared": "the CONTRACT the file is verified against: {dtype, valid_min, valid_max, "
-                    "nodata?} — say what the file IS; the platform checks it before staging",
+                    "nodata?, units?} — say what the file IS; the platform checks it before "
+                    "staging. `units` (e.g. 'people per pixel', 'index 0-1', 'class') is carried "
+                    "into every pack that reads the layer's values",
     },
     "optional": {
         "usage_notes": "a few lines the consuming analyst reads in the hazard passport (max 500 chars)",
@@ -1198,6 +1212,242 @@ def visible_staged_vectors() -> dict:
     return {layer: e for layer, e in STAGED_VECTORS.items()
             if caller.may_see(e.get("staged_by"))}
 
+# --------------------------------------------------------------------------- amend
+
+AMEND_FIELDS = {
+    "required": {
+        "layer": "an APPROVED contributed layer to correct — a raster (hazard_*, "
+                 "vulnerability_*, population_*, …) or a point layer. Built-in layers are "
+                 "corrected through code review, not here",
+        "fields": "only the corrected values: any of title, description, usage_notes, source, "
+                  "license, vintage (and units, for a raster). The file and its contract do "
+                  "not change — a different file is a new layer",
+        "rationale": "what was wrong with the record, in a sentence a reviewer can check "
+                     "(e.g. 'the data holds one value per district, not per sub-district')",
+    },
+    "optional": {},
+}
+_AMENDABLE = ("title", "description", "usage_notes", "source", "license", "vintage")
+_AMENDABLE_CONTRACT = ("units",)
+
+# Staged corrections: the contributor's own packs show the corrected record, nobody
+# else's do, until a reviewer approves — the same preview rule as every other kind.
+STAGED_AMENDS: dict[str, dict] = {}
+
+
+def _amend_target(layer: str):
+    """('raster' | 'vector', current row) for an approved contributed layer, else None.
+    Read from the machine-owned landing files, never the merged catalog: a staged or
+    hand-authored row is not something this kind may rewrite."""
+    import yaml
+    from ..config import get_settings
+    path = get_settings().tiffs_contrib_path
+    if path.exists():
+        rows = yaml.safe_load(path.read_text()) or {}
+        if layer in rows and isinstance(rows[layer], dict):
+            row = dict(rows[layer])
+            try:
+                from ..graph.geo import schema as _schema
+                doc = yaml.safe_load(get_settings().raster_schema_contrib_path.read_text()) or {}
+                row["units"] = ((doc.get("layers") or {}).get(layer) or {}).get("units")
+            except Exception:
+                row["units"] = None
+            return "raster", row
+    from ..graph.geo import vectors
+    entry = vectors.landed().get(layer)
+    if entry:
+        return "vector", dict(entry)
+    return None
+
+
+def _validate_amend(manifest) -> list[str]:
+    if not isinstance(manifest, dict):
+        return ["manifest must be a mapping with layer, fields and rationale"]
+    m = dict(manifest)
+    problems = []
+    unknown = set(m) - set(AMEND_FIELDS["required"]) - set(AMEND_FIELDS["optional"])
+    if unknown:
+        problems.append(f"unknown fields {sorted(unknown)} — layer, fields and rationale only")
+    layer = str(m.get("layer") or "").strip()
+    target = _amend_target(layer) if layer else None
+    if not layer:
+        problems.append("missing required field 'layer'")
+    elif target is None:
+        problems.append(f"{layer!r} is not an approved contributed layer — only those can be "
+                        "corrected here; a built-in layer's record is corrected in code review, "
+                        "and a pending contribution is withdrawn and resubmitted")
+    fields = m.get("fields")
+    if not isinstance(fields, dict) or not fields:
+        problems.append("missing required field 'fields' — the corrected values, e.g. "
+                        "{\"description\": \"…\", \"usage_notes\": \"…\"}")
+    else:
+        allowed = set(_AMENDABLE) | (set(_AMENDABLE_CONTRACT)
+                                     if target and target[0] == "raster" else set())
+        bad = sorted(set(fields) - allowed)
+        if bad:
+            problems.append(f"fields {bad} cannot be amended — one of: {', '.join(sorted(allowed))}. "
+                            "The file and its declared contract do not change: a different file "
+                            "is a new layer")
+        empty = sorted(k for k, v in fields.items() if not str(v or "").strip())
+        if empty:
+            problems.append(f"fields {empty} are empty — a correction states the right value; "
+                            "it does not erase the record")
+        from . import notes
+        problems += notes.validate(fields.get("usage_notes"))
+    if not str(m.get("rationale") or "").strip():
+        problems.append("missing required field 'rationale' — a correction with no stated reason "
+                        "cannot be reviewed")
+    if layer and target is not None:
+        caller = identity.current()
+        owner = _layer_contributor(layer, target[0])
+        if not (caller.is_reviewer or (owner and caller.owns(owner))):
+            problems.append(f"only the contributor of {layer!r} or a reviewer may correct its "
+                            "record" + ("" if owner else " — it landed outside the contribution "
+                                        "gate, so only a reviewer may"))
+        if isinstance(fields, dict):
+            from ..mcp.packs import _is_synthetic
+            row = target[1]
+            after = {**row, **{k: v for k, v in fields.items() if k in _AMENDABLE}}
+            if _is_synthetic(row) and not _is_synthetic(after):
+                problems.append(f"{layer!r} is declared a synthetic or demonstration layer; a "
+                                "correction cannot remove that declaration — every answer built "
+                                "on it leads with it")
+    if layer:
+        _ensure_staged_loaded()
+        pending = STAGED_AMENDS.get(layer)
+        if pending:
+            caller = identity.current()
+            mine = caller.is_reviewer or caller.owns(pending.get("staged_by"))
+            problems.append(f"a correction of {layer!r} is already pending review"
+                            + (f" ({pending.get('contribution_id')}) — withdraw it or wait for "
+                               "the decision" if mine else ""))
+    return problems
+
+
+def _layer_contributor(layer: str, target_kind: str) -> str | None:
+    """Who contributed `layer` through the gate (the approved record's contributor),
+    or None when it landed some other way."""
+    try:
+        for rec in store.list_contributions(status="approved", kind=target_kind):
+            if str((rec.get("manifest") or {}).get("layer") or "") == layer:
+                return rec.get("contributor_id")
+    except Exception:
+        return None
+    return None
+
+
+def _prepare_amend(m: dict) -> dict:
+    """The before and after of every field that actually changes — the record and the
+    reviewer both see what the correction replaces, not only its new text."""
+    layer = str(m["layer"]).strip()
+    target_kind, row = _amend_target(layer)
+    after = {k: str(v).strip() for k, v in m["fields"].items()}
+    changed = {k: {"from": row.get(k), "to": v} for k, v in after.items()
+               if str(row.get(k) or "").strip() != v}
+    if not changed:
+        raise Declined(f"the record of {layer!r} already says exactly this")
+    return {"layer": layer, "target_kind": target_kind,
+            "before": {k: row.get(k) for k in changed},
+            "after": {k: after[k] for k in changed}, "changed": changed}
+
+
+def _stage_amend(rec: dict, prepared: dict) -> dict:
+    _ensure_staged_loaded()
+    STAGED_AMENDS[prepared["layer"]] = {
+        "target_kind": prepared["target_kind"], "fields": prepared["after"],
+        "staged_by": rec["contributor_id"], "contribution_id": rec["contribution_id"],
+        "contributor_label": rec["contributor_label"],
+        "rationale": rec["manifest"].get("rationale")}
+    how = (f"assemble any pack over an area with layers=[{prepared['layer']!r}]"
+           if prepared["target_kind"] == "raster" else
+           f"assemble a risk pack for a place the layer covers with map_layer={prepared['layer']!r}")
+    return {**prepared,
+            "how_to_test": (how + " — your packs show the corrected record; everyone else's "
+                            "show the current one until a reviewer approves")}
+
+
+def _land_amend(rec: dict) -> dict:
+    """Rewrite the landed row with the corrected values and keep what they replaced:
+    `amended` is the row's own history, newest last."""
+    import yaml
+    from ..config import get_settings
+    pv = rec["preview"]
+    layer, after = pv["layer"], pv["after"]
+    history = {"contribution_id": rec["contribution_id"], "by": rec["contributor_label"],
+               "rationale": rec["manifest"].get("rationale"), "replaced": pv["before"],
+               **({"review": _review_note(rec, "correction")} if rec.get("auto_approved") else {})}
+    row_fields = {k: v for k, v in after.items() if k in _AMENDABLE}
+
+    def reviewed(current: dict) -> dict:
+        """Every citation reads the row's `review`; an unreviewed correction says so there."""
+        if not rec.get("auto_approved"):
+            return {}
+        note = (f"record corrected by auto-approve ({rec['contribution_id']}) — no human "
+                "reviewed the correction")
+        prior = current.get("review")
+        return {"review": f"{prior}; {note}" if prior else note}
+    if pv["target_kind"] == "raster":
+        s = get_settings()
+        rows = yaml.safe_load(s.tiffs_contrib_path.read_text()) or {}
+        if layer not in rows:
+            raise Declined(f"{layer!r} is no longer a landed raster — nothing to correct")
+        rows[layer] = {**rows[layer], **row_fields, **reviewed(rows[layer]),
+                       "amended": [*(rows[layer].get("amended") or []), history]}
+        s.tiffs_contrib_path.write_text(
+            "# Contributed raster rows — machine-owned; written by the\n"
+            "# contribution gate. Hand-edit conf/tiffs.yml, never this.\n"
+            + yaml.safe_dump(rows, sort_keys=False, allow_unicode=True))
+        if "units" in after:
+            sp = s.raster_schema_contrib_path
+            doc = (yaml.safe_load(sp.read_text()) or {}) if sp.exists() else {}
+            doc.setdefault("layers", {}).setdefault(layer, {})["units"] = after["units"]
+            sp.write_text("# Contributed raster contracts — machine-owned.\n"
+                          + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+    else:
+        from ..graph.geo import vectors
+        entry = vectors.landed().get(layer)
+        if entry is None:
+            raise Declined(f"{layer!r} is no longer a landed point layer — nothing to correct")
+        vectors.register(layer, {**entry, **row_fields, **reviewed(entry),
+                                 "amended": [*(entry.get("amended") or []), history]})
+    _ensure_staged_loaded()
+    STAGED_AMENDS.pop(layer, None)
+    return {"layer": layer, "corrected": after, "replaced": pv["before"]}
+
+
+def _retire_amend(rec: dict) -> dict:
+    _ensure_staged_loaded()
+    layer = (rec.get("preview") or {}).get("layer", "")
+    return {"removed": STAGED_AMENDS.pop(layer, None) is not None,
+            "note": "nothing was written to the layer's record for a staged correction"}
+
+
+def visible_staged_amends() -> dict:
+    """{layer: staged correction} the current caller may see — its author's packs read
+    the corrected record, as a preview."""
+    _ensure_staged_loaded()
+    caller = identity.current()
+    return {layer: a for layer, a in STAGED_AMENDS.items()
+            if caller.may_see(a.get("staged_by"))}
+
+
+def amended_row(layer: str, row: dict, contract: bool = False) -> dict:
+    """`row` with the caller's own staged correction laid over it, marked as unreviewed
+    so any pack that reads it is a preview. `contract` picks the contract fields."""
+    a = visible_staged_amends().get(layer)
+    if not a:
+        return row
+    keys = _AMENDABLE_CONTRACT if contract else _AMENDABLE
+    over = {k: v for k, v in (a.get("fields") or {}).items() if k in keys}
+    if contract:
+        return {**row, **over}
+    # marked even when only contract fields (units) change: whatever reads this row
+    # reads an unreviewed record, and the pack it lands in must be a preview
+    return {**row, **over, "staged_by": a.get("staged_by"),
+            "contribution_id": a.get("contribution_id"),
+            "review": "STAGED correction of this record — not yet reviewed"}
+
+
 _KINDS = {
     "document": {"validate": _validate_document, "prepare": _prepare_document,
                  "stage": _stage_document, "land": _land_document,
@@ -1223,6 +1473,10 @@ _KINDS = {
                 "stage": _stage_weights, "land": _land_weights, "retire": _retire_weights,
                 "fields": WEIGHTS_FIELDS,
                 "title": lambda m: f"vulnerability weights for {m.get('hazard')}"},
+    "amend": {"validate": _validate_amend, "prepare": _prepare_amend,
+              "stage": _stage_amend, "land": _land_amend, "retire": _retire_amend,
+              "fields": AMEND_FIELDS,
+              "title": lambda m: f"correction of the record of {m.get('layer')}"},
 }
 
 
@@ -1325,7 +1579,11 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
                              + " (feeds, tables and rasters are coming; packs stay on the "
                              "developer path)"]}
     spec = _KINDS[kind]
-    problems = spec["validate"](manifest)
+    vtok = identity.bind(caller)       # a kind that checks WHO may submit sees the submitter
+    try:
+        problems = spec["validate"](manifest)
+    finally:
+        identity.unbind(vtok)
     if problems:
         return {"status": "declined", "kind": kind, "problems": problems,
                 "fields": spec["fields"]}
@@ -1434,6 +1692,24 @@ def _landed_state(rec: dict) -> dict:
             adj = combine.adjustment_for("hazard_" + str(m.get("hazard") or ""))
             return {"live": bool(adj), "why": None if adj else
                     "no adjusted block is in force for this hazard"}
+        if kind == "amend":
+            pv = rec.get("preview") or {}
+            target = _amend_target(str(pv.get("layer") or ""))
+            if target is None:
+                return {"live": False, "why": f"no landed layer named {pv.get('layer')!r}"}
+            stale = [k for k, v in (pv.get("after") or {}).items()
+                     if str(target[1].get(k) or "").strip() != str(v).strip()]
+            if stale:
+                hist = target[1].get("amended") or []
+                ids = [h.get("contribution_id") for h in hist]
+                cid = rec.get("contribution_id")
+                later = [h for h in hist[ids.index(cid) + 1:]] if cid in ids else []
+                by = [h.get("contribution_id") for h in later
+                      if set(stale) & set((h.get("replaced") or {}))]
+                if by:
+                    return {"live": None, "why": f"superseded by a later correction ({by[-1]})"}
+            return {"live": not stale, "why": None if not stale else
+                    f"the record no longer says what this correction set for {stale}"}
     except Exception as exc:                                # pragma: no cover
         return {"live": None, "why": f"could not check ({type(exc).__name__}: {exc})"}
     return {"live": None, "why": f"no reconciliation for kind {kind!r}"}

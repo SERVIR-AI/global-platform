@@ -680,12 +680,16 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
         })
 
         n += 1
-        vuln_bits = []
+        vuln_bits, vuln_staged = [], {}
         for lay in risk_weights:
             try:
                 m = tiffs.entry(lay)
             except Exception:
                 m = {}
+            if m.get("staged_by") and not vuln_staged:
+                # this text renders the row; an unreviewed row makes the pack a preview
+                vuln_staged = {"staged_by": m["staged_by"],
+                               "contribution_id": m.get("contribution_id")}
             vuln_bits.append(
                 f"{lay} ({m.get('title') or 'no title recorded'}; source "
                 f"{m.get('source') or 'unattributed'}; licence {m.get('license') or 'unstated'}; "
@@ -707,6 +711,7 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
                      + (f". Outside the scheme's families: {', '.join(outside)}" if outside else "")
                      + "."),
             "families_covered": covered, "families_absent": absent,
+            **vuln_staged,
         })
 
     # --- the hazard layer's passport: declared contract vs observed clip ------

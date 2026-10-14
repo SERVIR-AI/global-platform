@@ -25,6 +25,9 @@ def _doc():
         layers = doc.setdefault("layers", {})
         layers.update({k: v for k, v in staging.visible_staged_contracts().items()
                        if k not in layers})
+        for k in staging.visible_staged_amends():
+            if k in layers:
+                layers[k] = staging.amended_row(k, layers[k], contract=True)
     except Exception:
         pass
     return doc
