@@ -72,3 +72,28 @@ def test_the_panel_tools_still_declare_an_output_schema(log):
         schema = getattr(tools[name], "output_schema", None)
         log("OUTPUT", f"{name}: output_schema={'present' if schema else 'ABSENT'}")
         assert schema, f"{name} would return no structuredContent for the panel"
+
+
+def test_the_handshake_carries_the_servir_symbol(log):
+    """A host draws the connector with serverInfo.icons, else with the domain's
+    favicon — which on a shared domain is the parent company's logo. Asserted over
+    both handshakes, since hosts still speak the classic initialize."""
+    import base64
+    import struct
+
+    from fastmcp import Client
+
+    async def server_info(mode):
+        async with Client(mcp, mode=mode) as c:
+            return c.server_info if mode == "auto" else c.initialize_result.server_info
+
+    for mode in ("auto", "legacy"):
+        icons = asyncio.run(server_info(mode)).icons or []
+        log("OUTPUT", f"{mode}: {[(i.theme, i.mime_type, i.sizes) for i in icons]}")
+        # light first: a host that ignores `theme` takes the first icon
+        assert [i.theme for i in icons] == ["light", "dark"]
+        for i in icons:
+            assert i.mime_type == "image/png" and i.sizes == ["64x64"]
+            raw = base64.b64decode(i.src.split(",", 1)[1])
+            assert raw[:8] == b"\x89PNG\r\n\x1a\n"
+            assert struct.unpack(">II", raw[16:24]) == (64, 64)

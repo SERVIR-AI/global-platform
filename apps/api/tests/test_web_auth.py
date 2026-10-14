@@ -241,7 +241,8 @@ def test_gate_leaves_public_embeds_and_assets_open(app):
     with TestClient(app(), follow_redirects=False) as client:
         embed = client.get("/?embed=provenance_graph&receipt_id=1")
         assert embed.status_code not in (302, 401)           # public: renders
-        for url in ("/assets/index-abc123.js", "/favicon.ico", "/", "/index.html",
+        for url in ("/assets/index-abc123.js", "/favicon.ico", "/favicon.svg",
+                    "/apple-touch-icon.png", "/icon-512.png", "/", "/index.html",
                     "/runbook", "/runbook/"):
             assert client.get(url).status_code not in (302, 401)   # public surfaces
         assert client.get("/api/chat").status_code == 401    # data still gated

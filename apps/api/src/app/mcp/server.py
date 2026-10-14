@@ -8,13 +8,16 @@ from __future__ import annotations
 
 from typing import Any
 
+import base64
 import os
 
 from fastmcp import FastMCP
+from mcp.types import Icon
 
 from . import (app_ui, assemble, auth, compose, context, feeds, fetch, loop,
                weights_ui,
                publish, record, registry, resolve, ui, verify)
+from ..config import get_settings
 
 
 def _transport_security() -> dict:
@@ -168,7 +171,25 @@ human-readable guide) — or run the `explain_platform` prompt — and answer fr
 # they come from _http_transport() at that point.
 # Remote is still the faithful build surface: consumers connect by URL, so no filesystem path leaks into
 # a client config for a coding agent to follow into our source (ARCHITECTURE §6).
-mcp = FastMCP("servirplatform", instructions=INSTRUCTIONS)
+def _brand_icons() -> list[Icon]:
+    """The SERVIR Symbol as the server's icon: Primary for light grounds, Reversed
+    Color for dark, as the design file defines them (SERVIR/Logo/Symbol, nodes
+    3:2720 and 3:3027). Committed renders, not a live pull: a Figma render URL
+    expires, and the icon must not depend on Figma being up at start. Data URIs, so
+    a host has nothing to fetch and nothing to be gated from. Without one, hosts fall
+    back to the domain's favicon — the parent company's, not SERVIR's."""
+    out = []
+    for treatment, theme in (("primary", "light"), ("reversed-color", "dark")):
+        png = ui.theme_path().parent / "brand" / f"servir-symbol-{treatment}-64.png"
+        if png.exists():
+            out.append(Icon(src="data:image/png;base64,"
+                                + base64.b64encode(png.read_bytes()).decode(),
+                            mimeType="image/png", sizes=["64x64"], theme=theme))
+    return out
+
+
+mcp = FastMCP("servirplatform", instructions=INSTRUCTIONS, icons=_brand_icons(),
+              website_url=get_settings().grp_public_url.strip() or None)
 
 
 # async because the surface accessors are coroutines: there is no sync way to ask

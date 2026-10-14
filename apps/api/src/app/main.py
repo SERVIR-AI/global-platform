@@ -52,7 +52,12 @@ _PUBLIC_PREFIXES = (
     "/assets/",
     # The public runbook: documentation that must load for anonymous visitors.
     "/runbook/",
+    # The SERVIR Symbol icons: a browser tab or an MCP host's icon lookup carries no
+    # session, and a redirect to /auth/login is not an image.
     "/favicon.ico",
+    "/favicon.svg",
+    "/apple-touch-icon.png",
+    "/icon-512.png",
 )
 
 
