@@ -9,10 +9,12 @@ import json
 
 import numpy as np
 import pytest
+from shapely.geometry import shape
 
 from app.config import get_settings
 from app.contrib import fetch_policy, identity, staging
 from app.graph.geo import schema, stacks, tiffs
+from app.land_cover import synthesis as lc
 from app.mcp import assemble
 
 from test_sprint_fix_landcover import H, POLY, PX, W, _write, lc_env  # noqa: F401
@@ -155,3 +157,37 @@ def test_a_change_maps_fields_ride_the_staged_and_the_landed_row(env, monkeypatc
     text = next(c for c in p["citations"] if c.get("layer") == "change_bay_8514")["text"]
     log("OUTPUT", text[:300])
     assert "A change map from 1996 to 2020, comparing the maps of landcover_two" in text
+
+
+# ------------------------------------------------------------ 2. one ranking rule
+def test_the_default_stack_is_ranked_by_the_one_rule_in_stacks(env, monkeypatch):
+    """land_cover._pick_stack reads stacks.rank: replacing the rule changes the pick."""
+    sid, _row, _others, why = lc._pick_stack(shape(POLY), years=(2020,), name="Test bay")
+    assert stacks.RANK_RULE in why
+    seen = {}
+
+    def reversed_rank(cands, facts):
+        seen["called"] = [s for s, _ in cands]
+        return list(reversed(stacks.__dict__["_orig_rank"](cands, facts)))
+    monkeypatch.setitem(stacks.__dict__, "_orig_rank", stacks.rank)
+    monkeypatch.setattr(stacks, "rank", reversed_rank)
+    sid2, *_ = lc._pick_stack(shape(POLY), years=(2020,), name="Test bay")
+    assert seen["called"] and sid2 != sid
+    assert not hasattr(lc, "_cell_tiers") and not hasattr(lc, "CELL_TIE")
+
+
+def test_a_change_layer_is_never_a_stack_nor_a_candidate(env):
+    out = _submit("change_bay_8514", env["serve"]("chg.tif", _change_map(), nodata=I32_FILL),
+                  legend=CHANGE_LEGEND, declared=CHANGE_DECL)
+    assert out["status"] == "approved", out
+    assert "change_bay_8514" not in stacks.rows()
+    assert all(not k.startswith("change_") for k in lc.landcover_stacks())
+    assert all(r.get("role") == "landcover" for r in lc.landcover_stacks().values())
+    sid, _row, others, why = lc._pick_stack(shape(POLY), years=(2020,), name="Test bay")
+    assert not sid.startswith("change_") and not any(s.startswith("change_") for s, _ in others)
+    # a stack row of another role, hand-registered, is still never a land-cover candidate
+    conf = env["tmp"] / "conf"
+    cat = json.loads((conf / "tiffs.yml").read_text())
+    cat["landcover_oddrole"] = {**cat["landcover_two"], "role": "change"}
+    (conf / "tiffs.yml").write_text(json.dumps(cat))
+    assert "landcover_oddrole" in stacks.rows() and "landcover_oddrole" not in lc.landcover_stacks()

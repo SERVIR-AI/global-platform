@@ -23,6 +23,7 @@ from shapely.geometry import box, mapping, shape
 
 from app.config import get_settings
 from app.contrib import fetch_policy, identity, rasters, staging
+from app.graph.geo import stacks
 from app.land_cover import synthesis as lc
 from app.mcp import app_ui, assemble, fetch, packs, publish, registry, store
 from app.rag import filters as rag_filters
@@ -191,7 +192,7 @@ def test_cells_within_one_percent_are_one_size_then_more_years_then_first_regist
     log("OUTPUT", why)
     assert sid == "the_map"                                  # more years; registered before same_again
     assert [s for s, _ in others] == ["reprojected_copy", "same_again"]
-    assert "within 1% counts as the same size" in why and "it holds 3 year(s)" in why
+    assert stacks.RANK_RULE in why and "it holds 3 year(s)" in why
     # a stack really finer (5%) still wins on its cells, whatever its years
     cells["finer"] = PX * 0.95
     rows = {**_rows(finer=(0, [2014])), **rows}
@@ -199,7 +200,7 @@ def test_cells_within_one_percent_are_one_size_then_more_years_then_first_regist
     # all else equal, the first registered is read
     rows = _rows(first=(0, [2014]), second=(0, [2014]))
     assert _pick(monkeypatch, rows, {"first": PX, "second": PX * 1.005})[0] == "first"
-    assert lc._cell_tiers([PX, PX * 1.005, PX * 1.02, PX * 1.025]) == {
+    assert stacks.cell_tiers([PX, PX * 1.005, PX * 1.02, PX * 1.025]) == {
         PX: 0, PX * 1.005: 0, PX * 1.02: 1, PX * 1.025: 1}
 
 

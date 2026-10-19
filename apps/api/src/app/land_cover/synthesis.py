@@ -161,30 +161,15 @@ def stack_cell_deg(sid, row):
         return None
 
 
-CELL_TIE = 0.01      # cell sizes within 1% are one size: reprojection moves them by less
-
-
-def _cell_tiers(cells):
-    """{cell: tier} — 0 for the finest, counting up; a cell within CELL_TIE of the
-    tier's finest shares its tier. Two copies of one 30 m grid reprojected from
-    different UTM extents differ by 0.02%, and that difference used to decide which
-    map a question read."""
-    tiers, tier, base = {}, -1, None
-    for c in sorted(set(cells)):
-        if base is None or c > base * (1 + CELL_TIE):
-            tier, base = tier + 1, c
-        tiers[c] = tier
-    return tiers
-
-
 def _pick_stack(boundary, wanted=None, years=(), name="this area"):
     """(stack_id, row, others, why): the registered land-cover stack to read for this
     area, every OTHER registered stack that also covers it, and why this one was
     read. Unless the caller names one (`stack`), the covering stacks that HAVE the
     requested years are ranked — two or more classes first (a one-class map cannot
     show loss or gain), then the one whose extent covers most of the area, then the
-    finest cells (within 1% counts as the same size), then the most years, then the
-    first registered — and the others are declared as a gap, never silently ignored.
+    finest cells (within 1% counts as equal), then the most years, then the first
+    registered (stacks.rank, the one rule) — and the others are declared as a gap, never
+    silently ignored.
     The first registered match used to win: a one-class mangrove extent map was read
     over a Costa Rica bay while an eleven-class map of the same years sat beside it.
     Then a raw cell size 0.02% finer, from reprojection alone, let a contributed copy
@@ -231,22 +216,15 @@ def _pick_stack(boundary, wanted=None, years=(), name="this area"):
             f"no registered land-cover stack covering {name} has {', '.join(map(str, want))} — "
             + "; ".join(f"{row.get('title', sid)} ({sid}) has {stacks._span(stacks.years(row)) or 'no years'}"
                         for sid, row in covering))
-    order = {sid: i for i, sid in enumerate(rows)}
-    facts = {sid: (len(_legend(row)), _cover_share(boundary, row), stack_cell_deg(sid, row),
-                   len(stacks.years(row)))
+    facts = {sid: (len(_legend(row)), _cover_share(boundary, row), stack_cell_deg(sid, row))
              for sid, row in able}
-    tiers = _cell_tiers(f[2] for f in facts.values() if f[2])
-    able = sorted(able, key=lambda sr: (facts[sr[0]][0] < 2, -round(facts[sr[0]][1], 2),
-                                        tiers.get(facts[sr[0]][2], len(tiers)),
-                                        -facts[sr[0]][3], order[sr[0]]))
+    able = stacks.rank(able, facts)        # stable: registration order breaks a tie
     sid, row = able[0]
-    n_cls, share, cell, n_years = facts[sid]
-    why = (f"chosen among the {len(able)} stack(s) holding the years asked — two or more classes "
-           "first, then the extent covering most of the area, then the finest cells (within 1% "
-           "counts as the same size), then the most years, then the first registered: it maps "
-           f"{n_cls} class(es), its extent covers {share * 100:.0f}% of {name}"
+    n_cls, share, cell = facts[sid]
+    why = (f"chosen among the {len(able)} stack(s) holding the years asked — {stacks.RANK_RULE}: "
+           f"it maps {n_cls} class(es), its extent covers {share * 100:.0f}% of {name}"
            + (f", its cells are {cell * 111_320:.0f} m" if cell else "")
-           + f" and it holds {n_years} year(s)"
+           + f" and it holds {len(stacks.years(row))} year(s)"
            if len(able) > 1 else "the only covering stack holding the years asked")
     return sid, row, [(s, r) for s, r in covering if s != sid], why
 

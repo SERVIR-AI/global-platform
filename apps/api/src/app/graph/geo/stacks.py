@@ -120,26 +120,36 @@ def installed(stack_id):
 CELL_TIE = 0.01
 
 
+def cell_tiers(cells):
+    """{cell: tier} — 0 for the finest, counting up; a cell within CELL_TIE of its
+    tier's finest shares the tier. Two copies of one 30 m grid reprojected from
+    different UTM extents differ by 0.02%."""
+    tier, start, t = {}, None, -1
+    for c in sorted(set(cells)):
+        if start is None or c > start * (1 + CELL_TIE):
+            start, t = c, t + 1
+        tier[c] = t
+    return tier
+
+
 def rank(candidates, facts):
     """`candidates` [(stack_id, row)] best first, by `facts` {stack_id: (classes, share of
-    the area its extent covers, cell size in degrees or None)}: two or more classes
+    the area its extent covers, cell size in degrees or None, ...)}: two or more classes
     first (a one-class map cannot show loss or gain), then the extent covering most of
     the area, then the finest cells — cells within CELL_TIE of the finest of their group
     count as equal — then the most years, then registration order (the sort is stable).
     A one-year change map whose cell came out 0.02% finer from reprojection won the
-    default over the three-year series it was drawn from."""
-    tier, start, t = {}, None, -1
-    for c in sorted({f[2] for f in facts.values() if f[2]}):
-        if start is None or c > start * (1 + CELL_TIE):
-            start, t = c, t + 1
-        tier[c] = t
+    default over the three-year series it was drawn from. The one ranking rule: the
+    land-cover pack's default and every listing read it from here."""
+    tier = cell_tiers(f[2] for f in facts.values() if f[2])
     return sorted(candidates, key=lambda sr: (
         facts[sr[0]][0] < 2, -round(facts[sr[0]][1], 2),
         tier.get(facts[sr[0]][2], len(tier) + 1), -len(years(sr[1]))))
 
 
 RANK_RULE = ("two or more classes first, then the extent covering most of the area, then the "
-             f"finest cells (within {CELL_TIE:.0%} counts as equal), then the most years")
+             f"finest cells (within {CELL_TIE:.0%} counts as equal), then the most years, then "
+             "the first registered")
 
 
 def header(path):
