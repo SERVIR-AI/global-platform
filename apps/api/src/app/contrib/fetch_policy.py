@@ -46,6 +46,16 @@ class FetchRefused(Exception):
     """A fetch the policy does not allow; the message names why."""
 
 
+class TooLarge(FetchRefused):
+    """A file over the byte cap. `size`: its declared size in bytes, or None when it
+    declared none and the read stopped at the cap; `cap`: the cap. A caller that can
+    read part of a file (a raster clip) asks for the part instead of declining."""
+
+    def __init__(self, message: str, size: int | None = None, cap: int | None = None):
+        super().__init__(message)
+        self.size, self.cap = size, cap
+
+
 class _Retryable(FetchRefused):
     """A refusal another User-Agent might not get (401/403, a bot challenge)."""
 
@@ -418,14 +428,14 @@ def _fetch(url: str, cap: int, started: float, agent: str) -> tuple[bytes, str]:
             # Sized against the link the contributor gave: the hop that answers may be
             # a pre-signed storage URL, and its name means nothing to them anyway.
             if declared and str(declared).isdigit() and int(declared) > cap:
-                raise FetchRefused(f"{str(url).strip()} declares {int(declared):,} bytes; the cap "
-                                   f"is {cap:,} — " + _TOO_BIG)
+                raise TooLarge(f"{str(url).strip()} declares {int(declared):,} bytes; the cap "
+                               f"is {cap:,} — " + _TOO_BIG, size=int(declared), cap=cap)
             buf = bytearray()
             for chunk in r.iter_content(chunk_size=65536):
                 buf.extend(chunk)
                 if len(buf) > cap:
-                    raise FetchRefused(f"{str(url).strip()} exceeds the {cap:,}-byte cap — "
-                                       + _TOO_BIG)
+                    raise TooLarge(f"{str(url).strip()} exceeds the {cap:,}-byte cap — "
+                                   + _TOO_BIG, cap=cap)
                 if time.monotonic() - started > DEADLINE:
                     raise FetchRefused(f"fetch exceeded the {DEADLINE}s deadline")
             # A Drive link that ends on ANY web page — the confirm page, or a redirect to

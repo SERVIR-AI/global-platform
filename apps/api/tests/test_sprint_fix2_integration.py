@@ -26,6 +26,7 @@ from app.mcp import app_ui, assemble, feeds, packs, publish, record, registry, s
 from app.rag import filters as rag_filters
 from app.risk import synthesis as risk
 
+from test_fetch_policy import FakeResponse, transport  # noqa: F401  (a scripted transport)
 from test_layer_values import POLY as RISK_POLY, world  # noqa: F401  (the risk pack's toy area)
 from test_sprint_fix_landcover import H, LEFT, POLY, PX, TOP, W, _write, lc_env  # noqa: F401
 
@@ -722,3 +723,39 @@ def test_a_staged_document_says_unreviewed_preview_in_every_packs_citation(monke
     src = record._sources({"citations": [{**doc}, {"n": 2, **STAGED_DOC, "kind": "document"}]})
     assert all(s["review_status"].startswith("UNREVIEWED PREVIEW — staged contribution c0ffee")
                for s in src)
+
+
+# ------------------------------------------------- 7. an over-cap refusal by type
+def test_an_over_cap_fetch_is_its_own_refusal_with_its_size(transport):
+    transport.script["example.org|big"] = FakeResponse(200, {"Content-Length": "5000"}, b"x" * 5000)
+    with pytest.raises(fetch_policy.TooLarge) as declared:
+        fetch_policy.fetch("https://example.org/big", max_bytes=1000)
+    assert (declared.value.size, declared.value.cap) == (5000, 1000)
+    assert isinstance(declared.value, fetch_policy.FetchRefused)
+    transport.script["example.org|lie"] = FakeResponse(200, {"Content-Length": "10"},
+                                                       chunks=[b"x" * 600, b"x" * 600])
+    with pytest.raises(fetch_policy.TooLarge) as streamed:
+        fetch_policy.fetch("https://example.org/lie", max_bytes=1000)
+    assert (streamed.value.size, streamed.value.cap) == (None, 1000)
+
+
+def test_staging_asks_for_a_clip_on_the_refusals_type_not_its_words(monkeypatch, tmp_path):
+    from app.contrib import remote_clip
+
+    def too_big(url, max_bytes=None):
+        raise fetch_policy.TooLarge("worded any way at all", size=3 * (1 << 30), cap=50 << 20)
+    monkeypatch.setattr(fetch_policy, "fetch", too_big)
+    monkeypatch.setattr(remote_clip, "probe", lambda url: (_ for _ in ()).throw(
+        fetch_policy.FetchRefused("no probe here")))
+    with pytest.raises(staging.Declined) as said:
+        staging._raster_source({"url": "https://hub.test/cr_dem.tif"}, 50 << 20, tmp_path)
+    assert str(said.value).startswith("missing required field 'clip': https://hub.test/cr_dem.tif "
+                                      "is 3 GB, over the 50 MB cap")
+    # any other refusal is said as it is
+    monkeypatch.setattr(fetch_policy, "fetch", lambda url, max_bytes=None: (_ for _ in ()).throw(
+        fetch_policy.FetchRefused("host 'hub.test' does not resolve")))
+    with pytest.raises(staging.Declined, match="does not resolve"):
+        staging._raster_source({"url": "https://hub.test/cr_dem.tif"}, 50 << 20, tmp_path)
+    assert not hasattr(staging, "_TOO_BIG")
+    import inspect
+    assert "_TOO_BIG" not in inspect.getsource(staging)

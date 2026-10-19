@@ -1020,9 +1020,9 @@ def _raster_source(m: dict, cap: int, folder) -> tuple[str, list, dict | None]:
             raise Declined(rc.whole_only(m["url"], found, cap))
     try:
         raw, _ = fetch_policy.fetch(url)
+    except fetch_policy.TooLarge as exc:
+        raise Declined(rc.ask_for_clip(m["url"], cap, member, size=exc.size)) from None
     except fetch_policy.FetchRefused as exc:
-        if fetch_policy._TOO_BIG in str(exc):
-            raise Declined(rc.ask_for_clip(m["url"], cap, member)) from None
         raise Declined(str(exc)) from None
     except Exception as exc:
         raise Declined(f"could not fetch {m['url']}: {type(exc).__name__}: {exc}") from None

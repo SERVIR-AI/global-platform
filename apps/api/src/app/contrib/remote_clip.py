@@ -500,20 +500,21 @@ def note(m_url: str, box: list[float] | None, where: str | None, made: dict,
             + "; cell values and grid unchanged, no resampling")
 
 
-def ask_for_clip(url: str, cap: int, member: str | None = None) -> str:
+def ask_for_clip(url: str, cap: int, member: str | None = None, size: int | None = None) -> str:
     """The decline for a raster over the cap with no `clip`: worded as a missing field,
-    so the contributor's agent asks them for the area — never picks one itself."""
+    so the contributor's agent asks them for the area — never picks one itself. `size`:
+    what the refused fetch was told, when a probe learns nothing."""
     quoted = str(url).strip()
     base, frag = split_member(url)
     try:
         found = probe(base)
     except (fetch_policy.FetchRefused, ClipRefused):
         found = None
-    size = (found or {}).get("size")
+    size = (found or {}).get("size") or size
     big = (f"{quoted} is {size_text(size)}, over the {size_text(cap)} cap" if size
            else f"{quoted} is over the {size_text(cap)} cap")
     if found and not found["ranges"] and size:
-        return whole_only(url, found, cap)
+        return whole_only(url, {**found, "size": size}, cap)
     zipped = ""
     if found and found["ranges"]:
         from .rasters import sniff
