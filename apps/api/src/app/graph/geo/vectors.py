@@ -76,16 +76,23 @@ def _save(reg: dict) -> None:
     write_json(_dir() / "registry.json", reg, indent=2)
 
 
+# register/unregister read, change and rewrite registry.json: two approvals landing at
+# once each read the old file, and the second write dropped the first one's layer.
+_REGISTRY_LOCK = threading.RLock()
+
+
 def register(layer: str, entry: dict) -> None:
-    reg = landed()
-    reg[layer] = entry
-    _save(reg)
+    with _REGISTRY_LOCK:
+        reg = landed()
+        reg[layer] = entry
+        _save(reg)
 
 
 def unregister(layer: str) -> None:
-    reg = landed()
-    if reg.pop(layer, None) is not None:
-        _save(reg)
+    with _REGISTRY_LOCK:
+        reg = landed()
+        if reg.pop(layer, None) is not None:
+            _save(reg)
 
 
 def visible() -> dict:

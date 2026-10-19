@@ -19,6 +19,7 @@ import yaml
 
 from ...config import get_settings
 from . import align as align_mod
+from . import ingest
 
 
 def _recipe():
@@ -171,6 +172,13 @@ def combine_l2(aoi, hazard="hazard_flood", vuln_weights=None, recompute=False):
     out = os.path.join(adir, f"risk_{hazard.replace('hazard_', '')}"
                              f"_l2__{_weights_tag(weights)}.tif")
     legacy = os.path.join(adir, f"risk_{hazard.replace('hazard_', '')}_l2.tif")
+    # One caller builds a grid at a time, and writes it whole: the exists check is
+    # what serves it to the next caller, so a half-written file must never exist.
+    with ingest._lock(out):
+        return _combine_l2_locked(aoi, hazard, weights, out, legacy, recompute)
+
+
+def _combine_l2_locked(aoi, hazard, weights, out, legacy, recompute):
     if os.path.exists(out) and not recompute:
         return out
     if os.path.exists(legacy) and not recompute and weights == _recipe_weights(hazard):
@@ -189,6 +197,7 @@ def combine_l2(aoi, hazard="hazard_flood", vuln_weights=None, recompute=False):
     prof = {"driver": "GTiff", "height": ref["height"], "width": ref["width"], "count": 1,
             "dtype": "uint8", "crs": ref["crs"], "transform": ref["transform"],
             "compress": "lzw", "nodata": 0}
-    with rasterio.open(out, "w", **prof) as d:
-        d.write(risk, 1)
+    with ingest.atomic_path(out) as tmp:
+        with rasterio.open(tmp, "w", **prof) as d:
+            d.write(risk, 1)
     return out

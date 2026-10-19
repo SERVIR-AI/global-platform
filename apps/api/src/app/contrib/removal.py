@@ -11,6 +11,8 @@ from pathlib import Path
 
 import yaml
 
+from . import catalog_io
+
 _HISTORY = ("existing packs and receipts are stored snapshots and remain "
             "replayable — removal stops future use, it does not rewrite history")
 
@@ -33,6 +35,7 @@ def remove_doc(pack_id: str, doc_id: str) -> dict:
     return {"status": "removed", **out, "note": _HISTORY}
 
 
+@catalog_io.serialised
 def remove_feed(dataset: str, force: bool = False) -> dict:
     """Remove a CONTRIBUTED feed row (and, for landed tables, the archived copy
     moves aside rather than vanishing). Rows the contribution gate did not write
@@ -67,6 +70,7 @@ def remove_feed(dataset: str, force: bool = False) -> dict:
             "note": _HISTORY + "; restart the server to stop serving it"}
 
 
+@catalog_io.serialised
 def remove_raster(layer: str) -> dict:
     """Remove a CONTRIBUTED raster: catalog row + declared contract. The file
     moves aside, kept for replay of receipts minted against it. Built-in layers
@@ -92,7 +96,7 @@ def remove_raster(layer: str) -> dict:
         cat.pop(layer, None)
         header = ("# Contributed raster rows — machine-owned; written by the\n"
                   "# contribution gate. Hand-edit conf/tiffs.yml, never this.\n")
-        cat_path.write_text(header + yaml.safe_dump(cat, sort_keys=False, allow_unicode=True))
+        catalog_io.write_text(cat_path, header + yaml.safe_dump(cat, sort_keys=False, allow_unicode=True))
         return {"status": "removed", "layer": layer, "stack": True,
                 "years_removed": [r.get("layer") for r in removed], "note": _HISTORY}
     del cat[layer]
@@ -110,12 +114,12 @@ def remove_raster(layer: str) -> dict:
             stack_note = f"stack {sid} had no other year and was removed with it"
     header = ("# Contributed raster rows — machine-owned; written by the\n"
               "# contribution gate. Hand-edit conf/tiffs.yml, never this.\n")
-    cat_path.write_text(header + yaml.safe_dump(cat, sort_keys=False, allow_unicode=True))
+    catalog_io.write_text(cat_path, header + yaml.safe_dump(cat, sort_keys=False, allow_unicode=True))
     sch_path = Path(settings.raster_schema_contrib_path)
     sch = (yaml.safe_load(sch_path.read_text()) or {}) if sch_path.exists() else {}
     (sch.get("layers") or {}).pop(layer, None)
-    sch_path.write_text("# Contributed raster contracts — machine-owned.\n"
-                        + yaml.safe_dump(sch, sort_keys=False, allow_unicode=True))
+    catalog_io.write_text(sch_path, "# Contributed raster contracts — machine-owned.\n"
+                          + yaml.safe_dump(sch, sort_keys=False, allow_unicode=True))
     out = {"catalog_row": "removed", "declared_contract": "removed"}
     from .staging import _purge_clips
     out["clips_purged"] = _purge_clips(layer)   # never serve an old clip under a reused name

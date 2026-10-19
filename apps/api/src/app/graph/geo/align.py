@@ -53,11 +53,15 @@ def align_to(ref, layer, aoi, verify_first=True):
     # silently overwrote the finer one's aligned layers.
     ref_tag = os.path.splitext(os.path.basename(ref["path"]))[0]
     out = os.path.join(adir, f"{layer}__aligned__{ref_tag}.tif")
-    with rasterio.open(clip) as src:
-        dst = _resample_onto(src.read(1), src.transform, src.crs, ref, src_nodata=src.nodata)
-        prof = {"driver": "GTiff", "height": ref["height"], "width": ref["width"],
-                "count": 1, "dtype": dst.dtype, "crs": ref["crs"],
-                "transform": ref["transform"], "compress": "lzw", "nodata": 0}
-    with rasterio.open(out, "w", **prof) as d:
-        d.write(dst, 1)
+    # Written whole (temp + rename) and one caller at a time: a second caller reading
+    # the bundle never opens a half-written grid.
+    with ingest._lock(out):
+        with rasterio.open(clip) as src:
+            dst = _resample_onto(src.read(1), src.transform, src.crs, ref, src_nodata=src.nodata)
+            prof = {"driver": "GTiff", "height": ref["height"], "width": ref["width"],
+                    "count": 1, "dtype": dst.dtype, "crs": ref["crs"],
+                    "transform": ref["transform"], "compress": "lzw", "nodata": 0}
+        with ingest.atomic_path(out) as tmp:
+            with rasterio.open(tmp, "w", **prof) as d:
+                d.write(dst, 1)
     return out

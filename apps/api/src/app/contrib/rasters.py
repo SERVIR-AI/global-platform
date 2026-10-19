@@ -20,6 +20,8 @@ from pathlib import Path
 
 import yaml
 
+from . import catalog_io
+
 REQUIRED = ("layer", "file", "title", "description", "source", "license",
             "vintage", "legend", "declared")
 _DECLARED_REQUIRED = ("dtype", "valid_min", "valid_max")
@@ -772,52 +774,63 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None,
         return {"status": "valid (dry-run, nothing written)", "verified": True,
                 "observed": obs, "file": str(manifest["file"]) if keep_prepared else original}
 
-    cat_path = Path(settings.tiffs_contrib_path)
-    cat = (yaml.safe_load(cat_path.read_text()) or {}) if cat_path.exists() else {}
-    if namespace(layer).get("stack"):
-        conflict = _stack_conflict(cat, manifest)
-        if conflict:
+    # The catalog files are read, changed and written as one step (catalog_io.LOCK).
+    with catalog_io.LOCK:
+        cat_path = Path(settings.tiffs_contrib_path)
+        cat = (yaml.safe_load(cat_path.read_text()) or {}) if cat_path.exists() else {}
+        if layer in cat:
+            # checked again where it is written: two landings of one name at once both
+            # passed the first check, and the second's file replaced the first's
             _drop_prepared()
-            return {"status": "declined", "verified": True, "failures": [conflict], "observed": obs}
+            return {"status": "declined", "verified": True, "observed": obs,
+                    "failures": [f"layer {layer!r} already in the catalog — contributions "
+                                 "add layers, they do not overwrite them"]}
+        if namespace(layer).get("stack"):
+            conflict = _stack_conflict(cat, manifest)
+            if conflict:
+                _drop_prepared()
+                return {"status": "declined", "verified": True, "failures": [conflict], "observed": obs}
 
-    dest = Path(settings.tiffs_dir) / f"{layer}.tif"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(manifest["file"], dest)
-    _drop_prepared()
+        dest = Path(settings.tiffs_dir) / f"{layer}.tif"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        from ..graph.geo.ingest import atomic_path
+        with atomic_path(str(dest)) as tmp:          # a reader never opens half a copy
+            shutil.copyfile(manifest["file"], tmp)
+        _drop_prepared()
 
-    # Contributed rows live in their own MACHINE-OWNED files, merged at load.
-    # The hand-authored conf files are never rewritten by code: a yaml round-trip
-    # strips their comments, which carry the institutional lessons (caught when
-    # X2b's first version silently deleted them).
-    row = {"local_path": f"tiffs/{layer}.tif",
-           "title": manifest["title"], "description": manifest["description"],
-           "legend": (manifest.get("legend") or {}), "source": manifest["source"],
-           "license": manifest["license"], "vintage": manifest["vintage"],
-           **({"usage_notes": manifest["usage_notes"]}
-              if manifest.get("usage_notes") else {}),
-           **({"review": review} if review else {}),
-           **({"prepared": prepared} if prepared else {}),
-           **({"fetched": fetched} if fetched else {}),
-           **({"outside_values": outside} if outside is not None else {}),
-           **({"countries": list(manifest["countries"])} if manifest.get("countries") else {}),
-           **declared_fields(manifest),
-           "contributed": True}
-    cat[layer] = row
-    if namespace(layer).get("stack"):
-        _land_stack_year(cat, layer, manifest, dest, outside or [])
-    cat_path.write_text("# Contributed raster rows — machine-owned; written by the\n"
-                        "# contribution gate. Hand-edit conf/tiffs.yml, never this.\n"
-                        + yaml.safe_dump(cat, sort_keys=False, allow_unicode=True))
+        # Contributed rows live in their own MACHINE-OWNED files, merged at load.
+        # The hand-authored conf files are never rewritten by code: a yaml round-trip
+        # strips their comments, which carry the institutional lessons (caught when
+        # X2b's first version silently deleted them).
+        row = {"local_path": f"tiffs/{layer}.tif",
+               "title": manifest["title"], "description": manifest["description"],
+               "legend": (manifest.get("legend") or {}), "source": manifest["source"],
+               "license": manifest["license"], "vintage": manifest["vintage"],
+               **({"usage_notes": manifest["usage_notes"]}
+                  if manifest.get("usage_notes") else {}),
+               **({"review": review} if review else {}),
+               **({"prepared": prepared} if prepared else {}),
+               **({"fetched": fetched} if fetched else {}),
+               **({"outside_values": outside} if outside is not None else {}),
+               **({"countries": list(manifest["countries"])} if manifest.get("countries") else {}),
+               **declared_fields(manifest),
+               "contributed": True}
+        cat[layer] = row
+        if namespace(layer).get("stack"):
+            _land_stack_year(cat, layer, manifest, dest, outside or [])
+        catalog_io.write_text(cat_path, "# Contributed raster rows — machine-owned; written by the\n"
+                              "# contribution gate. Hand-edit conf/tiffs.yml, never this.\n"
+                              + yaml.safe_dump(cat, sort_keys=False, allow_unicode=True))
 
-    sch_path = Path(settings.raster_schema_contrib_path)
-    sch = (yaml.safe_load(sch_path.read_text()) or {}) if sch_path.exists() else {}
-    sch.setdefault("layers", {})[layer] = decl
-    sch_path.write_text("# Contributed raster contracts — machine-owned.\n"
-                        + yaml.safe_dump(sch, sort_keys=False, allow_unicode=True))
+        sch_path = Path(settings.raster_schema_contrib_path)
+        sch = (yaml.safe_load(sch_path.read_text()) or {}) if sch_path.exists() else {}
+        sch.setdefault("layers", {})[layer] = decl
+        catalog_io.write_text(sch_path, "# Contributed raster contracts — machine-owned.\n"
+                              + yaml.safe_dump(sch, sort_keys=False, allow_unicode=True))
 
-    return {"status": "landed", "layer": layer, "verified": True,
-            "file": str(dest), "observed": obs,
-            "passport": {k: row[k] for k in ("title", "source", "license", "vintage")}}
+        return {"status": "landed", "layer": layer, "verified": True,
+                "file": str(dest), "observed": obs,
+                "passport": {k: row[k] for k in ("title", "source", "license", "vintage")}}
 
 
 def _norm_legend(legend):

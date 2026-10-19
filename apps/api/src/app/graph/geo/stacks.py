@@ -389,11 +389,14 @@ def change(clip_a, clip_b, boundary, legend, outside_values, focus_class=None, o
         code[common_px & (a == focus_class) & (b == focus_class)] = 1
         code[common_px & (a == focus_class) & (b != focus_class)] = 2
         code[common_px & (a != focus_class) & (b == focus_class)] = 3
-        with rasterio.open(out_path, "w", driver="GTiff", width=a.shape[1], height=a.shape[0],
-                           count=1, dtype="uint8", crs=ca, transform=ta, nodata=15,
-                           compress="lzw") as dst:
-            dst.write(code, 1)
-            dst.update_tags(overview_level=clip_level(clip_a), focus_class=int(focus_class))
+        # into the area bundle beside the clips: whole (temp + rename), one writer at a time
+        from . import ingest
+        with ingest._lock(out_path), ingest.atomic_path(out_path) as tmp:
+            with rasterio.open(tmp, "w", driver="GTiff", width=a.shape[1], height=a.shape[0],
+                               count=1, dtype="uint8", crs=ca, transform=ta, nodata=15,
+                               compress="lzw") as dst:
+                dst.write(code, 1)
+                dst.update_tags(overview_level=clip_level(clip_a), focus_class=int(focus_class))
     areas = row_pixel_areas_km2(ta, a.shape[0])
     w_all = np.broadcast_to(areas[:, None], a.shape)
     out_a, out_b = _outside_mask(a, outside_values), _outside_mask(b, outside_values)

@@ -24,7 +24,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from ..mcp import store
-from . import fetch_policy, identity, sources
+from . import catalog_io, fetch_policy, identity, sources
 
 KINDS = ("document", "table", "feed", "raster", "vector", "weights", "amend")
 STATUSES = ("pending", "approved", "rejected", "withdrawn", "failed")
@@ -714,6 +714,7 @@ def _stage_feed(rec: dict, prepared: dict) -> dict:
                             "get it until it is approved; then it is a platform feed for everyone")}
 
 
+@catalog_io.serialised
 def _land_feed(rec: dict) -> dict:
     import yaml
     from ..config import get_settings
@@ -733,7 +734,7 @@ def _land_feed(rec: dict) -> dict:
     if path.exists():
         raise Declined(f"{path.name} already exists — contributions never overwrite")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(yaml.safe_dump(spec, sort_keys=False, allow_unicode=True))
+    catalog_io.write_text(path, yaml.safe_dump(spec, sort_keys=False, allow_unicode=True))
     registry.reload_declarative_feeds()
     _ensure_staged_loaded()
     STAGED_FEEDS.pop(m["dataset"], None)
@@ -1447,6 +1448,7 @@ def _stage_weights(rec: dict, prepared: dict) -> dict:
                             "ones in force until a reviewer approves")}
 
 
+@catalog_io.serialised
 def _land_weights(rec: dict) -> dict:
     import yaml
     from ..config import get_settings
@@ -1457,7 +1459,8 @@ def _land_weights(rec: dict) -> dict:
         doc = yaml.safe_load(path.read_text()) or {}
     doc.setdefault("weights", {})[pv["hazard"]] = pv["after"]
     doc.setdefault("adjusted", {})[pv["hazard"]] = _weights_block(rec)
-    path.write_text(
+    catalog_io.write_text(
+        path,
         "# Hub-adjusted Layer-2 vulnerability weights \u2014 machine-owned, written by\n"
         "# the contribution gate on approval. Hand-edit conf/risk_l2.yml, never this.\n"
         + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
@@ -1944,6 +1947,7 @@ def _stage_amend(rec: dict, prepared: dict) -> dict:
                             "show the current one until a reviewer approves")}
 
 
+@catalog_io.serialised
 def _land_amend(rec: dict) -> dict:
     """Rewrite the landed row with the corrected values and keep what they replaced:
     `amended` is the row's own history, newest last."""
@@ -1971,7 +1975,8 @@ def _land_amend(rec: dict) -> dict:
             raise Declined(f"{layer!r} is no longer a landed raster — nothing to correct")
         rows[layer] = {**rows[layer], **row_fields, **reviewed(rows[layer]),
                        "amended": [*(rows[layer].get("amended") or []), history]}
-        s.tiffs_contrib_path.write_text(
+        catalog_io.write_text(
+            s.tiffs_contrib_path,
             "# Contributed raster rows — machine-owned; written by the\n"
             "# contribution gate. Hand-edit conf/tiffs.yml, never this.\n"
             + yaml.safe_dump(rows, sort_keys=False, allow_unicode=True))
@@ -1979,8 +1984,8 @@ def _land_amend(rec: dict) -> dict:
             sp = s.raster_schema_contrib_path
             doc = (yaml.safe_load(sp.read_text()) or {}) if sp.exists() else {}
             doc.setdefault("layers", {}).setdefault(layer, {})["units"] = after["units"]
-            sp.write_text("# Contributed raster contracts — machine-owned.\n"
-                          + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+            catalog_io.write_text(sp, "# Contributed raster contracts — machine-owned.\n"
+                                  + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
     else:
         from ..graph.geo import vectors
         entry = vectors.landed().get(layer)
@@ -2129,6 +2134,7 @@ def _weights_block(rec: dict) -> dict:
                if (rec.get("manifest") or {}).get("usage_notes") else {})}
 
 
+@catalog_io.serialised
 def _unland_weights(rec: dict) -> dict:
     """The hazard's weights go back to what was in force before: the latest OTHER
     approved adjustment for it, else the platform recipe (conf/risk_l2.yml)."""
@@ -2156,13 +2162,15 @@ def _unland_weights(rec: dict) -> dict:
         doc.get("weights", {}).pop(hz, None)
         doc.get("adjusted", {}).pop(hz, None)
         now = "the platform recipe (conf/risk_l2.yml) is in force again"
-    path.write_text(
+    catalog_io.write_text(
+        path,
         "# Hub-adjusted Layer-2 vulnerability weights — machine-owned, written by\n"
         "# the contribution gate on approval. Hand-edit conf/risk_l2.yml, never this.\n"
         + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
     return {"removed": True, "hazard": hz, "now": now, "note": removal._HISTORY}
 
 
+@catalog_io.serialised
 def _unland_amend(rec: dict) -> dict:
     """A correction taken back: every field that still says what it set returns to
     what it replaced; a field a later correction changed again is left alone and named."""
@@ -2195,7 +2203,8 @@ def _unland_amend(rec: dict) -> dict:
     if kind == "raster":
         rows = yaml.safe_load(s.tiffs_contrib_path.read_text()) or {}
         rows[layer] = undone(rows[layer])
-        s.tiffs_contrib_path.write_text(
+        catalog_io.write_text(
+            s.tiffs_contrib_path,
             "# Contributed raster rows — machine-owned; written by the\n"
             "# contribution gate. Hand-edit conf/tiffs.yml, never this.\n"
             + yaml.safe_dump(rows, sort_keys=False, allow_unicode=True))
@@ -2203,8 +2212,8 @@ def _unland_amend(rec: dict) -> dict:
             sp = s.raster_schema_contrib_path
             doc = (yaml.safe_load(sp.read_text()) or {}) if sp.exists() else {}
             doc.setdefault("layers", {}).setdefault(layer, {})["units"] = restore["units"]
-            sp.write_text("# Contributed raster contracts — machine-owned.\n"
-                          + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+            catalog_io.write_text(sp, "# Contributed raster contracts — machine-owned.\n"
+                                  + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
     else:
         from ..graph.geo import vectors
         vectors.register(layer, undone(vectors.landed()[layer]))

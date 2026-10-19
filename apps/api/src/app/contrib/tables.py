@@ -22,6 +22,8 @@ from pathlib import Path
 
 import yaml
 
+from . import catalog_io
+
 REQUIRED = ("dataset", "file", "title", "description", "source", "validation",
             "license", "vintage", "cadence", "columns", "units")
 # Where the rows speak: a table that declares neither is read for every place.
@@ -168,6 +170,17 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None) -> dic
         return {"status": "valid (dry-run, nothing written)",
                 "rows": n_rows, "sha256": digest, "encoding": enc}
 
+    with catalog_io.LOCK:
+        # checked again where it is written: two landings of one name at once both
+        # passed the first check, and the second's copy replaced the first's file
+        if feed_yml.exists():
+            return {"status": "declined",
+                    "failures": [f"dataset {ds!r} already landed — contributions add "
+                                 "tables, they do not overwrite them"]}
+        return _land(manifest, review, settings, ds, feed_yml, digest, enc, n_rows)
+
+
+def _land(manifest, review, settings, ds, feed_yml, digest, enc, n_rows):
     dest = Path(settings.cache_dir) / "tables" / f"{ds}.csv"
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(manifest["file"], dest)
@@ -200,7 +213,7 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None) -> dic
             # removable without --force; shipped feeds are code changes.
             "contributed": True}
     feed_yml.parent.mkdir(parents=True, exist_ok=True)
-    feed_yml.write_text(yaml.safe_dump(spec, sort_keys=False, allow_unicode=True))
+    catalog_io.write_text(feed_yml, yaml.safe_dump(spec, sort_keys=False, allow_unicode=True))
     return {"status": "landed", "dataset": ds, "rows": n_rows, "sha256": digest,
             "encoding": enc,
             "archived": str(dest), "feed_row": str(feed_yml),

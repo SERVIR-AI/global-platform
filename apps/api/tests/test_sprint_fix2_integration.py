@@ -6,20 +6,24 @@ Every fixture is synthetic and built here, on the four-stack bay of
 test_sprint_fix_landcover; layers arrive through the gate a moment before they are read."""
 
 import json
+import os
 import shutil
 import subprocess
+import threading
+import time
 
 import numpy as np
 import pytest
-from shapely.geometry import shape
+import rasterio
+from shapely.geometry import box, shape
 
 from app.config import get_settings
-from app.contrib import fetch_policy, identity, staging
-from app.graph.geo import schema, stacks, tiffs
+from app.contrib import catalog_io, fetch_policy, identity, rasters, removal, staging, tables
+from app.graph.geo import align, combine, ingest, schema, stacks, tiffs, vectors
 from app.land_cover import synthesis as lc
 from app.mcp import app_ui, assemble, publish, store
 
-from test_sprint_fix_landcover import H, POLY, PX, W, _write, lc_env  # noqa: F401
+from test_sprint_fix_landcover import H, LEFT, POLY, PX, TOP, W, _write, lc_env  # noqa: F401
 
 OWNER = identity.Caller("user_owner", "gis@hub.test", False, "bound")
 MANGROVE = {1: "Mangrove", 2: "Other"}
@@ -308,3 +312,157 @@ def test_colours_given_by_class_name_are_read_and_bad_ones_declined(env):
     assert p["status"] == "ok", p.get("note")
     g = store.load_pack(p["pack_id"])["viz"]["hazard_grid"]
     assert g["legend"][0] == {"code": 10, "label": "Mangrove", "color": "#0b6e4f"}
+
+
+# ------------------------------------------------- 4. many callers, one file
+def _together(n, fn):
+    """Run fn(i) on n threads released at once; their results, or the first error."""
+    gate, out, errs = threading.Barrier(n), [None] * n, []
+
+    def run(i):
+        gate.wait()
+        try:
+            out[i] = fn(i)
+        except BaseException as exc:        # noqa: BLE001 — surfaced below
+            errs.append(exc)
+    ts = [threading.Thread(target=run, args=(i,)) for i in range(n)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert not errs, errs
+    return out
+
+
+def _slow(monkeypatch, mod, name, delay=0.02):
+    """Widen a read-change-write window: `mod.name` sleeps after it runs."""
+    real = getattr(mod, name)
+
+    def slow(*a, **k):
+        r = real(*a, **k)
+        time.sleep(delay)
+        return r
+    monkeypatch.setattr(mod, name, slow)
+
+
+def _no_tmp(d):
+    return [f for f in os.listdir(d) if f.endswith(".tmp")]
+
+
+def test_two_vector_approvals_at_once_keep_both_layers(env, monkeypatch):
+    _slow(monkeypatch, vectors, "landed")
+    _together(8, lambda i: vectors.register(f"vec_{i}", {"local_path": f"vectors/v{i}.geojson"}))
+    assert set(vectors.landed()) == {f"vec_{i}" for i in range(8)}
+    _together(4, lambda i: vectors.unregister(f"vec_{i}"))
+    assert set(vectors.landed()) == {f"vec_{i}" for i in range(4, 8)}
+    assert _no_tmp(vectors._dir()) == []
+
+
+def test_rasters_landing_at_once_keep_every_row_and_one_name_lands_once(env, monkeypatch):
+    """The gate read tiffs.contrib.yml, changed it and wrote it back; two approvals at
+    once each wrote the old file plus their own row, and the first row was lost."""
+    _slow(monkeypatch, rasters, "declared_fields")
+    dem = np.full((H, W), 5.0, "float32")
+    decl = {"dtype": "float32", "valid_min": 0, "valid_max": 20, "nodata": -9999.0, "units": "m"}
+
+    def add(layer, i):
+        return rasters.add({"layer": layer, "title": "t", "description": "d", "source": "s",
+                            "license": "CC0-1.0", "vintage": "2026-10", "declared": decl,
+                            "file": _write(env["tmp"] / f"{layer}-{i}.tif", dem + i, nodata=-9999.0)})
+    outs = _together(5, lambda i: add(f"measure_bay_m{i}", i))
+    assert [o["status"] for o in outs] == ["landed"] * 5, outs
+    cat = tiffs.catalog()
+    assert all(f"measure_bay_m{i}" in cat for i in range(5))
+    assert all(f"measure_bay_m{i}" in schema._doc().get("layers", {}) for i in range(5))
+    # one name landed twice at once: one lands, the other is declined in words
+    twice = _together(2, lambda i: add("measure_bay_twice", i))
+    assert sorted(o["status"] for o in twice) == ["declined", "landed"], twice
+    assert "already in the catalog" in json.dumps(twice)
+    assert _no_tmp(get_settings().tiffs_dir) == []
+
+
+def test_tables_and_feeds_land_whole_and_once(env, monkeypatch):
+    _slow(monkeypatch, tables, "scope_fields")
+    csv = env["tmp"] / "t.csv"
+    csv.write_text("site,depth\nA,1\nB,2\n")
+    m = {"file": str(csv), "title": "t", "description": "d", "source": "s",
+         "validation": "single-agency", "license": "CC0-1.0", "vintage": "2026-10",
+         "cadence": "static", "columns": {"site": "site", "depth": "depth"},
+         "units": {"depth": "m"}}
+    outs = _together(2, lambda i: tables.add({**m, "dataset": "same_table"}))
+    assert sorted(o["status"] for o in outs) == ["declined", "landed"], outs
+    outs = _together(4, lambda i: tables.add({**m, "dataset": f"table_{i}"}))
+    assert [o["status"] for o in outs] == ["landed"] * 4
+    assert _no_tmp(env["feeds"]) == []
+
+
+def test_the_catalog_writers_go_through_one_lock_and_one_rename(env, monkeypatch):
+    """Every machine-owned catalog file the gate rewrites: removal, amend, weights, feeds."""
+    written = []
+    real = catalog_io.write_text
+
+    def spy(path, text):
+        assert catalog_io.LOCK._is_owned(), f"{path} written outside the catalog lock"
+        written.append(os.path.basename(path))
+        return real(path, text)
+    monkeypatch.setattr(catalog_io, "write_text", spy)
+    dem = np.full((H, W), 5.0, "float32")
+    decl = {"dtype": "float32", "valid_min": 0, "valid_max": 20, "nodata": -9999.0, "units": "m"}
+    out = _submit("measure_bay_spy", env["serve"]("spy.tif", dem, nodata=-9999.0), declared=decl)
+    assert out["status"] == "approved", out
+    assert {"tiffs.contrib.yml", "raster_schema.contrib.yml"} <= set(written)
+    written.clear()
+    assert removal.remove_raster("measure_bay_spy")["status"] == "removed"
+    assert {"tiffs.contrib.yml", "raster_schema.contrib.yml"} <= set(written)
+    assert "measure_bay_spy" not in tiffs.catalog()
+
+
+def test_bundle_rasters_are_built_once_and_written_whole(env, monkeypatch, tmp_path):
+    """align_to, combine_l2 and a land-cover change map write into the area bundle: two
+    callers used to serve each other a half-written grid. One builds, the other reads."""
+    adir = tmp_path / "aoi"
+    adir.mkdir()
+    aoi = {"admin": str(adir / "admin.geojson")}
+    hz = np.full((H, W), 3, "uint8")
+    ref_path = _write(adir / "hazard_toy.tif", hz, nodata=0)
+    v = np.full((H, W), 4, "uint8")
+    v_path = _write(adir / "vuln_src.tif", v, nodata=0)
+    with rasterio.open(ref_path) as r:
+        ref = {"path": ref_path, "transform": r.transform, "crs": r.crs,
+               "width": r.width, "height": r.height}
+    monkeypatch.setattr(ingest, "hazard_clip", lambda a, layer, **k: v_path)
+    monkeypatch.setattr(align.verify, "verify_raster",
+                        lambda layer: type("Report", (), {"ok": True, "mismatches": []})())
+    used = []
+    real_atomic = ingest.atomic_path
+
+    def spy(dest):
+        used.append(os.path.basename(dest))
+        return real_atomic(dest)
+    monkeypatch.setattr(ingest, "atomic_path", spy)
+    outs = _together(6, lambda i: align.align_to(ref, "vulnerability_toy", aoi, verify_first=False))
+    assert len(set(outs)) == 1 and rasterio.open(outs[0]).read(1).max() == 4
+    assert used.count(os.path.basename(outs[0])) == 6
+    # combine_l2: six callers, one computation, one grid
+    monkeypatch.setattr(align, "reference_grid", lambda a, h: ref)
+    calls = []
+    real_combine = combine._combine
+
+    def counting(*a, **k):
+        calls.append(1)
+        time.sleep(0.05)
+        return real_combine(*a, **k)
+    monkeypatch.setattr(combine, "_combine", counting)
+    grids = _together(6, lambda i: combine.combine_l2(aoi, "hazard_toy",
+                                                      vuln_weights={"vulnerability_toy": 1.0}))
+    assert len(set(grids)) == 1 and len(calls) == 1
+    assert rasterio.open(grids[0]).read(1).max() >= 1
+    # a land-cover change map
+    a = np.full((H, W), 2, "uint8"); a[:, :5] = 1
+    b = np.full((H, W), 2, "uint8"); b[:, :4] = 1
+    pa, pb = _write(adir / "a.tif", a), _write(adir / "b.tif", b)
+    out_path = str(adir / "landcover_change_1_1996_2020.tif")
+    bay = box(LEFT, TOP - H * PX, LEFT + W * PX, TOP)
+    _together(4, lambda i: stacks.change(pa, pb, bay, MANGROVE, [], focus_class=1, out_path=out_path))
+    assert "landcover_change_1_1996_2020.tif" in used
+    with rasterio.open(out_path) as ds:
+        assert set(np.unique(ds.read(1)).tolist()) == {1, 2, 15}     # stable, loss, neither
+    assert _no_tmp(adir) == []
