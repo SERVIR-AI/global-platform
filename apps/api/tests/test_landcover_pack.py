@@ -89,10 +89,21 @@ def lc_env(tmp_path, monkeypatch):
 
 
 def _expected_px_area_km2(row):
-    """Spherical area of one pixel in raster row `row` (same formula as stacks.py)."""
+    """Area of one pixel in raster row `row` on the WGS84 ellipsoid, through the
+    authalic latitude β (stacks.py moved from the authalic sphere, which overstates a
+    pixel by ~0.17% at 27 N): R_q² · Δλ · (sin β_n − sin β_s)."""
+    a, e2 = 6378.137, 0.00669437999014
+    e = math.sqrt(e2)
+
+    def q(phi):
+        s = math.sin(phi)
+        return (1 - e2) * (s / (1 - e2 * s * s) - (1 / (2 * e)) * math.log((1 - e * s) / (1 + e * s)))
+    qp = q(math.pi / 2)
+    rq2 = a * a * qp / 2
+    sin_beta = lambda phi: q(phi) / qp
     lat_n = math.radians(TOP - row * PX)
     lat_s = math.radians(TOP - (row + 1) * PX)
-    return stacks.R_KM ** 2 * math.radians(PX) * (math.sin(lat_n) - math.sin(lat_s))
+    return rq2 * math.radians(PX) * (sin_beta(lat_n) - sin_beta(lat_s))
 
 
 def test_stack_expands_into_per_year_rows_and_contracts(lc_env):

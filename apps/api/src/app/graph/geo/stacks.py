@@ -7,9 +7,9 @@ source_raster, hazard_clip, schema_for, verify) works on `landcover_hkh_2022`
 unchanged. What is specific to a series lives here: which years exist and why
 one is missing, where a year's file is, and the pixel-counting computations.
 
-Areas are summed per pixel at the pixel's own latitude on the authalic sphere,
-never with one constant pixel area: a 30 m cell at 28 N covers 11% less ground
-than one at the equator. Counts are never resampled.
+Areas are summed per pixel at the pixel's own latitude, exact on the WGS84
+ellipsoid, never with one constant pixel area: a 30 m cell at 28 N covers 11% less
+ground than one at the equator. Counts are never resampled.
 """
 import math
 
@@ -21,7 +21,23 @@ from shapely.geometry import shape
 
 from . import tiffs
 
-R_KM = 6371.0072          # authalic Earth radius; the WGS84-exact area is 0.08% smaller
+# The authalic radius: a sphere of this radius has the ellipsoid's total area, but not
+# its area between two parallels — at 10 N the sphere overstates a pixel by ~0.41%, at
+# the equator ~0.45%, at 30 N ~0.11%. Pixel areas use the authalic LATITUDE instead,
+# which is exact on WGS84 (row_pixel_areas_km2).
+R_KM = 6371.0072
+WGS84_A_KM = 6378.137
+WGS84_E2 = 0.00669437999014
+_E = math.sqrt(WGS84_E2)
+
+
+def _q(lat_rad):
+    """Snyder's q(φ): the authalic latitude β of φ is asin(q(φ) / q(π/2)), and the area
+    of the WGS84 ellipsoid between the equator and φ is a²/2 · q(φ) per radian of
+    longitude."""
+    s = np.sin(lat_rad)
+    return (1 - WGS84_E2) * (s / (1 - WGS84_E2 * s ** 2)
+                             - (1 / (2 * _E)) * np.log((1 - _E * s) / (1 + _E * s)))
 
 
 def rows():
@@ -111,13 +127,15 @@ def header(path):
 
 
 def row_pixel_areas_km2(transform, height):
-    """Area of one pixel in each raster row, km², on the authalic sphere:
-    R² · Δλ · (sin φ_north − sin φ_south). Vectorised over rows."""
+    """Area of one pixel in each raster row, km², exact on the WGS84 ellipsoid:
+    R_q² · Δλ · (sin β_north − sin β_south), β the authalic latitude and
+    R_q = a·sqrt(q_p / 2) — which is a²/2 · Δλ · |q(φ_north) − q(φ_south)|.
+    Vectorised over rows."""
     a, e, f = transform.a, transform.e, transform.f
     i = np.arange(height, dtype="float64")
-    lat_n = np.radians(f + i * e)
-    lat_s = np.radians(f + (i + 1) * e)
-    return (R_KM ** 2) * math.radians(abs(a)) * np.abs(np.sin(lat_n) - np.sin(lat_s))
+    lat_n = np.radians(np.clip(f + i * e, -90.0, 90.0))
+    lat_s = np.radians(np.clip(f + (i + 1) * e, -90.0, 90.0))
+    return (WGS84_A_KM ** 2 / 2) * math.radians(abs(a)) * np.abs(_q(lat_n) - _q(lat_s))
 
 
 def _inside(boundary, shape_, transform):
