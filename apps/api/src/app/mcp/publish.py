@@ -38,7 +38,9 @@ def _insight(pack_id: str, draft: str) -> dict:
               for c in pack.get("citations", []) if c.get("series")]
     context = {c["kind"]: c.get("text") for c in pack.get("citations", [])
                if c.get("kind") in ("conditions", "calendar")}
+    prepared = _insight_prepared(pack)
     return {"brief": draft, "series": series, "context": context,
+            **({"prepared": prepared} if prepared else {}),
             **({"map": _panel_map(pack)} if _panel_map(pack) else {}),
             **({"places": _insight_places(pack)} if _insight_places(pack) else {}),
             **({"layers": _insight_layers(pack)} if pack.get("layers") else {}),
@@ -46,6 +48,36 @@ def _insight(pack_id: str, draft: str) -> dict:
             "pack": pack.get("pack"), "target": pack.get("target"),
             **({"country": pack.get("country"), "crop": pack.get("crop")}
                if pack.get("country") or pack.get("crop") else {})}
+
+
+def _notes(v) -> list[str]:
+    return [str(x).strip() for x in (v or []) if str(x).strip()] if isinstance(v, (list, tuple)) else []
+
+
+def _insight_prepared(pack: dict) -> dict:
+    """{citation n: what ingest did to its file} — reprojected, recoded, clipped, band
+    1 of 4 — for every cited layer that was changed on the way in, so the evidence
+    view shows it beside the source and not only inside the citation's prose."""
+    out = {}
+    for c in pack.get("citations", []):
+        if _notes(c.get("prepared")):
+            out[str(c.get("n"))] = _notes(c["prepared"])
+    for block in ("layers", "vectors"):
+        for name, rec in (pack.get(block) or {}).items():
+            notes = _notes(rec.get("prepared")) or (_vector_prepared(name) if block == "vectors" else [])
+            if notes and rec.get("n") is not None:
+                out.setdefault(str(rec["n"]), notes)
+    return out
+
+
+def _vector_prepared(name: str) -> list[str]:
+    """A vector layer's stored ingest notes, from its registry row (the measured
+    record does not carry them)."""
+    try:
+        from . import vectors as _vectors
+        return _notes((_vectors.registered().get(name) or {}).get("prepared"))
+    except Exception:
+        return []
 
 
 def _insight_places(pack: dict, per_layer: int = 50) -> dict | None:
@@ -86,8 +118,41 @@ def _insight_vectors(pack: dict) -> list[dict]:
             "unnamed": rec.get("unnamed"), "truncated": bool(rec.get("truncated")),
             "source": rec.get("source"), "vintage": rec.get("vintage"),
             "license": rec.get("license"), "review": rec.get("review"),
+            "prepared": _notes(rec.get("prepared")) or _vector_prepared(name) or None,
             "features_sha256": rec.get("features_sha256")})
     return rows
+
+
+_TOP_VALUES = 6        # a class's cross-tab keeps its largest values; the rest is one sum
+
+
+def _class_rows(classes: dict) -> list[dict] | None:
+    """A categorical layer's area per class, largest first, as the summary counted it."""
+    rows = [{"value": code, "label": d.get("label"), "km2": d.get("km2"),
+             "share_pct": d.get("share_pct")}
+            for code, d in (classes or {}).items() if isinstance(d, dict)]
+    return sorted(rows, key=lambda r: -(r["km2"] or 0)) or None
+
+
+def _by_class_of(b: dict) -> dict | None:
+    """A layer's values per class of the pack's class map (summary.by_class_of) at panel
+    size: per class its area, the area with a value and — for an amount — mean, median
+    and total; for a class layer its largest values by area, the rest summed."""
+    if not isinstance(b, dict) or b.get("error") or not b.get("classes"):
+        return None
+    rows = []
+    for label, r in b["classes"].items():
+        row = {"class": label, **{k: r.get(k) for k in ("km2", "km2_with_value", "mean", "p50", "total")
+                                  if r.get(k) is not None}}
+        if isinstance(r.get("by_value"), dict):
+            vals = sorted(r["by_value"].items(), key=lambda kv: -(kv[1] or 0))
+            row["by_value"] = [{"value": k, "km2": v} for k, v in vals[:_TOP_VALUES]]
+            if len(vals) > _TOP_VALUES:
+                row["by_value_rest"] = {"values": len(vals) - _TOP_VALUES,
+                                        "km2": round(sum(v or 0 for _k, v in vals[_TOP_VALUES:]), 4)}
+        rows.append(row)
+    return {"map": b.get("map"), "year": b.get("year"), "total_unit": b.get("total_unit"),
+            "km2_outside_map": b.get("km2_outside_map"), "classes": rows}
 
 
 def _insight_layers(pack: dict, budget: int = 12_000) -> list[dict]:
@@ -105,7 +170,7 @@ def _insight_layers(pack: dict, budget: int = 12_000) -> list[dict]:
         rng = rec.get("declared_range")
         rows.append({
             "layer": name, "n": rec.get("n"), "title": rec.get("title"),
-            "why": rec.get("why"), "unit": rec.get("unit_note"),
+            "why": rec.get("why"), "unit": rec.get("unit_note"), "units": rec.get("unit"),
             "source": rec.get("source"), "vintage": rec.get("vintage"),
             "validation": rec.get("validation"), "staged": bool(rec.get("staged_by")),
             "review": rec.get("review"),
@@ -122,6 +187,17 @@ def _insight_layers(pack: dict, budget: int = 12_000) -> list[dict]:
                       else {"lo": s.get("min"), "hi": s.get("max"), "from": "observed"}),
             "summary": {k: s.get(k) for k in ("min", "max", "mean", "distinct", "uniform",
                                               "cells_with_value", "cells_in_area")},
+            # what a measure says beyond its range: its percentiles and, for a density
+            # per area, its stated total; a class layer's km² per class; and either one
+            # split per class of the pack's class map (mean biomass inside Mangrove)
+            "values": rec.get("values"),
+            **({"percentiles": {k: s[k] for k in ("p10", "p50", "p90")}}
+               if all(s.get(k) is not None for k in ("p10", "p50", "p90")) else {}),
+            **({"total": s["total"]} if isinstance(s.get("total"), dict) else {}),
+            **({"classes": _class_rows(s["classes"])} if _class_rows(s.get("classes")) else {}),
+            **({"by_class_of": _by_class_of(s["by_class_of"])}
+               if _by_class_of(s.get("by_class_of")) else {}),
+            **({"prepared": _notes(rec["prepared"])} if _notes(rec.get("prepared")) else {}),
             "grid": rec.get("grid")})
     size = lambda: len(_json.dumps(rows))
     while size() > budget and any(r.get("grid") and min(r["grid"]["w"], r["grid"]["h"]) > 8

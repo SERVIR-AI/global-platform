@@ -123,6 +123,7 @@ a{color:var(--color-text-info,var(--grp-primary,#2380b0))}
   color:var(--color-text-secondary,var(--grp-neutral,#5a6472))}
 .tbl th,.tbl td{padding:.15rem .5rem .15rem 0;border-bottom:var(--border-width-regular,1px)
   solid var(--color-border-primary,var(--grp-base-300,#e0e6ec))}
+.tbl .num{text-align:right;font-variant-numeric:tabular-nums}
 .s0{color:var(--color-text-info,var(--grp-info,#2380b0))}
 .s1{color:var(--color-text-warning,var(--grp-warning,#a06a08))}
 .readout{font-size:var(--font-text-xs-size,.72rem);
@@ -677,6 +678,53 @@ function catColor(r, v) {
   const c = (r.colors || {})[String(v)];
   return c || CAT[Math.abs(Math.round(+v)) % CAT.length];
 }
+// What a layer holds over the area beyond its range: a measure's percentiles and, for a
+// density per area, the total it states with its unit; a class layer's km² per class;
+// and either one per class of the pack's class map (mean biomass inside Mangrove).
+const fmtN = v => v == null || v === "" ? "–" : (+v).toLocaleString(undefined,
+  {maximumFractionDigits: Math.abs(+v) >= 100 ? 0 : Math.abs(+v) >= 1 ? 2 : 4});
+function measureHTML(r) {
+  const u = r.units ? " " + esc(r.units) : "";
+  const p = r.percentiles, t = r.total;
+  return (p ? `<div class="stats">p10 ${esc(fmtN(p.p10))} · median ${esc(fmtN(p.p50))} ·
+      p90 ${esc(fmtN(p.p90))}${u}</div>` : "")
+    + (t && t.value != null ? `<div class="stats"><b>total ${esc(fmtN(t.value))} ${esc(t.unit || "")}</b>
+      over ${esc(fmtN(t.area))} ${esc(t.area_unit || "")}${t.mean_area_weighted != null
+        ? ` (area-weighted mean ${esc(fmtN(t.mean_area_weighted))}${u})` : ""}</div>` : "");
+}
+function classTableHTML(r) {
+  const rows = r.classes || [];
+  if (!rows.length) return "";
+  return `<div class="tblwrap"><table class="tbl"><thead><tr><th>class</th><th class="num">km²</th>
+    <th class="num">share</th></tr></thead><tbody>${rows.map(c => `<tr>
+      <td>${esc(c.label || c.value)}${c.label ? ` <span class="stats">(${esc(c.value)})</span>` : ""}</td>
+      <td class="num">${esc(fmtN(c.km2))}</td><td class="num">${esc(fmtN(c.share_pct))}%</td></tr>`).join("")}
+    </tbody></table></div>`;
+}
+function byClassHTML(r) {
+  const b = r.by_class_of;
+  if (!b || !(b.classes || []).length) return "";
+  const amount = b.classes.some(c => c.mean != null || c.p50 != null || c.total != null);
+  const head = amount
+    ? `<th class="num">km²</th><th class="num">with a value</th><th class="num">mean</th>
+       <th class="num">median</th>${b.total_unit ? `<th class="num">total (${esc(b.total_unit)})</th>` : ""}`
+    : `<th class="num">km²</th><th>largest values (km²)</th>`;
+  const row = c => amount
+    ? `<td class="num">${esc(fmtN(c.km2))}</td><td class="num">${esc(fmtN(c.km2_with_value))}</td>
+       <td class="num">${esc(fmtN(c.mean))}</td><td class="num">${esc(fmtN(c.p50))}</td>
+       ${b.total_unit ? `<td class="num">${esc(fmtN(c.total))}</td>` : ""}`
+    : `<td class="num">${esc(fmtN(c.km2))}</td><td>${(c.by_value || []).map(v =>
+        `${esc(v.value)} ${esc(fmtN(v.km2))}`).join("; ")}${c.by_value_rest
+        ? `; ${esc(c.by_value_rest.values)} more ${esc(fmtN(c.by_value_rest.km2))}` : ""}</td>`;
+  return `<div class="stats" style="margin-top:.35rem">per class of ${esc(b.map || "the class map")}${b.year
+      ? " " + esc(b.year) : ""}${amount && r.units ? " · values in " + esc(r.units) : ""}</div>
+    <div class="tblwrap"><table class="tbl"><thead><tr><th>class</th>${head}</tr></thead>
+    <tbody>${b.classes.map(c => `<tr><td>${esc(c.class)}</td>${row(c)}</tr>`).join("")}</tbody></table></div>
+    ${b.km2_outside_map ? `<div class="stats">${esc(fmtN(b.km2_outside_map))} km² of the area is outside
+      the class map</div>` : ""}`;
+}
+const preparedHTML = notes => (notes || []).length
+  ? `<div class="meta">At ingest: ${notes.map(n => esc(String(n).replace(/[.]$/, ""))).join("; ")}.</div>` : "";
 function layersCard(rows, aoi) {
   const tile = r => {
     const g = r.grid, s = r.summary || {}, rg = r.range || {}, leg = r.legend || {};
@@ -713,14 +761,16 @@ function layersCard(rows, aoi) {
       ${svg}
       ${s.uniform ? `<div class="livewarn">One value (${esc(s.min)}) across the whole area: this
         layer cannot show where inside it anything varies.</div>` : ""}
-      <div class="stats">${s.cells_with_value ? `min ${esc(s.min)} · max ${esc(s.max)} · mean
-        ${esc(s.mean)} · ${esc(s.distinct)} distinct` : "no value anywhere inside the area"}</div>
+      <div class="stats">${s.cells_with_value ? `min ${esc(s.min)} · max ${esc(s.max)}${s.mean != null
+        ? ` · mean ${esc(s.mean)}` : ""} · ${esc(s.distinct)} distinct` : "no value anywhere inside the area"}</div>
+      ${measureHTML(r)}${classTableHTML(r)}${byClassHTML(r)}
       ${nominal
         ? `<div class="stats">${((g && g.palette) || []).map(v => `<span class="pill"
             style="border-color:${esc(catColor(r, v))};color:${esc(catColor(r, v))}">${esc(v)}${leg[String(v)] ? ": " + esc(leg[String(v)]) : ""}</span>`).join(" ")}</div>`
         : `<div class="stats">shade ${esc(lo)} → ${esc(hi)} (${esc(rg.from || "observed")} range) ·
         ${esc(r.unit || "units not declared")}</div>`}
       ${(r.caveats || []).map(c => `<div class="stats">${esc(c)}</div>`).join("")}
+      ${preparedHTML(r.prepared)}
       <div class="meta">${r.staged ? `<span class="pill arch">staged, unreviewed</span>`
         : (r.review ? `<span class="pill arch">${esc(r.review)}</span>` : "")}
         ${esc(r.source || "source unrecorded")} · ${esc(r.vintage || "undated")} ·
@@ -752,6 +802,7 @@ function vectorsCard(rows) {
       ${named.length ? `<div class="stats">largest named (${esc(r.name_field)}): ${named.slice(0, 6).map(d => `${esc(d.name)}${r.unit === "features" ? "" : " (" + esc((+d.measure).toLocaleString(undefined, {maximumFractionDigits: 2})) + ")"}`).join("; ")}${r.unnamed ? ` · ${esc(r.unnamed)} unnamed` : ""}</div>` : ""}
       ${(r.most_frequent_named || []).length ? `<div class="stats">most frequent (${esc(r.name_field)}): ${r.most_frequent_named.slice(0, 6).map(d => `${esc(d.name)} (${esc((+d.count).toLocaleString())})`).join(", ")}${r.distinct_names > 6 ? ` · ${esc(r.distinct_names - 6)} more names` : ""}</div>` : ""}
       ${r.truncated ? `<div class="livewarn">read up to the layer's feature cap — a lower bound</div>` : ""}
+      ${preparedHTML(r.prepared)}
       <div class="meta">${r.review ? `<span class="pill arch">${esc(r.review)}</span> ` : ""}${esc(r.source || "source unstated")} · ${esc(r.vintage || "undated")} · ${esc(r.license || "licence unstated")}</div>
     </div>`;
   };
@@ -815,6 +866,7 @@ function render(d){
           ${esc(s.pub_date||"undated")} · ${esc(s.validation||"unvalidated")}
         </div>
         ${s.caveat?`<div class="meta">⚠ ${esc(s.caveat)}</div>`:""}
+        ${preparedHTML((ins.prepared || {})[String(s.n)] || s.prepared)}
         <div class="links">
           ${s.archived_url?`<a class="lnk" data-url="${esc(s.archived_url)}"
              href="${esc(s.archived_url)}">archived copy</a>`:""}
