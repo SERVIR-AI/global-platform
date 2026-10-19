@@ -97,7 +97,8 @@ def assemble(country: str | None = None, crop: str | None = None,
     # values of registered raster layers over it — the same two steps for every pack;
     # each numbers its citations after the last, before the gaps. The vector step
     # reads the gatherer's `_area`; the layer step pops it.
-    vector_block = vectors_step.attach(spec, target, stats, citations, gaps, vectors, extras)
+    vector_block, vector_area = vectors_step.attach(spec, target, stats, citations, gaps,
+                                                    vectors, extras)
     layer_block, layer_area = layers_step.attach(spec, target, stats, citations, gaps,
                                                  layers, extras)
     if layers is not None:
@@ -130,6 +131,7 @@ def assemble(country: str | None = None, crop: str | None = None,
         pack_body["layers_area"] = layer_area      # persisted with the pack, not returned
     if vector_block:
         pack_body["vectors"] = vector_block        # measures per layer, beside their citations
+        pack_body["vectors_area"] = vector_area    # persisted with the pack, not returned
     if stats.get("viz") is not None:                # a pack may carry embed data
         pack_body["viz"] = stats["viz"]
         pack_body["stats"].pop("viz", None)
@@ -147,7 +149,7 @@ def assemble(country: str | None = None, crop: str | None = None,
     # The viz payload is PERSISTED for the embed resolver, never returned inline:
     # 850 KB of hazard polygons in a tool result is 850 KB in the consumer LLM's
     # context, paying tokens to carry pixels it cannot see (adversarial review).
-    response = {k: v for k, v in pack_body.items() if k not in ("viz", "layers_area")}
+    response = {k: v for k, v in pack_body.items() if k not in ("viz", "layers_area", "vectors_area")}
     if "viz" in pack_body:
         response["viz_recorded"] = ("map payload recorded with the pack — rendered "
                                     "by the hazard_map embed for this receipt")

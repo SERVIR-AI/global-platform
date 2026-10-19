@@ -98,12 +98,14 @@ def citation_text(layer: str, entry: dict, rec: dict, area_name: str) -> str:
 
 
 def attach(spec: dict, target: dict, stats: dict, citations: list, gaps: list,
-           names, extras: dict) -> dict | None:
+           names, extras: dict) -> tuple[dict | None, dict | None]:
     """Measure the wanted layers inside the pack's area; append their citations and
-    gaps. Returns the `vectors` block, or None when there is nothing to measure."""
+    gaps. Returns (the `vectors` block, the area they were measured in) — (None, None)
+    when there is nothing to measure. The area is persisted with the pack so a
+    receipt can recompute every features hash from the stored boundary."""
     wanted = _wanted(spec, names)
     if not wanted:
-        return None
+        return None, None
     area = stats.get("_area") if isinstance(stats, dict) else None
     if not (isinstance(area, dict) and area.get("geometry")):
         from . import layers as _layers
@@ -112,7 +114,7 @@ def attach(spec: dict, target: dict, stats: dict, citations: list, gaps: list,
         gaps.append("vector layers were requested, but this pack resolves no area to measure "
                     "them in — pass `geometry` (a GeoJSON polygon or a bbox) with the request. "
                     "Nothing was measured, which is not a zero.")
-        return None
+        return None, None
     from shapely.geometry import shape
     from ..graph.geo import layer_values
     name = area.get("name") or target.get("place") or "this area"
@@ -120,7 +122,7 @@ def attach(spec: dict, target: dict, stats: dict, citations: list, gaps: list,
         boundary = shape(area["geometry"])
     except Exception as exc:
         gaps.append(f"vector layers could not be measured for {name}: {type(exc).__name__}: {exc}")
-        return None
+        return None, None
     a_sha = layer_values.area_sha256(boundary)
     reg = registered()
     n = max((int(c.get("n") or 0) for c in citations), default=0)
@@ -170,4 +172,38 @@ def attach(spec: dict, target: dict, stats: dict, citations: list, gaps: list,
         if rec["features_inside"] == 0:
             gaps.append(f"{entry.get('title') or layer} ({layer}) has no feature inside {name}; "
                         "its figure is a real zero inside this boundary, not a missing layer")
-    return records or None
+    if not records:
+        return None, None
+    where = {"name": name, "how": area.get("how"), "area_km2": area.get("area_km2"),
+             "area_sha256": a_sha, "geometry": area["geometry"]}
+    return records, where
+
+
+def verify(pack: dict) -> dict | None:
+    """{layer: True|False|'<why not>'} — each stored features hash recomputed from the
+    stored boundary and the layer as it is NOW; a removed or changed layer says so."""
+    recs = pack.get("vectors") or {}
+    where = pack.get("vectors_area") or {}
+    if not recs:
+        return None
+    if not where.get("geometry"):
+        return {k: "the pack stored no boundary for its vector measures" for k in recs}
+    from shapely.geometry import shape
+    try:
+        boundary = shape(where["geometry"])
+    except Exception:
+        return {k: "the stored boundary could not be read" for k in recs}
+    reg = registered()
+    out = {}
+    for layer, rec in recs.items():
+        entry = reg.get(layer)
+        if not entry:
+            out[layer] = "the layer is no longer registered on this platform"
+            continue
+        try:
+            now = _vectors.summarise(entry, boundary)
+        except Exception as exc:
+            out[layer] = f"could not be re-measured: {type(exc).__name__}"
+            continue
+        out[layer] = now.get("features_sha256") == rec.get("features_sha256")
+    return out

@@ -731,6 +731,32 @@ function layersCard(rows, aoi) {
   return `<h2 class="sec">Layer values over the area</h2>
     <div class="grid">${rows.map(tile).join("")}</div>`;
 }
+// Contributed vector layers measured inside the area (insight.vectors): a table
+// per layer — the total, the breakdown by the contributor's group field, the
+// largest named features — the same numbers the citation states.
+function vectorsCard(rows) {
+  const fmt = (v, unit) => unit === "features" ? String(v)
+    : unit === "km2" ? `${(+v).toLocaleString(undefined, {maximumFractionDigits: 2})} km² (${(+v * 100).toLocaleString(undefined, {maximumFractionDigits: 0})} ha)`
+    : `${(+v).toLocaleString(undefined, {maximumFractionDigits: 2})} km`;
+  const noun = {points: "features inside", lines: "of line inside", polygons: "of area inside"};
+  const tile = r => {
+    const groups = Object.entries(r.by_group || {});
+    const named = r.largest_named || [];
+    return `<div class="card">
+      <b>[${esc(r.n)}] ${esc(r.title || r.layer)}</b>
+      <div class="meta">${esc(r.geometry || "")} · ${esc(r.features_inside)} of ${esc(r.features_in_layer)} features inside the boundary</div>
+      <div class="stats"><b>${esc(fmt(r.total, r.unit))}</b> ${esc(noun[r.geometry] || "")}</div>
+      ${groups.length ? `<table class="tbl"><thead><tr><th>${esc(r.group_field)}</th><th class="num">${esc(r.unit === "features" ? "count" : r.unit === "km2" ? "km²" : "km")}</th></tr></thead>
+        <tbody>${groups.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${esc((+v).toLocaleString(undefined, {maximumFractionDigits: 2}))}</td></tr>`).join("")}
+        ${r.by_group_rest ? `<tr><td>${esc(r.by_group_rest.groups)} other value(s)</td><td class="num">${esc((+r.by_group_rest.total).toLocaleString(undefined, {maximumFractionDigits: 2}))}</td></tr>` : ""}</tbody></table>` : ""}
+      ${named.length ? `<div class="stats">largest named (${esc(r.name_field)}): ${named.slice(0, 6).map(d => `${esc(d.name)}${r.unit === "features" ? "" : " (" + esc((+d.measure).toLocaleString(undefined, {maximumFractionDigits: 2})) + ")"}`).join("; ")}${r.unnamed ? ` · ${esc(r.unnamed)} unnamed` : ""}</div>` : ""}
+      ${r.truncated ? `<div class="livewarn">read up to the layer's feature cap — a lower bound</div>` : ""}
+      <div class="meta">${r.review ? `<span class="pill arch">${esc(r.review)}</span> ` : ""}${esc(r.source || "source unstated")} · ${esc(r.vintage || "undated")} · ${esc(r.license || "licence unstated")}</div>
+    </div>`;
+  };
+  return `<h2 class="sec">Contributed layers measured inside the area</h2>
+    <div class="grid">${rows.map(tile).join("")}</div>`;
+}
 // The platform's own execution trace for this answer (publish_answer.trace):
 // assemble -> draft (consumer's, declared unobserved) -> verify -> record. Rendered
 // collapsed: it is the governance detail, not the headline. The draft step is the
@@ -769,6 +795,7 @@ function render(d){
     ${_ov && series.filter(sr => !sr.categorical).length > 1 ? overlayCard(series) : ""}
     ${ins.map ? mapCard(ins.map) : ""}
     ${(ins.layers || []).length ? layersCard(ins.layers, ins.map && ins.map.aoi) : ""}
+    ${(ins.vectors || []).length ? vectorsCard(ins.vectors) : ""}
     ${shown.map((sr, i) => chart(sr, i)).join("")}
     <div id="ana">${anaHTML()}</div>
     ${hidden.map(sr => `<div class="meta oneline"><b>${esc(sr.title||sr.id)}</b> ·

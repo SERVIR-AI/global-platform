@@ -42,6 +42,13 @@ def _render_with(pack: dict, rid: str) -> dict:
                       # needs something to click.
                       "url": _embed_url("hazard_map", rid),
                       "note": "the recorded AOI, assets and hazard layer for this receipt"}
+    if pack.get("vectors"):
+        out["vectors"] = {"where": "the pack's `vectors` block (also insight.vectors from "
+                                   "publish_answer): one record per contributed layer measured "
+                                   "inside the area — total, by group, largest named; the "
+                                   "numbers are in the matching citation [n]",
+                          "note": "render as a table per layer; the receipt's replay recomputes "
+                                  "each features hash (vectors_verified)"}
     if pack.get("layers"):
         out["layers"] = {"where": "the pack's `layers` block (also insight.layers from "
                                   "publish_answer)",
@@ -87,6 +94,13 @@ def replay_view(receipt: dict) -> dict:
             name: (rec.get("values_sha256") == layer_values.values_sha256(
                 name, rec, rec.get("area_sha256")))
             for name, rec in pack["layers"].items()}
+    if pack.get("vectors"):
+        # Re-measure each contributed layer inside the stored boundary: a changed or
+        # removed layer shows up here, in words, rather than passing as verified.
+        from . import vectors as _vectors_step
+        verified = _vectors_step.verify(pack)
+        if verified:
+            view["vectors_verified"] = verified
     return view
 
 

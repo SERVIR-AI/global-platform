@@ -42,6 +42,7 @@ def _insight(pack_id: str, draft: str) -> dict:
             **({"map": _panel_map(pack)} if _panel_map(pack) else {}),
             **({"places": _insight_places(pack)} if _insight_places(pack) else {}),
             **({"layers": _insight_layers(pack)} if pack.get("layers") else {}),
+            **({"vectors": _insight_vectors(pack)} if pack.get("vectors") else {}),
             "pack": pack.get("pack"), "target": pack.get("target"),
             **({"country": pack.get("country"), "crop": pack.get("crop")}
                if pack.get("country") or pack.get("crop") else {})}
@@ -62,6 +63,28 @@ def _insight_places(pack: dict, per_layer: int = 50) -> dict | None:
                       "items": items[:per_layer],
                       "truncated": bool(a.get("truncated")) or len(items) > per_layer}
     return out or None
+
+
+def _insight_vectors(pack: dict) -> list[dict]:
+    """Each contributed vector layer the pack measured inside its area: what it is,
+    how much of it is inside, by the contributor's group field, the largest named
+    features — the numbers the citation states, in a shape a panel can table."""
+    rows = []
+    for name, rec in (pack.get("vectors") or {}).items():
+        rows.append({
+            "layer": name, "n": rec.get("n"), "title": rec.get("title"),
+            "geometry": rec.get("geometry"), "unit": rec.get("unit"),
+            "total": rec.get("total"), "total_ha": rec.get("total_ha"),
+            "features_inside": rec.get("features_inside"),
+            "features_in_layer": rec.get("features_in_layer"),
+            "group_field": rec.get("group_field"), "by_group": rec.get("by_group"),
+            "by_group_rest": rec.get("by_group_rest"),
+            "name_field": rec.get("name_field"), "largest_named": rec.get("largest_named"),
+            "unnamed": rec.get("unnamed"), "truncated": bool(rec.get("truncated")),
+            "source": rec.get("source"), "vintage": rec.get("vintage"),
+            "license": rec.get("license"), "review": rec.get("review"),
+            "features_sha256": rec.get("features_sha256")})
+    return rows
 
 
 def _insight_layers(pack: dict, budget: int = 12_000) -> list[dict]:

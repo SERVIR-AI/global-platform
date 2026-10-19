@@ -282,9 +282,9 @@ def test_seam_measures_named_vectors_for_any_pack_and_declines_unknown_names(vec
     stats = {"_area": {"name": "Test bay", "how": "supplied polygon",
                        "geometry": mapping(box(-85.3, 10.0, -84.9, 10.4))}}
     citations, gaps = [{"n": 1, "text": "x"}], []
-    block = _as(OWNER, lambda: vectors_step.attach(spec, {"place": "Test bay"}, stats, citations, gaps,
-                                                  ["test_rivers"], {}))
-    assert block and "test_rivers" in block
+    block, where = _as(OWNER, lambda: vectors_step.attach(spec, {"place": "Test bay"}, stats, citations, gaps,
+                                                         ["test_rivers"], {}))
+    assert block and "test_rivers" in block and where["area_sha256"] and where["geometry"]
     cit = citations[-1]
     log("OUTPUT", cit["text"][:400])
     assert cit["n"] == 2 and cit["kind"] == "vector_summary" and cit["features_sha256"] == block["test_rivers"]["features_sha256"]
@@ -509,3 +509,48 @@ def test_removing_a_contributed_year_keeps_its_stack_honest(tmp_path, monkeypatc
     cat = yaml.safe_load((conf / "tiffs.contrib.yml").read_text())
     assert out["stack"] is True and sorted(out["years_removed"]) == ["landcover_rm_1996", "landcover_rm_2020"]
     assert not any(k.startswith("landcover_rm") for k in cat)
+
+
+def test_vector_measures_reach_the_evidence_view_and_replay_verifies_them(binary_stack, tmp_path, monkeypatch, log):
+    """A line layer measured inside a land-cover answer: the pack carries the record
+    and the boundary, publish's insight tables it, and a receipt's replay re-measures
+    the layer and confirms the hash; a removed layer is reported, not passed."""
+    from app.mcp import publish, record
+    from app.contrib import removal
+    s = get_settings()
+    monkeypatch.setattr(s, "grp_mattermost_webhook", "")
+    monkeypatch.setattr(s, "grp_auto_approve", True)
+    PX, LEFT, TOP = binary_stack["PX"], binary_stack["LEFT"], binary_stack["TOP"]
+    fc = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {"NOMBRE": "Rio Test", "CATEGORIA": "PERMANENTE"},
+         "geometry": {"type": "LineString", "coordinates": [[LEFT - 0.01, TOP - 5 * PX], [LEFT + 0.02, TOP - 5 * PX]]}},
+        {"type": "Feature", "properties": {"NOMBRE": "Far", "CATEGORIA": "INTERMITENTE"},
+         "geometry": {"type": "LineString", "coordinates": [[LEFT + 1, TOP + 1], [LEFT + 1.1, TOP + 1.1]]}}]}
+    monkeypatch.setattr(fetch_policy, "check_url", lambda url: [])
+    monkeypatch.setattr(fetch_policy, "fetch", lambda url, max_bytes=None: (json.dumps(fc).encode(), "r.geojson"))
+    staging.STAGED_VECTORS.clear()
+    monkeypatch.setattr(staging, "_STAGED_VECTORS_LOADED", True)
+    out = staging.submit("vector", {"layer": "test_lines", "url": "https://x.test/r.geojson", "title": "Test lines",
+                                    "description": "synthetic", "source": "test fixture", "license": "CC0-1.0",
+                                    "vintage": "2026-10", "name_field": "NOMBRE", "group_field": "CATEGORIA"}, OWNER)
+    assert out["status"] == "approved", out
+    p = assemble.assemble(pack="land-cover", place="Test bay", year="2020", geometry=binary_stack["poly"],
+                          vectors=["test_lines"])
+    assert p["status"] == "ok", p.get("note")
+    assert "vectors_area" not in p and p["vectors"]["test_lines"]["unit"] == "km"
+    stored = store.load_pack(p["pack_id"])
+    assert stored["vectors_area"]["geometry"] and stored["vectors_area"]["area_sha256"]
+    ins = publish._insight(p["pack_id"], "draft")
+    row = ins["vectors"][0]
+    log("OUTPUT", f"insight row: {row['title']} {row['total']} {row['unit']} by {row['group_field']} {row['by_group']}")
+    assert row["layer"] == "test_lines" and row["by_group"] == {"PERMANENTE": row["total"]}
+    assert row["largest_named"][0]["name"] == "Rio Test"
+    view = record.replay_view({"receipt_id": "r1", "pack_id": p["pack_id"]})
+    assert view["vectors_verified"] == {"test_lines": True}
+    # the layer gone: the replay says so instead of claiming verification
+    removal_result = {"removed": False}
+    from app.graph.geo import vectors as _v
+    _v.unregister("test_lines")
+    view = record.replay_view({"receipt_id": "r1", "pack_id": p["pack_id"]})
+    assert "no longer registered" in view["vectors_verified"]["test_lines"]
+    staging.STAGED_VECTORS.clear()
