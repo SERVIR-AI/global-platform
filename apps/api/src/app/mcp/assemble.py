@@ -155,8 +155,8 @@ def assemble(country: str | None = None, crop: str | None = None,
                                     "by the hazard_map embed for this receipt")
     return {"status": "ok", "pack_id": pack_id,
             # pack-level contributor guidance, read at the moment of use
-            **({"usage_notes": spec["usage_notes"]}
-               if spec.get("usage_notes") else {}),
+            **({"usage_notes": packs.text(spec, "usage_notes")}
+               if packs.text(spec, "usage_notes") else {}),
             "answer_status": loop.PACK_IS_NOT_AN_ANSWER,
             "next_step": loop.after_assemble(pack_id, pack_body["required_sections"],
                                              gaps_citation_n=gaps_cit["n"]),

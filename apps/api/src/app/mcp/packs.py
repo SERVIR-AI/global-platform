@@ -410,12 +410,40 @@ PACKS: dict[str, dict] = {
                                     + (f" against {t['year_to']}" if t.get("year_to") else "")).strip(),
         "doctor_target": {"place": "Bagmati Province, Nepal", "year": "2022"},
         "default_layers_doc": "the year maps its class areas are counted from",
-        "usage_notes": ("Pixel counts of a 30 m land-cover map, not a model. Quote the figures "
-                        "with their year and the mask the pack declares; change between two "
-                        "years includes classifier disagreement, so read trends over several "
-                        "years. No accuracy figure exists on this platform: say so."),
+        "usage_notes": lambda: _lc_usage_notes(),
     },
 }
+
+
+def _lc_usage_notes() -> str:
+    """The land-cover pack's guidance, from the stacks registered today: their cell
+    sizes and whether any declares an accuracy — two sentences that were typed for
+    the first stack and stayed wrong for every stack after it."""
+    try:
+        from ..land_cover.synthesis import landcover_stacks
+        from ..graph.geo import schema as _schema
+        rows = landcover_stacks()
+    except Exception:
+        rows = {}
+    cells, declared = [], []
+    for sid, row in rows.items():
+        try:
+            px = (_schema._doc().get("stacks") or {}).get(sid, {}).get("pixel_size_deg")
+        except Exception:
+            px = None
+        if px:
+            cells.append(f"{round(float(px) * 111_320)} m")
+        acc = str(row.get("accuracy") or "").strip()
+        if acc and acc.lower() not in ("unstated", "unknown", "none"):
+            declared.append(str(row.get("title") or sid))
+    cell = ("Pixel counts of land-cover maps (cells of " + ", ".join(sorted(set(cells))) + ")"
+            if cells else "Pixel counts of registered land-cover maps")
+    acc = (f"Accuracy is declared by {len(declared)} stack(s) ({'; '.join(declared[:3])}) and "
+           "stated in the pack's gaps; where a stack declares none, say so."
+           if declared else "No stack declares an accuracy figure: say so.")
+    return (f"{cell}, not a model. Quote the figures with their year and the mask the pack "
+            "declares; change between two years includes classifier disagreement, so read "
+            f"trends over several years. {acc}")
 
 # Load errors from dropped-in pack modules, surfaced by doctor and capabilities —
 # a broken contribution must be visible, never a silent absence or a dead server.

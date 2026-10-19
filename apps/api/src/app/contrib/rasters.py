@@ -209,7 +209,8 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None) -> dic
         return {"status": "declined", "verified": False,
                 "failures": [f"the file could not be read as a raster: {type(exc).__name__}: {exc}"]}
     manifest = {**manifest, "file": src_file}
-    obs = verify.windowed_stats(str(manifest["file"]))
+    obs = verify.windowed_stats(str(manifest["file"]),
+                                keep_values=tuple(_norm_legend(manifest.get("legend"))))
     if prepared:
         obs["prepared"] = prepared
     advice = hints(manifest)

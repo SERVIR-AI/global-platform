@@ -13,8 +13,10 @@ import numpy as np
 import rasterio
 
 
-def windowed_stats(path, sample=1024):
-    """Profile + a decimated-sample min/max/distinct for `path`. Never full-loads."""
+def windowed_stats(path, sample=1024, keep_values=()):
+    """Profile + a decimated-sample min/max/distinct for `path`. Never full-loads.
+    `keep_values`: values that count even when they equal the nodata tag — a binary
+    extent map tags 0 as nodata and names it a class in the same legend."""
     with rasterio.open(path) as src:
         full_w, full_h = src.width, src.height
         dtype = src.dtypes[0]
@@ -27,7 +29,7 @@ def windowed_stats(path, sample=1024):
 
     a = arr.astype("float64").ravel()
     a = a[~np.isnan(a)]
-    if nodata is not None:
+    if nodata is not None and float(nodata) not in {float(v) for v in keep_values}:
         a = a[a != nodata]
     if a.size:
         smin, smax, ndist = float(a.min()), float(a.max()), int(np.unique(a).size)

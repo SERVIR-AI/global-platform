@@ -344,7 +344,7 @@ def _passport_citation(n, sid, row, layer, year, clip, level, legend, gaps):
     except Exception as exc:
         notes.append(f"declared contract unreadable ({type(exc).__name__})")
     try:
-        obs = rasterstats.windowed_stats(clip)
+        obs = rasterstats.windowed_stats(clip, keep_values=tuple(legend))
     except Exception as exc:
         notes.append(f"clip statistics unreadable ({type(exc).__name__})")
     try:
@@ -455,9 +455,19 @@ def _standing_gaps(row, pixel_size_deg):
     return out
 
 
+def _boundary_gap(how: str) -> str:
+    """One sentence about where the boundary came from — the one actually used."""
+    h = str(how or "")
+    if h.startswith("contributed boundary"):
+        return (f"the boundary is a contributed polygon ({h.split(': ', 1)[-1]}); the hub's official "
+                "boundary may differ from OpenStreetMap's and from other contributed layers")
+    if h.startswith(("supplied polygon", "drawn")):
+        return "the boundary is the caller's own polygon; no administrative boundary was resolved"
+    return ("the boundary comes from OpenStreetMap at pack time; the hub's official boundary "
+            "may differ")
+
+
 STANDING_GAPS = (
-    "the boundary comes from OpenStreetMap at pack time (or the caller's polygon); the hub's "
-    "official boundary may differ",
     "no degradation, canopy, biomass, carbon, NDVI or building figures: this pack counts "
     "classes, it does not model inside them",
 )
@@ -520,6 +530,7 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
             "the mapped footprint — this product does not cover it, so no class area exists to report")
 
     citations, gaps = [], _standing_gaps(row, st["pixel_size_deg"])
+    gaps.append(_boundary_gap(how))
     if other_stacks:
         gaps.append(f"{len(other_stacks)} other registered land-cover stack(s) also cover "
                     f"{name}: " + "; ".join(f"{r.get('title', s)} ({s})" for s, r in other_stacks)
@@ -620,6 +631,16 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
         fire_stats = {k: v for k, v in q.items() if k in ("n", "by_year", "by_class", "first", "last")}
         trace.append(f"fire[{pid}] {q.get('n', 0)} detections")
 
+    # What the library holds about this question: a method paper, the national map's
+    # memo, a guideline — cited so a brief can lean on more than pixel counts.
+    labels = [legend[c] for c in (detail or hits or [])] or list(legend.values())
+    corpus, doc_hits = _library_hits(name, focus, labels, trace, gaps)
+    for h in doc_hits:
+        n += 1
+        citations.append(_document_citation(n, h, corpus))
+    if doc_hits:
+        trace.append(f"documents[{len(doc_hits)}] cited")
+
     # Contributed tables bound to this pack: a FACTOR table (class, factor) is
     # applied to the areas, losses and gains above; any other is cited as context.
     factor_stats = {}
@@ -659,7 +680,7 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
     if how.startswith(("admin boundary", "protected-area boundary", "contributed boundary")):
         gaps.append("boundary: " + how)
 
-    stats = {"queries": None,
+    stats = {"queries": [t for t in trace if t.startswith("retrieve ")] or None,
              "aoi": {"requested": place, "name": name, "area_km2": aoi.get("area_km2"),
                      "how": how, "is_admin_boundary": how.startswith("admin boundary")},
              "stack": sid, "year": year, "year_to": year_to, "overview_level": level,
@@ -677,6 +698,63 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
                  {"layer": ly, "why": f"the {y} map these class areas are counted from"}
                  for y, ly in ((year, layer), (year_to, layer_to)) if ly]}
     return citations, gaps, stats
+
+
+def _library_hits(name, focus, labels, trace, gaps, k=3):
+    """Documents in this pack's library that speak to the question: a method paper,
+    a national map's technical memo, a guideline. Mirrors the risk pack: an empty or
+    unreadable library is a declared gap, never a failure. Returns (corpus, hits)."""
+    from ..llm import MissingAPIKey
+    from ..rag.store import Corpus, CorpusError
+    try:
+        corpus = Corpus(PACK_ID)
+    except (CorpusError, MissingAPIKey) as exc:
+        gaps.append(f"the land-cover document library could not be read ({exc}) — nothing "
+                    "published is cited alongside these numbers")
+        return None, []
+    try:
+        n_docs = len(corpus.documents())
+    except Exception:
+        n_docs = 0
+    if n_docs == 0:
+        gaps.append("the land-cover document library is empty — no method paper, national map "
+                    "memo or guideline is cited alongside these numbers. It accepts "
+                    "contributions: a document lands the same way it does for any pack")
+        return corpus, []
+    queries = [f"{focus} {name}".strip(),
+               f"{' '.join(labels[:3])} map method classes accuracy {name}".strip()]
+    hits, seen = [], set()
+    for q in queries:
+        try:
+            got = corpus.search(q, k=k)
+        except (CorpusError, MissingAPIKey) as exc:
+            gaps.append(f"document retrieval failed ({exc})")
+            return corpus, hits
+        trace.append(f"retrieve {q!r} -> {len(got)} hits")
+        for h in got:
+            if h.get("id") not in seen:
+                seen.add(h.get("id"))
+                hits.append(h)
+    if not hits:
+        gaps.append(f"the land-cover library holds {n_docs} document(s), none relevant to "
+                    f"{name} above the relevance floor — a decline, not a weak match")
+    return corpus, hits[:2 * k]
+
+
+def _document_citation(n, h, corpus):
+    m = h.get("metadata") or {}
+    return {"n": n, "kind": "document", "retrieval": "archived-document",
+            "source": m.get("source"), "title": m.get("title"),
+            "pub_date": m.get("pub_date"), "validation": m.get("validation"),
+            "temporal": m.get("temporal"), "url": m.get("url"), "score": h.get("score"),
+            "doc_id": h.get("doc_id"), "chunk_id": h.get("id"),
+            **({"review_status": m["review"]} if m.get("review") else {}),
+            "archived_copy": (f"/api/rag/{PACK_ID}/document/{h.get('doc_id')}"
+                              if corpus and h.get("doc_id") and corpus.raw_path(h["doc_id"]) else None),
+            "usage_notes": m.get("usage_notes"),
+            **({"staged_by": m["staged_by"], "contribution_id": m.get("contribution_id")}
+               if m.get("staged_by") else {}),
+            "text": h.get("text")}
 
 
 def _bound_tables(country, gaps, trace):

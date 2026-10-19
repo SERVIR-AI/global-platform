@@ -1091,7 +1091,8 @@ VECTOR_FIELDS = {
         "description": "what one feature represents, how the layer was compiled, what it excludes",
         "source": "who maintains the layer (agency), derived from what",
         "license": "e.g. CC-BY-4.0, or 'unstated' (silence is not accepted)",
-        "vintage": "when the layer was last updated, YYYY-MM",
+        "vintage": "when the layer was last updated, YYYY-MM, or 'unstated' when the file does "
+                   "not say (an honest 'unstated' beats a guessed month)",
     },
     "optional": {
         "countries": "which countries the layer covers, e.g. [Costa Rica]",

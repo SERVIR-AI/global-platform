@@ -41,7 +41,10 @@ def _aoi_feature(aoi):
     bounds = list(shape(feat["geometry"]).bounds)
     name = aoi.get("name", "")
     how = (aoi.get("how") or "").lower()
-    source = "drawn" if "drawn" in how else "radius_box" if "radius" in name else "nominatim"
+    source = ("contributed" if how.startswith("contributed boundary")
+              else "supplied" if how.startswith("supplied polygon")
+              else "drawn" if "drawn" in how
+              else "radius_box" if "radius" in name else "nominatim")
     return {**feat, "properties": {**feat.get("properties", {}), "source": source}}, bounds
 
 

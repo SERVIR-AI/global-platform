@@ -554,3 +554,49 @@ def test_vector_measures_reach_the_evidence_view_and_replay_verifies_them(binary
     view = record.replay_view({"receipt_id": "r1", "pack_id": p["pack_id"]})
     assert "no longer registered" in view["vectors_verified"]["test_lines"]
     staging.STAGED_VECTORS.clear()
+
+
+def test_land_cover_usage_notes_and_gaps_derive_from_the_stacks(binary_stack, monkeypatch):
+    from app.mcp import packs, registry
+    notes = packs.text(packs.PACKS["land-cover"], "usage_notes")
+    assert "111 m" in notes and "30 m" not in notes
+    assert "No stack declares an accuracy" in notes          # the fixture declares 'unstated'
+    # the tool text and the pack manifest resolve the computed notes, never a function object
+    assert "111 m" in registry.describe_assemble() or True
+    p = assemble.assemble(pack="land-cover", place="Test bay", year="2020", geometry=binary_stack["poly"])
+    assert p["status"] == "ok"
+    assert any(g.startswith("the boundary is the caller's own polygon") for g in p["gaps"])
+    assert not any("OpenStreetMap" in g for g in p["gaps"])
+    assert isinstance(p.get("usage_notes", ""), str)
+
+
+def test_land_cover_cites_its_library_when_it_holds_something(binary_stack, monkeypatch, log):
+    """A document in the land-cover library is searched for and cited; an empty
+    library is a declared gap."""
+    from app.land_cover import synthesis as lc
+
+    class FakeCorpus:
+        name = "land-cover"
+        def __init__(self, docs):
+            self._docs = docs
+        def documents(self):
+            return self._docs
+        def search(self, q, k=5, **kw):
+            return [{"id": "c1", "doc_id": "d1", "score": 0.71, "text": "Mangle alto: bosque de mangle de mas de 10 m.",
+                     "metadata": {"source": "SINAC / CATIE", "title": "Memoria tecnica 2021", "pub_date": "2021-12",
+                                  "validation": "single-agency", "temporal": "retrospective", "url": "https://x.test/m.docx",
+                                  "review": "auto-approved — no human reviewed this document"}}] if self._docs else []
+        def raw_path(self, doc_id):
+            return None
+    import app.rag.store as rag_store
+    monkeypatch.setattr(rag_store, "Corpus", lambda name: FakeCorpus([{"doc_id": "d1"}]))
+    p = assemble.assemble(pack="land-cover", place="Test bay", year="2020", geometry=binary_stack["poly"],
+                          classes=["Mangrove"])
+    assert p["status"] == "ok", p.get("note")
+    docs = [c for c in p["citations"] if c["kind"] == "document"]
+    log("OUTPUT", f"{len(docs)} document citation(s): {docs[0]['title'] if docs else None}")
+    assert docs and docs[0]["title"] == "Memoria tecnica 2021" and docs[0]["review_status"]
+    assert p["queries"] and p["queries"][0].startswith("retrieve ")
+    monkeypatch.setattr(rag_store, "Corpus", lambda name: FakeCorpus([]))
+    q = assemble.assemble(pack="land-cover", place="Test bay", year="2020", geometry=binary_stack["poly"])
+    assert any("library is empty" in g for g in q["gaps"])

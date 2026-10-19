@@ -63,7 +63,7 @@ def _fmt(v, unit: str) -> str:
 
 def citation_text(layer: str, entry: dict, rec: dict, area_name: str) -> str:
     unit = rec["unit"]
-    what = {"points": "features", "lines": "km of line", "polygons": "of mapped area"}[rec["geometry"]]
+    what = {"points": "features", "lines": "of line", "polygons": "of mapped area"}[rec["geometry"]]
     head = (f"{entry.get('title') or layer} ({layer}; a contributed {rec['geometry'][:-1]} layer, "
             f"source {entry.get('source') or 'unstated'}, vintage {entry.get('vintage') or 'unstated'}, "
             f"licence {entry.get('license') or 'unstated'}) inside {area_name}: ")
