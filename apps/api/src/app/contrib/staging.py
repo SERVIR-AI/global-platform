@@ -738,7 +738,7 @@ def _prepare_raster(m: dict) -> dict:
     with os.fdopen(fd, "wb") as f:
         f.write(raw)
     base = {k: v for k, v in m.items() if k != "url"}
-    out = rasters.add({**base, "file": tmp}, dry_run=True)
+    out = rasters.add({**base, "file": tmp}, dry_run=True, keep_prepared=True)
     if out["status"] == "declined":
         os.unlink(tmp)
         for stray in (tmp + ".norm.tif",):

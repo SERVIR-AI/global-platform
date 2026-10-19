@@ -9,6 +9,8 @@ is the exact lesson raster_schema.yml records at its top.
 
 from __future__ import annotations
 
+import os
+
 import shutil
 from pathlib import Path
 
@@ -181,7 +183,8 @@ def validate_manifest(m: dict) -> list[str]:
     return fails
 
 
-def add(manifest: dict, dry_run: bool = False, review: str | None = None) -> dict:
+def add(manifest: dict, dry_run: bool = False, review: str | None = None,
+        keep_prepared: bool = False) -> dict:
     """Gate then land: validate -> verify file against the DECLARED contract ->
     copy into TIFFS_DIR -> append tiffs.yml row + raster_schema.yml contract.
     A mismatch refuses and writes NOTHING."""
@@ -208,7 +211,14 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None) -> dic
     except Exception as exc:
         return {"status": "declined", "verified": False,
                 "failures": [f"the file could not be read as a raster: {type(exc).__name__}: {exc}"]}
+    original = str(manifest["file"])
     manifest = {**manifest, "file": src_file}
+
+    def _drop_prepared():
+        # the converted copy lives beside the input; it never outlives this call
+        # unless the caller (the staging path) takes it over
+        if src_file != original and os.path.exists(src_file):
+            os.unlink(src_file)
     obs = verify.windowed_stats(str(manifest["file"]),
                                 keep_values=tuple(_norm_legend(manifest.get("legend"))))
     if prepared:
@@ -227,24 +237,29 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None) -> dic
         obs["granularity"] = gran
     mismatches = verify._check({**(schema_mod._doc().get("defaults") or {}), **decl}, obs)
     if mismatches:
+        _drop_prepared()
         return {"status": "declined", "verified": False,
                 "failures": [f"file does not satisfy the DECLARED contract: {m}"
                              for m in mismatches],
                 "observed": obs}
     if dry_run:
+        if not keep_prepared:
+            _drop_prepared()
         return {"status": "valid (dry-run, nothing written)", "verified": True,
-                "observed": obs, "file": str(manifest["file"])}
+                "observed": obs, "file": str(manifest["file"]) if keep_prepared else original}
 
     cat_path = Path(settings.tiffs_contrib_path)
     cat = (yaml.safe_load(cat_path.read_text()) or {}) if cat_path.exists() else {}
     if decl.get("role") == "landcover":
         conflict = _stack_conflict(cat, manifest)
         if conflict:
+            _drop_prepared()
             return {"status": "declined", "verified": True, "failures": [conflict], "observed": obs}
 
     dest = Path(settings.tiffs_dir) / f"{layer}.tif"
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(manifest["file"], dest)
+    _drop_prepared()
 
     # Contributed rows live in their own MACHINE-OWNED files, merged at load.
     # The hand-authored conf files are never rewritten by code: a yaml round-trip

@@ -759,3 +759,28 @@ def test_a_portal_page_given_as_a_raster_or_vector_is_declined_in_words(vec_env)
                                     "title": "t", "description": "d", "source": "s", "license": "unstated",
                                     "vintage": "unstated"}, OWNER)
     assert out["status"] == "declined" and "web page, not a vector file" in " ".join(out["problems"])
+
+
+def test_a_local_projected_raster_leaves_no_converted_copy_behind(tmp_path, monkeypatch):
+    s = get_settings()
+    conf = tmp_path / "conf"; conf.mkdir()
+    (conf / "tiffs.yml").write_text("# hand-authored\n{}\n")
+    (conf / "raster_schema.yml").write_text(json.dumps({"defaults": {"crs": "EPSG:4326"}, "layers": {}}))
+    for k, v in (("tiffs_config_path", conf / "tiffs.yml"), ("tiffs_contrib_path", conf / "tiffs.contrib.yml"),
+                 ("raster_schema_path", conf / "raster_schema.yml"),
+                 ("raster_schema_contrib_path", conf / "raster_schema.contrib.yml"),
+                 ("cache_dir", tmp_path / "cache"), ("tiffs_dir", tmp_path / "cache" / "tiffs")):
+        monkeypatch.setattr(s, k, v)
+    src = tmp_path / "in"; src.mkdir()
+    arr = np.full((20, 20), 2, dtype="uint8"); arr[:, :10] = 1
+    p = _write(src / "utm.tif", arr, "EPSG:32616", from_origin(700000, 1120000, 30, 30), nodata=255)
+    m = {"layer": "landcover_utm_2014", "stack": "landcover_utm", "year": 2014, "file": p, "title": "t",
+         "description": "d", "source": "s", "license": "CC0-1.0", "vintage": "2014-12",
+         "legend": {1: "Mangrove", 2: "Not mangrove"}, "outside_values": [255],
+         "declared": {"dtype": "uint8", "valid_min": 1, "valid_max": 2, "nodata": 255}}
+    assert rasters.add(m, dry_run=True)["status"].startswith("valid")
+    assert sorted(x.name for x in src.iterdir()) == ["utm.tif"]
+    out = rasters.add(m)
+    assert out["status"] == "landed" and sorted(x.name for x in src.iterdir()) == ["utm.tif"]
+    with rasterio.open(out["file"]) as ds:
+        assert ds.crs.to_epsg() == 4326
