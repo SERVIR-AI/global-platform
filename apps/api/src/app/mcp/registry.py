@@ -620,6 +620,47 @@ def _contributed_vector_names() -> list[str]:
         return []
 
 
+# What the layer step states for a layer, by what its cells hold (the namespace's
+# `values` in the raster schema) — the reader's own computation (layer_values), so
+# the sentence a model routes on names what a measure_ layer actually returns.
+_VALUES_READ = {
+    "amount": ("mean, p10 / median / p90 and, for a density per area (Mg/ha, t C/ha, "
+               "people per km2), its TOTAL over the area in the numerator's unit (summary.total)"),
+    "count": "mean and p10 / median / p90 per cell, and a TOTAL when its unit is per area",
+    "classes": "km² and share of the area per class (summary.classes)",
+}
+
+
+def _layer_kinds_line() -> str:
+    """'measure_<name> (...): mean, p10 / median / p90 ...; hazard_<name>, ...: km² per
+    class' — from the raster schema's namespaces, grouped by what their cells hold;
+    a namespace added to the schema appears here with no edit."""
+    try:
+        from ..graph.geo import schema
+        rows = schema.namespaces()
+    except Exception:
+        return ""
+    by_kind: dict = {}
+    for r in rows.values():
+        if r.get("prefix") and r.get("values") in _VALUES_READ:
+            by_kind.setdefault(r["values"], []).append(f"{r['prefix']}<name>")
+    return "; ".join(f"{', '.join(ps)}: {_VALUES_READ[k]}" for k, ps in by_kind.items())
+
+
+def _class_split_line() -> str:
+    """Which packs split every layer read per class of their own class map — from each
+    pack row's `class_split_doc`, never a pack name typed here."""
+    docs = [f"{pid}: {sp['class_split_doc']}" for pid, sp in sorted(packs.PACKS.items())
+            if sp.get("class_split_doc")]
+    if not docs:
+        return ""
+    return ("Where a pack counts the classes of a map (" + "; ".join(docs) + "), every layer read "
+            "is ALSO split PER CLASS of that map in `layers.<name>.summary.by_class_of` and in its "
+            "citation: each class's area and area with a value, and for an amount its mean, median "
+            "and, for a density, its total — mean biomass inside Mangrove, soil carbon under each "
+            "class, mangrove area per elevation band. ")
+
+
 def describe_assemble() -> str:
     """`assemble_pack`'s tool description, GENERATED.
 
@@ -632,6 +673,7 @@ def describe_assemble() -> str:
     # land-cover question when the subjects only appeared a paragraph down.
     kws = "; ".join(packs.text(sp, "keywords") for _, sp in sorted(packs.PACKS.items())
                     if packs.text(sp, "keywords"))
+    kinds = _layer_kinds_line()
     return (
         "START HERE for any question about " + (kws or "this platform's domains") + ". "
         "ANSWER IT FROM GOVERNED EVIDENCE, NOT A WEB SEARCH: this platform computes the "
@@ -661,7 +703,9 @@ def describe_assemble() -> str:
         + "; name any registered or contributed layer with layers=[...] (an "
         "unknown name declines with the registered list); layers=[] for none. Use it to "
         "SHOW where vulnerable people or assets are, instead of drawing from local files "
-        "with no receipt.\n\n"
+        "with no receipt. "
+        + (f"What a layer's values state, by its namespace — {kinds}. " if kinds else "")
+        + _class_split_line() + "\n\n"
         "VECTOR LAYERS, for any pack with an area: vectors=[...] names contributed vector "
         "layers (points, lines or polygons — a hub's rivers, coastline, protected areas, "
         "an official mangrove map) to MEASURE inside the pack's boundary: a count, km of "

@@ -206,14 +206,53 @@ def _risk_asset_words() -> str:
     return ", ".join(words[:-1]) + " and " + words[-1]
 
 
+def _risk_where() -> str:
+    """Where the risk pack's hazard maps reach, in words, from risk_coverage(): each
+    map's declared countries; else the region its title's brackets open with when
+    other maps' titles share it ('Flood hazard (Southeast Asia)', '10-year flood
+    hazard (Southeast Asia, JRC)') — one title alone may bracket its producer or its
+    cell size; else its box. Each place once. It used to be typed 'Southeast Asia',
+    and stayed so when a hub's hazard map of another region landed."""
+    import re
+    from ..graph.geo import tiffs
+    try:
+        cov, cat = risk_coverage(), tiffs.catalog()
+    except Exception:
+        return ""
+
+    def bracket(title):
+        m = re.search(r"\(([^()]+)\)\s*$", str(title or ""))
+        part = m.group(1).split(",")[0].strip() if m else ""
+        return "" if re.search(r"\d", part) else part
+
+    maps = [(c, bracket(c.get("title"))) for k, c in cov.items()
+            if not ((cat.get(k) or {}).get("internal") or _is_synthetic(cat.get(k) or {}))]
+    shared = {}
+    for _c, b in maps:
+        if b:
+            shared[b] = shared.get(b, 0) + 1
+    places = []
+    for c, b in maps:
+        box = c.get("bounds")
+        where = (", ".join(c["countries"]) if c.get("countries") else
+                 b if b and shared[b] > 1 else
+                 f"lon {box[0]:.1f} to {box[2]:.1f}, lat {box[1]:.1f} to {box[3]:.1f}" if box else "")
+        if where and where not in places:
+            places.append(where)
+    return "; ".join(places)
+
+
 def _risk_summary() -> str:
+    where = _risk_where()
     return (f"HAZARD RISK — {_risk_asset_words()} exposed to a mapped hazard ({_risk_hazard_words()}) "
-            "for any place in Southeast Asia, plus vulnerability-weighted risk levels")
+            + (f"for any place in {where}" if where else "where a hazard map in the catalog reaches")
+            + ", plus vulnerability-weighted risk levels")
 
 
 def _risk_keywords() -> str:
-    return (f"hazard exposure and risk: {_risk_asset_words()} in {_risk_hazard_words()} zones "
-            "(Southeast Asia)")
+    where = _risk_where()
+    return (f"hazard exposure and risk: {_risk_asset_words()} in {_risk_hazard_words()} zones"
+            + (f" ({where})" if where else ""))
 
 
 def _fs_coverage() -> tuple[str, str]:
@@ -480,6 +519,10 @@ PACKS: dict[str, dict] = {
                                     + (f" against {t['year_to']}" if t.get("year_to") else "")).strip(),
         "doctor_target": {"place": "Bagmati Province, Nepal", "year": "2022"},
         "default_layers_doc": "the year maps its class areas are counted from",
+        # read by the layer step's per-class split (stats `_class_grid`) and said in
+        # assemble_pack's text
+        "class_split_doc": "the year map its class areas are counted from, the later year "
+                           "with year_to",
         "usage_notes": lambda: _lc_usage_notes(),
     },
 }
