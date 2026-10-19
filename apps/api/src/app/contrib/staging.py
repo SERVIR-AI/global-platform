@@ -833,6 +833,14 @@ def _raster_layer_text() -> str:
         return "namespaced name (see the namespaces table in conf/raster_schema.yml)"
 
 
+def _raster_namespace_fields() -> dict:
+    try:
+        from ..graph.geo import layer_values
+        return layer_values.namespace_fields()
+    except Exception:                             # the form text never fails an import
+        return {}
+
+
 RASTER_FIELDS = {
     "required": {
         "layer": _raster_layer_text(),
@@ -891,6 +899,9 @@ RASTER_FIELDS = {
                 "may be clipped",
         "clip_member": "for a zip of rasters: the one to read, as named inside the zip (the "
                        "url may end '#<member>' instead); not needed when the zip holds one raster",
+        # what a namespace lets its layers declare (a change map's from_year, to_year and
+        # compares): the schema's `namespaces.<role>.fields`, never typed here
+        **_raster_namespace_fields(),
     },
 }
 _RASTER_KNOWN = set(RASTER_FIELDS["required"]) | set(RASTER_FIELDS["optional"])
@@ -1142,6 +1153,7 @@ def _stage_raster(rec: dict, prepared: dict) -> dict:
              "contributed": True, "staged_by": rec["contributor_id"], "contribution_id": cid,
              "contributor_label": rec["contributor_label"], "review": _preview_review(rec)}
     from . import rasters as _r
+    entry.update(_r.declared_fields(m))
     rule = _r.namespace(layer)
     contract = {**m["declared"], "role": _r._role(layer)}
     # the values that are not readings ride the row every reader takes them from — as

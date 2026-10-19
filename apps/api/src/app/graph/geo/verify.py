@@ -62,7 +62,7 @@ def _check(decl, obs):
 
     if "nodata" in decl:
         dn, on = decl["nodata"], obs["nodata"]
-        if (dn is None) != (on is None) or (dn is not None and on is not None and abs(dn - on) > tol):
+        if not schema_mod.same_nodata(dn, on, tol):      # -3.4e38 is the float32 fill
             out.append(f"nodata {on} != declared {dn}")
 
     depsg, oepsg = _declared_epsg(decl), obs["crs_epsg"]

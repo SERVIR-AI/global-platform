@@ -743,6 +743,16 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None,
                 "failures": [f"file does not satisfy the DECLARED contract: {_explain(m, decl)}"
                              for m in mismatches],
                 "observed": obs}
+    if legend_keys and namespace(layer).get("values") == "classes":
+        # the readers' own count, run on the file before it is approved: they mask the
+        # outside values, the declared nodata and the file's own fill tag
+        from ..graph.geo import stacks as _stacks
+        unread = _stacks.read_check(str(manifest["file"]), _norm_legend(manifest.get("legend")),
+                                    [*skip, *([_num(tag)] if _isnum(tag) else [])])
+        if unread:
+            _drop_prepared()
+            return {"status": "declined", "verified": False, "observed": obs,
+                    "failures": [f"the file does not read as a class map: {unread}"]}
     if dry_run:
         if not keep_prepared:
             _drop_prepared()
@@ -777,6 +787,7 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None,
            **({"fetched": fetched} if fetched else {}),
            **({"outside_values": outside} if outside is not None else {}),
            **({"countries": list(manifest["countries"])} if manifest.get("countries") else {}),
+           **declared_fields(manifest),
            "contributed": True}
     cat[layer] = row
     if namespace(layer).get("stack"):
