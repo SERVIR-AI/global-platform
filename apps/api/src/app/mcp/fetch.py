@@ -67,8 +67,11 @@ def search(query: str, k: int = 5, country: str | None = None, crop: str | None 
            temporal: str | None = None, doc_type: str | None = None,
            pack: str | None = None) -> dict:
     """Top-k passages with passports. status='empty' with a `note` naming which of
-    the three causes applies (empty library / filters exclude / below the floor);
-    status='declined' with a `note` for a hard failure (missing key / torn corpus)."""
+    the causes applies (empty library / filters exclude / below the floor / only
+    reference lists above it); status='declined' with a `note` for a hard failure
+    (missing key / torn corpus). A reference list, bibliography or contents page is
+    never returned as a passage (rag.filters), and a `country` matches the countries
+    a document declares however the name is written."""
     floor = get_settings().rag_min_relevance
     k = max(1, min(int(k), 50))          # bounded like the REST route (1..50)
     name, why = _resolve_corpus(pack)
@@ -80,13 +83,18 @@ def search(query: str, k: int = 5, country: str | None = None, crop: str | None 
         corpus = Corpus(name)
         filters = {"countries": country, "crops": crop,
                    "temporal": temporal, "doc_type": doc_type}
-        hits = corpus.search(query, k=k, **filters)
+        skipped: dict = {}
+        hits = corpus.search(query, k=k, skipped=skipped, **filters)
     except MissingAPIKey as exc:
         return {**base, "status": "declined", "note": f"embedding key missing: {exc}"}
     except CorpusError as exc:
         return {**base, "status": "declined", "note": str(exc)}
+    refs = sorted(set(skipped.get("references") or []))
+    passed_over = ({"passed_over": f"{len(skipped['references'])} reference-list or contents "
+                                   "passage(s) above the floor were not returned: "
+                                   + "; ".join(r[:60] for r in refs[:5])} if refs else {})
     if hits:
-        return {**base, "status": "ok",
+        return {**base, "status": "ok", **passed_over,
                 "hits": [{"score": h["score"], "text": h["text"],
                           "passport": _passport(h["metadata"], h["doc_id"],
                                                 corpus.raw_path(h["doc_id"]) is not None,
@@ -97,6 +105,10 @@ def search(query: str, k: int = 5, country: str | None = None, crop: str | None 
         note = "The library is empty."
     elif corpus.count(**filters) == 0:
         note = f"{n} document(s) ingested, but none match the filters."
+    elif refs:
+        note = (f"Only reference lists, bibliographies or contents pages matched {query!r} above "
+                f"the floor ({floor}) — they name other works and say nothing of their own, so "
+                "none is returned: " + "; ".join(r[:60] for r in refs[:5]))
     else:
         note = (f"No document is relevant to {query!r} above the floor ({floor}) — "
                 "the honest answer is a decline, not a weak match.")

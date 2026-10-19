@@ -72,13 +72,19 @@ def _visible(meta: dict) -> bool:
 
 def _matches(meta: dict, filters: dict) -> bool:
     """Case-insensitive: scalars by equality, list fields by intersection;
-    empty filter values are ignored."""
+    empty filter values are ignored. Country names match forgivingly (Viet Nam /
+    Vietnam, Lao PDR / Laos), the way every other source's countries are read."""
     for key, want in filters.items():
         if want in (None, "", []):
             continue
         have = meta.get(key)
         wanted = [str(w).lower() for w in (want if isinstance(want, (list, tuple)) else [want])]
-        if isinstance(have, (list, tuple)):
+        if key == "countries":
+            from ..graph.geo.vectors import country_matches
+            declared = [str(h) for h in (have if isinstance(have, (list, tuple)) else [have] if have else [])]
+            if not declared or not any(country_matches(declared, w) for w in wanted):
+                return False
+        elif isinstance(have, (list, tuple)):
             if not set(wanted) & {str(h).lower() for h in have}:
                 return False
         elif str(have).lower() not in wanted:
@@ -272,9 +278,15 @@ class Corpus:
                 "raw_archive_kept": self.raw_path(doc_id) is not None}
 
     def search(self, query: str, k: int = 5, min_relevance: float | None = None,
+               *, where=None, skipped: dict | None = None, references: bool = False,
                **filters) -> list[dict]:
         """Top-k above the relevance floor; metadata filters narrow BEFORE ranking;
-        below the floor returns []."""
+        below the floor returns []. Every caller gets passages of their own: a
+        reference list or contents page is passed over (unless `references`), and
+        with `where` (the countries of the area asked about) so is a document that
+        declares other countries — the next passage down takes its place, so k
+        stays k. `skipped` (a dict) collects what was passed over (rag.filters.sift)."""
+        from .filters import sift
         if min_relevance is None:
             min_relevance = get_settings().rag_min_relevance
         k = max(int(k), 0)
@@ -284,10 +296,14 @@ class Corpus:
             return []
         q = self.embedder.embed([query])[0]
         sims = self._matrix[idx] @ q
-        order = np.argsort(sims)[::-1][:k]
-        return [{"score": round(float(sims[j]), 4),
-                 **{key: self._chunks[idx[j]][key] for key in ("id", "doc_id", "text", "metadata")}}
-                for j in order if sims[j] >= min_relevance]
+        out = []
+        for j in np.argsort(sims)[::-1]:
+            if sims[j] < min_relevance or len(out) >= k:
+                break
+            hit = {"score": round(float(sims[j]), 4),
+                   **{key: self._chunks[idx[j]][key] for key in ("id", "doc_id", "text", "metadata")}}
+            out.extend(sift([hit], where=where, skipped=skipped, references=references))
+        return out
 
     def count(self, **filters) -> int:
         """Chunks surviving the filters (pre-similarity) — distinguishes
