@@ -83,7 +83,31 @@ def remove_raster(layer: str) -> dict:
                                  "— removing it is a code/catalog decision, not a "
                                  "CLI one"]}
         return {"status": "declined", "failures": [f"no catalog row {layer!r}"]}
+    row = cat[layer] or {}
+    if row.get("kind") == "stack":
+        # A contributed STACK: every year row goes with it, each file moved aside.
+        years = [str(row["layer_pattern"]).format(year=int(y)) for y in row.get("years") or []]
+        removed = [remove_raster(y) for y in years if y in cat]
+        cat = (yaml.safe_load(cat_path.read_text()) or {}) if cat_path.exists() else {}
+        cat.pop(layer, None)
+        header = ("# Contributed raster rows — machine-owned; written by the\n"
+                  "# contribution gate. Hand-edit conf/tiffs.yml, never this.\n")
+        cat_path.write_text(header + yaml.safe_dump(cat, sort_keys=False, allow_unicode=True))
+        return {"status": "removed", "layer": layer, "stack": True,
+                "years_removed": [r.get("layer") for r in removed], "note": _HISTORY}
     del cat[layer]
+    stack_note = None
+    sid = row.get("stack")
+    if sid and isinstance(cat.get(sid), dict) and cat[sid].get("kind") == "stack":
+        # The year leaves its series; a series with no years left leaves the catalog,
+        # or every reader would find a stack whose files never open.
+        st = cat[sid]
+        st["years"] = [int(y) for y in st.get("years") or [] if int(y) != int(row.get("year", -1))]
+        if st["years"]:
+            stack_note = f"year {row.get('year')} dropped from stack {sid}; years left: {st['years']}"
+        else:
+            del cat[sid]
+            stack_note = f"stack {sid} had no other year and was removed with it"
     header = ("# Contributed raster rows — machine-owned; written by the\n"
               "# contribution gate. Hand-edit conf/tiffs.yml, never this.\n")
     cat_path.write_text(header + yaml.safe_dump(cat, sort_keys=False, allow_unicode=True))
@@ -100,6 +124,8 @@ def remove_raster(layer: str) -> dict:
         retired = tif.with_suffix(".tif.retired")
         tif.rename(retired)
         out["file"] = f"moved aside to {retired.name} (kept for replay)"
+    if stack_note:
+        out["stack"] = stack_note
     return {"status": "removed", "layer": layer, **out, "note": _HISTORY}
 
 

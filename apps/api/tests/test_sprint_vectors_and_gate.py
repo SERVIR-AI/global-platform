@@ -469,3 +469,43 @@ def test_private_hosts_stay_refused_unless_the_dev_switch_is_on(monkeypatch):
     assert fetch_policy.check_url("http://127.0.0.1:8899/x.geojson")
     monkeypatch.setattr(s, "grp_contrib_allow_private_hosts", True)
     assert fetch_policy.check_url("http://127.0.0.1:8899/x.geojson") == []
+
+
+def test_removing_a_contributed_year_keeps_its_stack_honest(tmp_path, monkeypatch):
+    """Removing the only year of a contributed stack removes the stack row too;
+    removing one of several drops it from the series; naming the stack removes all."""
+    from app.contrib import removal
+    s = get_settings()
+    conf = tmp_path / "conf"; conf.mkdir()
+    (conf / "tiffs.yml").write_text("# hand-authored\n{}\n")
+    (conf / "raster_schema.yml").write_text(json.dumps({"defaults": {"crs": "EPSG:4326"}, "layers": {}}))
+    for k, v in (("tiffs_config_path", conf / "tiffs.yml"), ("tiffs_contrib_path", conf / "tiffs.contrib.yml"),
+                 ("raster_schema_path", conf / "raster_schema.yml"),
+                 ("raster_schema_contrib_path", conf / "raster_schema.contrib.yml"),
+                 ("cache_dir", tmp_path / "cache"), ("tiffs_dir", tmp_path / "cache" / "tiffs")):
+        monkeypatch.setattr(s, k, v)
+    arr = np.ones((5, 5), dtype="uint8")
+    for y in (1996, 2020):
+        rasters.add({"layer": f"landcover_rm_{y}", "stack": "landcover_rm", "year": y, "stack_title": "rm",
+                     "file": _write(tmp_path / f"{y}.tif", arr, "EPSG:4326", from_origin(-85, 10, 0.001, 0.001)),
+                     "title": f"{y}", "description": "d", "source": "s", "license": "CC0-1.0", "vintage": "2026-10",
+                     "legend": {1: "Mangrove"}, "declared": {"dtype": "uint8", "valid_min": 0, "valid_max": 1}})
+    import yaml
+    cat = yaml.safe_load((conf / "tiffs.contrib.yml").read_text())
+    assert cat["landcover_rm"]["years"] == [1996, 2020]
+    out = removal.remove_raster("landcover_rm_1996")
+    cat = yaml.safe_load((conf / "tiffs.contrib.yml").read_text())
+    assert out["status"] == "removed" and cat["landcover_rm"]["years"] == [2020] and "dropped" in out["stack"]
+    out = removal.remove_raster("landcover_rm_2020")
+    cat = yaml.safe_load((conf / "tiffs.contrib.yml").read_text())
+    assert "landcover_rm" not in cat and "removed with it" in out["stack"]
+    # a whole stack by name
+    for y in (1996, 2020):
+        rasters.add({"layer": f"landcover_rm_{y}", "stack": "landcover_rm", "year": y, "stack_title": "rm",
+                     "file": str(tmp_path / f"{y}.tif"), "title": f"{y}", "description": "d", "source": "s",
+                     "license": "CC0-1.0", "vintage": "2026-10", "legend": {1: "Mangrove"},
+                     "declared": {"dtype": "uint8", "valid_min": 0, "valid_max": 1}})
+    out = removal.remove_raster("landcover_rm")
+    cat = yaml.safe_load((conf / "tiffs.contrib.yml").read_text())
+    assert out["stack"] is True and sorted(out["years_removed"]) == ["landcover_rm_1996", "landcover_rm_2020"]
+    assert not any(k.startswith("landcover_rm") for k in cat)
