@@ -516,6 +516,7 @@ def _passport_citation(n, sid, row, layer, year, clip, level, legend, gaps):
                if meta.get("staged_by") else {}),
             **({"review_status": review} if review else {}),
             **({"prepared": prepared} if prepared else {}),
+            **({"fetched": meta["fetched"]} if meta.get("fetched") else {}),
             "authority": row.get("authority"), "residency": "platform-hosted",
             "text": " ".join(bits)}
 

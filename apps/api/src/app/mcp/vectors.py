@@ -198,6 +198,9 @@ def attach(spec: dict, target: dict, stats: dict, citations: list, gaps: list,
         rec["source"] = entry.get("source")
         rec["vintage"] = entry.get("vintage")
         rec["license"] = entry.get("license")
+        for k in ("prepared", "fetched"):     # what ingest did; the pack stores it with the record
+            if entry.get(k):
+                rec[k] = entry[k]
         if entry.get("review"):
             rec["review"] = entry["review"]
         n += 1
@@ -212,6 +215,9 @@ def attach(spec: dict, target: dict, stats: dict, citations: list, gaps: list,
                "text": citation_text(layer, entry, rec, name)}
         if entry.get("usage_notes"):
             cit["usage_notes"] = entry["usage_notes"]
+        for k in ("prepared", "fetched"):
+            if entry.get(k):
+                cit[k] = entry[k]
         if entry.get("review"):
             cit["review_status"] = entry["review"]
         if entry.get("staged_by"):

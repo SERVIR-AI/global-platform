@@ -736,6 +736,10 @@ function byClassHTML(r) {
 }
 const preparedHTML = notes => (notes || []).length
   ? `<div class="meta">At ingest: ${notes.map(n => esc(String(n).replace(/[.]$/, ""))).join("; ")}.</div>` : "";
+// Where a clip was cut from: enough to cut it again and compare the bytes.
+const fetchedHTML = f => f && f.url
+  ? `<div class="meta">Cut from ${esc(f.url)}${f.member ? ` (member ${esc(f.member)})` : ""}${f.clip
+      ? `, box ${esc(f.clip.join(", "))}` : ""}${f.sha256 ? ` · stored sha256 ${esc(String(f.sha256).slice(0, 16))}…` : ""}</div>` : "";
 function layersCard(rows, aoi) {
   const tile = r => {
     const g = r.grid, s = r.summary || {}, rg = r.range || {}, leg = r.legend || {};
@@ -878,6 +882,7 @@ function render(d){
         </div>
         ${s.caveat?`<div class="meta">⚠ ${esc(s.caveat)}</div>`:""}
         ${preparedHTML((ins.prepared || {})[String(s.n)] || s.prepared)}
+        ${fetchedHTML(s.fetched)}
         <div class="links">
           ${s.archived_url?`<a class="lnk" data-url="${esc(s.archived_url)}"
              href="${esc(s.archived_url)}">archived copy</a>`:""}

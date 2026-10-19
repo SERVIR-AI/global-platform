@@ -134,6 +134,9 @@ def attach(spec: dict, target: dict, stats: dict, citations: list, gaps: list,
                "text": layer_values.citation_text(layer, rec, name)}
         if rec.get("usage_notes"):
             cit["usage_notes"] = rec["usage_notes"]
+        for k in ("prepared", "fetched"):     # what ingest did, and where a clip was cut from
+            if rec.get(k):
+                cit[k] = rec[k]
         if rec.get("review"):
             cit["review_status"] = rec["review"]
         if rec.get("staged_by"):

@@ -15,13 +15,13 @@ import time
 import numpy as np
 import pytest
 import rasterio
-from shapely.geometry import box, shape
+from shapely.geometry import box, mapping, shape
 
 from app.config import get_settings
 from app.contrib import catalog_io, fetch_policy, identity, rasters, removal, staging, tables
 from app.graph.geo import align, combine, ingest, schema, stacks, tiffs, vectors
 from app.land_cover import synthesis as lc
-from app.mcp import app_ui, assemble, publish, store
+from app.mcp import app_ui, assemble, packs, publish, record, store
 
 from test_sprint_fix_landcover import H, LEFT, POLY, PX, TOP, W, _write, lc_env  # noqa: F401
 
@@ -466,3 +466,92 @@ def test_bundle_rasters_are_built_once_and_written_whole(env, monkeypatch, tmp_p
     with rasterio.open(out_path) as ds:
         assert set(np.unique(ds.read(1)).tolist()) == {1, 2, 15}     # stable, loss, neither
     assert _no_tmp(adir) == []
+
+
+# ------------------------------------------------- 5. provenance, carried through
+FETCHED = {"url": "https://hub.test/big.tif", "clip": [LEFT, TOP - H * PX, LEFT + W * PX, TOP],
+           "member": "dem/big.tif", "window": [0, 0, W, H], "of": [4000, 4000],
+           "read": "range requests, only the window", "sha256": "ab" * 32, "bytes": 1234}
+
+
+def _toy_pack(monkeypatch):
+    """A contributed extension pack: the bay as its area, nothing else."""
+    def gather(target, focus, trace, extras):
+        return ([{"n": 1, "kind": "measurement", "retrieval": "computed-at-pack-time",
+                  "source": "toy", "title": "reading", "text": "42 units."}], [],
+                {"queries": None, "_area": {"name": "Toy bay", "how": "test polygon",
+                                            "geometry": POLY}})
+    monkeypatch.setitem(packs.PACKS, "toy", {
+        "display_name": "Toy", "version": "v0", "target_keys": ("place",),
+        "target_doc": {"place": "site"}, "gather": gather,
+        "sections": lambda: ["## Reading"], "corpus": None,
+        "default_focus": lambda t: t.get("place", "")})
+
+
+def test_a_clips_provenance_rides_the_record_the_citation_and_the_receipt(env, monkeypatch, log):
+    dem = np.full((H, W), 5.0, "float32")
+    out = rasters.add({"layer": "measure_bay_clip", "title": "Clipped DEM", "description": "d",
+                       "source": "s", "license": "CC0-1.0", "vintage": "2026-10",
+                       "declared": {"dtype": "float32", "valid_min": 0, "valid_max": 20,
+                                    "nodata": -9999.0, "units": "m"},
+                       "file": _write(env["tmp"] / "clip.tif", dem, nodata=-9999.0)},
+                      prepared_before=["clipped at the source to the box asked"], fetched=FETCHED)
+    assert out["status"] == "landed", out
+    # a key the gate starts writing tomorrow rides too; a server path or a label never does
+    conf = env["tmp"] / "conf"
+    import yaml
+    cat = yaml.safe_load((conf / "tiffs.contrib.yml").read_text())
+    cat["measure_bay_clip"].update({"hub_ticket": "HUB-42", "contributor_label": "gis@hub.test"})
+    (conf / "tiffs.contrib.yml").write_text(yaml.safe_dump(cat))
+    _toy_pack(monkeypatch)
+    for pack, kw in (("land-cover", {"year": "2020", "geometry": POLY, "stack": "landcover_two"}),
+                     ("toy", {})):
+        p = assemble.assemble(pack=pack, place="Test bay", layers=["measure_bay_clip"], **kw)
+        assert p["status"] == "ok", (pack, p.get("note"))
+        rec = p["layers"]["measure_bay_clip"]
+        assert rec["fetched"] == FETCHED and rec["prepared"][0] == "clipped at the source to the box asked"
+        assert rec["hub_ticket"] == "HUB-42"
+        assert not {"local_path", "contributor_label", "license"} & set(rec)
+        cit = next(c for c in p["citations"] if c.get("layer") == "measure_bay_clip")
+        assert cit["fetched"] == FETCHED and cit["prepared"] == rec["prepared"]
+        r = record.record(pack_id=p["pack_id"])
+        src = next(x for x in store.load_receipt(r["receipt_id"])["sources"]
+                   if x.get("layer") == "measure_bay_clip")
+        log("OUTPUT", f"{pack}: {json.dumps({k: src[k] for k in ('prepared', 'fetched')})[:200]}")
+        assert src["fetched"] == FETCHED and src["prepared"] == rec["prepared"]
+
+
+def test_a_vectors_ingest_notes_ride_its_measured_record(env, monkeypatch):
+    fc = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {"NAME": "Stand A"},
+         "geometry": mapping(box(LEFT + 2 * PX, TOP - 6 * PX, LEFT + 4 * PX, TOP - 2 * PX))}]}
+    monkeypatch.setattr(fetch_policy, "fetch",
+                        lambda url, max_bytes=None: (json.dumps(fc).encode(), "m.geojson"))
+    tok = identity.bind(OWNER)
+    try:
+        out = staging.submit("vector", {"layer": "test_bay_stands", "url": "https://hub.test/m.geojson",
+                                        "title": "Bay stands", "description": "d", "source": "s",
+                                        "license": "CC0-1.0", "vintage": "2026",
+                                        "name_field": "NAME"}, OWNER)
+    finally:
+        identity.unbind(tok)
+    assert out["status"] == "approved", out
+    entry = vectors.landed()["test_bay_stands"]
+    vectors.register("test_bay_stands", {**entry, "prepared": ["reprojected from EPSG:32617"]})
+    _toy_pack(monkeypatch)
+    for pack, kw in (("land-cover", {"year": "2020", "geometry": POLY, "stack": "landcover_two"}),
+                     ("toy", {})):
+        p = assemble.assemble(pack=pack, place="Test bay", vectors=["test_bay_stands"], **kw)
+        assert p["status"] == "ok", (pack, p.get("note"))
+        assert store.load_pack(p["pack_id"])["vectors"]["test_bay_stands"]["prepared"] == [
+            "reprojected from EPSG:32617"]
+        cit = next(c for c in p["citations"] if c.get("layer") == "test_bay_stands")
+        assert cit["prepared"] == ["reprojected from EPSG:32617"]
+        src = next(x for x in record._sources(store.load_pack(p["pack_id"]))
+                   if x.get("layer") == "test_bay_stands")
+        assert src["prepared"] == ["reprojected from EPSG:32617"]
+
+
+def test_the_view_says_where_a_clip_was_cut_from():
+    html = app_ui.template()
+    assert "fetchedHTML(s.fetched)" in html and "Cut from" in html

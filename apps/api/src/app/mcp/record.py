@@ -174,6 +174,9 @@ def _sources(pack: dict) -> list[dict]:
                  # a layer-values source names its layer and fingerprints the values
                  # the pack returned, so they can be checked against this receipt
                  "layer": c.get("layer"), "values_sha256": c.get("values_sha256"),
+                 # what ingest did to the file, and where a clip was cut from (url, box,
+                 # member, sha256) — so the stored file can be cut again and compared
+                 "prepared": c.get("prepared") or None, "fetched": c.get("fetched") or None,
                  # an auto-approved or otherwise annotated source says so in the receipt,
                  # not only a staged one — review is off by default for now
                  **({"review_status": c["review_status"]}

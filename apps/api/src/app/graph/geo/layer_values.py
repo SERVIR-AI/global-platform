@@ -45,6 +45,14 @@ FEW_CELLS = 100                # an amount over fewer cells than this is said to
 _PATCH_LIMIT = 250_000         # cells above which equal-value patches are not traced
 INLINE_CHARS = 16_000          # all grids in one response, serialised — a float grid costs
                                # ~7 characters a cell, and pixels cost a model tokens
+# Row keys a layer record never carries: where the file lives on this server (paths,
+# download links), who contributed it (a label may be an e-mail address), and what the
+# record already restates in its own terms (licence, no-data, the amend history).
+_ROW_NOT_CARRIED = frozenset({
+    "local_path", "path", "file", "data_root", "data_root_env", "file_pattern",
+    "layer_pattern", "download_url", "drive_id", "contributor_label",
+    "license", "outside_values", "amended"})
+
 PALETTE_SYMBOLS = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 
@@ -758,15 +766,13 @@ def read(layer: str, boundary, *, side: int | None = None,
                        else "")}),
         "area_smaller_than_a_cell": touched,
     }
-    for k in ("usage_notes", "review", "staged_by", "contribution_id", "description",
-              "granularity", "colors", "prepared"):
-        if row.get(k):
-            rec[k] = row[k]
-    # what the layer's namespace lets it declare (a change map's from_year, to_year and
-    # the stack it compares) rides every read, from the schema's `fields`, never a list here
-    for k in namespace_fields():
-        if row.get(k) not in (None, ""):
-            rec[k] = row[k]
+    # Every other fact the row states rides the record — its review, ingest notes, where
+    # a clip was cut from (`fetched`), a change map's years — derived from the row itself,
+    # so a key the gate starts writing is never dropped by a list here. The record's own
+    # figures win, and where a file lives on this server or who contributed it never ride.
+    for k, v in row.items():
+        if k not in rec and k not in _ROW_NOT_CARRIED and v not in (None, "", [], {}):
+            rec[k] = v
     if row.get("amended"):
         last = row["amended"][-1]
         rec["amended"] = {"times": len(row["amended"]),
