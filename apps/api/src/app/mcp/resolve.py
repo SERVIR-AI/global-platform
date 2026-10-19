@@ -1,7 +1,8 @@
-"""The resolve bone (minimal): human place-and-time -> machine place-and-time.
+"""The resolve bone: human place-and-time -> machine place-and-time.
 Country/crop + "this season" -> the season windows and the phase the month falls
-in, via the hub calendar. Sub-national gazetteer / admin geometries are Phase 2 —
-the limitation is DECLARED, never silently faked.
+in, via the hub calendar. A place -> the area every pack would analyse, from the
+same resolver they use: a contributed area named in full, else the geocoder's
+boundary, else a box marked `approximate` with the contributed areas near it.
 """
 
 from __future__ import annotations
@@ -56,7 +57,13 @@ def place_time(country: str | None = None, crop: str | None = None,
             return {"status": "declined",
                     "note": "pass a `place` to resolve an area, or `country` and "
                             "`crop` to resolve a season — this call had neither"}
-        return {"status": resolved_place["status"], "asked_month": month,
+        # A declined place says why at the top, where every decline does, with the
+        # forms that resolve when several contributed areas share the name.
+        declined = ({"note": resolved_place["note"],
+                     **({"candidates": resolved_place["candidates"]}
+                        if resolved_place.get("candidates") else {})}
+                    if resolved_place["status"] == "declined" else {})
+        return {"status": resolved_place["status"], **declined, "asked_month": month,
                 "month_name": _cal.month_name[month] if month else None,
                 "place": resolved_place,
                 "seasons_note": ("no country/crop given, so no season window was "
