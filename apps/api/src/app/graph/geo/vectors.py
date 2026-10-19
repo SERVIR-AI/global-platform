@@ -164,7 +164,7 @@ def clip_into(adir: str, boundary, layer: str, entry: dict) -> int:
         if fam is None:
             continue
         try:
-            geom = shape(g)
+            geom = _valid(shape(g))
         except Exception:
             continue
         bx = geom.bounds
@@ -172,7 +172,10 @@ def clip_into(adir: str, boundary, layer: str, entry: dict) -> int:
             continue
         if not ready.intersects(geom):
             continue
-        part = geom if ready.contains(geom) else geom.intersection(boundary)
+        try:
+            part = geom if ready.contains(geom) else geom.intersection(boundary)
+        except Exception:
+            continue
         if part.is_empty:
             continue
         keep.append({"type": "Feature", "geometry": mapping(part),
@@ -310,6 +313,20 @@ def area_km2(geom) -> float:
     return max(total, 0.0)
 
 
+def _valid(geom):
+    """A polygon a hub's GIS left invalid (a self-touching ring, nested shells) is
+    repaired before it is clipped or measured — GEOS refuses to intersect it otherwise,
+    and a layer would silently lose those features. Lines and points pass through."""
+    if geom.geom_type in ("Polygon", "MultiPolygon") and not geom.is_valid:
+        from shapely import make_valid
+        fixed = make_valid(geom)
+        if fixed.geom_type == "GeometryCollection":
+            polys = [g for g in fixed.geoms if g.geom_type in ("Polygon", "MultiPolygon")]
+            fixed = unary_union(polys) if polys else fixed
+        return fixed
+    return geom
+
+
 def family(entry: dict) -> str:
     return str(entry.get("geometry") or "points")
 
@@ -337,6 +354,7 @@ def summarise(entry: dict, boundary, cap_features: int = 250_000) -> dict:
     n_in = 0
     digest = hashlib.sha256()
     truncated = False
+    skipped = 0
     for i, ft in enumerate(feats):
         if i >= cap_features:
             truncated = True
@@ -345,7 +363,7 @@ def summarise(entry: dict, boundary, cap_features: int = 250_000) -> dict:
         if FAMILIES.get(g.get("type")) != fam:
             continue
         try:
-            geom = shape(g)
+            geom = _valid(shape(g))
         except Exception:
             continue
         bx = geom.bounds
@@ -358,7 +376,11 @@ def summarise(entry: dict, boundary, cap_features: int = 250_000) -> dict:
         else:
             if not ready.intersects(geom):
                 continue
-            part = geom if ready.contains(geom) else geom.intersection(boundary)
+            try:
+                part = geom if ready.contains(geom) else geom.intersection(boundary)
+            except Exception:
+                skipped += 1
+                continue
             if part.is_empty:
                 continue
             measure = length_km(part) if fam == "lines" else area_km2(part)
@@ -379,7 +401,7 @@ def summarise(entry: dict, boundary, cap_features: int = 250_000) -> dict:
            "total": round(total, 3) if fam != "points" else n_in,
            **({"total_ha": round(total * 100, 1)} if fam == "polygons" else {}),
            "features_in_layer": len(feats), "features_sha256": digest.hexdigest(),
-           "truncated": truncated}
+           "truncated": truncated, **({"skipped_unreadable": skipped} if skipped else {})}
     if gkey:
         out["group_field"] = gkey
         out["by_group"] = {k: (round(v, 3) if fam != "points" else int(v)) for k, v in by_group[:_TOP]}

@@ -1084,9 +1084,11 @@ VECTOR_FIELDS = {
                  "A POINT layer becomes a countable asset beside hospitals/schools in every risk "
                  "answer; a LINE or POLYGON layer is measured inside any pack's area with "
                  "assemble_pack(..., vectors=[<layer>]) — km of line, km² (ha) of polygon",
-        "url": "where the platform can fetch a GeoJSON FeatureCollection in EPSG:4326 (lon, lat) "
-               "of Point, LineString or Polygon features (or their Multi forms; one family per "
-               "layer); a Google Drive share link works; public host, up to the size cap",
+        "url": "where the platform can fetch the layer: a GeoJSON FeatureCollection in EPSG:4326 "
+               "(lon, lat), a ZIPPED SHAPEFILE (.shp/.shx/.dbf/.prj in one .zip) or a GEOPACKAGE "
+               "(.gpkg) — shapefiles and GeoPackages in any CRS are reprojected to EPSG:4326 at "
+               "ingest; Point, LineString or Polygon features (or their Multi forms; one family "
+               "per layer); a Google Drive share link works; public host, up to the size cap",
         "title": "what the features are",
         "description": "what one feature represents, how the layer was compiled, what it excludes",
         "source": "who maintains the layer (agency), derived from what",
@@ -1101,6 +1103,8 @@ VECTOR_FIELDS = {
                       "every pack and in resolve_place_time (the hub's own boundary, not a geocoder's)",
         "group_field": "a property to break the measure down by, e.g. clase or IUCN_CAT — "
                        "the citation states the km / km² / count per value",
+        "layer_name": "for a GeoPackage with several feature layers, or a zip with several "
+                      "shapefiles: which one to read",
         "usage_notes": "a few lines the consuming analyst reads (max 500 chars)",
     },
 }
@@ -1169,15 +1173,26 @@ def _prepare_vector(m: dict) -> dict:
     if taken:
         raise Declined(taken)
     try:
-        raw, _ = fetch_policy.fetch(m["url"])
+        raw, fname = fetch_policy.fetch(m["url"])
     except fetch_policy.FetchRefused as exc:
         raise Declined(str(exc)) from None
     except Exception as exc:
         raise Declined(f"could not fetch {m['url']}: {type(exc).__name__}: {exc}") from None
+    # A zipped shapefile or a GeoPackage is read into GeoJSON on EPSG:4326 here;
+    # what lands is always GeoJSON, and the record says what ingest did.
+    from ..graph.geo import vecio
+    try:
+        raw, prep_notes = vecio.to_geojson(raw, fname, m.get("layer_name"))
+    except ValueError as exc:
+        raise Declined(f"{m['url']}: {exc}") from None
+    except Exception as exc:
+        raise Declined(f"{m['url']}: could not be read as a vector file: {type(exc).__name__}: {exc}") from None
     try:
         observed = vectors.inspect(raw)
     except ValueError as exc:
         raise Declined(f"{m['url']}: {exc}") from None
+    if prep_notes:
+        observed["prepared"] = prep_notes
     vdir = vectors._dir()
     fd, tmp = tempfile.mkstemp(prefix="staged-tmp-", suffix=".geojson", dir=vdir)
     with os.fdopen(fd, "wb") as f:
@@ -1201,6 +1216,8 @@ def _stage_vector(rec: dict, prepared: dict) -> dict:
              **({"countries": m["countries"]} if m.get("countries") else {}),
              **({"name_field": m["name_field"]} if m.get("name_field") else {}),
              **({"group_field": m["group_field"]} if m.get("group_field") else {}),
+             **({"prepared": prepared["observed"]["prepared"]}
+                if prepared["observed"].get("prepared") else {}),
              **({"usage_notes": m["usage_notes"]} if m.get("usage_notes") else {}),
              "contributed": True, "staged_by": rec["contributor_id"], "contribution_id": cid,
              "contributor_label": rec["contributor_label"]}

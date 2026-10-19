@@ -87,6 +87,9 @@ def citation_text(layer: str, entry: dict, rec: dict, area_name: str) -> str:
                     + (f"; {rec['unnamed']:,} unnamed" if rec.get("unnamed") else "") + ".")
     if rec.get("truncated"):
         bits.append("The layer was read up to its feature cap; the figures are a lower bound.")
+    if rec.get("skipped_unreadable"):
+        bits.append(f"{rec['skipped_unreadable']:,} feature(s) could not be clipped to the boundary "
+                    "and are not counted; the figures are a lower bound.")
     bits.append("Measured on the authalic sphere (the same one the platform's raster areas use), "
                 f"over {rec['features_in_layer']:,} features in the layer; replayable by the "
                 "features hash on the receipt.")

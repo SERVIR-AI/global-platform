@@ -600,3 +600,124 @@ def test_land_cover_cites_its_library_when_it_holds_something(binary_stack, monk
     monkeypatch.setattr(rag_store, "Corpus", lambda name: FakeCorpus([]))
     q = assemble.assemble(pack="land-cover", place="Test bay", year="2020", geometry=binary_stack["poly"])
     assert any("library is empty" in g for g in q["gaps"])
+
+
+# --------------------------------------------- native formats: zipped shapefile, GeoPackage
+def _mini_shapefile_zip(crs_wkt=None, encoding="latin-1"):
+    """A one-record PolyLine shapefile (plus .dbf with NOMBRE/HECT) zipped — written by
+    hand from the format, so the reader is tested against the spec, not itself."""
+    import struct, zipfile, io
+    pts = [(700000.0, 1110000.0), (701000.0, 1111000.0)] if crs_wkt else [(-85.0, 10.0), [-84.99, 10.01]]
+    # record: shape type 3, bbox, nparts 1, npts 2, parts[0], points
+    body = struct.pack("<i", 3) + struct.pack("<4d", min(p[0] for p in pts), min(p[1] for p in pts),
+                                              max(p[0] for p in pts), max(p[1] for p in pts))
+    body += struct.pack("<ii", 1, len(pts)) + struct.pack("<i", 0)
+    for x, y in pts:
+        body += struct.pack("<dd", x, y)
+    rec = struct.pack(">ii", 1, len(body) // 2) + body
+    total_words = (100 + len(rec)) // 2
+    header = struct.pack(">i", 9994) + b"\x00" * 20 + struct.pack(">i", total_words) + struct.pack("<ii", 1000, 3)
+    header += struct.pack("<4d", min(p[0] for p in pts), min(p[1] for p in pts), max(p[0] for p in pts), max(p[1] for p in pts))
+    header += struct.pack("<4d", 0, 0, 0, 0)
+    shp = header + rec
+    shx = header[:24] + struct.pack(">i", (100 + 8) // 2) + header[28:] + struct.pack(">ii", 50, len(body) // 2)
+    # dbf: two fields, one record
+    fields = [("NOMBRE", "C", 20, 0), ("HECT", "N", 10, 2)]
+    hlen = 32 + 32 * len(fields) + 1
+    rlen = 1 + sum(f[2] for f in fields)
+    dbf = bytes([3, 126, 10, 19]) + struct.pack("<IHH", 1, hlen, rlen) + b"\x00" * 20
+    for name, t, ln, dec in fields:
+        dbf += name.encode("ascii").ljust(11, b"\x00") + t.encode() + b"\x00" * 4 + bytes([ln, dec]) + b"\x00" * 14
+    dbf += b"\x0d"
+    dbf += b" " + "Río Test".encode(encoding).ljust(20) + b"     12.50" + b"\x1a"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("rios/rios.shp", shp); z.writestr("rios/rios.shx", shx); z.writestr("rios/rios.dbf", dbf)
+        z.writestr("rios/rios.cpg", encoding)
+        if crs_wkt:
+            z.writestr("rios/rios.prj", crs_wkt)
+    return buf.getvalue()
+
+
+UTM16N_ESRI_WKT = ('PROJCS["WGS_1984_UTM_Zone_16N",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137.0,298.257223563]],'
+                   'PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],'
+                   'PARAMETER["False_Easting",500000.0],PARAMETER["False_Northing",0.0],PARAMETER["Central_Meridian",-87.0],'
+                   'PARAMETER["Scale_Factor",0.9996],PARAMETER["Latitude_Of_Origin",0.0],UNIT["Meter",1.0]]')
+
+
+def test_a_zipped_shapefile_in_utm_reads_as_geojson_on_wgs84():
+    from app.graph.geo import vecio
+    raw = _mini_shapefile_zip(crs_wkt=UTM16N_ESRI_WKT)
+    assert vecio.kind_of(raw, "rios.zip") == "shapefile-zip"
+    out, notes = vecio.to_geojson(raw, "rios.zip")
+    fc = json.loads(out)
+    assert len(fc["features"]) == 1 and fc["features"][0]["geometry"]["type"] == "LineString"
+    (x, y), *_ = fc["features"][0]["geometry"]["coordinates"]
+    assert -86 < x < -84 and 9.5 < y < 10.5                       # UTM 16N -> lon/lat near Costa Rica
+    assert fc["features"][0]["properties"] == {"NOMBRE": "Río Test", "HECT": 12.5}
+    assert any("reprojected from EPSG:32616" in n for n in notes) and notes[0].startswith("read 1 feature")
+    # and it passes the platform's own inspector
+    assert vectors.inspect(out)["geometry"] == "lines"
+
+
+def test_a_geopackage_layer_reads_as_geojson_and_several_layers_need_a_name(tmp_path):
+    import sqlite3, struct
+    from shapely.geometry import Polygon
+    from app.graph.geo import vecio
+    p = tmp_path / "t.gpkg"
+    con = sqlite3.connect(p)
+    con.executescript("""
+      create table gpkg_spatial_ref_sys(srs_name text, srs_id integer primary key, organization text, organization_coordsys_id integer, definition text);
+      insert into gpkg_spatial_ref_sys values ('CR05 / CRTM05', 5367, 'EPSG', 5367, 'undefined');
+      create table gpkg_contents(table_name text primary key, data_type text, identifier text, srs_id integer);
+      create table gpkg_geometry_columns(table_name text, column_name text, geometry_type_name text, srs_id integer, z integer, m integer);
+      create table manglar(fid integer primary key, geom blob, clase text, ha real);
+      create table otros(fid integer primary key, geom blob, nombre text);
+      insert into gpkg_contents values ('manglar','features','manglar',5367), ('otros','features','otros',5367);
+      insert into gpkg_geometry_columns values ('manglar','geom','MULTIPOLYGON',5367,0,0), ('otros','geom','POLYGON',5367,0,0);
+    """)
+    # CRTM05 coordinates near the Gulf of Nicoya
+    poly = Polygon([(400000, 1105000), (401000, 1105000), (401000, 1106000), (400000, 1106000), (400000, 1105000)])
+    blob = b"GP" + bytes([0, 0x01]) + struct.pack("<i", 5367) + poly.wkb
+    con.execute("insert into manglar values (1, ?, 'mangle alto', 100.0)", (blob,))
+    con.execute("insert into otros values (1, ?, 'x')", (blob,))
+    con.commit(); con.close()
+    raw = p.read_bytes()
+    assert vecio.kind_of(raw, "t.gpkg") == "gpkg"
+    with pytest.raises(ValueError, match="several feature layers"):
+        vecio.to_geojson(raw, "t.gpkg")
+    out, notes = vecio.to_geojson(raw, "t.gpkg", layer_name="manglar")
+    fc = json.loads(out)
+    g = fc["features"][0]
+    assert g["geometry"]["type"] == "Polygon" and g["properties"] == {"fid": 1, "clase": "mangle alto", "ha": 100.0}
+    lon, lat = g["geometry"]["coordinates"][0][0]
+    assert -85.2 < lon < -84.6 and 9.9 < lat < 10.1
+    assert any("EPSG:5367" in n for n in notes)
+    with pytest.raises(ValueError, match="no feature layer named"):
+        vecio.to_geojson(raw, "t.gpkg", layer_name="nope")
+
+
+def test_the_vector_kind_takes_a_zipped_shapefile_over_the_gate(vec_env, log):
+    raw = _mini_shapefile_zip(crs_wkt=UTM16N_ESRI_WKT)
+    monkeypatch_fetch = lambda url, max_bytes=None: (raw, "rios.zip")
+    import app.contrib.fetch_policy as fp
+    fp.fetch = monkeypatch_fetch
+    out = staging.submit("vector", {"layer": "test_shp_rivers", "url": "https://x.test/rios.zip", "title": "Rivers (zip)",
+                                    "description": "synthetic shapefile", "source": "test fixture", "license": "CC0-1.0",
+                                    "vintage": "unstated", "name_field": "NOMBRE"}, OWNER)
+    assert out["status"] in ("approved", "staged"), out
+    pv = out["preview"]
+    log("OUTPUT", f"observed={pv['observed'].get('geometry')} prepared={pv['observed'].get('prepared')}")
+    assert pv["observed"]["geometry"] == "lines" and any("reprojected" in n for n in pv["observed"]["prepared"])
+    assert pv["entry"]["prepared"]
+
+
+def test_an_invalid_polygon_is_repaired_not_dropped(tmp_path, monkeypatch):
+    """A bow-tie polygon (self-intersecting ring) from a hub's GIS: measured after
+    repair, never silently lost."""
+    bowtie = {"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"clase": "x"},
+              "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [1, 1], [1, 0], [0, 1], [0, 0]]]}}]}
+    p = tmp_path / "bow.geojson"; p.write_text(json.dumps(bowtie))
+    monkeypatch.setattr(vectors, "master_path", lambda e: p)
+    rec = vectors.summarise({"geometry": "polygons", "group_field": "clase"}, box(0.25, -1, 2, 2))
+    assert rec["features_inside"] == 1 and rec["total"] > 0 and not rec.get("skipped_unreadable")
