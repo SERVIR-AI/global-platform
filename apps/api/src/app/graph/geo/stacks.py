@@ -194,19 +194,34 @@ def clip_level(path):
         return 1
 
 
-def category_grid(clip_path, outside_values, cells=56):
-    """The clip downsampled to a small digit grid for the panel's inline map:
-    legend classes 1-9 stay themselves, the outside/nodata values become 0, so a
-    nodata 15 is never painted as a class."""
+def category_grid(clip_path, outside_values, legend, cells=56):
+    """The clip downsampled to a small grid for the panel's inline map. Each cell is the
+    1-based position of its class in `legend` order ({code: {label, color}}); 0 is outside
+    the map, no data, or a code the legend does not name. The legend rides with the grid as
+    [{code, label, color}], so a code of any size draws in its own colour — the cells used
+    to be the code itself as one digit, clipped to 9, and every map coded 10..220 (ESA
+    WorldCover, MapBiomas, a change map) drew as one colour. One character per cell
+    (layer_values.PALETTE_SYMBOLS) up to 61 classes, else a list of positions."""
+    from .layer_values import PALETTE_SYMBOLS
     try:
         with rasterio.open(clip_path) as src:
             h = max(1, min(cells, src.height))
             w = max(1, min(cells, src.width))
             arr = src.read(1, out_shape=(h, w))
             b = src.bounds
-        arr = np.where(np.isin(arr, list(outside_values)), 0, arr)
-        arr = np.clip(arr, 0, 9)
-        return {"w": w, "h": h, "cells": "".join(str(int(v)) for v in arr.ravel()),
+        entries = []
+        for code, item in (legend or {}).items():
+            item = item if isinstance(item, dict) else {"label": item}
+            entries.append({"code": _plain(code), "label": item.get("label"),
+                            "color": item.get("color")})
+        pos = np.zeros(arr.shape, dtype="int32")
+        out = _outside_mask(arr, list(outside_values or []))
+        for i, e in enumerate(entries, 1):
+            pos[(arr == e["code"]) & ~out] = i
+        flat = pos.ravel().tolist()
+        grid = ("".join(PALETTE_SYMBOLS[i] for i in flat) if len(entries) < len(PALETTE_SYMBOLS)
+                else flat)
+        return {"w": w, "h": h, "encoding": "legend", "legend": entries, "cells": grid,
                 "bounds": [b.left, b.bottom, b.right, b.top]}
     except Exception:
         return None

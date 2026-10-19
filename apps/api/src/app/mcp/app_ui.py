@@ -593,14 +593,25 @@ function mapCard(m) {
     const y0 = PAD + (b[3] - gb[3]) / spanY * (H - PAD * 2);
     const cw = ((gb[2] - gb[0]) / spanX * (W - PAD * 2)) / g.w;
     const ch = ((gb[3] - gb[1]) / spanY * (H - PAD * 2)) / g.h;
+    // A class map's cells are positions in the legend it carries (0 = outside), so a
+    // code of any size (WorldCover's 95, a change code 220) keeps its own colour; a
+    // severity grid's cells are the digit itself.
+    const classes = g.encoding === "legend" ? (g.legend || []) : null;
+    const cellAt = i => !classes ? g.cells.charCodeAt(i) - 48
+      : typeof g.cells === "string" ? SYMS.indexOf(g.cells[i]) : +g.cells[i];
+    const fillOf = v => {
+      if (!classes) return color(v);
+      const e = classes[v - 1] || {};
+      return e.color || color(e.code);
+    };
     const parts = [];
     for (let r = 0; r < g.h; r++) {
       for (let c = 0; c < g.w; c++) {
-        const v = g.cells.charCodeAt(r * g.w + c) - 48;
-        if (v < 1) continue;
+        const v = cellAt(r * g.w + c);
+        if (!(v >= 1)) continue;
         parts.push(`<rect x="${(x0 + c * cw).toFixed(1)}" y="${(y0 + r * ch).toFixed(1)}"
           width="${(cw + 0.3).toFixed(1)}" height="${(ch + 0.3).toFixed(1)}"
-          fill="${esc(color(v))}" fill-opacity=".8"/>`);
+          fill="${esc(fillOf(v))}" fill-opacity=".8"/>`);
       }
     }
     hz = parts.join("");

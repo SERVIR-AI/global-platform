@@ -620,7 +620,7 @@ def _viz(aoi, name, layer_key, raster_path, legend_entries, label, caption, metr
             "features": {"type": "FeatureCollection", "features": []},
             "hazard_layer": {"raster_url": f"/api/raster/{slug}/{os.path.basename(raster_path)}",
                              "geojson": None, "crs": "EPSG:4326"},
-            "hazard_grid": stacks.category_grid(raster_path, outside)}
+            "hazard_grid": stacks.category_grid(raster_path, outside, legend_entries)}
 
 
 # ------------------------------------------------------------------ gather

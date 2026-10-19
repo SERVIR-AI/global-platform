@@ -15,7 +15,7 @@ from app.graph.geo import ingest, stacks
 from app.land_cover import fire
 from app.mcp import assemble
 
-from test_landcover_pack import H, LEFT, PX, TOP, W, lc_env  # noqa: F401  (fixture reuse)
+from test_landcover_pack import H, LEFT, LEGEND, PX, TOP, W, lc_env  # noqa: F401  (fixture reuse)
 
 
 def test_resolver_accepts_protected_areas_and_estimates_by_latitude():
@@ -41,7 +41,8 @@ def test_clip_honours_a_pixel_budget_and_records_the_level(lc_env):
         level = stacks.clip_level(coarse)
         assert level > 1 and ds.width <= W // level + 1
         assert abs(ds.transform.a - PX * level) < 1e-9
-    g = stacks.category_grid(coarse, [0, 15])
+    g = stacks.category_grid(coarse, [0, 15], {k: {"label": v} for k, v in LEGEND.items()})
+    assert g["encoding"] == "legend" and [e["code"] for e in g["legend"]] == list(LEGEND)
     assert set(g["cells"]) <= set("0123456789") and "9" not in g["cells"]   # 15 is never a class
 
 

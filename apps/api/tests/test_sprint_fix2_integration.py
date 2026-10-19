@@ -6,6 +6,8 @@ Every fixture is synthetic and built here, on the four-stack bay of
 test_sprint_fix_landcover; layers arrive through the gate a moment before they are read."""
 
 import json
+import shutil
+import subprocess
 
 import numpy as np
 import pytest
@@ -15,7 +17,7 @@ from app.config import get_settings
 from app.contrib import fetch_policy, identity, staging
 from app.graph.geo import schema, stacks, tiffs
 from app.land_cover import synthesis as lc
-from app.mcp import assemble
+from app.mcp import app_ui, assemble, publish, store
 
 from test_sprint_fix_landcover import H, POLY, PX, W, _write, lc_env  # noqa: F401
 
@@ -191,3 +193,97 @@ def test_a_change_layer_is_never_a_stack_nor_a_candidate(env):
     cat["landcover_oddrole"] = {**cat["landcover_two"], "role": "change"}
     (conf / "tiffs.yml").write_text(json.dumps(cat))
     assert "landcover_oddrole" in stacks.rows() and "landcover_oddrole" not in lc.landcover_stacks()
+
+
+# ------------------------------------------------------- 3. the map's own colours
+_RUN_MAPCARD = """
+const fs = require("fs"), vm = require("vm");
+const el = new Proxy(function () {}, {
+  get: (t, k) => (k === Symbol.toPrimitive ? () => 0 : k === "then" ? undefined : el),
+  apply: () => el, construct: () => el, set: () => true });
+const ctx = { window: el, document: el, ResizeObserver: class { observe() {} }, console,
+              setTimeout: () => 0, clearTimeout: () => 0, navigator: el, location: el };
+vm.createContext(ctx);
+vm.runInContext(fs.readFileSync(process.argv[2], "utf8"), ctx);
+const m = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+process.stdout.write(vm.runInContext("mapCard", ctx)(m));
+"""
+
+
+def _draw(tmp_path, panel_map):
+    """The evidence view's own mapCard, run in node over a recorded map: the fills drawn."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not installed: the view's map is not drawn here")
+    html = app_ui.template()
+    (tmp_path / "app.js").write_text(html.split("<script>")[-1].split("</script>")[0])
+    (tmp_path / "run.js").write_text(_RUN_MAPCARD)
+    (tmp_path / "m.json").write_text(json.dumps(panel_map))
+    r = subprocess.run([node, str(tmp_path / "run.js"), str(tmp_path / "app.js"),
+                        str(tmp_path / "m.json")], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[:500]
+    import re
+    return re.findall(r'<rect x="[^"]*" y="[^"]*"\s+width="[^"]*" height="[^"]*"\s+fill="([^"]*)"',
+                      r.stdout)
+
+
+def test_a_worldcover_like_map_draws_three_classes_not_one(env, tmp_path, log):
+    """WorldCover codes 10/80/95 (95 = Mangroves) were clipped to the digit 9 and drew in
+    one colour. The cells are now positions in the legend that rides with them."""
+    p = assemble.assemble(pack="land-cover", place="Test bay", year="2020", geometry=POLY,
+                          stack="landcover_wc")
+    assert p["status"] == "ok", p.get("note")
+    viz = store.load_pack(p["pack_id"])["viz"]
+    g = viz["hazard_grid"]
+    assert g["encoding"] == "legend"
+    assert [e["code"] for e in g["legend"]] == [10, 80, 95]
+    assert set(g["cells"]) == {"1", "2", "3"}               # three classes; nothing outside
+    colors = {e["code"]: e["color"] for e in g["legend"]}
+    assert len(set(colors.values())) == 3
+    fills = _draw(tmp_path, publish._panel_map(store.load_pack(p["pack_id"])))
+    log("OUTPUT", f"{len(fills)} cells, fills {sorted(set(fills))}")
+    assert set(fills) == set(colors.values())
+    # the bay's columns 0-2 are Mangroves (95) and 8-9 water (80): the left cell is 95's
+    assert fills[0] == colors[95] and fills[g["w"] - 1] == colors[80]
+
+
+def test_a_contributed_stack_coded_past_nine_draws_each_class(env, tmp_path):
+    """A hub's map coded 10/20/100/200 (CATIE) through the gate: four classes, four colours,
+    its own declared colours first; the fill is no class."""
+    a = np.full((H, W), 200, "int32")
+    a[:, :3] = 10
+    a[:, 3:5] = 20
+    a[:, 5:7] = 100
+    a[0, :] = I32_FILL
+    legend = {10: "Mangrove", 20: "Forest", 100: "Water", 200: "Other"}
+    out = _submit("landcover_catie_2014", env["serve"]("catie-2014.tif", a, nodata=I32_FILL),
+                  stack="landcover_catie", year=2014, stack_title="CATIE-like (synthetic)",
+                  legend=legend, colors={10: "#0b6e4f"},
+                  declared={"dtype": "int32", "valid_min": 10, "valid_max": 200, "nodata": I32_FILL})
+    assert out["status"] == "approved", out
+    p = assemble.assemble(pack="land-cover", place="Test bay", year="2014", geometry=POLY,
+                          stack="landcover_catie")
+    assert p["status"] == "ok", p.get("note")
+    g = store.load_pack(p["pack_id"])["viz"]["hazard_grid"]
+    assert [e["code"] for e in g["legend"]] == [10, 20, 100, 200]
+    assert set(g["cells"]) == {"0", "1", "2", "3", "4"}      # 0: the fill row
+    fills = _draw(tmp_path, publish._panel_map(store.load_pack(p["pack_id"])))
+    assert len(set(fills)) == 4 and len(fills) == g["w"] * g["h"] - g["w"]
+    assert g["legend"][0]["color"] == "#0b6e4f" and "#0b6e4f" in fills
+
+
+def test_a_grid_recorded_before_the_legend_encoding_still_draws(tmp_path):
+    """Receipts recorded earlier carry the digit itself (severity grids still do)."""
+    m = {"bounds": [0, 0, 1, 1], "legend": {"1": {"label": "Low", "color": "#aaaaaa"},
+                                            "3": {"label": "High", "color": "#cc0000"}},
+         "hazard_grid": {"w": 3, "h": 1, "cells": "013", "bounds": [0, 0, 1, 1]}}
+    assert _draw(tmp_path, m) == ["#aaaaaa", "#cc0000"]
+
+
+def test_more_classes_than_symbols_ride_as_positions(tmp_path):
+    a = np.arange(W * H, dtype="int32").reshape(H, W)
+    path = _write(tmp_path / "many.tif", a)
+    legend = {i: {"label": f"c{i}", "color": f"#{i:06x}"} for i in range(W * H)}
+    g = stacks.category_grid(path, [], legend)
+    assert isinstance(g["cells"], list) and sorted(g["cells"]) == list(range(1, W * H + 1))
+    assert len(set(_draw(tmp_path, {"bounds": g["bounds"], "legend": {}, "hazard_grid": g}))) == W * H
