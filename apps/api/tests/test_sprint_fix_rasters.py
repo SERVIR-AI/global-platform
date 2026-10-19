@@ -240,7 +240,9 @@ def test_how_to_test_a_measure_names_layers(gate, log):
     out = _agb(gate)
     how = out["preview"]["how_to_test"]
     log("OUTPUT", how)
-    assert "assemble_pack(pack='land-cover'" in how and "layers=['measure_toy_agb']" in how
+    # the hint points at the pack that reaches the layer where it lies (none in this
+    # toy state, and it says so); either way it names the layer and what a measure gives
+    assert "'measure_toy_agb'" in how and "per-area density" in how
 
 
 def test_a_projected_measure_is_regridded_bilinear_and_a_class_map_nearest(tmp_path):

@@ -44,7 +44,7 @@ def _aoi_feature(aoi):
     source = ("contributed" if how.startswith("contributed boundary")
               else "supplied" if how.startswith("supplied polygon")
               else "drawn" if "drawn" in how
-              else "radius_box" if "radius" in name else "nominatim")
+              else "radius_box" if aoi.get("approximate") or "radius" in name else "nominatim")
     return {**feat, "properties": {**feat.get("properties", {}), "source": source}}, bounds
 
 

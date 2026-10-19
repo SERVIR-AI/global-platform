@@ -237,16 +237,14 @@ def _resolve_aoi(place, extras, trace):
     else:
         aoi = ingest.ensure_aoi(place=place, layers=(), area_cap_km2=AREA_CAP_KM2)
     how = str(aoi.get("how") or "")
-    if not how.startswith(_BOUNDARY_OK):
-        from ..graph.geo import vectors as _vectors
-        try:
-            named = _vectors.names(limit=6)
-        except Exception:
-            named = {}
+    if aoi.get("approximate") or not how.startswith(_BOUNDARY_OK):
+        # the contributed areas NEAR the asked point, nearest first, in forms that resolve
+        near = aoi.get("nearby_contributed") or []
         hint = ""
-        if named:
-            sample = "; ".join(f"{layer}: {', '.join(n[:4])}" for layer, n in named.items())
-            hint = f", or name a contributed area ({sample})"
+        if near:
+            sample = "; ".join(f"{d['name']} ({d['layer']}, {d['km']:.0f} km)" if isinstance(d, dict)
+                               else str(d) for d in near[:6])
+            hint = f", or name a contributed area near it ({sample})"
         raise ValueError(
             f"{place!r} did not resolve to a boundary but to {how}. Land-cover figures "
             "are only computed for a real boundary: name a district, province, park or "

@@ -827,7 +827,8 @@ def for_area(boundary, wanted: list[dict], area_name: str,
         if not s["cells_with_value"]:
             gaps.append(f"{layer} has no value anywhere in {area_name}: every cell inside is "
                         f"no-data ({rec['nodata']['rule']})")
-        elif s.get("uniform"):
+        elif s.get("uniform") and not (rec.get("legend") and len(rec["legend"]) == 1):
+            # a one-class map (a presence mask) holds one value by design: no gap for that
             g = (rec.get("granularity") or {}).get("typical_run_km")
             gaps.append(f"{layer} holds ONE value ({s['min']}) across all "
                         f"{s['cells_with_value']:,} cells of {area_name} it has a value for "

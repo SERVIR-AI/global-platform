@@ -898,7 +898,15 @@ def source_raster(layer="hazard_flood"):
             raise ValueError(f"no Drive id for '{layer}' (looked up '{fname}' in drive_tifs + tiffs.yml)")
         os.makedirs(settings.tiffs_dir, exist_ok=True)
         import gdown
-        gdown.download(id=fid, output=path, quiet=True)
+        try:
+            gdown.download(id=fid, output=path, quiet=True)
+        except Exception as exc:
+            # gdown's own errors are none of OSError/ValueError/RuntimeError, so the seam
+            # would surface them raw; this is an upstream failure, said in plain words
+            if os.path.exists(path) and os.path.getsize(path) == 0:
+                os.remove(path)
+            raise RuntimeError(f"the source raster {fname!r} for {layer} could not be "
+                               f"downloaded from Google Drive ({type(exc).__name__})") from None
         emit({"kind": "download", "what": "source_raster", "api": "Google Drive", "layer": layer,
               "filename": fname, "drive_id": fid, "dest": short_path(path), "was_cached": was_cached})
     else:

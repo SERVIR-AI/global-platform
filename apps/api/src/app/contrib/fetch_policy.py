@@ -115,8 +115,10 @@ def _drive_problem(parts) -> str | None:
     path = parts.path or ""
     if "/folders/" in path or "/drive/" in path and "/file/" not in path:
         return ("this is a Google Drive FOLDER link; the platform fetches one file per "
-                "contribution — open the file, Share -> Copy link (access: Anyone with the "
-                "link) and give that link")
+                "contribution — open the folder, open the file, Share -> Copy link (access: "
+                "Anyone with the link) and give that link. A shapefile's parts go in one .zip "
+                "first. If the folder itself asks you to sign in or says it does not exist, it "
+                "is not shared or the link is wrong")
     if "/document/" in path:
         # A Doc is fetched as an export; a published (/d/e/.../pub) page goes through
         # as a web page and the gate for its kind says what that means.

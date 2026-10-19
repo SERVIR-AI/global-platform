@@ -54,7 +54,10 @@ def assemble(country: str | None = None, crop: str | None = None,
                                      for pid, sp in sorted(packs.PACKS.items()))),
                 "available_packs": packs.available()}
     spec = packs.PACKS[pack_id_name]
-    target, why = packs.build_target(pack_id_name, params)
+    # a pack row may let a call param stand in for a required key (its `satisfied_by`):
+    # a geometry for a place, a vector or layer measure for a map year
+    target, why = packs.build_target(pack_id_name, {**params, "geometry": geometry,
+                                                    "vectors": vectors, "layers": layers})
     if target is None:
         return {"status": "declined", "note": why,
                 "available_packs": packs.available()}
@@ -99,6 +102,9 @@ def assemble(country: str | None = None, crop: str | None = None,
         extras["within_how"] = within_how
     if map_layer:
         extras["map_layer"] = map_layer  # which counted point layer the map should draw
+    # what the seam will measure after the gather: a gatherer with no map of the area
+    # can still hand back the area itself for these (land-cover outside every stack)
+    extras["vectors"], extras["layers"] = vectors, layers
     t_gather = time.perf_counter()
     try:
         citations, gaps, stats = spec["gather"](target, focus, trace, extras)

@@ -750,6 +750,7 @@ function vectorsCard(rows) {
         <tbody>${groups.map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${esc((+v).toLocaleString(undefined, {maximumFractionDigits: 2}))}</td></tr>`).join("")}
         ${r.by_group_rest ? `<tr><td>${esc(r.by_group_rest.groups)} other value(s)</td><td class="num">${esc((+r.by_group_rest.total).toLocaleString(undefined, {maximumFractionDigits: 2}))}</td></tr>` : ""}</tbody></table>` : ""}
       ${named.length ? `<div class="stats">largest named (${esc(r.name_field)}): ${named.slice(0, 6).map(d => `${esc(d.name)}${r.unit === "features" ? "" : " (" + esc((+d.measure).toLocaleString(undefined, {maximumFractionDigits: 2})) + ")"}`).join("; ")}${r.unnamed ? ` · ${esc(r.unnamed)} unnamed` : ""}</div>` : ""}
+      ${(r.most_frequent_named || []).length ? `<div class="stats">most frequent (${esc(r.name_field)}): ${r.most_frequent_named.slice(0, 6).map(d => `${esc(d.name)} (${esc((+d.count).toLocaleString())})`).join(", ")}${r.distinct_names > 6 ? ` · ${esc(r.distinct_names - 6)} more names` : ""}</div>` : ""}
       ${r.truncated ? `<div class="livewarn">read up to the layer's feature cap — a lower bound</div>` : ""}
       <div class="meta">${r.review ? `<span class="pill arch">${esc(r.review)}</span> ` : ""}${esc(r.source || "source unstated")} · ${esc(r.vintage || "undated")} · ${esc(r.license || "licence unstated")}</div>
     </div>`;

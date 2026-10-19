@@ -881,6 +881,9 @@ def _prepare_raster(m: dict) -> dict:
         raise Declined(f"could not fetch {m['url']}: {type(exc).__name__}: {exc}") from None
     if _is_web_page(raw):
         raise Declined(_WEB_PAGE.format(url=m["url"], what="raster file (GeoTIFF, .img)"))
+    service = _service_xml_problem(raw, m["url"], "raster file (GeoTIFF, .img)")
+    if service:
+        raise Declined(service)
     tiffs_dir = get_settings().tiffs_dir
     tiffs_dir.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix="staged-tmp-", suffix=".tif", dir=tiffs_dir)
@@ -1317,6 +1320,33 @@ def _is_web_page(raw: bytes) -> bool:
     return head.startswith((b"<!doctype html", b"<html", b"<?xml version")) and b"<html" in raw[:4096].lower()
 
 
+# A map service's own XML: its capabilities (a list of layers, not a layer) or an error
+# report. GDAL opens a WMS capabilities document as a "raster" with no CRS, so without
+# this the contributor heard "the file carries no coordinate reference system".
+_SERVICE_XML = ((b"wms_capabilities", "WMS"), (b"wmt_ms_capabilities", "WMS"),
+                (b"wfs_capabilities", "WFS"), (b"capabilities", "OGC"),
+                (b"serviceexceptionreport", "error"), (b"exceptionreport", "error"))
+
+
+def _service_xml_problem(raw: bytes, url: str, what: str) -> str | None:
+    head = raw[:4096].lstrip().lower()
+    if not head.startswith(b"<"):
+        return None
+    for tag, kind in _SERVICE_XML:
+        if b"<" + tag in head or b":" + tag in head:
+            if kind == "error":
+                import re
+                msg = re.sub(r"<[^>]+>", " ", raw[:2000].decode("utf-8", "replace"))
+                msg = " ".join(msg.split())[:200]
+                return f"{url} answered with the map service's error report, not a {what}: \"{msg}\""
+            return (f"{url} answered with a {kind} service description (XML), not a {what}: a "
+                    "capabilities document lists a service's layers, it does not hold them. "
+                    "Give the file itself, or a request that returns it (a WCS GetCoverage for "
+                    "a raster, a WFS GetFeature for features), or download it and share it "
+                    "from Google Drive (Anyone with the link)")
+    return None
+
+
 def _vector_taken(layer: str) -> str | None:
     import re
     from ..graph.geo import ingest, vectors
@@ -1369,6 +1399,9 @@ def _prepare_vector(m: dict) -> dict:
         raise Declined(f"could not fetch {m['url']}: {type(exc).__name__}: {exc}") from None
     if _is_web_page(raw):
         raise Declined(_WEB_PAGE.format(url=m["url"], what="vector file (GeoJSON, zipped shapefile, GeoPackage)"))
+    service = _service_xml_problem(raw, m["url"], "vector file (GeoJSON, zipped shapefile, GeoPackage)")
+    if service:
+        raise Declined(service)
     # A zipped shapefile or a GeoPackage is read into GeoJSON on EPSG:4326 here;
     # what lands is always GeoJSON, and the record says what ingest did.
     from ..graph.geo import vecio

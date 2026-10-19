@@ -80,6 +80,9 @@ def _insight_vectors(pack: dict) -> list[dict]:
             "group_field": rec.get("group_field"), "by_group": rec.get("by_group"),
             "by_group_rest": rec.get("by_group_rest"),
             "name_field": rec.get("name_field"), "largest_named": rec.get("largest_named"),
+            # a point layer names its most frequent names with counts (every point measures 1)
+            "most_frequent_named": rec.get("most_frequent_named"),
+            "distinct_names": rec.get("distinct_names"),
             "unnamed": rec.get("unnamed"), "truncated": bool(rec.get("truncated")),
             "source": rec.get("source"), "vintage": rec.get("vintage"),
             "license": rec.get("license"), "review": rec.get("review"),
