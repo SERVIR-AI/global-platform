@@ -481,3 +481,84 @@ def test_a_recipe_marker_anywhere_in_the_first_4_kb_is_refused(env, host, log):
         log("OUTPUT", out["problems"][0])
         assert out["status"] == "declined" and "virtual raster (VRT)" in out["problems"][0]
     assert "/mosaic.bin" in host.asked and "/secret.tif" not in host.asked
+
+
+# ------------------------------------------------------------ 5. GDAL reads: one driver, no network
+@pytest.fixture
+def opens(monkeypatch):
+    """Every read-mode rasterio.open: (path, driver, the GDAL config it ran under)."""
+    import rasterio
+    import rasterio.env
+    seen, real = [], rasterio.open
+
+    def spy(fp, mode="r", driver=None, *a, **k):
+        if mode == "r":
+            try:
+                env = rasterio.env.getenv()
+            except Exception:
+                env = {}
+            seen.append((str(fp), driver, env.get("CPL_VSIL_CURL_ALLOWED_FILENAME"),
+                         env.get("GDAL_HTTP_NETRC")))
+        return real(fp, mode, driver, *a, **k)
+    monkeypatch.setattr(rasterio, "open", spy)
+    return seen
+
+
+def _contributed(seen, env):
+    """The opens of contributed bytes: anything but the gate's own outputs read back."""
+    return [o for o in seen if "staged-tmp" in o[0] or "/vsi" in o[0] or str(env) in o[0]]
+
+
+def test_every_gdal_open_of_contributed_bytes_names_one_driver_and_no_network(env, host, opens, log):
+    """Whole, zipped, and clipped over ranges: every open has ONE driver chosen from the
+    bytes, and GDAL may reach the network only for the one remote path (a sentinel that
+    matches nothing for local files); never a .netrc."""
+    from app.contrib import rasters
+    assert rasters.gdal_env() == {"CPL_VSIL_CURL_ALLOWED_FILENAME": rasters.NO_REMOTE, "GDAL_HTTP_NETRC": "NO"}
+    whole = _submit(_measure("measure_whole", host.put("whole.tif", _tif(_noise(120)))))
+    zipped = _submit(_measure("measure_zipped", host.put("z.zip", _zip({"d/z.tif": _tif(_noise(120))}))))
+    clipped = _submit(_measure("measure_clipped", host.put("big.tif", _tif(_noise())), clip=GULF))
+    for out in (whole, zipped, clipped):
+        assert out["status"] in ("staged", "approved"), out
+    seen = _contributed(opens, env)
+    log("OUTPUT", [(p[-40:], d, a[:30] if a else a, n) for p, d, a, n in seen])
+    assert seen and all(d for _, d, _, _ in seen)                       # never GDAL's own guess
+    assert all(n == "NO" for *_, n in seen)
+    remote = [o for o in seen if "/vsicurl" in o[0]]
+    assert remote and all(a and a.startswith("/vsicurl?") and a in p for p, _, a, _ in remote)
+    assert all(a == rasters.NO_REMOTE for p, _, a, _ in seen if "/vsicurl" not in p)
+    assert any("/vsizip/" in p and d == "GTiff" for p, d, _, _ in seen)
+
+
+def test_only_listed_formats_open_and_a_vrt_never_does(env, host, opens, tmp_path, log):
+    """A VRT, a VRT behind leading junk (a local file, and a member named inside a zip)
+    and a file of an unlisted format are declined from their bytes, before GDAL opens
+    them; an ERDAS .img, a NetCDF-4 and a GeoTIFF inside a zip still land."""
+    import rasterio.shutil
+    from app.contrib import rasters
+    secret = tmp_path / "secret.tif"
+    secret.write_bytes(_tif(_noise(64)))
+    vrt = _vrt(str(secret))
+    asc = b"ncols 4\nnrows 4\nxllcorner -86\nyllcorner 9\ncellsize 0.5\n" + b"1 2 3 4\n" * 4
+    for name, data, said in (("m.vrt", vrt, "virtual raster (VRT)"), ("j.bin", b"junk " + vrt, "virtual raster (VRT)"),
+                             ("g.asc", asc, "not in a raster format the platform opens")):
+        f = tmp_path / name
+        f.write_bytes(data)
+        out = rasters.add({**_measure("measure_local", "-"), "file": str(f)}, dry_run=True)
+        log("OUTPUT", out["failures"][0])
+        assert out["status"] == "declined" and said in out["failures"][0]
+    member = _submit(_measure("measure_member_vrt", host.put("v.zip", _zip({"x/m.vrt": b"#\n" + vrt})),
+                              clip_member="x/m.vrt"))
+    assert member["status"] == "declined" and "virtual raster (VRT)" in member["problems"][0]
+    assert not [o for o in opens if "secret" in o[0] or o[0].endswith((".vrt", ".bin", ".asc"))]
+    # what lands today keeps landing
+    with MemoryFile(_tif(_noise(100))) as mf, mf.open() as src:
+        img, nc = tmp_path / "dem.img", tmp_path / "dem.nc"
+        rasterio.shutil.copy(src, str(img), driver="HFA")
+        rasterio.shutil.copy(src, str(nc), driver="netCDF", FORMAT="NC4")
+    for layer, url in (("measure_img", host.put("dem.img", img.read_bytes())),
+                       ("measure_nc4", host.put("dem.nc", nc.read_bytes())),
+                       ("measure_img_zip", host.put("dem.zip", _zip({"dem.img": img.read_bytes()})))):
+        out = _submit(_measure(layer, url))
+        assert out["status"] in ("staged", "approved"), out
+    assert {d for p, d, _, _ in opens if "dem" in p or "staged-tmp" in p} >= {"HFA", "netCDF", "GTiff"}

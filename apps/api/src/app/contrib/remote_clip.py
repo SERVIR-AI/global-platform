@@ -19,9 +19,12 @@ Security. GDAL's own HTTP client does the windowed reads, not the pinned fetcher
 fetcher — every hop checked and pinned, redirects followed there and only there —
 and GDAL is handed the FINAL url, checked again (public addresses only) just before
 the read; CPL_VSIL_CURL_ALLOWED_FILENAME names that one path, so GDAL opens nothing
-else over HTTP (no sidecar, no file a format points at); a text or XML file (a VRT, a
-service description) is refused before GDAL opens it; GDAL never sees a .netrc, retries
-twice, and times out. Zip directories are listed through the pinned fetcher too.
+else over HTTP (no sidecar, no file a format points at) — and for a local file or a zip
+downloaded whole it names a path that matches nothing; a text or XML file (a VRT, a
+service description, even behind leading bytes) is refused before GDAL opens it; every
+open names ONE driver, chosen from the file's first bytes (rasters.driver_for), so no
+format GDAL would resolve other files through is ever tried; GDAL never sees a .netrc,
+retries twice, and times out. Zip directories are listed through the pinned fetcher too.
 RESIDUAL, accepted and recorded here: GDAL resolves the host itself, so a name that
 answers a public address to the check and a private one to GDAL's connect (DNS
 rebinding between check and read) reaches it; and GDAL follows redirects (it has no
@@ -279,6 +282,22 @@ def pick_member(names: list[str], member: str | None, quoted: str) -> tuple[str,
                       "covers your area")
 
 
+def member_head(container, member: str, quoted: str) -> bytes:
+    """The first 4 KB of `member` inside a zip — `container` a local path or a probe's
+    `found` (read over ranges through the pinned fetcher) — so its format is named from
+    its bytes before GDAL opens it."""
+    import zipfile
+    import zlib
+    try:
+        src = _Ranged(container, quoted) if isinstance(container, dict) else container
+        with zipfile.ZipFile(src) as z, z.open(member) as f:
+            return f.read(4096)
+    except (zipfile.BadZipFile, zlib.error, OSError, KeyError, RuntimeError,
+            NotImplementedError) as exc:
+        raise ClipRefused(f"{member!r} inside the zip at {quoted} cannot be read "
+                          f"({type(exc).__name__}); re-upload the zip and resubmit") from None
+
+
 def remote_names(found: dict, quoted: str) -> list[str]:
     """Every file in a remote zip, read from its directory over range requests."""
     import zipfile
@@ -349,9 +368,10 @@ def in_zip(container: str, member: str) -> str:
 
 
 def _gdal_env(agent: str, allowed: str) -> dict:
-    return {"CPL_VSIL_CURL_ALLOWED_FILENAME": allowed,
+    from . import rasters
+    return {**rasters.gdal_env(allowed),
             "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR", "GDAL_HTTP_USERAGENT": agent,
-            "GDAL_HTTP_NETRC": "NO", "GDAL_HTTP_TIMEOUT": "60", "GDAL_HTTP_CONNECTTIMEOUT": "10",
+            "GDAL_HTTP_TIMEOUT": "60", "GDAL_HTTP_CONNECTTIMEOUT": "10",
             "GDAL_HTTP_LOW_SPEED_TIME": "30", "GDAL_HTTP_LOW_SPEED_LIMIT": "1",
             "GDAL_HTTP_MAX_RETRY": "2", "GDAL_HTTP_RETRY_DELAY": "1",
             "CPL_VSIL_CURL_USE_HEAD": "NO"}
@@ -393,12 +413,15 @@ def _said(exc: Exception) -> str:
 
 
 def cut(path: str, box: list[float] | None, dest: str, cap: int, *, quoted: str,
-        remote: dict | None = None, layer_name=None, started: float | None = None) -> dict:
+        remote: dict | None = None, layer_name=None, started: float | None = None,
+        driver: str | None = None) -> dict:
     """Read the cells of `path` (a GDAL path) under `box` — every cell when None — and
     write them, unchanged and unresampled, as a compressed GeoTIFF at `dest`. `remote`
-    {agent, allowed} when GDAL reads over HTTP. Returns {cells, of, window, notes}. The
-    window is whole cells covering the box's extent in the file's own CRS; a window too
-    big to fit the cap even compressed is refused before a cell is read."""
+    {agent, allowed} when GDAL reads over HTTP. `driver`: the one GDAL driver the
+    file's first bytes name (rasters.driver_for), required for a path GDAL reads inside
+    a zip or over HTTP. Returns {cells, of, window, notes}. The window is whole cells
+    covering the box's extent in the file's own CRS; a window too big to fit the cap
+    even compressed is refused before a cell is read."""
     import numpy as np
     import rasterio
     from rasterio.windows import Window
@@ -406,15 +429,19 @@ def cut(path: str, box: list[float] | None, dest: str, cap: int, *, quoted: str,
     from . import rasters
     started = started or time.monotonic()
     notes: list[str] = []
-    env = _gdal_env(remote["agent"], remote["allowed"]) if remote else {}
+    # GDAL may open over HTTP the one remote path, or nothing at all for a local file
+    env = (_gdal_env(remote["agent"], remote["allowed"]) if remote else rasters.gdal_env())
     if remote:
         _forget(remote["allowed"])
     try:
         with rasterio.Env(**env):
-            target, picked = rasters._open_target(path, layer_name)
+            try:
+                target, picked, driver = rasters._open_target(path, layer_name, driver)
+            except ValueError as exc:
+                raise ClipRefused(str(exc)) from None
             if picked:
                 notes.append(picked)
-            with rasterio.open(target) as src:
+            with rasterio.open(target, driver=driver) as src:
                 try:
                     crs, said = rasters.crs_of(src, ", so a box in degrees cannot be placed on it")
                 except ValueError as exc:

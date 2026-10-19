@@ -152,9 +152,10 @@ RANK_RULE = ("two or more classes first, then the extent covering most of the ar
              "the first registered")
 
 
-def header(path):
-    """The facts a passport states about a file, without reading pixels."""
-    with rasterio.open(path) as ds:
+def header(path, driver=None):
+    """The facts a passport states about a file, without reading pixels (`driver`: the
+    one GDAL driver to open with — the contribution gate names it)."""
+    with rasterio.open(path, driver=driver) as ds:
         b = ds.bounds
         return {"width": ds.width, "height": ds.height, "dtype": ds.dtypes[0],
                 "nodata": ds.nodata, "crs": ds.crs.to_string() if ds.crs else None,
@@ -322,13 +323,13 @@ def class_areas(clip_path, boundary, legend, outside_values):
                           legend, outside_values)
 
 
-def read_check(path, legend, outside_values, cells=1024):
+def read_check(path, legend, outside_values, cells=1024, driver=None):
     """None when a class map's file reads the way every pack reads it — counted by
     class over its whole extent, on a decimated grid — else what fails, in words. The
     gate approved a file whose int32 fill crashed every read; this runs the readers'
-    own count on a file before it is approved."""
+    own count on a file before it is approved (`driver`: the one GDAL driver to open with)."""
     try:
-        with rasterio.open(path) as src:
+        with rasterio.open(path, driver=driver) as src:
             h, w = min(cells, src.height), min(cells, src.width)
             arr = src.read(1, out_shape=(h, w))
             b = src.bounds

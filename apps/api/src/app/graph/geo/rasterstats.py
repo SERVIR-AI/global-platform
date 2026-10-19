@@ -13,13 +13,14 @@ import numpy as np
 import rasterio
 
 
-def windowed_stats(path, sample=1024, keep_values=(), skip_values=()):
+def windowed_stats(path, sample=1024, keep_values=(), skip_values=(), driver=None):
     """Profile + a decimated-sample min/max/distinct for `path`. Never full-loads.
     `keep_values`: values that count even when they equal the nodata tag — a binary
     extent map tags 0 as nodata and names it a class in the same legend.
     `skip_values`: values that are not readings — the layer's declared outside values
-    and nodata (255 over open sea) — so a declared range is checked on readings only."""
-    with rasterio.open(path) as src:
+    and nodata (255 over open sea) — so a declared range is checked on readings only.
+    `driver`: the one GDAL driver to open with (the contribution gate names it)."""
+    with rasterio.open(path, driver=driver) as src:
         full_w, full_h = src.width, src.height
         dtype = src.dtypes[0]
         nodata = src.nodata

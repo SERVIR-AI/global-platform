@@ -825,9 +825,14 @@ def _where_to_test(name: str, bbox, arg: str, family: str | None = None) -> str:
 
 
 def _raster_bounds(path) -> list | None:
+    """The bounds of a GeoTIFF the gate stored, read like every gate read: one driver,
+    no network."""
     try:
+        import rasterio
         from ..graph.geo import stacks as _stacks
-        return _stacks.header(str(path))["bounds"]
+        from . import rasters
+        with rasterio.Env(**rasters.gdal_env()):
+            return _stacks.header(str(path), driver="GTiff")["bounds"]
     except Exception:
         return None
 
@@ -1071,11 +1076,18 @@ def _read_raster(m, path, kind, box, where, member, cap, folder, found=None):
         member, said = rc.pick_member(names, member, quoted)
         if said:
             notes.append(said)
+        head = rc.member_head(found or path, member, quoted)
         path = rc.in_zip(path, member)
     elif m.get("clip_member"):
         raise Declined(_NOT_A_ZIP.format(url=quoted))
     else:
         member = None
+        head = found["head"] if found else path
+    from . import rasters
+    try:
+        driver = rasters.driver_for(head)      # the ONE driver GDAL may open it with
+    except ValueError as exc:
+        raise rc.ClipRefused(str(exc)) from None
     remote = None
     if found:
         # GDAL's own client reads from here: the final host is checked again, public
@@ -1089,7 +1101,7 @@ def _read_raster(m, path, kind, box, where, member, cap, folder, found=None):
     os.close(fd)
     try:
         made = rc.cut(path, box, dest, cap, quoted=quoted, remote=remote,
-                      layer_name=m.get("layer_name"))
+                      layer_name=m.get("layer_name"), driver=driver)
     except BaseException:
         os.unlink(dest)
         raise
@@ -1185,9 +1197,12 @@ def _stage_raster(rec: dict, prepared: dict) -> dict:
         entry["countries"] = list(m["countries"])
     _ensure_staged_loaded()
     if rule.get("stack"):
+        import rasterio
         from ..graph.geo import stacks as _stacks
+        with rasterio.Env(**_r.gdal_env()):              # the GeoTIFF the gate verified
+            bounds = _stacks.header(str(dest), driver="GTiff")["bounds"]
         entry.update({"stack": str(m["stack"]), "year": int(m["year"]), "role": contract["role"],
-                      "bounds": _stacks.header(str(dest))["bounds"],
+                      "bounds": bounds,
                       **{k: m[k] for k in ("stack_title", "authority", "accuracy", "colors")
                          if m.get(k) is not None}})
         _stage_stack_row(entry, rec["contributor_id"], cid)

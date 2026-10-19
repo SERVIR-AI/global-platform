@@ -151,11 +151,12 @@ def sniff(head) -> str | None:
     return None
 
 
-def picture_problem(src) -> str | None:
+def picture_problem(src, always: bool = False) -> str | None:
     """A print-layout PNG or JPEG offered as a raster is a picture of a map, and no CRS
     can make it one — the old advice ("assign its CRS") sent a contributor round in
-    circles. Returns the refusal, or None when the dataset is not a bare picture."""
-    if src.crs is not None or src.driver not in _PICTURE_DRIVERS:
+    circles. Returns the refusal, or None when the dataset is not a bare picture
+    (`always`: a picture is refused whatever georeferencing a sidecar gave it)."""
+    if src.driver not in _PICTURE_DRIVERS or (src.crs is not None and not always):
         return None
     bands = {1: "greyscale", 2: "greyscale with transparency", 3: "RGB", 4: "RGBA"}.get(src.count, "")
     return (f"the file is a picture ({_PICTURE_DRIVERS[src.driver]} image, {src.width:,} x "
@@ -261,42 +262,88 @@ def crs_of(src, what: str = "") -> tuple:
                                  "unchanged")
 
 
-# Formats whose file is a recipe naming OTHER files or services — a VRT, a WMS
-# description, a label beside its data. GDAL would read whatever they name, on this
-# server or anywhere, so they are refused once opened and before a cell is read.
-INDIRECT = frozenset({"VRT", "GTI", "WMS", "WMTS", "WCS", "KMLSUPEROVERLAY", "STACTA",
-                      "STACIT", "PLMOSAIC", "DAAS", "EEDA", "EEDAI", "OGCAPI", "HTTP",
-                      "PDS", "PDS4", "ISIS2", "ISIS3", "ERS", "TIL", "MRF", "ECRGTOC",
-                      "RPFTOC"})
+# GDAL handed a file tries every driver it has, and some read the files or services the
+# bytes NAME (a VRT, a label beside its data, a tile index, a service description) — on
+# this server or over HTTP; a list of those is never complete. So the gate names the
+# format from the file's first bytes and opens it with that ONE driver; anything else is
+# declined. Pictures open only to be declined as pictures.
+DRIVERS = {"tiff": "GTiff", "img": "HFA", "netcdf": "netCDF", "hdf5": "netCDF", "sqlite": "GPKG",
+           "png": "PNG", "jpeg": "JPEG", "gif": "GIF", "webp": "WEBP"}
+FORMATS = "GeoTIFF, ERDAS .img, NetCDF or GeoPackage"
+# Matches no path: with it set, GDAL opens nothing over HTTP (no /vsicurl/, /vsis3/, ...).
+NO_REMOTE = "/vsicurl/grp-no-remote-read"
 
 
-def _open_target(path: str, layer_name) -> tuple[str, str | None]:
-    """(what GDAL opens, a note): the file itself, or the raster named `layer_name`
-    inside a container that holds several (a GeoPackage with several gridded tables)."""
+def gdal_env(allowed: str | None = None) -> dict:
+    """The GDAL config every open of contributed bytes runs under: over the network only
+    the `allowed` path (a remote clip's one url) — for a local file, nothing at all, so
+    no format can send GDAL to a url it names — and never a .netrc."""
+    return {"CPL_VSIL_CURL_ALLOWED_FILENAME": allowed or NO_REMOTE, "GDAL_HTTP_NETRC": "NO"}
+
+
+def driver_for(head) -> str:
+    """The one GDAL driver for a file beginning with `head` (bytes, or a local path).
+    ValueError, in words, for an archive, a recipe (a VRT, a service description — even
+    behind leading bytes) or any format the gate does not open."""
+    from . import remote_clip
+    if not isinstance(head, (bytes, bytearray)):
+        path = head
+        try:
+            with open(path, "rb") as f:
+                head = f.read(4096)
+        except OSError as exc:
+            raise ValueError(f"the file could not be read ({type(exc).__name__})") from None
+    else:
+        path = None
+    kind = sniff(head)
+    said = remote_clip.recipe(head)
+    if said:
+        raise ValueError(f"the file is {said} — a description that points at other files or "
+                         f"services, which the platform does not follow; give the raster file "
+                         f"itself ({FORMATS})")
+    if kind in DRIVERS:
+        return DRIVERS[kind]
+    if kind == "zip" and path:
+        raise ValueError(unreadable(path, None))
+    if kind == "zip" or kind in _ARCHIVES:
+        raise ValueError(f"the file is {_ARCHIVES[kind]}, not a raster — give the raster itself "
+                         f"({FORMATS})")
+    text = bytes(head[:512]).lstrip(b"\xef\xbb\xbf \t\r\n").startswith(b"<")
+    raise ValueError(f"the file is {'an XML/text file' if text else 'not in a raster format the platform opens'}"
+                     f" — it reads {FORMATS} (or a zip holding one); convert it (gdal_translate "
+                     "-of GTiff) and resubmit")
+
+
+def _open_target(path: str, layer_name, driver: str | None = None) -> tuple[str, str | None, str]:
+    """(what GDAL opens, a note, the one driver it opens with): the file itself, or the
+    raster named `layer_name` inside a container that holds several (a GeoPackage with
+    several gridded tables, a NetCDF of several variables). `driver`: chosen from the
+    file's first bytes when not given (driver_for)."""
     import rasterio
-    with rasterio.open(path) as src:
-        if src.driver in INDIRECT:
-            raise ValueError(f"the file is a {src.driver} description that points at other files "
-                             "or services, not a raster — give the raster file itself")
+    driver = driver or driver_for(path)
+    with rasterio.open(path, driver=driver) as src:
+        picture = picture_problem(src, always=True)
+        if picture:
+            raise ValueError(picture)
         subs, count = list(src.subdatasets or []), src.count
     if not subs:
-        return path, None           # a plain raster: there is nothing to choose
+        return path, None, driver   # a plain raster: there is nothing to choose
     names = [s.rsplit(":", 1)[-1] for s in subs]
     if layer_name:
         for sub, name in zip(subs, names):
             if name == str(layer_name):
-                return sub, f"read the raster {name!r}, one of {len(subs)} in the file"
+                return sub, f"read the raster {name!r}, one of {len(subs)} in the file", driver
         raise ValueError(f"layer_name {layer_name!r} is not one of the rasters in the file — "
                          f"it holds {', '.join(names)}")
     if count == 0:
         raise ValueError(f"the file holds {len(subs)} rasters ({', '.join(names)}) — name the "
                          f"one to contribute with layer_name, e.g. layer_name: {names[0]!r}, "
                          "and submit each one you need as its own layer")
-    return path, None
+    return path, None, driver
 
 
 def normalise(path: str, role: str, declared: dict | None = None,
-              layer_name=None) -> tuple[str, list[str]]:
+              layer_name=None, driver: str | None = None) -> tuple[str, list[str]]:
     """The file the platform will verify and keep: a single-band GeoTIFF on EPSG:4326.
 
     Hubs hand over what they have — an ERDAS .img in UTM, a CRTM05 GeoTIFF, a
@@ -314,10 +361,10 @@ def normalise(path: str, role: str, declared: dict | None = None,
     rule = schema.namespaces().get(str(role)) or {}
     regrid = str(rule.get("regrid") or "refuse")
     notes = []
-    target, picked = _open_target(path, layer_name)
+    target, picked, driver = _open_target(path, layer_name, driver)
     if picked:
         notes.append(picked)
-    with rasterio.open(target) as src:
+    with rasterio.open(target, driver=driver) as src:
         crs, said = crs_of(src)
         if said:
             notes.append(said)
@@ -691,7 +738,6 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None,
     `contribution_id`: the gate's record that landed it — a take-down checks the row is
     still that one's before removing it."""
     from ..config import get_settings
-    from ..graph.geo import schema as schema_mod, verify
 
     fails = validate_manifest(manifest)
     if fails:
@@ -706,6 +752,16 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None,
 
     decl = {**manifest["declared"]}
     decl.setdefault("role", _role(layer))
+    import rasterio
+    # every open of the contributed bytes: one driver, and nothing over the network
+    with rasterio.Env(**gdal_env()):
+        return _verify_and_land(manifest, dry_run, review, keep_prepared, prepared_before,
+                                fetched, contribution_id, decl, layer, settings)
+
+
+def _verify_and_land(manifest, dry_run, review, keep_prepared, prepared_before, fetched,
+                     contribution_id, decl, layer, settings):
+    from ..graph.geo import schema as schema_mod, verify
     try:
         src_file, prepared = normalise(str(manifest["file"]), decl["role"], declared=decl,
                                        layer_name=manifest.get("layer_name"))
@@ -728,8 +784,10 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None,
     # A declared range is of READINGS: the layer's outside values and its nodata
     # (255 over open sea) are skipped, never a reason to widen the range.
     skip = [*(outside or []), *([decl["nodata"]] if _isnum(decl.get("nodata")) else [])]
+    # normalise leaves a GeoTIFF: the contributor's own (checked GTiff by its bytes) or
+    # the one it wrote — read with that one driver from here on
     obs = verify.windowed_stats(str(manifest["file"]), keep_values=legend_keys,
-                                skip_values=tuple(skip))
+                                skip_values=tuple(skip), driver="GTiff")
     tag = obs.get("nodata")
     if (manifest.get("outside_values") is None and outside is not None and _isnum(tag)
             and not math.isnan(float(tag)) and _num(tag) not in outside
@@ -750,7 +808,8 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None,
     from ..graph.geo import layer_values
     gran = layer_values.granularity(str(manifest["file"]), decl,
                                     row={"outside_values": outside,
-                                         "legend": manifest.get("legend") or {}})
+                                         "legend": manifest.get("legend") or {}},
+                                    driver="GTiff")
     if gran:
         obs["granularity"] = gran
     mismatches = verify._check({**(schema_mod._doc().get("defaults") or {}), **decl}, obs)
@@ -765,7 +824,7 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None,
         # outside values, the declared nodata and the file's own fill tag
         from ..graph.geo import stacks as _stacks
         unread = _stacks.read_check(str(manifest["file"]), _norm_legend(manifest.get("legend")),
-                                    [*skip, *([_num(tag)] if _isnum(tag) else [])])
+                                    [*skip, *([_num(tag)] if _isnum(tag) else [])], driver="GTiff")
         if unread:
             _drop_prepared()
             return {"status": "declined", "verified": False, "observed": obs,
@@ -873,7 +932,7 @@ def _land_stack_year(cat, layer, manifest, dest, outside):
     at its file and carries the stack id so every primitive can find its contract."""
     from ..graph.geo import stacks as _stacks
     sid, year = str(manifest["stack"]), int(manifest["year"])
-    b = _stacks.header(str(dest))["bounds"]
+    b = _stacks.header(str(dest), driver="GTiff")["bounds"]      # the GeoTIFF the gate verified
     row = cat[layer]
     row.update({"stack": sid, "year": year, "role": _role(layer), "internal": True,
                 "outside_values": outside})

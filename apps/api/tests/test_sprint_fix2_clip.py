@@ -559,4 +559,4 @@ def test_a_vrt_is_refused_and_what_it_names_is_never_read(env, host):
         out = _submit(_measure("measure_vrt", url, **({"clip": clip} if clip else {})))
         assert out["status"] == "declined" and "virtual raster (VRT)" in out["problems"][0]
     assert not [p for p, _, _ in host.log if p == "/secret.tif"]
-    assert rasters.INDIRECT >= {"VRT", "WMS"}
+    assert not {"VRT", "WMS", "GTI"} & set(rasters.DRIVERS.values())    # never a driver the gate opens with

@@ -1055,17 +1055,18 @@ def citation_text(layer: str, rec: dict, area_name: str) -> str:
 
 
 def granularity(path: str, contract: dict | None = None, windows: int = 4,
-                side: int = 512, row: dict | None = None) -> dict | None:
+                side: int = 512, row: dict | None = None, driver: str | None = None) -> dict | None:
     """How coarse a raster's values really are — read at full resolution in a few
     windows centred where it has data, measured as the typical run of equal values
     along rows and columns. Advisory, for the contribution preview: a layer described
     as varying by sub-district whose equal values run for tens of kilometres says
     otherwise. Only a layer holding non-integral values gets the warning: a class
-    layer stored as floats repeats its classes by design."""
+    layer stored as floats repeats its classes by design. `driver`: the one GDAL driver
+    to open with (the contribution gate names it)."""
     import rasterio
     from rasterio.windows import Window
     try:
-        with rasterio.open(path) as src:
+        with rasterio.open(path, driver=driver) as src:
             nod_vals, _ = _no_value(contract or {}, src.nodata, row or {})
             geographic = bool(src.crs and src.crs.is_geographic)
             W, H = src.width, src.height
