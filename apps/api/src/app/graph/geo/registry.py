@@ -5,9 +5,11 @@ COUNTABLE = ("hospitals", "schools", "buildings")     # built-in, from OSM
 
 
 def countable() -> tuple:
-    """Built-in point layers plus every contributed point layer this caller may see."""
+    """Built-in point layers plus every contributed POINT layer this caller may see.
+    Line and polygon layers are measured, not counted (graph/geo/vectors.summarise)."""
     from . import vectors
-    return COUNTABLE + tuple(l for l in vectors.visible() if l not in COUNTABLE)
+    return COUNTABLE + tuple(l for l, e in vectors.visible().items()
+                             if l not in COUNTABLE and vectors.family(e) == "points")
 
 # named in the use case but not ingested -> the agent must refuse, not guess
 UNAVAILABLE = {

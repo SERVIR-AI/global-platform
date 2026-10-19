@@ -31,9 +31,12 @@ _ASSETS = ("hospitals", "schools", "buildings")     # built-in, from OSM
 
 
 def _asset_layers() -> tuple:
-    """Built-in point assets plus every contributed point layer the caller may see."""
+    """Built-in point assets plus every contributed POINT layer the caller may see.
+    A contributed line or polygon layer reaches a risk answer through the seam's
+    vector step (assemble_pack(..., vectors=[...])), not as a counted asset."""
     from ..graph.geo import vectors
-    return _ASSETS + tuple(l for l in vectors.visible() if l not in _ASSETS)
+    return _ASSETS + tuple(l for l, e in vectors.visible().items()
+                           if l not in _ASSETS and vectors.family(e) == "points")
 
 # Only hazard_flood's lineage is stated in conf/tiffs.yml; announcing that the
 # other eight are unattributed is part of the evidence, not a footnote.

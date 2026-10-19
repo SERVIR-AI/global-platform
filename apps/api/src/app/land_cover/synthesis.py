@@ -126,7 +126,8 @@ def _pick_stack(boundary, wanted=None):
     return sid, row, covering[1:]
 
 
-_BOUNDARY_OK = ("admin boundary", "protected-area boundary", "supplied polygon", "drawn")
+_BOUNDARY_OK = ("admin boundary", "protected-area boundary", "contributed boundary",
+                "supplied polygon", "drawn")
 
 
 def _resolve_aoi(place, extras, trace):
@@ -158,7 +159,8 @@ def _colors(row, legend):
 
 
 def _outside(row):
-    return [int(v) for v in (row.get("outside_values") or [0])]
+    vals = row.get("outside_values")
+    return [0] if vals is None else [int(v) for v in vals]      # [] = the whole grid is mapped
 
 
 def _match_classes(wanted, legend):
@@ -595,7 +597,7 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
     missing_years = row.get("missing_years") or {}
     if missing_years:
         gaps.append("years with no map: " + "; ".join(f"{y} ({r})" for y, r in missing_years.items()))
-    if how.startswith(("admin boundary", "protected-area boundary")):
+    if how.startswith(("admin boundary", "protected-area boundary", "contributed boundary")):
         gaps.append("boundary: " + how)
 
     stats = {"queries": None,

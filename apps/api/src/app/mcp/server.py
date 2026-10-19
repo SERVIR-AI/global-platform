@@ -268,7 +268,8 @@ def assemble_pack(country: str | None = None, crop: str | None = None,
                   year: int | str | None = None, year_to: int | str | None = None,
                   classes: list[str] | None = None,
                   stack: str | None = None,
-                  layers: list[str] | None = None) -> dict:
+                  layers: list[str] | None = None,
+                  vectors: list[str] | None = None) -> dict:
     """Assembles a deterministic, citable EVIDENCE PACK for one domain pack's target
     (country/crop; place/hazard; place/year) and mints a `pack_id`. For a pack whose
     target is a place, pass `geometry` (a GeoJSON Polygon/MultiPolygon in EPSG:4326, or a
@@ -278,6 +279,10 @@ def assemble_pack(country: str | None = None, crop: str | None = None,
     (`layers.<name>`: a grid clipped to the area, unit, source, vintage, validation,
     nodata, summary) — any pack, any registered or contributed layer; omit it for the
     pack's own defaults (risk: the recipe's vulnerability layers), pass [] for none.
+    `vectors` names contributed vector layers (points, lines or polygons) to MEASURE
+    inside the pack's area — a count, km of line, km² (ha) of polygon, broken down by
+    the contributor's group field, with the largest named features — each as a cited
+    item [n] and in `vectors.<name>`; an unknown name declines with the list.
     `map_layer` names which counted point layer the map draws — hospitals, schools,
     buildings, or a contributed layer such as evacuation_centres; unnamed ones are
     declined by name. Whatever is drawn, every counted layer's places — name,
@@ -305,7 +310,7 @@ def assemble_pack(country: str | None = None, crop: str | None = None,
                              override=override, override_country=override_country,
                              override_crop=override_crop,
                              year=year, year_to=year_to, classes=classes,
-                             layers=layers)
+                             layers=layers, vectors=vectors)
 
 
 @mcp.tool()

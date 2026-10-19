@@ -13,9 +13,10 @@ contribution can neither fill the disk nor hold a worker forever.
 from __future__ import annotations
 
 import ipaddress
+import re
 import socket
 import time
-from urllib.parse import urlparse, urljoin
+from urllib.parse import parse_qs, urlparse, urljoin
 
 from ..config import get_settings
 
@@ -29,6 +30,90 @@ USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.3
 
 class FetchRefused(Exception):
     """A fetch the policy does not allow; the message names why."""
+
+
+# Google Drive is where hubs keep their maps. A share link ("/file/d/<id>/view")
+# answers a web page, not the file; the direct form answers the bytes for any
+# file shared with "Anyone with the link". Rewriting it here means every kind —
+# document, table, raster, vector — takes the link a contributor actually has.
+_DRIVE_HOSTS = ("drive.google.com", "docs.google.com")
+_DRIVE_CONTENT_HOST = "drive.usercontent.google.com"
+_DRIVE_ID = re.compile(r"/(?:file/)?d/([A-Za-z0-9_-]{10,})")
+
+
+def drive_file_id(url: str) -> str | None:
+    """The file id in a Google Drive link, or None when the link is not one."""
+    try:
+        parts = urlparse(str(url or "").strip())
+    except ValueError:
+        return None
+    if (parts.hostname or "").lower() not in _DRIVE_HOSTS:
+        return None
+    m = _DRIVE_ID.search(parts.path or "")
+    if m:
+        return m.group(1)
+    ids = parse_qs(parts.query).get("id") or []
+    return ids[0] if ids and re.fullmatch(r"[A-Za-z0-9_-]{10,}", ids[0]) else None
+
+
+def direct_url(url: str) -> str:
+    """A Google Drive share link rewritten to its direct-download form; any other
+    URL unchanged."""
+    fid = drive_file_id(url)
+    if not fid:
+        return str(url).strip()
+    return f"https://drive.google.com/uc?export=download&id={fid}"
+
+
+def _drive_problem(parts) -> str | None:
+    """Why a Google Drive link cannot be fetched as a file, in the contributor's terms."""
+    host = (parts.hostname or "").lower()
+    if host not in _DRIVE_HOSTS:
+        return None
+    path = parts.path or ""
+    if "/folders/" in path or "/drive/" in path and "/file/" not in path:
+        return ("this is a Google Drive FOLDER link; the platform fetches one file per "
+                "contribution — open the file, Share -> Copy link (access: Anyone with the "
+                "link) and give that link")
+    if "/document/" in path or "/spreadsheets/" in path or "/presentation/" in path:
+        return ("this is a Google Docs/Sheets/Slides link, not an uploaded file; export it "
+                "(File -> Download) and share the exported file, or give a public http(s) URL")
+    if not drive_file_id(parts.geturl()):
+        return ("this Google Drive link carries no file id; use the file's share link "
+                "(.../file/d/<id>/view) or the direct form (...?id=<id>)")
+    return None
+
+
+def _confirm_url(html: str, fallback_id: str | None) -> str | None:
+    """The direct link inside Google Drive's 'can't scan for viruses' page, or None."""
+    m = re.search(r'<form[^>]+action="([^"]+)"', html)
+    if not m:
+        return None
+    action = m.group(1).replace("&amp;", "&")
+    fields = dict(re.findall(r'<input[^>]+name="([^"]+)"[^>]+value="([^"]*)"', html))
+    fields.setdefault("export", "download")
+    fields.setdefault("confirm", "t")
+    if fallback_id:
+        fields.setdefault("id", fallback_id)
+    query = "&".join(f"{k}={v}" for k, v in fields.items() if k in ("id", "export", "confirm", "uuid"))
+    return f"{action}?{query}" if query else action
+
+
+def _filename(headers, url_path: str) -> str:
+    """The name the server gives the file, else the URL's last path segment. The
+    extension decides the parser downstream, so a Drive link must not be archived as
+    'uc' or 'view'."""
+    cd = headers.get("content-disposition") or ""
+    m = re.search(r"filename\*=(?:UTF-8|utf-8)''([^;]+)", cd)
+    if m:
+        from urllib.parse import unquote
+        name = unquote(m.group(1)).strip().strip('"')
+        if name:
+            return name
+    m = re.search(r'filename="?([^";]+)"?', cd)
+    if m and m.group(1).strip():
+        return m.group(1).strip()
+    return url_path.rstrip("/").rsplit("/", 1)[-1] or "document"
 
 
 def _addresses(host: str) -> list[ipaddress._BaseAddress]:
@@ -73,6 +158,9 @@ def check_url(url: str) -> list[str]:
         problems.append("url must not embed credentials")
     if problems:
         return problems
+    drive = _drive_problem(parts)
+    if drive:
+        return [drive]
     try:
         bad = _refuse_private(parts.hostname, _addresses(parts.hostname))
         if bad:
@@ -113,8 +201,10 @@ def fetch(url: str, max_bytes: int | None = None) -> tuple[bytes, str]:
     body is streamed under the byte cap and the wall-clock deadline."""
     cap = int(max_bytes or get_settings().grp_contrib_max_bytes)
     started = time.monotonic()
-    current = str(url).strip()
-    for _ in range(MAX_REDIRECTS + 1):
+    current = direct_url(url)
+    drive_id = drive_file_id(url)
+    confirmed = False
+    for _ in range(MAX_REDIRECTS + 2):
         if time.monotonic() - started > DEADLINE:
             raise FetchRefused(f"fetch exceeded the {DEADLINE}s deadline")
         problems = check_url(current)
@@ -145,8 +235,25 @@ def fetch(url: str, max_bytes: int | None = None) -> tuple[bytes, str]:
                     raise FetchRefused(f"{current} exceeds the {cap:,}-byte cap")
                 if time.monotonic() - started > DEADLINE:
                     raise FetchRefused(f"fetch exceeded the {DEADLINE}s deadline")
-            name = parts.path.rstrip("/").rsplit("/", 1)[-1] or "document"
-            return bytes(buf), name
+            host = (parts.hostname or "").lower()
+            ctype = (r.headers.get("content-type") or "").lower()
+            if drive_id and (host in _DRIVE_HOSTS or host == _DRIVE_CONTENT_HOST) \
+                    and ctype.startswith("text/html"):
+                # Drive answered a page instead of the file: either the "can't scan
+                # for viruses" confirm page (follow its form once) or a sign-in /
+                # not-shared page (refuse, in the contributor's terms).
+                html = bytes(buf[:200_000]).decode("utf-8", "replace")
+                nxt = _confirm_url(html, drive_id) if not confirmed else None
+                if nxt and "confirm" in nxt:
+                    confirmed = True
+                    current = nxt
+                    continue
+                raise FetchRefused(
+                    "Google Drive answered with a web page, not the file — the file is not "
+                    "shared with 'Anyone with the link', or the link is a Google Doc/Sheet "
+                    "rather than an uploaded file. Share it (Share -> General access -> "
+                    "Anyone with the link) and give the file's link again")
+            return bytes(buf), _filename(r.headers, parts.path)
         finally:
             r.close()
             session.close()

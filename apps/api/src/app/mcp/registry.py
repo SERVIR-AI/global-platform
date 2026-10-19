@@ -600,12 +600,24 @@ def coverage_line() -> str:
         if packs.text(sp, "summary"):
             domains.append(packs.text(sp, "summary"))
         elif sp.get("subjects"):
+            where = sp.get("where")
+            where = where() if callable(where) else where
             domains.append(f"{', '.join(sp['subjects'])} in "
-                           f"{' and '.join(sp.get('where') or ['its registered footprint'])}")
+                           f"{' and '.join(where or ['its registered footprint'])}")
     lead = ("Covers " + "; ".join(domains) + ". " if domains else
             f"Covers {what} and food security in {where}. ")
     return (lead + f"Food-security specifics: {what} in {where}, and the climate drivers "
             f"behind them ({subj}). Sources include {shown}{more}.")
+
+
+def _contributed_vector_names() -> list[str]:
+    """Names of the contributed vector layers the caller may see — read live, so the
+    tool text names what the platform holds today."""
+    try:
+        from ..graph.geo import vectors
+        return [f"{k} ({vectors.family(e)})" for k, e in vectors.visible().items()]
+    except Exception:
+        return []
 
 
 def describe_assemble() -> str:
@@ -650,6 +662,15 @@ def describe_assemble() -> str:
         "unknown name declines with the registered list); layers=[] for none. Use it to "
         "SHOW where vulnerable people or assets are, instead of drawing from local files "
         "with no receipt.\n\n"
+        "VECTOR LAYERS, for any pack with an area: vectors=[...] names contributed vector "
+        "layers (points, lines or polygons — a hub's rivers, coastline, protected areas, "
+        "an official mangrove map) to MEASURE inside the pack's boundary: a count, km of "
+        "line, km² (ha) of polygon, broken down by the contributor's group field, with "
+        "the largest named features; each is a cited item [n] and `vectors.<name>` carries "
+        "the record. A contributed POLYGON layer with names is also a gazetteer: its "
+        "feature names work as `place` (and in resolve_place_time) — the hub's own "
+        "boundary, not a geocoder's box. Contributed layers so far: "
+        + (", ".join(sorted(_contributed_vector_names())) or "none yet") + ".\n\n"
         "STEP 1 OF 3 — the pack is evidence, NOT a finished answer. You then draft "
         "from it, call verify_groundedness(draft, pack_id) to gate the draft, and "
         "call record_receipt(pack_id, report_id) to mint the receipt. An answer that "

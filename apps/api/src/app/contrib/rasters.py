@@ -31,6 +31,97 @@ def _role(layer: str) -> str:
     return "risk"
 
 
+_CLASS_ROLES = ("hazard", "risk", "vulnerability", "landcover")
+
+
+def normalise(path: str, role: str) -> tuple[str, list[str]]:
+    """The file the platform will verify and keep: a GeoTIFF on EPSG:4326.
+
+    Hubs hand over what they have — an ERDAS .img in UTM, a CRTM05 GeoTIFF. The
+    counting primitives (stacks.row_pixel_areas_km2, every clip) assume a geographic
+    grid, so a projected class raster is reprojected here, nearest-neighbour (a class
+    never blends), and the passport says so. A COUNT grid (population_*) cannot be
+    re-gridded without moving people between cells, so a projected one is refused in
+    words. Returns (path to use, notes); the path is the input when nothing changed."""
+    import numpy as np
+    import rasterio
+    from rasterio.warp import Resampling, calculate_default_transform, reproject
+    notes = []
+    with rasterio.open(path) as src:
+        if src.crs is None:
+            raise ValueError("the file carries no coordinate reference system — assign its CRS "
+                             "(gdal_edit -a_srs, or QGIS: Layer -> Set CRS) and resubmit")
+        epsg = src.crs.to_epsg()
+        geographic = bool(src.crs.is_geographic)
+        driver = src.driver
+        same_crs = epsg == 4326 or (geographic and epsg is None and "WGS 84" in src.crs.to_wkt())
+        if same_crs and driver == "GTiff":
+            return path, notes
+        if not same_crs and role not in _CLASS_ROLES:
+            raise ValueError(
+                f"the file is on {src.crs.to_string()} (EPSG:{epsg}); a {role}_* layer is a count "
+                "grid, which the platform never re-grids (reprojecting moves counts between "
+                "cells) — reproject it yourself with a sum-preserving method and resubmit on "
+                "EPSG:4326")
+        out = str(path) + ".norm.tif"
+        profile = src.profile.copy()
+        for k in ("blockxsize", "blockysize", "tiled", "interleave"):
+            profile.pop(k, None)        # the source's block layout is not ours to keep
+        if same_crs:
+            notes.append(f"converted from {driver} to GeoTIFF at ingest; values unchanged")
+            profile.update(driver="GTiff", compress="lzw",
+                           tiled=(src.width >= 256 and src.height >= 256))
+            with rasterio.open(out, "w", **profile) as dst:
+                for b in range(1, src.count + 1):
+                    dst.write(src.read(b), b)
+            return out, notes
+        transform, width, height = calculate_default_transform(
+            src.crs, "EPSG:4326", src.width, src.height, *src.bounds)
+        nodata = src.nodata
+        fill = nodata
+        if fill is None:
+            fill = 0
+            notes.append("the file declares no nodata; cells outside its original grid are 0 "
+                         "after reprojection")
+        profile.update(driver="GTiff", crs="EPSG:4326", transform=transform, width=width,
+                       height=height, compress="lzw", nodata=nodata,
+                       tiled=(width >= 256 and height >= 256))
+        with rasterio.open(out, "w", **profile) as dst:
+            for b in range(1, src.count + 1):
+                arr = np.full((height, width), fill, dtype=src.dtypes[b - 1])
+                reproject(source=rasterio.band(src, b), destination=arr,
+                          src_transform=src.transform, src_crs=src.crs,
+                          dst_transform=transform, dst_crs="EPSG:4326",
+                          src_nodata=nodata, dst_nodata=nodata,
+                          resampling=Resampling.nearest)
+                dst.write(arr, b)
+        notes.insert(0, f"reprojected at ingest from {src.crs.to_string()} (EPSG:{epsg}, "
+                        f"{abs(src.transform.a):g} {src.crs.linear_units or 'unit'} cells) to "
+                        f"EPSG:4326, nearest neighbour — class values unchanged, cell edges moved"
+                        + ("; converted from " + driver if driver != "GTiff" else ""))
+    return out, notes
+
+
+def hints(m: dict) -> list[str]:
+    """Advice the gate gives WITHOUT refusing: shapes of a manifest that pass every
+    check and still give a wrong answer later. Shown with the preview."""
+    out = []
+    layer = str(m.get("layer") or "")
+    legend = _norm_legend(m.get("legend")) if isinstance(m.get("legend"), dict) else {}
+    outside = m.get("outside_values")
+    outside = [0] if outside is None else [int(v) for v in outside]
+    if layer.startswith("landcover_") and len(legend) == 1 and 0 in outside and 0 not in legend:
+        only = next(iter(legend.values()))
+        out.append(
+            f"one legend class ({only}) with 0 outside the map: every other pixel counts as "
+            "'outside the footprint', so change between years cannot tell loss or gain from "
+            f"no data. If 0 means 'not {only.lower()}' INSIDE the mapped footprint, declare it "
+            f"as a class — legend {{0: 'Not {only.lower()}', 1: '{only}'}} — and set "
+            "outside_values to the value that marks outside the map (or [] when the whole "
+            "grid is mapped)")
+    return out
+
+
 def validate_manifest(m: dict) -> list[str]:
     """Every problem at once. license/vintage are REQUIRED for new layers — the
     existing catalog's unrecorded vintages are a declared gap we do not grow.
@@ -110,7 +201,20 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None) -> dic
 
     decl = {**manifest["declared"]}
     decl.setdefault("role", _role(layer))
+    try:
+        src_file, prepared = normalise(str(manifest["file"]), decl["role"])
+    except ValueError as exc:
+        return {"status": "declined", "verified": False, "failures": [str(exc)]}
+    except Exception as exc:
+        return {"status": "declined", "verified": False,
+                "failures": [f"the file could not be read as a raster: {type(exc).__name__}: {exc}"]}
+    manifest = {**manifest, "file": src_file}
     obs = verify.windowed_stats(str(manifest["file"]))
+    if prepared:
+        obs["prepared"] = prepared
+    advice = hints(manifest)
+    if advice:
+        obs["hints"] = advice
     # How coarse the values really are, measured at full resolution — advisory, shown
     # to the contributor and the reviewer before approval. A layer described as one
     # value per sub-district that repeats one value across a whole district landed
@@ -128,7 +232,7 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None) -> dic
                 "observed": obs}
     if dry_run:
         return {"status": "valid (dry-run, nothing written)", "verified": True,
-                "observed": obs}
+                "observed": obs, "file": str(manifest["file"])}
 
     cat_path = Path(settings.tiffs_contrib_path)
     cat = (yaml.safe_load(cat_path.read_text()) or {}) if cat_path.exists() else {}
@@ -152,6 +256,8 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None) -> dic
            **({"usage_notes": manifest["usage_notes"]}
               if manifest.get("usage_notes") else {}),
            **({"review": review} if review else {}),
+           **({"prepared": prepared} if prepared else {}),
+           **({"countries": list(manifest["countries"])} if manifest.get("countries") else {}),
            "contributed": True}
     cat[layer] = row
     if decl.get("role") == "landcover":
@@ -209,7 +315,10 @@ def _land_stack_year(cat, layer, manifest, dest):
         "title": manifest.get("stack_title") or f"{sid} land cover",
         "description": manifest["description"], "source": manifest["source"],
         "license": manifest["license"], "legend": manifest.get("legend") or {},
-        "outside_values": manifest.get("outside_values") or [0],
+        # [] is a declaration ("the whole grid is mapped"), not an omission
+        "outside_values": ([0] if manifest.get("outside_values") is None
+                           else [int(v) for v in manifest["outside_values"]]),
+        **({"countries": list(manifest["countries"])} if manifest.get("countries") else {}),
         "authority": manifest.get("authority") or "contributed; authority unstated",
         "accuracy": manifest.get("accuracy") or "unstated",
         **({"colors": manifest["colors"]} if manifest.get("colors") else {}),

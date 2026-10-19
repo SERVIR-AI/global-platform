@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from ..llm import MissingAPIKey
 from ..rag.store import CorpusError
-from . import context, layers as layers_step, loop, packs, store
+from . import context, layers as layers_step, loop, packs, store, vectors as vectors_step
 
 
 def assemble(country: str | None = None, crop: str | None = None,
@@ -27,7 +27,8 @@ def assemble(country: str | None = None, crop: str | None = None,
              year: int | str | None = None, year_to: int | str | None = None,
              classes: list[str] | None = None,
              stack: str | None = None,
-             layers: list[str] | None = None) -> dict:
+             layers: list[str] | None = None,
+             vectors: list[str] | None = None) -> dict:
     """Gather one pack's evidence into a numbered, gap-declaring pack; mint and
     persist a pack_id. Back-compat: bare (country, crop) calls stay food-security,
     and FS packs keep top-level country/crop keys — Desktop configs and the embed
@@ -61,6 +62,9 @@ def assemble(country: str | None = None, crop: str | None = None,
     bad_layers = layers_step.check(layers)
     if bad_layers:
         return {"status": "declined", "note": bad_layers}
+    bad_vectors = vectors_step.check(vectors)
+    if bad_vectors:
+        return {"status": "declined", "note": bad_vectors}
     focus = (focus or spec["default_focus"](target)).strip()
     trace: list[str] = []
     extras = {"override": override, "override_country": override_country,
@@ -89,13 +93,19 @@ def assemble(country: str | None = None, crop: str | None = None,
                         "gap — retrying later may succeed."}
     except CorpusError as exc:
         return {"status": "declined", "note": str(exc)}
-    # Values of registered raster layers over the area this pack used — the same step
-    # for every pack; it numbers its citations after the gatherer's, before the gaps.
+    # Contributed vector layers measured inside the area this pack used, then the
+    # values of registered raster layers over it — the same two steps for every pack;
+    # each numbers its citations after the last, before the gaps. The vector step
+    # reads the gatherer's `_area`; the layer step pops it.
+    vector_block = vectors_step.attach(spec, target, stats, citations, gaps, vectors, extras)
     layer_block, layer_area = layers_step.attach(spec, target, stats, citations, gaps,
                                                  layers, extras)
     if layers is not None:
         target = {**target, "layers": [n for n in dict.fromkeys(
             str(x).strip() for x in layers) if n]}
+    if vectors is not None:
+        target = {**target, "vectors": [n for n in dict.fromkeys(
+            str(x).strip() for x in vectors) if n]}
     gaps_cit = packs.gaps_citation(citations, gaps)
     citations = [*citations, gaps_cit]
     pack_body = {"pack": pack_id_name, "target": target, "focus": focus,
@@ -118,6 +128,8 @@ def assemble(country: str | None = None, crop: str | None = None,
         # `stats`: the gate scans stats for numbers (see mcp/layers.py).
         pack_body["layers"] = layer_block
         pack_body["layers_area"] = layer_area      # persisted with the pack, not returned
+    if vector_block:
+        pack_body["vectors"] = vector_block        # measures per layer, beside their citations
     if stats.get("viz") is not None:                # a pack may carry embed data
         pack_body["viz"] = stats["viz"]
         pack_body["stats"].pop("viz", None)

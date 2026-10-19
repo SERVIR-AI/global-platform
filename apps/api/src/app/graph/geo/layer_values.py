@@ -99,7 +99,10 @@ def _no_value(contract: dict, file_nodata, row: dict) -> tuple[list, str]:
     add(file_nodata, "the file's nodata tag")
     for v in row.get("outside_values") or []:
         add(v, "outside the producer's footprint")
-    if str(_role_rule(contract).get("zero", "")).strip().lower() == "nodata":
+    # The role's zero rule is the default; a row that DECLARES its outside values
+    # (even none: a binary map where 0 is the class "not mangrove") replaces it.
+    if row.get("outside_values") is None and \
+            str(_role_rule(contract).get("zero", "")).strip().lower() == "nodata":
         add(0, f"0 means no value for a {contract.get('role')} layer")
     vals = [int(v) if float(v).is_integer() else v for v in vals]
     rule = ("; ".join(f"{v} — {r}" for v, r in zip(vals, why))

@@ -137,6 +137,14 @@ def _boundary(place, cap=None):
     canonical name it returned (recovers typo'd cities, e.g. 'Batambang' -> Battambang);
     otherwise a radius box around the centre point. `how` records which path was taken.
     Raises only when nothing is found."""
+    from . import vectors as _vectors
+    named = _vectors.named_area(place)
+    if named and named.get("ambiguous"):
+        raise ValueError(f"'{place}' matches several contributed areas: "
+                         + "; ".join(named["matches"]) + " — name one of them exactly")
+    if named:
+        g = named["geometry"]
+        return (_est_km2(g), named["label"], g, named["how"])
     results = _search(place)
     area_cap = AREA_CAP_KM2 if cap is None else float(cap)
     if not results:
@@ -465,6 +473,7 @@ def resolve_place(place):
     return {"status": "ok", "place": place, "name": name,
             "area_km2": round(km2), "how": how,
             "is_admin_boundary": str(how).startswith("admin boundary"),
+            "is_contributed_boundary": str(how).startswith("contributed boundary"),
             "bbox": [round(v, 5) for v in (minx, miny, maxx, maxy)],
             "centroid": [round(boundary.centroid.x, 5), round(boundary.centroid.y, 5)],
             "area_cap_km2": AREA_CAP_KM2}
@@ -491,6 +500,21 @@ def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=N
     # could have taken the polygon.
     cap = AREA_CAP_KM2 if area_cap_km2 is None else float(area_cap_km2)
     cache = str(get_settings().cache_dir)
+    contributed_how = None
+    if geometry is None and place:
+        from . import vectors as _vectors
+        named = _vectors.named_area(place)
+        if named and named.get("ambiguous"):
+            raise ValueError(f"'{place}' matches several contributed areas: "
+                             + "; ".join(named["matches"]) + " — name one of them exactly")
+        if named:
+            # The hub's own polygon, under its own label: cached by its shape, so a
+            # re-contributed layer gets a fresh bundle and a geocoder's box for the
+            # same words is never served in its place.
+            from shapely.geometry import mapping as _mapping
+            geometry = _mapping(named["geometry"])
+            name = named["label"]
+            contributed_how = named["how"]
     if geometry is not None:
         boundary = _to_polygon(geometry)
         slug = "draw-" + hashlib.sha1(boundary.wkt.encode()).hexdigest()[:12]
@@ -528,18 +552,21 @@ def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=N
         cached = None
     if cached is not None:
         info = cached
-        if geometry is not None and name and info.get("name") != name:
+        if geometry is not None and name and (info.get("name") != name or
+                                              (contributed_how and info.get("how") != contributed_how)):
             # The same polygon, now with the caller's label: a district named by
             # the system that holds its boundary must not be cited as "drawn area".
-            info["name"], info["how"] = name, "supplied polygon"
+            info["name"], info["how"] = name, (contributed_how or "supplied polygon")
             json.dump(info, open(meta, "w"), indent=2)
         boundary = shape(json.load(open(os.path.join(adir, "admin.geojson")))["features"][0]["geometry"])
     else:
         if geometry is not None:
             km2 = _est_km2(boundary)
             if km2 > cap:
-                raise ValueError(f"drawn area is too large (>{cap:.0f} km²) — draw a smaller box")
-            name, how = (name or "drawn area"), ("drawn" if not name else "supplied polygon")
+                raise ValueError(f"{'the contributed area' if contributed_how else 'drawn area'} "
+                                 f"is too large (~{km2:.0f} km², over the {cap:.0f} km² cap)"
+                                 + ("" if contributed_how else " — draw a smaller box"))
+            name, how = (name or "drawn area"), (contributed_how or ("drawn" if not name else "supplied polygon"))
         else:
             km2, name, boundary, how = _boundary(place, cap)
         print(f"   [ingest: resolving '{name}' (~{km2:.0f} km²)…]")

@@ -646,6 +646,8 @@ RASTER_FIELDS = {
         "authority": "who stands behind the map: national agency, regional hub product, ...",
         "accuracy": "documented accuracy, or 'unstated' (never invent one)",
         "colors": "optional {class: '#rrggbb'} for the map legend",
+        "countries": "which countries the layer (or its stack) covers, e.g. [Costa Rica] — "
+                     "the pack names them as where it answers",
     },
 }
 _RASTER_KNOWN = set(RASTER_FIELDS["required"]) | set(RASTER_FIELDS["optional"])
@@ -726,8 +728,16 @@ def _prepare_raster(m: dict) -> dict:
     out = rasters.add({**base, "file": tmp}, dry_run=True)
     if out["status"] == "declined":
         os.unlink(tmp)
+        for stray in (tmp + ".norm.tif",):
+            if os.path.exists(stray):
+                os.unlink(stray)
         raise Declined("; ".join(out["failures"]))
-    return {"tmp": tmp, "observed": out.get("observed")}
+    # The gate may have reprojected or converted the file; what it verified is what
+    # gets staged, and the raw upload goes.
+    keep = out.get("file") or tmp
+    if keep != tmp:
+        os.unlink(tmp)
+    return {"tmp": keep, "observed": out.get("observed")}
 
 
 def _stage_raster(rec: dict, prepared: dict) -> dict:
@@ -741,6 +751,8 @@ def _stage_raster(rec: dict, prepared: dict) -> dict:
              "description": m["description"], "legend": (m.get("legend") or {}), "source": m["source"],
              "license": m["license"], "vintage": m["vintage"],
              **({"usage_notes": m["usage_notes"]} if m.get("usage_notes") else {}),
+             **({"prepared": prepared["observed"]["prepared"]}
+                if (prepared.get("observed") or {}).get("prepared") else {}),
              "contributed": True, "staged_by": rec["contributor_id"], "contribution_id": cid,
              "contributor_label": rec["contributor_label"]}
     from . import rasters as _r
@@ -751,7 +763,8 @@ def _stage_raster(rec: dict, prepared: dict) -> dict:
         entry.update({"stack": str(m["stack"]), "year": int(m["year"]), "role": "landcover",
                       "bounds": _stacks.header(str(dest))["bounds"],
                       **{k: m[k] for k in ("stack_title", "authority", "accuracy",
-                                           "outside_values", "colors") if m.get(k) is not None}})
+                                           "outside_values", "colors", "countries")
+                         if m.get(k) is not None}})
         _stage_stack_row(entry, rec["contributor_id"], cid)
     STAGED_RASTERS[layer] = {"entry": entry, "contract": contract}
     _purge_clips(layer)
@@ -812,7 +825,9 @@ def _stage_stack_row(entry: dict, staged_by: str, cid: str) -> None:
                          "title": entry.get("stack_title") or f"{sid} land cover",
                          "description": entry.get("description", ""), "source": entry.get("source"),
                          "license": entry.get("license"), "legend": entry.get("legend") or {},
-                         "outside_values": entry.get("outside_values") or [0],
+                         "outside_values": ([0] if entry.get("outside_values") is None
+                                            else [int(v) for v in entry["outside_values"]]),
+                         **({"countries": list(entry["countries"])} if entry.get("countries") else {}),
                          "authority": entry.get("authority") or "contributed; authority unstated",
                          "accuracy": entry.get("accuracy") or "unstated",
                          **({"colors": entry["colors"]} if entry.get("colors") else {}),
@@ -1041,19 +1056,26 @@ def visible_staged_weights(hazard: str) -> dict | None:
 
 VECTOR_FIELDS = {
     "required": {
-        "layer": "a short snake_case name the risk pack will count under, e.g. "
-                 "evacuation_centres — becomes a countable asset beside hospitals/schools",
-        "url": "where the platform can fetch a GeoJSON FeatureCollection of Point features "
-               "in EPSG:4326 (lon, lat); public host, up to the size cap",
-        "title": "what the points are",
-        "description": "what one point represents, how the list was compiled, what it excludes",
-        "source": "who maintains the list (agency), derived from what",
+        "layer": "a short snake_case name, e.g. evacuation_centres, cr_rivers, cr_mangrove_map_2021. "
+                 "A POINT layer becomes a countable asset beside hospitals/schools in every risk "
+                 "answer; a LINE or POLYGON layer is measured inside any pack's area with "
+                 "assemble_pack(..., vectors=[<layer>]) — km of line, km² (ha) of polygon",
+        "url": "where the platform can fetch a GeoJSON FeatureCollection in EPSG:4326 (lon, lat) "
+               "of Point, LineString or Polygon features (or their Multi forms; one family per "
+               "layer); a Google Drive share link works; public host, up to the size cap",
+        "title": "what the features are",
+        "description": "what one feature represents, how the layer was compiled, what it excludes",
+        "source": "who maintains the layer (agency), derived from what",
         "license": "e.g. CC-BY-4.0, or 'unstated' (silence is not accepted)",
-        "vintage": "when the list was last updated, YYYY-MM",
+        "vintage": "when the layer was last updated, YYYY-MM",
     },
     "optional": {
-        "countries": "which countries the layer covers, e.g. [Thailand]",
-        "name_field": "the property holding each point's name, if any",
+        "countries": "which countries the layer covers, e.g. [Costa Rica]",
+        "name_field": "the property holding each feature's name, if any. A POLYGON layer with a "
+                      "name_field is also a gazetteer: its feature names resolve as `place` in "
+                      "every pack and in resolve_place_time (the hub's own boundary, not a geocoder's)",
+        "group_field": "a property to break the measure down by, e.g. clase or IUCN_CAT — "
+                       "the citation states the km / km² / count per value",
         "usage_notes": "a few lines the consuming analyst reads (max 500 chars)",
     },
 }
@@ -1149,21 +1171,43 @@ def _stage_vector(rec: dict, prepared: dict) -> dict:
              "description": m["description"], "source": m["source"],
              "license": m["license"], "vintage": m["vintage"],
              "features": prepared["observed"]["features"],
+             "geometry": prepared["observed"].get("geometry", "points"),
              "bbox": prepared["observed"]["bbox"],
              **({"countries": m["countries"]} if m.get("countries") else {}),
              **({"name_field": m["name_field"]} if m.get("name_field") else {}),
+             **({"group_field": m["group_field"]} if m.get("group_field") else {}),
              **({"usage_notes": m["usage_notes"]} if m.get("usage_notes") else {}),
              "contributed": True, "staged_by": rec["contributor_id"], "contribution_id": cid,
              "contributor_label": rec["contributor_label"]}
     _ensure_staged_vectors_loaded()
     STAGED_VECTORS[layer] = entry
     vectors.purge_clips(layer)
+    fam = entry["geometry"]
+    if fam == "points":
+        how = (f"assemble_pack(pack='risk', place=<a place inside the layer's bbox>, "
+               f"hazard='flood') — the pack now counts {layer!r} against the hazard beside "
+               f"hospitals and schools; or any pack with vectors=[{layer!r}] for a count inside its area")
+    else:
+        how = (f"assemble any pack over an area the layer covers with vectors=[{layer!r}] — "
+               f"the pack states the {'km of line' if fam == 'lines' else 'km² (ha) of polygon'} "
+               "inside its boundary"
+               + (f", broken down by {entry['group_field']}" if entry.get("group_field") else ""))
+        if fam == "polygons" and entry.get("name_field"):
+            how += (f"; the features' {entry['name_field']} values now resolve as `place` "
+                    "(resolve_place_time(place=<a feature's name>))")
+    gp = m.get("group_field")
+    props = prepared["observed"].get("properties") or []
+    warn = []
+    if gp and gp not in props:
+        warn.append(f"group_field {gp!r} is not a property of the features (properties: "
+                    f"{', '.join(props[:12])}) — the breakdown will be empty")
+    nf = m.get("name_field")
+    if nf and nf not in props:
+        warn.append(f"name_field {nf!r} is not a property of the features (properties: "
+                    f"{', '.join(props[:12])}) — no feature will carry a name")
     return {"layer": layer, "observed": prepared["observed"], "staged_file": str(dest),
-            "entry": entry,
-            "how_to_test": (f"assemble_pack(pack='risk', place=<a place inside the layer's "
-                            f"bbox>, hazard='flood') — the pack now counts {layer!r} against "
-                            "the hazard beside hospitals and schools; only you and reviewers "
-                            "see it until it is approved")}
+            "entry": entry, **({"hints": warn} if warn else {}),
+            "how_to_test": how + "; only you and reviewers see it until it is approved"}
 
 
 def _land_vector(rec: dict) -> dict:

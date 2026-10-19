@@ -185,7 +185,9 @@ def _fs_keywords() -> str:
 
 
 def _lc_stacks_words() -> tuple[str, str]:
-    """(classes, where) from the registered stacks' legends, titles and years."""
+    """(classes, where) from the registered stacks' legends, titles, years and the
+    countries their rows declare — a contributed national mangrove stack names its
+    country here the moment it lands."""
     try:
         from ..land_cover.synthesis import landcover_stacks
         from ..graph.geo import stacks as _stacks
@@ -207,8 +209,25 @@ def _lc_stacks_words() -> tuple[str, str]:
         except Exception:
             span = ""
         title = str(row.get("title") or sid)
-        where.append(title + (f", {span}" if span and span not in title else ""))
+        countries = [str(c) for c in (row.get("countries") or []) if str(c).strip()]
+        where.append(title + (f", {span}" if span and span not in title else "")
+                     + (f" ({', '.join(countries)})" if countries else ""))
     return ", ".join(classes), "; ".join(where)
+
+
+def _lc_where() -> list[str]:
+    """Where the land-cover pack answers, from the registered stacks' declared
+    countries (else their titles) — never a typed list."""
+    try:
+        from ..land_cover.synthesis import landcover_stacks
+        rows = landcover_stacks()
+    except Exception:
+        rows = {}
+    out = []
+    for sid, row in rows.items():
+        countries = [str(c) for c in (row.get("countries") or []) if str(c).strip()]
+        out.append(", ".join(countries) if countries else str(row.get("title") or sid))
+    return out or ["no land-cover stack is registered yet"]
 
 
 def _lc_summary() -> str:
@@ -380,8 +399,7 @@ PACKS: dict[str, dict] = {
         "keywords": lambda: _lc_keywords(),
         "subjects": ["land cover by class", "forest, cropland, grassland and built-up change "
                      "between mapped years"],
-        "where": ["the Hindu Kush Himalaya (Afghanistan, Pakistan, India, Nepal, Bhutan, "
-                  "Bangladesh, Myanmar and south-west China)"],
+        "where": _lc_where,
         "default_focus": lambda t: (f"land cover of {t.get('place', '')} in {t.get('year', '')}"
                                     + (f" against {t['year_to']}" if t.get("year_to") else "")).strip(),
         "doctor_target": {"place": "Bagmati Province, Nepal", "year": "2022"},

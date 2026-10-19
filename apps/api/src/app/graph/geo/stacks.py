@@ -197,8 +197,14 @@ def change(clip_a, clip_b, boundary, legend, outside_values, focus_class=None, o
     that class (1 stable, 2 loss, 3 gain; nodata elsewhere) beside the clips."""
     a, ta, ca = _read_clip(clip_a)
     b, tb, cb = _read_clip(clip_b)
-    nod = list(outside_values)[-1]
+    outside_values = list(outside_values)
+    # The fill for cells year B has no pixel for. With no outside value declared
+    # (a binary map where 0 is a class), a value no legend uses stands in.
+    nod = outside_values[-1] if outside_values else (
+        int(np.iinfo(a.dtype).max) if np.issubdtype(a.dtype, np.integer) else float("nan"))
     b = align(b, tb, cb, a.shape, ta, ca, nod)
+    if not outside_values:
+        outside_values = [nod]        # the fill alone marks "no pixel here"
     inside = _inside(boundary, a.shape, ta)
     if focus_class is not None and out_path:
         common_px = inside & ~np.isin(a, list(outside_values)) & ~np.isin(b, list(outside_values))
