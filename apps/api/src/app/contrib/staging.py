@@ -768,10 +768,14 @@ RASTER_FIELDS = {
     "required": {
         "layer": _raster_layer_text(),
         "url": "where the platform can fetch the raster (GeoTIFF, or any GDAL-readable raster "
-               "such as ERDAS .img or a GeoPackage — converted to GeoTIFF and reprojected to "
-               "EPSG:4326 at ingest; public host or a Google Drive share link; up to the size "
-               "cap). One band is read: a multi-band file is read as band 1, and a colour "
-               "rendering (RGB/RGBA) is refused — give the single-band values",
+               "such as ERDAS .img, a GeoPackage or a NetCDF grid — converted to GeoTIFF and "
+               "reprojected to EPSG:4326 at ingest; a NetCDF on CF latitude/longitude with no "
+               "CRS is read as EPSG:4326; public host or a Google Drive share link). A file over "
+               "the size cap needs `clip`; a zip of rasters is read in place — name the one in "
+               "it with `clip_member` (or end the url with '#<member>') unless it holds only "
+               "one. One band is read: a multi-band file is read as band 1, and a colour "
+               "rendering (RGB/RGBA) or a picture of a map (PNG/JPEG) is refused — give the "
+               "single-band values",
         "title": "what the layer is",
         "description": "what a pixel value means and how the layer was produced",
         "source": "who produced it, derived from what",
@@ -808,6 +812,16 @@ RASTER_FIELDS = {
         "colors": "optional {class: '#rrggbb'} for the map legend",
         "countries": "which countries the layer (or its stack) covers, e.g. [Costa Rica] — "
                      "the pack names them as where it answers",
+        "clip": "REQUIRED when the file is over the size cap (the gate then declines it as a "
+                "missing field and says how big it is): the area to keep, as a bbox [minLon, "
+                "minLat, maxLon, maxLat] in degrees, or a place or contributed area name. ASK "
+                "the contributor for the area — never guess one. The platform reads only the "
+                "cells under it (over HTTP range requests where the host allows them, as Google "
+                "Drive, S3, GCS and Zenodo do), stores them unchanged, unresampled, as a "
+                "compressed GeoTIFF, and the cap applies to that stored clip. Any raster layer "
+                "may be clipped",
+        "clip_member": "for a zip of rasters: the one to read, as named inside the zip (the "
+                       "url may end '#<member>' instead); not needed when the zip holds one raster",
     },
 }
 _RASTER_KNOWN = set(RASTER_FIELDS["required"]) | set(RASTER_FIELDS["optional"])
@@ -835,6 +849,13 @@ def _validate_raster(manifest) -> list[str]:
     unknown = set(m) - _RASTER_KNOWN
     if unknown:
         problems.append(f"unknown fields {sorted(unknown)} — every field is provenance")
+    if m.get("clip") is not None:
+        from . import remote_clip
+        problems += remote_clip.box_problems(m["clip"])
+    if m.get("clip_member") is not None and not (isinstance(m["clip_member"], str)
+                                                 and m["clip_member"].strip()):
+        problems.append(f"clip_member must be a file name inside the zip, e.g. "
+                        f"'folder/name.tif' — got {m['clip_member']!r}")
     if m.get("url"):
         problems += fetch_policy.check_url(m["url"])
     return problems
@@ -865,30 +886,139 @@ def _raster_taken(layer: str) -> str | None:
     return None
 
 
-def _prepare_raster(m: dict) -> dict:
+_RASTER_WHAT = "raster file (GeoTIFF, .img)"
+
+
+def _raster_page(raw: bytes, url: str) -> None:
+    """A link that answered a web page, a map service's XML or any other text that points
+    elsewhere (a VRT names files GDAL would open on this server), not a raster: refused."""
+    from . import remote_clip
+    if _is_web_page(raw):
+        raise Declined(_WEB_PAGE.format(url=url, what=_RASTER_WHAT))
+    service = _service_xml_problem(raw, url, _RASTER_WHAT) or remote_clip.text_problem(raw, url)
+    if service:
+        raise Declined(service)
+
+
+def _raster_source(m: dict, cap: int, folder) -> tuple[str, list, dict | None]:
+    """(the local file to verify, what was done to read it, where it was read from).
+
+    The whole file when it fits the cap and no `clip` is asked; else only the cells under
+    the clip, read in place over range requests where the host answers them (a zip's
+    raster through /vsizip/), or cut from the downloaded file when it fits the cap. A file
+    over the cap with no clip is declined as a missing field: the area is the
+    contributor's to give. `fetched` is None for a whole plain file."""
     import os
     import tempfile
-    from ..config import get_settings
-    from . import rasters
-    taken = _raster_taken(m["layer"])
-    if taken:
-        raise Declined(taken)
+    from . import rasters, remote_clip as rc
+    url, frag = rc.split_member(m["url"])
+    member = m.get("clip_member") or frag
+    box = where = None
+    if m.get("clip") is not None:
+        box, where = rc.box_of(m["clip"])
+        try:
+            found = rc.probe(url)
+        except fetch_policy.FetchRefused as exc:
+            raise Declined(str(exc)) from None
+        _raster_page(found["head"], m["url"])
+        if found["ranges"]:
+            return _read_raster(m, rc.vsicurl(found["final"]), rasters.sniff(found["head"]),
+                                box, where, member, cap, folder, found=found)
+        if found["size"] is not None and found["size"] > cap:
+            raise Declined(rc.whole_only(m["url"], found, cap))
     try:
-        raw, _ = fetch_policy.fetch(m["url"])
+        raw, _ = fetch_policy.fetch(url)
     except fetch_policy.FetchRefused as exc:
+        if fetch_policy._TOO_BIG in str(exc):
+            raise Declined(rc.ask_for_clip(m["url"], cap, member)) from None
         raise Declined(str(exc)) from None
     except Exception as exc:
         raise Declined(f"could not fetch {m['url']}: {type(exc).__name__}: {exc}") from None
-    if _is_web_page(raw):
-        raise Declined(_WEB_PAGE.format(url=m["url"], what="raster file (GeoTIFF, .img)"))
-    service = _service_xml_problem(raw, m["url"], "raster file (GeoTIFF, .img)")
-    if service:
-        raise Declined(service)
-    tiffs_dir = get_settings().tiffs_dir
-    tiffs_dir.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix="staged-tmp-", suffix=".tif", dir=tiffs_dir)
+    _raster_page(raw, m["url"])
+    kind = rasters.sniff(raw)
+    fd, tmp = tempfile.mkstemp(prefix="staged-tmp-", suffix=rasters.SUFFIX.get(kind, ".tif"),
+                               dir=folder)
     with os.fdopen(fd, "wb") as f:
         f.write(raw)
+    if kind != "zip" and box is None:
+        if m.get("clip_member"):
+            os.unlink(tmp)
+            raise Declined(_NOT_A_ZIP.format(url=m["url"]))
+        return tmp, [], None
+    try:
+        return _read_raster(m, tmp, kind, box, where, member, cap, folder)
+    finally:
+        os.unlink(tmp)
+
+
+_NOT_A_ZIP = ("clip_member names a raster inside a zip, but the file at {url} is not a zip — "
+              "drop clip_member")
+
+
+def _read_raster(m, path, kind, box, where, member, cap, folder, found=None):
+    """The cells under `box` (all of them when None) of `path` — a local file, or a
+    /vsicurl? path when `found` holds the probe — written to a staged-tmp GeoTIFF."""
+    import os
+    import tempfile
+    from . import remote_clip as rc
+    quoted, notes = m["url"], []
+    if kind == "zip":
+        if found:
+            names = rc.remote_names(found, quoted)
+        else:
+            import zipfile
+            with zipfile.ZipFile(path) as z:
+                names = [i.filename for i in z.infolist() if not i.is_dir()]
+        member, said = rc.pick_member(names, member, quoted)
+        if said:
+            notes.append(said)
+        path = rc.in_zip(path, member)
+    elif m.get("clip_member"):
+        raise Declined(_NOT_A_ZIP.format(url=quoted))
+    else:
+        member = None
+    remote = None
+    if found:
+        # GDAL's own client reads from here: the final host is checked again, public
+        # addresses only, right before it does, and GDAL may open that one path only
+        # (remote_clip's header: what is left)
+        problems = fetch_policy.check_url(found["final"])
+        if problems:
+            raise Declined("; ".join(problems))
+        remote = {"agent": found["agent"], "allowed": rc.vsicurl(found["final"])}
+    fd, dest = tempfile.mkstemp(prefix="staged-tmp-", suffix=".tif", dir=folder)
+    os.close(fd)
+    try:
+        made = rc.cut(path, box, dest, cap, quoted=quoted, remote=remote,
+                      layer_name=m.get("layer_name"))
+    except BaseException:
+        os.unlink(dest)
+        raise
+    notes = [rc.note(quoted, box, where, made, member, remote=bool(found)), *notes, *made["notes"]]
+    fetched = {"url": quoted,
+               **({"clip": [round(v, 6) for v in box]} if box else {}),
+               **({"clip_place": m["clip"]} if isinstance(m.get("clip"), str) else {}),
+               **({"member": member} if member else {}),
+               "window": made["window"], "of": made["of"],
+               "read": "range requests, only the window" if found else "downloaded whole"}
+    return dest, notes, fetched
+
+
+def _prepare_raster(m: dict) -> dict:
+    import hashlib
+    import os
+    from ..config import get_settings
+    from . import rasters, remote_clip
+    taken = _raster_taken(m["layer"])
+    if taken:
+        raise Declined(taken)
+    tiffs_dir = get_settings().tiffs_dir
+    tiffs_dir.mkdir(parents=True, exist_ok=True)
+    cap = int(get_settings().grp_contrib_max_bytes)
+    try:
+        tmp, notes, fetched = _raster_source(m, cap, tiffs_dir)
+    except (remote_clip.ClipRefused, fetch_policy.FetchRefused) as exc:
+        raise Declined(str(exc)) from None
     base = {k: v for k, v in m.items() if k != "url"}
     out = rasters.add({**base, "file": tmp}, dry_run=True, keep_prepared=True)
     if out["status"] == "declined":
@@ -902,7 +1032,28 @@ def _prepare_raster(m: dict) -> dict:
     keep = out.get("file") or tmp
     if keep != tmp:
         os.unlink(tmp)
-    return {"tmp": keep, "observed": out.get("observed")}
+    observed = out.get("observed") or {}
+    if fetched:
+        # A clip or a zip's raster was never bounded by the fetch cap: the cap is on
+        # what is stored, and the record keeps where it came from, so it can be cut
+        # again and compared byte for byte.
+        size = os.path.getsize(keep)
+        if size > cap:
+            os.unlink(keep)
+            big, limit = remote_clip.size_text(size), remote_clip.size_text(cap)
+            if fetched.get("clip"):
+                raise Declined(f"the clip of {m['url']} is {big} stored (compressed), over the "
+                               f"{limit} cap — give a smaller box")
+            raise Declined(remote_clip.ask_text(
+                f"the raster {fetched.get('member')!r} inside {m['url']} is {big} stored, over "
+                f"the {limit} cap"))
+        with open(keep, "rb") as f:
+            sha = hashlib.file_digest(f, "sha256").hexdigest()
+        fetched = {**fetched, "sha256": sha, "bytes": size}
+        notes[0] += f"; the stored file's sha256 is {sha}"
+        observed = {**observed, "prepared": [*notes, *(n for n in observed.get("prepared") or []
+                                                       if n not in notes)]}
+    return {"tmp": keep, "observed": observed, **({"fetched": fetched} if fetched else {})}
 
 
 def _stage_raster(rec: dict, prepared: dict) -> dict:
@@ -918,6 +1069,7 @@ def _stage_raster(rec: dict, prepared: dict) -> dict:
              **({"usage_notes": m["usage_notes"]} if m.get("usage_notes") else {}),
              **({"prepared": prepared["observed"]["prepared"]}
                 if (prepared.get("observed") or {}).get("prepared") else {}),
+             **({"fetched": prepared["fetched"]} if prepared.get("fetched") else {}),
              "contributed": True, "staged_by": rec["contributor_id"], "contribution_id": cid,
              "contributor_label": rec["contributor_label"]}
     from . import rasters as _r
@@ -982,7 +1134,8 @@ def _land_raster(rec: dict) -> dict:
     STAGED_RASTERS.pop(m["layer"], None)          # so the gate's own taken-check sees the catalog only
     # the staged file was already converted; what was done to it stays on the landed row
     out = rasters.add(manifest, review=_review_note(rec, "layer"),
-                      prepared_before=(preview.get("entry") or {}).get("prepared"))
+                      prepared_before=(preview.get("entry") or {}).get("prepared"),
+                      fetched=(preview.get("entry") or {}).get("fetched"))
     if out["status"] == "declined":
         STAGED_RASTERS[m["layer"]] = {"entry": preview["entry"], "contract": preview["contract"]}
         raise Declined("; ".join(out["failures"]))
