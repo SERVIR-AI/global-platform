@@ -69,12 +69,28 @@ def _span(ys):
     return ", ".join(out)
 
 
+def year_path(layer_key, cat=None):
+    """Where a stack year's file is, without downloading anything: a built-in year
+    carries `path` (a plain file or a /vsizip/ entry); a CONTRIBUTED or staged year
+    is a landed row whose `local_path` sits under the tiffs directory. None when the
+    row names no file."""
+    import os
+    from ...config import get_settings
+    meta = (cat if cat is not None else tiffs.catalog()).get(layer_key) or {}
+    if meta.get("path"):
+        return meta["path"]
+    if meta.get("local_path"):
+        return os.path.join(str(get_settings().tiffs_dir), os.path.basename(str(meta["local_path"])))
+    return None
+
+
 def installed(stack_id):
     """{year: bool} — whether each declared year's file opens. Header-only, cheap."""
     row = stack(stack_id)
+    cat = tiffs.catalog()
     out = {}
     for y in years(row):
-        path = tiffs.catalog()[str(row["layer_pattern"]).format(year=y)]["path"]
+        path = year_path(str(row["layer_pattern"]).format(year=y), cat)
         try:
             with rasterio.open(path):
                 out[y] = True

@@ -16,6 +16,8 @@ minted while previewing stays replayable.
 
 from __future__ import annotations
 
+import re
+
 import hashlib
 from datetime import datetime, timedelta, timezone
 
@@ -769,11 +771,23 @@ def _stage_raster(rec: dict, prepared: dict) -> dict:
     STAGED_RASTERS[layer] = {"entry": entry, "contract": contract}
     _purge_clips(layer)
     short = layer.split("_", 1)[1] if "_" in layer else layer
+    if contract["role"] == "landcover":
+        how = (f"assemble_pack(pack='land-cover', place=<a place inside the map>, "
+               f"year={int(m['year'])}) — or geometry=<a bbox or polygon the map covers>; "
+               f"add year_to=<another year of {m['stack']}> for change and transitions, "
+               "and classes=[<a legend label>] to detail one class")
+    elif contract["role"] == "population":
+        how = (f"assemble_pack(pack='risk', place=<a place the layer covers>, hazard=<any>) "
+               f"with layers=[{layer!r}] — people exposed are summed from this grid")
+    elif contract["role"] == "vulnerability":
+        how = (f"risk_weights(hazard=<hazard>) to weigh {layer!r} into a recipe; "
+               f"assemble_pack(..., layers=[{layer!r}]) returns its values over any area")
+    else:
+        how = (f"assemble_pack(pack='risk', place=<a place the layer covers>, "
+               f"hazard={short!r}) — the pack's hazard passport shows the contract check")
     return {"layer": layer, "observed": prepared["observed"], "staged_file": str(dest),
             "entry": entry, "contract": contract,
-            "how_to_test": (f"assemble_pack(pack='risk', place=<a place the layer covers>, "
-                            f"hazard={short!r}) — only you and reviewers can use it until it "
-                            "is approved; the pack's hazard passport shows the contract check")}
+            "how_to_test": how + "; only you and reviewers can use it until it is approved"}
 
 
 def _land_raster(rec: dict) -> dict:
@@ -1672,6 +1686,12 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
             "decision_note": "auto-approved: this deployment lands contributions without review"})
         _notify(f"New {kind} contribution AUTO-APPROVED for {caller.label}: "
                 f"{rec['title']} (id {ident})")
+        preview = dict(rec.get("preview") or {})
+        if isinstance(preview.get("how_to_test"), str):
+            # the staged-preview tail is not true here: it landed for everyone
+            preview["how_to_test"] = re.sub(
+                r"\s*[;—-]\s*only you and reviewers[^.;]*?approved[^.;]*", "", preview["how_to_test"])
+        rec = {**rec, "preview": preview}
         return {**_public(rec), "status": "approved",
                 "review": "AUTO-APPROVED — this deployment is configured to land "
                           "contributions without human review; the record says so",

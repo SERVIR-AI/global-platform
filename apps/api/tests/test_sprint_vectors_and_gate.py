@@ -294,3 +294,50 @@ def test_seam_measures_named_vectors_for_any_pack_and_declines_unknown_names(vec
     # the risk pack's counted assets stay point layers: a line layer is not an "asset"
     from app.risk import synthesis as risk
     assert "test_rivers" not in _as(OWNER, risk._asset_layers)
+
+
+# --------------------------------------------- a freshly contributed stack, end to end
+def test_a_contributed_extent_stack_answers_the_land_cover_pack(tmp_path, monkeypatch, log):
+    """Two years of a 0/1 extent map contributed over the gate (auto-approve on), then
+    the land-cover pack counts area, loss and gain over a polygon — no code change."""
+    s = get_settings()
+    conf = tmp_path / "conf"; conf.mkdir()
+    (conf / "tiffs.yml").write_text("# hand-authored\n{}\n")
+    (conf / "raster_schema.yml").write_text(json.dumps({"defaults": {"crs": "EPSG:4326", "float_tol": 0.0001}, "layers": {}}))
+    for k, v in (("tiffs_config_path", conf / "tiffs.yml"), ("tiffs_contrib_path", conf / "tiffs.contrib.yml"),
+                 ("raster_schema_path", conf / "raster_schema.yml"),
+                 ("raster_schema_contrib_path", conf / "raster_schema.contrib.yml"),
+                 ("cache_dir", tmp_path / "cache"), ("tiffs_dir", tmp_path / "cache" / "tiffs"),
+                 ("grp_mattermost_webhook", ""), ("grp_auto_approve", True)):
+        monkeypatch.setattr(s, k, v)
+    monkeypatch.setattr(store, "_db_path", lambda: tmp_path / "store.sqlite")
+    staging.STAGED_RASTERS.clear()
+    monkeypatch.setattr(staging, "_STAGED_LOADED", True)
+    W = H = 10; PX = 0.001; LEFT, TOP = -85.0, 10.0
+    a = np.zeros((H, W), dtype="uint8"); a[:, :4] = 1
+    b = np.zeros((H, W), dtype="uint8"); b[:, 1:3] = 1; b[:, 6] = 1
+    files = {}
+    for y, arr in ((1996, a), (2020, b)):
+        files[f"https://x.test/gmw-{y}.tif"] = open(_write(tmp_path / f"src-{y}.tif", arr, "EPSG:4326",
+                                                           from_origin(LEFT, TOP, PX, PX), nodata=0), "rb").read()
+    monkeypatch.setattr(fetch_policy, "check_url", lambda url: [])
+    monkeypatch.setattr(fetch_policy, "fetch", lambda url, max_bytes=None: (files[url], url.rsplit("/", 1)[-1]))
+    for y in (1996, 2020):
+        out = staging.submit("raster", {
+            "layer": f"landcover_bintest_{y}", "stack": "landcover_bintest", "year": y,
+            "stack_title": "Binary extent test (synthetic)", "url": f"https://x.test/gmw-{y}.tif",
+            "title": f"Extent {y} (synthetic)", "description": "synthetic 0/1 extent", "source": "test fixture",
+            "license": "CC0-1.0", "vintage": "2026-10", "legend": {0: "Not mangrove", 1: "Mangrove"},
+            "outside_values": [], "countries": ["Testland"],
+            "declared": {"dtype": "uint8", "valid_min": 0, "valid_max": 1, "nodata": 0}}, OWNER)
+        assert out["status"] == "approved", out
+        log("OUTPUT", out["preview"]["how_to_test"][:160])
+        assert "land-cover" in out["preview"]["how_to_test"] and "only you" not in out["preview"]["how_to_test"]
+    poly = mapping(box(LEFT + 1 * PX, TOP - 9 * PX, LEFT + 9 * PX, TOP - 1 * PX))
+    p = assemble.assemble(pack="land-cover", place="Test bay", year="1996", year_to="2020",
+                          geometry=poly, classes=["Mangrove"])
+    assert p["status"] == "ok", p.get("note")
+    ch = p["stats"]["change"]["by_class"]["Mangrove"]
+    assert ch["loss_km2"] > 0 and ch["gain_km2"] > 0 and p["stats"]["change"]["km2_one_year_only"] == 0
+    assert any("Testland" in w for w in __import__("app.mcp.packs", fromlist=["x"]).PACKS["land-cover"]["where"]())
+    staging.STAGED_RASTERS.clear()
