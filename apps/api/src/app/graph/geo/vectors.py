@@ -403,6 +403,37 @@ def _norm(text) -> str:
     return " ".join(t.casefold().replace("-", " ").replace("_", " ").split())
 
 
+_NAME_INDEX: dict = {}       # layer -> (mtime, size, {normalised name: [(label, geometry dict)]})
+
+
+def _name_index(layer: str, entry: dict) -> dict:
+    """{normalised name: [(label, geometry)]} for one polygon layer, built once per
+    master file and rebuilt when the file changes — a place lookup must not parse
+    40 MB of GeoJSON on every question."""
+    path = master_path(entry)
+    try:
+        st = os.stat(path)
+    except OSError:
+        return {}
+    cached = _NAME_INDEX.get(layer)
+    if cached and cached[0] == st.st_mtime and cached[1] == st.st_size:
+        return cached[2]
+    index: dict = {}
+    key = entry["name_field"]
+    try:
+        fc = json.load(open(path))
+    except (OSError, ValueError):
+        return {}
+    for ft in fc.get("features") or []:
+        props = ft.get("properties") or {}
+        label = props.get(key)
+        if label in (None, ""):
+            continue
+        index.setdefault(_norm(label), []).append((str(label).strip(), ft.get("geometry")))
+    _NAME_INDEX[layer] = (st.st_mtime, st.st_size, index)
+    return index
+
+
 def named_area(name: str) -> dict | None:
     """A contributed polygon feature (or all features sharing a name) whose name
     matches `name`: {"geometry": shapely, "label", "layer", "entry", "how", "matches"}.
@@ -416,21 +447,11 @@ def named_area(name: str) -> dict | None:
     for layer, entry in visible().items():
         if family(entry) != "polygons" or not entry.get("name_field"):
             continue
-        key = entry["name_field"]
-        try:
-            fc = json.load(open(master_path(entry)))
-        except (OSError, ValueError):
-            continue
-        for ft in fc.get("features") or []:
-            props = ft.get("properties") or {}
-            label = props.get(key)
-            if label in (None, ""):
-                continue
-            n = _norm(label)
+        for n, items in _name_index(layer, entry).items():
             if n == q:
-                exact.append((layer, entry, str(label).strip(), ft))
+                exact.extend((layer, entry, label, {"geometry": g}) for label, g in items)
             elif len(q) >= 5 and (q in n or n in q):
-                partial.append((layer, entry, str(label).strip(), ft))
+                partial.extend((layer, entry, label, {"geometry": g}) for label, g in items)
     hits = exact or partial
     if not hits:
         return None
@@ -462,16 +483,13 @@ def names(limit: int = 20) -> dict:
     for layer, entry in visible().items():
         if family(entry) != "polygons" or not entry.get("name_field"):
             continue
-        key = entry["name_field"]
-        try:
-            fc = json.load(open(master_path(entry)))
-        except (OSError, ValueError):
-            continue
         seen = []
-        for ft in fc.get("features") or []:
-            v = (ft.get("properties") or {}).get(key)
-            if v not in (None, "") and str(v).strip() not in seen:
-                seen.append(str(v).strip())
+        for items in _name_index(layer, entry).values():
+            for label, _g in items:
+                if label not in seen:
+                    seen.append(label)
+                if len(seen) >= limit:
+                    break
             if len(seen) >= limit:
                 break
         out[layer] = seen
