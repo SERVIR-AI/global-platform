@@ -620,6 +620,23 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
         fire_stats = {k: v for k, v in q.items() if k in ("n", "by_year", "by_class", "first", "last")}
         trace.append(f"fire[{pid}] {q.get('n', 0)} detections")
 
+    # Contributed tables bound to this pack: a FACTOR table (class, factor) is
+    # applied to the areas, losses and gains above; any other is cited as context.
+    factor_stats = {}
+    for ds, spec, res in _bound_tables(aoi.get("country"), gaps, trace):
+        cols = (spec.get("fetch") or {}).get("columns") or {}
+        if "class" in cols and "factor" in cols:
+            cit, fstats = _factor_citation(n + 1, ds, spec, res, name, year, year_to, legend,
+                                           st, st_to if layer_to else None, ch if layer_to else None,
+                                           gaps, trace)
+            if cit:
+                n += 1
+                citations.append(cit)
+                factor_stats[ds] = fstats
+        else:
+            n += 1
+            citations.append(_context_table_citation(n, ds, spec, res))
+
     for yr, ly, cl, lv in ((year, layer, clip, level),
                            *(((year_to, layer_to, aoi[layer_to], level_to),) if layer_to else ())):
         n += 1
@@ -651,6 +668,7 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
              "km2_outside": round(st["km2_outside"], 1),
              **({"change": change_stats} if change_stats else {}),
              **({"fire": fire_stats} if fire_stats else {}),
+             **({"factors": factor_stats} if factor_stats else {}),
              "viz": viz,
              # for the assemble seam's layer-values step: the area this pack read and
              # the map(s) its class areas are counted from
@@ -659,6 +677,158 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
                  {"layer": ly, "why": f"the {y} map these class areas are counted from"}
                  for y, ly in ((year, layer), (year_to, layer_to)) if ly]}
     return citations, gaps, stats
+
+
+def _bound_tables(country, gaps, trace):
+    """Every contributed table (and staged one the caller may see) bound to this
+    pack, with its rows — the same rule the risk pack applies: a source that
+    declares its countries is read only where it speaks."""
+    from ..contrib import staging
+    from ..graph.geo import vectors as _vectors
+    from ..mcp import feeds, registry
+    rows = {k: v for k, v in registry.FEEDS.items()
+            if v.get("pack") == PACK_ID and v.get("status") == "available"}
+    try:
+        rows.update({k: v for k, v in staging.visible_staged_feeds_for_pack(PACK_ID).items()
+                     if k not in rows})
+    except Exception:
+        pass
+    out = []
+    for ds in sorted(rows):
+        spec = rows[ds]
+        if not _vectors.country_matches(spec.get("countries"), country):
+            trace.append(f"table[{ds}] declares other countries — not read")
+            gaps.append(f"{spec.get('title') or ds} ({ds}) was not read: it declares "
+                        f"{', '.join(str(c) for c in spec.get('countries') or [])} and this area is in "
+                        f"{country}. Available through feeds_query.")
+            continue
+        res = feeds.query(ds, {"limit": 10_000})
+        if res.get("status") != "ok":
+            gaps.append(f"table {ds} bound to this pack did not answer: {res.get('note', 'no reason given')}")
+            continue
+        trace.append(f"table[{ds}] {res.get('count')} rows")
+        out.append((ds, spec, res))
+    return out
+
+
+def _norm_label(text) -> str:
+    import unicodedata
+    t = unicodedata.normalize("NFKD", str(text or ""))
+    return " ".join("".join(ch for ch in t if not unicodedata.combining(ch)).casefold().split())
+
+
+def _num(v):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f else None
+
+
+def _fmt_t(v: float) -> str:
+    return f"{v:,.0f}" if abs(v) >= 100 else f"{v:,.1f}"
+
+
+def _factor_citation(n, ds, spec, res, name, year, year_to, legend, st, st_to, ch, gaps, trace):
+    """One citation applying a factor table to the class areas the pack counted —
+    every product stated in the text, the arithmetic visible, the caveat in the
+    same sentence. Returns (citation or None, stats)."""
+    cols = (spec.get("fetch") or {}).get("columns") or {}
+    if "class" not in cols or "factor" not in cols:
+        return None, None
+    by_label = {_norm_label(v): k for k, v in legend.items()}
+    matched, unmatched = [], []
+    for rec in res.get("records") or []:
+        key = by_label.get(_norm_label(rec.get("class")))
+        f = _num(rec.get("factor"))
+        if key is None or f is None:
+            unmatched.append(str(rec.get("class")))
+            continue
+        matched.append((key, f, rec))
+    if not matched:
+        gaps.append(f"{spec.get('title') or ds} ({ds}) names classes "
+                    f"{', '.join(sorted(set(unmatched))[:6]) or 'none'}; none is in this stack's legend "
+                    f"({', '.join(legend.values())}) — the table was not applied")
+        return None, None
+    units = (spec.get("fetch") or {}).get("units") or "per hectare"
+    parts, stats = [], {}
+    for cls, f, rec in matched:
+        label = legend[cls]
+        unit = str(rec.get("unit") or units)
+        pool = str(rec.get("pool") or "").strip()
+        basis = str(rec.get("basis") or "").strip()
+        ha = float(st["by_class"][cls]["ha"])
+        value = ha * f
+        line = (f"{label} {year}: {ha:,.1f} ha × {f:g} {unit}"
+                + (f" ({pool}" + (f"; {basis}" if basis else "") + ")" if pool or basis else "")
+                + f" = {_fmt_t(value)} {unit.split('/')[0].strip() or 'units'}")
+        entry = {"class": label, "ha": round(ha, 1), "factor": f, "unit": unit,
+                 **({"pool": pool} if pool else {}), **({"basis": basis} if basis else {}),
+                 "value": round(value, 1)}
+        lo, hi = _num(rec.get("low")), _num(rec.get("high"))
+        if lo is not None and hi is not None:
+            line += f" (with the factor's 95% CI {lo:g}-{hi:g}: {_fmt_t(ha * lo)} to {_fmt_t(ha * hi)})"
+            entry["value_low"], entry["value_high"] = round(ha * lo, 1), round(ha * hi, 1)
+        if ch is not None and year_to:
+            cd = ch["by_class"][cls]
+            loss_ha, gain_ha = cd["loss_km2"] * 100.0, cd["gain_km2"] * 100.0
+            ha_to = float(st_to["by_class"][cls]["ha"]) if st_to else None
+            line += (f"; {year_to}: {ha_to:,.1f} ha × {f:g} = {_fmt_t(ha_to * f)}" if ha_to is not None else "")
+            line += (f"; {year}->{year_to} loss {loss_ha:,.1f} ha × {f:g} = {_fmt_t(loss_ha * f)} in lost extent, "
+                     f"gain {gain_ha:,.1f} ha × {f:g} = {_fmt_t(gain_ha * f)} in gained extent, "
+                     f"net {_fmt_t((gain_ha - loss_ha) * f)}")
+            entry.update({"loss_ha": round(loss_ha, 1), "gain_ha": round(gain_ha, 1),
+                          "value_lost": round(loss_ha * f, 1), "value_gained": round(gain_ha * f, 1),
+                          **({"ha_to": round(ha_to, 1), "value_to": round(ha_to * f, 1)} if ha_to is not None else {})})
+        parts.append(line)
+        stats.setdefault(label, []).append(entry)
+    pools = sorted({p["pool"] for v in stats.values() for p in v if p.get("pool")})
+    text = (f"Applying {spec.get('title') or ds} ({ds}; {spec.get('source') or 'source unstated'}, "
+            f"vintage {spec.get('vintage') or 'unstated'}, validation {spec.get('validation') or 'unstated'}, "
+            f"licence {spec.get('license') or 'unstated'}) to the class areas counted in {name}: "
+            + "; ".join(parts) + ". "
+            "Each figure is area × a per-hectare factor, not a measurement of this site: it holds only "
+            "where the mapped class and the factor's domain match, and a change figure is the stock "
+            "associated with lost or gained extent, not an emission estimate."
+            + (f" Pools stated: {', '.join(pools)}." if pools else "")
+            + (f" {len(set(unmatched))} row(s) named classes not in this legend and were skipped." if unmatched else "")
+            + (f" Contributor's note: {spec['usage_notes']}" if spec.get("usage_notes") else "")
+            + (f" Review: {spec['review']}." if spec.get("review") else ""))
+    cit = {"n": n, "kind": "class_factor", "retrieval": "computed-at-pack-time",
+           "source": spec.get("source") or "contributed table (source unstated)",
+           "title": f"{spec.get('title') or ds} applied to {name}",
+           "pub_date": spec.get("vintage"),
+           "validation": f"contributed-table ({spec.get('validation') or 'unstated'}), deterministic arithmetic",
+           "dataset": ds, "values_in": f"stats.factors.{ds}", "text": text}
+    if spec.get("usage_notes"):
+        cit["usage_notes"] = spec["usage_notes"]
+    if spec.get("review"):
+        cit["review_status"] = spec["review"]
+    if spec.get("staged_by"):
+        cit["staged_by"] = spec["staged_by"]
+        cit["contribution_id"] = spec.get("contribution_id")
+    trace.append(f"factors[{ds}] {len(matched)} rows applied")
+    return cit, stats
+
+
+def _context_table_citation(n, ds, spec, res):
+    recs = res.get("records") or []
+    sample = "; ".join(", ".join(f"{k}={v}" for k, v in r.items() if v not in (None, ""))
+                       for r in recs[:3])
+    text = (f"{spec.get('title') or ds} ({ds}; {spec.get('source') or 'source unstated'}, vintage "
+            f"{spec.get('vintage') or 'unstated'}, validation {spec.get('validation') or 'unstated'}): "
+            f"{res.get('count')} row(s) bound to this pack, first rows: {sample}."
+            + (f" Contributor's note: {spec['usage_notes']}" if spec.get("usage_notes") else "")
+            + (f" Review: {spec['review']}." if spec.get("review") else ""))
+    cit = {"n": n, "kind": "table", "retrieval": "pulled-at-pack-time",
+           "source": spec.get("source") or "contributed table (source unstated)",
+           "title": spec.get("title") or ds, "pub_date": spec.get("vintage"),
+           "validation": f"contributed-table ({spec.get('validation') or 'unstated'})",
+           "dataset": ds, "text": text}
+    if spec.get("staged_by"):
+        cit["staged_by"] = spec["staged_by"]
+        cit["contribution_id"] = spec.get("contribution_id")
+    return cit
 
 
 def _default_detail_from_areas(st_a, st_b, legend):

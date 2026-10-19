@@ -192,7 +192,12 @@ TABLE_FIELDS = {
         "url": "where the platform can fetch the CSV instead of csv_text (public host)",
         "as_of_field": "the output field holding the row date, so the feed reports as_of",
         "usage_notes": "a few lines the consuming analyst reads on every query (max 500 chars)",
-        "pack": "which domain pack may cite it: food-security or risk (default food-security)",
+        "pack": "which domain pack may cite it (default food-security): one of the packs that "
+                "read tables — the decline text names the live list. A table bound to "
+                "land-cover whose columns map `class` (a legend label) and `factor` (a number "
+                "per hectare of that class; optional `unit`, `pool`, `basis`, `low`, `high`) "
+                "is a FACTOR TABLE: every land-cover answer multiplies its class areas, losses "
+                "and gains by it and cites the arithmetic",
     },
 }
 CSV_TEXT_CAP = 200 * 1024
@@ -460,7 +465,8 @@ FEED_FIELDS = {
     },
     "optional": {
         "usage_notes": "a few lines the consuming analyst reads on every query (max 500 chars)",
-        "pack": "which domain pack may cite it: food-security or risk (default food-security)",
+        "pack": "which domain pack may cite it (default food-security): one of the packs that "
+                "read feeds — the decline text names the live list",
         "countries": ("which countries this source is about, e.g. [Kenya]. Without "
                       "it the platform treats it as global and cites it in every "
                       "answer for this pack — a Battambang rainfall table was cited "

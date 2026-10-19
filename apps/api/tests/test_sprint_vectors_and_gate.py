@@ -408,3 +408,56 @@ def test_the_stack_that_has_the_year_is_read_when_several_cover_the_area(binary_
     r = assemble.assemble(pack="land-cover", place="Test bay", year="1999", geometry=binary_stack["poly"])
     log("OUTPUT", r.get("note"))
     assert r["status"] == "declined" and "has 2014" in r["note"] and "has 1996, 2020" in r["note"]
+
+
+# ------------------------------------------------------------- factor tables
+IPCC_CSV = """Class,Factor,Unit,Pool,Basis,Low,High
+Mangrove,386,t C/ha,soil organic carbon 0-1 m (aggregated organic and mineral soils),IPCC 2013 Wetlands Supplement Table 4.11 (n=119),351,424
+Mangrove,86.6,t C/ha,above-ground biomass carbon (192 t d.m./ha tropical wet x carbon fraction 0.451),IPCC 2013 Wetlands Supplement Tables 4.2 and 4.3,,
+Seagrass meadow,108,t C/ha,soil organic carbon mineral soils,IPCC 2013 Wetlands Supplement Table 4.11,,
+"""
+
+
+def test_a_factor_table_bound_to_land_cover_multiplies_class_areas_and_change(binary_stack, tmp_path, monkeypatch, log):
+    """A contributed table (class, factor per hectare) bound to the land-cover pack
+    is applied to the areas the pack counted — stock, loss, gain — and the
+    arithmetic is in the citation text; a class the stack lacks is skipped and said."""
+    s = get_settings()
+    feeds_dir = tmp_path / "feeds"; feeds_dir.mkdir()
+    monkeypatch.setattr(s, "feeds_conf_dir", feeds_dir)
+    monkeypatch.setattr(s, "grp_mattermost_webhook", "")
+    monkeypatch.setattr(s, "grp_auto_approve", True)
+    from app.mcp import registry
+    registry.reload_declarative_feeds()
+    staging.STAGED_FEEDS.clear()
+    monkeypatch.setattr(staging, "_STAGED_LOADED", True)
+    out = staging.submit("table", {
+        "dataset": "ipcc_mangrove_tier1_test", "pack": "land-cover",
+        "title": "IPCC 2013 Wetlands Supplement Tier 1 mangrove carbon defaults (test copy)",
+        "description": "Per-hectare carbon stock defaults for mangroves from the IPCC 2013 Wetlands Supplement, Chapter 4; the above-ground row is the contributor's arithmetic (192 x 0.451).",
+        "source": "IPCC 2013 Wetlands Supplement, Chapter 4 (Coastal Wetlands)", "validation": "multi-agency-consensus",
+        "license": "unstated", "vintage": "2014-02", "cadence": "irregular",
+        "columns": {"class": "Class", "factor": "Factor", "unit": "Unit", "pool": "Pool", "basis": "Basis", "low": "Low", "high": "High"},
+        "units": "tonnes of carbon per hectare", "csv_text": IPCC_CSV,
+        "usage_notes": "Tier 1 global defaults; a site measurement supersedes them."}, OWNER)
+    assert out["status"] == "approved", out
+    p = assemble.assemble(pack="land-cover", place="Test bay", year="1996", year_to="2020",
+                          geometry=binary_stack["poly"], classes=["Mangrove"])
+    assert p["status"] == "ok", p.get("note")
+    cits = [c for c in p["citations"] if c["kind"] == "class_factor"]
+    assert len(cits) == 1
+    text = cits[0]["text"]
+    log("OUTPUT", text[:600])
+    f = p["stats"]["factors"]["ipcc_mangrove_tier1_test"]["Mangrove"]
+    soil = next(e for e in f if e["factor"] == 386)
+    ha = p["stats"]["classes_km2"]["Mangrove"] * 100          # stats round to 0.1 km2 (10 ha)
+    # stats round ha to 0.1 and value is computed from the unrounded area
+    assert abs(soil["ha"] - ha) <= 10 and abs(soil["value"] - soil["ha"] * 386) < 386 * 0.1
+    assert f"× 386 t C/ha" in text and "= " in text and "95% CI 351-424" in text
+    assert "loss" in text and "gain" in text and "not an emission estimate" in text
+    assert "1 row(s) named classes not in this legend" in text      # the seagrass row
+    assert soil["value_lost"] > 0 and soil["value_gained"] > 0
+    # every number the brief may quote is in the citation text
+    for v in (soil["value"], soil["value_lost"]):
+        assert f"{v:,.0f}" in text
+    registry.reload_declarative_feeds()

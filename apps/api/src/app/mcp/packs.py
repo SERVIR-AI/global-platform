@@ -393,6 +393,12 @@ PACKS: dict[str, dict] = {
         "gather": _gather_land_cover,
         "sections": _lc_sections,
         "corpus": "land-cover",
+        # Contributed TABLES bound to this pack are read: one whose columns map
+        # `class` and `factor` is applied to the class areas (and loss/gain) the
+        # pack counts — carbon per hectare, a value per hectare, any per-hectare
+        # coefficient — and cited with the arithmetic shown. Any other table bound
+        # here is cited as context.
+        "cites_sources": ("tables",),
         "manifest": _lc_manifest,
         "summary": lambda: _lc_summary(),
         "audience": "foresters, land-use and conservation planners, and the hubs that map land cover",

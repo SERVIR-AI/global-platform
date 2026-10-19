@@ -173,14 +173,20 @@ def test_a_contributed_hazard_can_get_a_recipe(monkeypatch, log):
 
 
 # ----------------------------------------------------------------- H5: gate vs consumer
-def test_a_feed_or_table_bound_to_a_pack_that_cites_nothing_is_declined(log):
-    for pack, needle in (("land-cover", "cites no feeds or tables"), ("Risk", "unknown pack 'Risk'"),
+def test_a_feed_or_table_bound_to_a_pack_that_cites_nothing_is_declined(monkeypatch, log):
+    from app.mcp import packs as _packs
+    # a scaffolded pack that reads no sources yet (land-cover used to be the example;
+    # it now reads factor tables, so a table bound to it is accepted — asserted below)
+    monkeypatch.setitem(_packs.PACKS, "scaffold-test", {"target_keys": ("place",), "sections": lambda: []})
+    for pack, needle in (("scaffold-test", "cites no feeds or tables"), ("Risk", "unknown pack 'Risk'"),
                          ("asean-pack", "unknown pack")):
         f = staging._validate_feed({"dataset": "x", "pack": pack})
         t = staging._validate_table({"dataset": "x", "pack": pack, "csv_text": "a,b\n1,2"})
         log("OUTPUT", f"{pack}: {[x for x in f if 'pack' in x][:1]}")
         assert any(needle in x for x in f) and any(needle in x for x in t)
     assert not any("pack" in x for x in staging._validate_feed({"dataset": "x", "pack": "risk"}))
+    assert not any("pack" in x for x in staging._validate_table({"dataset": "x", "pack": "land-cover",
+                                                                   "csv_text": "a,b\n1,2"}))
 
 
 def test_risk_feeds_are_cited_only_where_they_speak(monkeypatch, log):
