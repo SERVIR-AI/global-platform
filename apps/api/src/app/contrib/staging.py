@@ -42,7 +42,8 @@ class Declined(Exception):
 DOCUMENT_FIELDS = {
     "required": {
         "pack": "the domain pack whose library receives it (e.g. food-security)",
-        "url": "where the platform can fetch the original (http/https, public host)",
+        "url": "where the platform can fetch the original (http/https, public host; a Google "
+               "Drive share link works when the file is shared with Anyone with the link)",
         "source": "publisher, e.g. NOAA CPC",
         "title": "the document's title",
         "pub_date": "publication date as YYYY-MM or YYYY-MM-DD, quoted as text",
@@ -631,7 +632,9 @@ RASTER_FIELDS = {
                  "vulnerability_<name> (classes 1-5, weightable via the 'weights' kind), or "
                  "population_<name> (a COUNT grid: people per pixel, float; the pack sums it "
                  "inside each hazard class to report people exposed — no legend needed)",
-        "url": "where the platform can fetch the GeoTIFF (public host; up to the size cap)",
+        "url": "where the platform can fetch the raster (GeoTIFF, or any GDAL-readable raster "
+               "such as ERDAS .img — converted to GeoTIFF and reprojected to EPSG:4326 at "
+               "ingest; public host or a Google Drive share link; up to the size cap)",
         "title": "what the layer is",
         "description": "what a pixel value means and how the layer was produced",
         "source": "who produced it, derived from what",
