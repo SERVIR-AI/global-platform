@@ -399,3 +399,58 @@ def test_the_local_operator_and_a_signed_in_contributor_still_withdraw_their_own
     cid = _land_lines("alice_lines", alice)
     assert staging.withdraw(cid, caller=bob) == {"status": "declined", "note": f"unknown contribution {cid!r}"}
     assert staging.withdraw(cid, caller=alice)["status"] == "withdrawn"
+
+
+# ------------------------------------------------------------ 7. a take-down removes only its own
+def test_a_late_take_down_never_removes_the_layer_that_replaced_it(vec_env, log):
+    """Two take-downs of one approved contribution race a resubmission of the freed name:
+    the late one finds the NEW contributor's row, says so and removes nothing."""
+    from app.graph.geo import vectors
+    from app.mcp import store
+    alice = identity.Caller("user_alice", "alice@hub.test", False, "token")
+    bob = identity.Caller("user_bob", "bob@hub.test", False, "token")
+    first = _land_lines("shared_name", alice)
+    stale = store.load_contribution(first)            # what the racing second take-down read
+    assert staging.withdraw(first, caller=alice)["status"] == "withdrawn"
+    second = _land_lines("shared_name", bob)
+    undone, why = staging._take_down(stale)
+    log("OUTPUT", undone)
+    assert why is None and undone["removed"] is False and undone["already_replaced"] is True
+    assert second in undone["note"] and "nothing was removed" in undone["note"]
+    assert vectors.landed()["shared_name"]["contribution_id"] == second
+
+
+def test_feed_and_raster_take_downs_check_the_row_is_still_theirs(env, host, monkeypatch, log):
+    """A raster row and a feed row carry the contribution that landed them; a take-down of
+    another contribution leaves them. A table row from before rows carried the id is
+    matched on the sha its landing recorded."""
+    import yaml
+    from app.graph.geo import tiffs
+    s = get_settings()
+    monkeypatch.setattr(s, "grp_auto_approve", True)
+    monkeypatch.setattr(s, "feeds_conf_dir", env / "feeds")
+    url = host.put("small.tif", _tif(_noise(120)))
+    out = _submit(_measure("measure_small", url))
+    assert out["status"] == "approved", out
+    row = tiffs.catalog(include_staged=False)["measure_small"]
+    assert row["contribution_id"] == out["contribution_id"]
+    stale = {"contribution_id": "0" * 16, "kind": "raster", "manifest": {"layer": "measure_small"}}
+    undone, why = staging._take_down(stale)
+    assert undone["already_replaced"] and "measure_small" in tiffs.catalog(include_staged=False)
+    # feed rows: one of another contribution, and a table row with no id (older landing)
+    (env / "feeds").mkdir()
+    feed = {"dataset": "test_feed", "contributed": True, "contribution_id": "1" * 16,
+            "fetch": {"url": "https://x.test/new.json"}}
+    (env / "feeds" / "test_feed.yml").write_text(yaml.safe_dump(feed))
+    undone, _ = staging._take_down({"contribution_id": "2" * 16, "kind": "feed",
+                                    "manifest": {"dataset": "test_feed", "fetch": {"url": "https://x.test/new.json"}}})
+    assert undone["already_replaced"] and (env / "feeds" / "test_feed.yml").exists()
+    table = {"dataset": "test_table", "contributed": True, "fetch": {"path": "tables/t.csv", "sha256": "b" * 64}}
+    (env / "feeds" / "test_table.yml").write_text(yaml.safe_dump(table))
+    old = {"contribution_id": "3" * 16, "kind": "table", "manifest": {"dataset": "test_table"},
+           "landing": {"sha256": "a" * 64}}
+    undone, _ = staging._take_down(old)
+    log("OUTPUT", undone["note"])
+    assert undone["already_replaced"] and (env / "feeds" / "test_table.yml").exists()
+    undone, why = staging._take_down({**old, "landing": {"sha256": "b" * 64}})
+    assert why is None and undone["removed"] is True and not (env / "feeds" / "test_table.yml").exists()

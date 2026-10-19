@@ -681,13 +681,15 @@ def _explain(mismatch: str, decl: dict) -> str:
 
 def add(manifest: dict, dry_run: bool = False, review: str | None = None,
         keep_prepared: bool = False, prepared_before: list | None = None,
-        fetched: dict | None = None) -> dict:
+        fetched: dict | None = None, contribution_id: str | None = None) -> dict:
     """Gate then land: validate -> verify file against the DECLARED contract ->
     copy into TIFFS_DIR -> append tiffs.yml row + raster_schema.yml contract.
     A mismatch refuses and writes NOTHING. `prepared_before`: what was done to the file
     when it was staged (reprojected, a band dropped) — the landed row keeps saying it.
     `fetched`: where a clip or a zip member was read from (url, box, member, sha256) —
-    the row keeps it so the stored file can be cut again and compared."""
+    the row keeps it so the stored file can be cut again and compared.
+    `contribution_id`: the gate's record that landed it — a take-down checks the row is
+    still that one's before removing it."""
     from ..config import get_settings
     from ..graph.geo import schema as schema_mod, verify
 
@@ -814,6 +816,7 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None,
                **({"outside_values": outside} if outside is not None else {}),
                **({"countries": list(manifest["countries"])} if manifest.get("countries") else {}),
                **declared_fields(manifest),
+               **({"contribution_id": contribution_id} if contribution_id else {}),
                "contributed": True}
         cat[layer] = row
         if namespace(layer).get("stack"):

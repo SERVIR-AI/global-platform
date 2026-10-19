@@ -148,8 +148,10 @@ def validate_manifest(m: dict) -> list[str]:
     return fails
 
 
-def add(manifest: dict, dry_run: bool = False, review: str | None = None) -> dict:
-    """Gate then land: validate -> archive the file + sha -> write the feed row."""
+def add(manifest: dict, dry_run: bool = False, review: str | None = None,
+        contribution_id: str | None = None) -> dict:
+    """Gate then land: validate -> archive the file + sha -> write the feed row
+    (carrying `contribution_id`, the gate's record that landed it, when given)."""
     from ..config import get_settings
 
     fails = validate_manifest(manifest)
@@ -177,10 +179,11 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None) -> dic
             return {"status": "declined",
                     "failures": [f"dataset {ds!r} already landed — contributions add "
                                  "tables, they do not overwrite them"]}
-        return _land(manifest, review, settings, ds, feed_yml, digest, enc, n_rows)
+        return _land(manifest, review, settings, ds, feed_yml, digest, enc, n_rows,
+                     contribution_id)
 
 
-def _land(manifest, review, settings, ds, feed_yml, digest, enc, n_rows):
+def _land(manifest, review, settings, ds, feed_yml, digest, enc, n_rows, contribution_id=None):
     dest = Path(settings.cache_dir) / "tables" / f"{ds}.csv"
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(manifest["file"], dest)
@@ -209,6 +212,7 @@ def _land(manifest, review, settings, ds, feed_yml, digest, enc, n_rows):
             **({"review": review} if review else {}),
             **({"usage_notes": manifest["usage_notes"]}
                if manifest.get("usage_notes") else {}),
+            **({"contribution_id": contribution_id} if contribution_id else {}),
             # The marker remove-feed keys on: only rows the gate wrote are
             # removable without --force; shipped feeds are code changes.
             "contributed": True}

@@ -431,7 +431,8 @@ def _land_table(rec: dict) -> dict:
     preview = rec["preview"]
     manifest = {**{k: v for k, v in rec["manifest"].items() if k not in ("csv_text", "url")},
                 "file": preview["staged_copy"]}
-    out = tables.add(manifest, review=_review_note(rec, "table"))
+    out = tables.add(manifest, review=_review_note(rec, "table"),
+                     contribution_id=rec["contribution_id"])
     if out["status"] == "declined":
         raise Declined("; ".join(out["failures"]))
     registry.reload_declarative_feeds()
@@ -739,7 +740,7 @@ def _land_feed(rec: dict) -> dict:
         raise Declined(taken)
     note = _review_note(rec, "feed")
     spec = {"dataset": m["dataset"], **_feed_spec(m), "contributed": True,
-            **({"review": note} if note else {})}
+            "contribution_id": rec["contribution_id"], **({"review": note} if note else {})}
     path = get_settings().feeds_conf_dir / f"{m['dataset']}.yml"
     if path.exists():
         raise Declined(f"{path.name} already exists — contributions never overwrite")
@@ -1234,7 +1235,8 @@ def _land_raster(rec: dict) -> dict:
     # the staged file was already converted; what was done to it stays on the landed row
     out = rasters.add(manifest, review=_review_note(rec, "layer"),
                       prepared_before=(preview.get("entry") or {}).get("prepared"),
-                      fetched=(preview.get("entry") or {}).get("fetched"))
+                      fetched=(preview.get("entry") or {}).get("fetched"),
+                      contribution_id=rec["contribution_id"])
     if out["status"] == "declined":
         STAGED_RASTERS[m["layer"]] = {"entry": preview["entry"], "contract": preview["contract"]}
         raise Declined("; ".join(out["failures"]))
@@ -2083,12 +2085,44 @@ def _unland_document(rec: dict) -> dict:
             "raw_archive_kept": out.get("raw_archive_kept", False), "note": removal._HISTORY}
 
 
+def _not_this_landing(name: str, row: dict | None, rec: dict, recorded=None, live=None) -> dict | None:
+    """None when the live `row` under `name` is this contribution's landing; else the
+    take-down's answer, removing nothing. Two take-downs of one contribution can race a
+    resubmission of the freed name: the late one must not remove the NEW layer. A row
+    landed before rows carried their contribution id is matched on what its landing
+    recorded (`recorded`: a sha or a url) against the row's own (`live`), when both are
+    known; with neither it is taken as this one's."""
+    have = (row or {}).get("contribution_id")
+    if have and have != rec["contribution_id"]:
+        why = f"the live row is contribution {have}'s"
+    elif not have and recorded and live and recorded != live:
+        why = "the live row is not what this contribution landed"
+    else:
+        return None
+    return {"removed": False, "already_replaced": True,
+            "note": (f"{name!r} was already taken down and has been replaced since — {why}, "
+                     "not this one's; nothing was removed")}
+
+
 def _unland_feed(rec: dict) -> dict:
     """A landed table or feed: its row leaves conf/feeds and the live registry at once;
     a table's archived copy moves aside, kept for replay."""
+    import yaml
+    from ..config import get_settings
     from ..mcp import registry
     from . import removal
     ds = (rec.get("manifest") or {}).get("dataset")
+    yml = get_settings().feeds_conf_dir / f"{ds}.yml"
+    if ds and yml.is_file():
+        spec = yaml.safe_load(yml.read_text()) or {}
+        fetch = spec.get("fetch") or {}
+        landing = rec.get("landing") or {}
+        recorded, live = ((landing.get("sha256"), fetch.get("sha256")) if rec["kind"] == "table"
+                          else (((rec.get("manifest") or {}).get("fetch") or {}).get("url"),
+                                fetch.get("url")))
+        other = _not_this_landing(ds, spec, rec, recorded, live)
+        if other:
+            return other
     out = removal.remove_feed(ds)
     if out["status"] != "removed":
         if ds not in registry.FEEDS:
@@ -2108,9 +2142,13 @@ def _unland_raster(rec: dict) -> dict:
     from ..graph.geo import tiffs
     from . import removal
     layer = (rec.get("manifest") or {}).get("layer")
-    if layer not in tiffs.catalog(include_staged=False):
+    cat = tiffs.catalog(include_staged=False)
+    if layer not in cat:
         return {"removed": False, "note": f"{layer!r} is no longer in the catalog — nothing of "
                                           "it was being served"}
+    other = _not_this_landing(layer, cat[layer], rec)
+    if other:
+        return other
     out = removal.remove_raster(layer)
     if out["status"] != "removed":
         raise Declined("; ".join(out["failures"]))
@@ -2127,6 +2165,9 @@ def _unland_vector(rec: dict) -> dict:
     if not entry:
         return {"removed": False, "note": f"{layer!r} is no longer a landed vector layer — "
                                           "nothing of it was being served"}
+    other = _not_this_landing(layer, entry, rec)
+    if other:
+        return other
     vectors.unregister(layer)
     out = {"removed": True, "layer": layer, "registry_row": "removed",
            "clips_purged": vectors.purge_clips(layer)}
