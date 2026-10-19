@@ -413,6 +413,19 @@ def _legend_problem(m: dict) -> list[str]:
         legend = _norm_legend(legend)
     except (TypeError, ValueError):
         return ["legend keys must be class numbers, e.g. {1: Mangrove, 2: Non-mangrove}"]
+    colors = m.get("colors")
+    if colors is not None:
+        names = {str(v).strip().lower() for v in legend.values()}
+        codes = {float(k) for k in legend}
+        bad = [k for k in (colors if isinstance(colors, dict) else {})
+               if not (_isnum(k) and float(k) in codes) and str(k).strip().lower() not in names]
+        hexes = [v for v in (colors.values() if isinstance(colors, dict) else [])
+                 if not re.fullmatch(r"#[0-9a-fA-F]{6}", str(v).strip())]
+        if not isinstance(colors, dict) or bad or hexes:
+            return [f"colors must map a legend class (its number or its label) to '#rrggbb' — "
+                    + (f"{bad} name no class of the legend; " if bad else "")
+                    + (f"{hexes} are not '#rrggbb'; " if hexes else "")
+                    + "the legend: " + ", ".join(f"{k}: {v}" for k, v in legend.items())]
     ov = m.get("outside_values")
     if ov is not None and (not isinstance(ov, (list, tuple)) or not all(_isnum(v) for v in ov)):
         return [f"outside_values must be a list of pixel values, e.g. [255] or [] — got {ov!r}"]

@@ -886,7 +886,8 @@ RASTER_FIELDS = {
                       "tables): the one to contribute",
         "authority": "who stands behind the map: national agency, regional hub product, ...",
         "accuracy": "documented accuracy, or 'unstated' (never invent one)",
-        "colors": "optional {class: '#rrggbb'} for the map legend",
+        "colors": "optional {class: '#rrggbb'} for the map legend — the class by its legend "
+                  "number or its label",
         "countries": "which countries the layer (or its stack) covers, e.g. [Costa Rica] — "
                      "the pack names them as where it answers",
         "clip": "REQUIRED when the file is over the size cap (the gate then declines it as a "

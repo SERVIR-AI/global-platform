@@ -266,7 +266,17 @@ def _legend(row):
 
 
 def _colors(row, legend):
-    given = {int(k): str(v) for k, v in (row.get("colors") or {}).items()}
+    """{code: colour}: the row's own colours, keyed by class code or by its label (the
+    form asks for {class: '#rrggbb'}, and a label key crashed every read), else defaults."""
+    by_label = {str(v).strip().lower(): k for k, v in legend.items()}
+    given = {}
+    for k, v in (row.get("colors") or {}).items():
+        try:
+            code = int(k)
+        except (TypeError, ValueError):
+            code = by_label.get(str(k).strip().lower())
+        if code is not None:
+            given[code] = str(v)
     return {k: given.get(k) or DEFAULT_COLORS[i % len(DEFAULT_COLORS)]
             for i, k in enumerate(sorted(legend))}
 

@@ -287,3 +287,24 @@ def test_more_classes_than_symbols_ride_as_positions(tmp_path):
     g = stacks.category_grid(path, [], legend)
     assert isinstance(g["cells"], list) and sorted(g["cells"]) == list(range(1, W * H + 1))
     assert len(set(_draw(tmp_path, {"bounds": g["bounds"], "legend": {}, "hazard_grid": g}))) == W * H
+
+
+def test_colours_given_by_class_name_are_read_and_bad_ones_declined(env):
+    """The form asks {class: '#rrggbb'}; a label key passed the gate and then every read of
+    the stack failed on int('Mangrove')."""
+    a = np.full((H, W), 20, "uint8")
+    a[:, :4] = 10
+    url = env["serve"]("named-2014.tif", a, nodata=255)
+    base = dict(stack="landcover_named", year=2014, stack_title="Named colours (synthetic)",
+                legend={10: "Mangrove", 20: "Other"},
+                declared={"dtype": "uint8", "valid_min": 10, "valid_max": 20, "nodata": 255})
+    bad = _submit("landcover_named_2014", url, **base, colors={"Mangrov": "#0b6e4f", 20: "green"})
+    msg = " ".join(bad.get("problems") or bad.get("failures") or [])
+    assert bad["status"] == "declined" and "['Mangrov'] name no class" in msg and "['green']" in msg
+    ok = _submit("landcover_named_2014", url, **base, colors={"mangrove": "#0b6e4f"})
+    assert ok["status"] == "approved", ok
+    p = assemble.assemble(pack="land-cover", place="Test bay", year="2014", geometry=POLY,
+                          stack="landcover_named")
+    assert p["status"] == "ok", p.get("note")
+    g = store.load_pack(p["pack_id"])["viz"]["hazard_grid"]
+    assert g["legend"][0] == {"code": 10, "label": "Mangrove", "color": "#0b6e4f"}
