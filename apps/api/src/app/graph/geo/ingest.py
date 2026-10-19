@@ -2,12 +2,14 @@
 flood-hazard raster clipped to it. Raises ValueError if the place can't be
 resolved or is too large — it never silently falls back to somewhere else.
 """
+import contextlib
 import contextvars
 import hashlib
 import json
 import math
 import os
 import re
+import threading
 import time
 import unicodedata
 import warnings
@@ -19,7 +21,7 @@ from rasterio.windows import from_bounds
 from shapely.geometry import LineString, Point, box, mapping, shape
 
 from ...config import get_settings
-from . import drive_tifs, tiffs
+from . import drive_tifs, tiffs, vectors
 
 HEADERS = {"User-Agent": "grp-mvp/0.1 (disaster-risk research prototype)"}
 NOMINATIM = "https://nominatim.openstreetmap.org"
@@ -100,6 +102,48 @@ def short_path(path: str) -> str:
     except ValueError:                       # different drive on Windows
         return os.path.basename(path)
     return os.path.basename(path) if relative.startswith("..") else relative
+
+
+@contextlib.contextmanager
+def atomic_path(dest):
+    """A temporary path beside `dest` to write into. When the block ends it is flushed
+    to disk and renamed over `dest` in one step, so a reader sees the old file or the
+    new one, never part of either; if the block raises, `dest` is left as it was. The
+    name is unique per process and thread, so two writers never share it."""
+    tmp = f"{dest}.{os.getpid()}.{threading.get_ident()}.tmp"
+    try:
+        yield tmp
+        fd = os.open(tmp, os.O_RDWR)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(tmp, dest)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+        raise
+
+
+def write_json(path, obj, **kw) -> None:
+    """json.dump `obj` to `path` atomically (see atomic_path). Every cache file the
+    platform rewrites goes through here: two callers relabelling one area wrote its
+    meta.json with plain open(..., "w") at once, the file held both objects, and
+    every later question about that area failed on "Extra data"."""
+    with atomic_path(os.fspath(path)) as tmp:
+        with open(tmp, "w") as f:
+            json.dump(obj, f, **kw)
+
+
+_LOCKS: dict = {}
+_LOCKS_GUARD = threading.Lock()
+
+
+def _lock(path):
+    """One lock per cache path in this process. Callers building the same file take
+    turns, so the second finds the first's file instead of fetching it again."""
+    with _LOCKS_GUARD:
+        return _LOCKS.setdefault(path, threading.RLock())
 
 
 def _slug(place):
@@ -1003,67 +1047,76 @@ def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=N
     adir = os.path.join(cache, slug)
     meta = os.path.join(adir, "meta.json")
 
-    # Resolve the AOI boundary once (or reload it from a prior fetch of this AOI).
+    # A polygon's label is the caller's, per call, and never written back. One gulf
+    # asked about under several names by several people is one cached bundle: writing
+    # each caller's label into its meta.json is how two writes landed in one file, and
+    # it made a caller's label depend on who had asked before.
+    label = None
+    if geometry is not None:
+        label = (name or "drawn area", contributed_how or ("drawn" if not name else "supplied polygon"))
+
+    # Resolve the AOI boundary once (or reload it from a prior fetch of this AOI),
+    # under this area's lock: callers asking about one area at once take turns, and
+    # the second reads what the first built.
     emit({"kind": "cache", "what": "aoi_boundary", "key": slug,
           "dest": short_path(meta), "was_cached": os.path.exists(meta)})
-    cached = json.load(open(meta)) if os.path.exists(meta) else None
-    # A radius box cached before boxes said they were approximate is re-resolved on
-    # its own, so it says so and offers the contributed areas near it; bumping the
-    # resolver for that would re-fetch every cached area's OSM layers.
-    legacy_box = (cached is not None and "approximate" not in cached
-                  and str(cached.get("how") or "").startswith(f"{RADIUS_KM:.0f} km radius box"))
-    if cached is not None and place is not None \
-            and (int(cached.get("resolver", 0)) < RESOLVER_VERSION or legacy_box):
-        # The cache is keyed on the query string, so a resolution made by an older,
-        # wronger resolver is served forever. "Battambang Province" kept returning a
-        # records office long after the geocoder learned not to pick one. Stamp the
-        # resolver and re-resolve anything older; the layer files stay, only the
-        # boundary is recomputed.
-        print(f"   [ingest: re-resolving '{place}' — cached by an older resolver]")
-        # The asset layers go too. They were fetched for the OLD boundary, and a
-        # boundary can now change by two orders of magnitude — "Battambang Province"
-        # moved from a 115 km² town to the 12,159 km² province. Keeping the old
-        # files silently reported a town's 27 schools as the province's.
-        from . import vectors as _vectors
-        for f in ("meta.json", "admin.geojson",
-                  *(f"{ly}.geojson" for ly in ASSET_LAYERS),
-                  *(f"{ly}.geojson" for ly in _vectors.visible())):
+    with _lock(adir):
+        cached = _read_meta(adir)
+        # A radius box cached before boxes said they were approximate is re-resolved on
+        # its own, so it says so and offers the contributed areas near it; bumping the
+        # resolver for that would re-fetch every cached area's OSM layers.
+        legacy_box = (cached is not None and "approximate" not in cached
+                      and str(cached.get("how") or "").startswith(f"{RADIUS_KM:.0f} km radius box"))
+        if cached is not None and place is not None \
+                and (int(cached.get("resolver", 0)) < RESOLVER_VERSION or legacy_box):
+            # The cache is keyed on the query string, so a resolution made by an older,
+            # wronger resolver is served forever. "Battambang Province" kept returning a
+            # records office long after the geocoder learned not to pick one. Stamp the
+            # resolver and re-resolve anything older; the layer files stay, only the
+            # boundary is recomputed.
+            print(f"   [ingest: re-resolving '{place}' — cached by an older resolver]")
+            # The asset layers go too. They were fetched for the OLD boundary, and a
+            # boundary can now change by two orders of magnitude — "Battambang Province"
+            # moved from a 115 km² town to the 12,159 km² province. Keeping the old
+            # files silently reported a town's 27 schools as the province's.
+            for f in ("meta.json", "admin.geojson",
+                      *(f"{ly}.geojson" for ly in ASSET_LAYERS),
+                      *(f"{ly}.geojson" for ly in vectors.visible())):
+                try:
+                    os.remove(os.path.join(adir, f))
+                except OSError:
+                    pass
+            cached = None
+        if cached is not None:
+            info = cached
             try:
-                os.remove(os.path.join(adir, f))
-            except OSError:
-                pass
-        cached = None
-    if cached is not None:
-        info = cached
-        if geometry is not None and name and (info.get("name") != name or
-                                              (contributed_how and info.get("how") != contributed_how)):
-            # The same polygon, now with the caller's label: a district named by
-            # the system that holds its boundary must not be cited as "drawn area".
-            info["name"], info["how"] = name, (contributed_how or "supplied polygon")
-            json.dump(info, open(meta, "w"), indent=2)
-        boundary = shape(json.load(open(os.path.join(adir, "admin.geojson")))["features"][0]["geometry"])
-    else:
-        if geometry is not None:
-            km2 = _est_km2(boundary)
-            if km2 > cap:
-                raise ValueError(f"{'the contributed area' if contributed_how else 'drawn area'} "
-                                 f"is too large (~{km2:.0f} km², over the {cap:.0f} km² cap)"
-                                 + ("" if contributed_how else " — draw a smaller box"))
-            name, how = (name or "drawn area"), (contributed_how or ("drawn" if not name else "supplied polygon"))
-            approximate = {}
-        else:
-            r = _resolve(place, cap, contributed)
-            km2, name, boundary, how = r["km2"], r["name"], r["geometry"], r["how"]
-            # A box is not the place: said as a field every pack's reader can test,
-            # with the contributed areas near it that would give a real boundary.
-            approximate = ({"approximate": True, "nearby_contributed": r["nearby"]}
-                           if r["approximate"] else {})
-        print(f"   [ingest: resolving '{name}' (~{km2:.0f} km²)…]")
-        os.makedirs(adir, exist_ok=True)
-        _write(adir, "admin", [_feature(boundary, {"name": name})])
-        info = {"name": name, "area_km2": round(km2), "how": how, "counts": {},
-                "resolver": RESOLVER_VERSION, **approximate}
-        json.dump(info, open(meta, "w"), indent=2)
+                with open(os.path.join(adir, "admin.geojson")) as f:
+                    boundary = shape(json.load(f)["features"][0]["geometry"])
+            except Exception as exc:                 # missing, garbled or not a shape
+                _drop_bundle(adir, f"its boundary file is unreadable ({exc})")
+                cached = None
+        if cached is None:
+            if geometry is not None:
+                km2 = _est_km2(boundary)
+                if km2 > cap:
+                    raise ValueError(f"{'the contributed area' if contributed_how else 'drawn area'} "
+                                     f"is too large (~{km2:.0f} km², over the {cap:.0f} km² cap)"
+                                     + ("" if contributed_how else " — draw a smaller box"))
+                name, how = label
+                approximate = {}
+            else:
+                r = _resolve(place, cap, contributed)
+                km2, name, boundary, how = r["km2"], r["name"], r["geometry"], r["how"]
+                # A box is not the place: said as a field every pack's reader can test,
+                # with the contributed areas near it that would give a real boundary.
+                approximate = ({"approximate": True, "nearby_contributed": r["nearby"]}
+                               if r["approximate"] else {})
+            print(f"   [ingest: resolving '{name}' (~{km2:.0f} km²)…]")
+            os.makedirs(adir, exist_ok=True)
+            _write(adir, "admin", [_feature(boundary, {"name": name})])
+            info = {"name": name, "area_km2": round(km2), "how": how, "counts": {},
+                    "resolver": RESOLVER_VERSION, **approximate}
+            write_json(meta, info, indent=2)
 
     # Over a large area the heavy OSM layers are declined rather than attempted.
     # Saying so is the point: a count that was never fetched must never read as a
@@ -1073,36 +1126,40 @@ def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=N
     # fetched must never read as a count of zero. (Tiling them works and takes
     # ~43 minutes for a province — parked on uat/local-hardening as prefetch work.)
     area_km2 = float(info.get("area_km2") or 0)
+    declined_rec = None
     if area_km2 > ASSET_CAP_KM2:
         declined = [ly for ly in needed if ly not in LIGHT_ASSET_LAYERS]
         needed = tuple(ly for ly in needed if ly in LIGHT_ASSET_LAYERS)
         if declined:
-            info["assets_declined"] = {
+            declined_rec = {
                 "layers": declined, "area_km2": round(area_km2),
                 "reason": (f"area is ~{area_km2:.0f} km², over the "
                            f"{ASSET_CAP_KM2:.0f} km² asset budget — "
                            f"{', '.join(declined)} were NOT fetched, so they must "
                            "not be read as zero"),
             }
-            json.dump(info, open(meta, "w"), indent=2)
+            if info.get("assets_declined") != declined_rec:
+                info = _note(adir, info, assets_declined=declined_rec)
 
-    # Fetch only the requested asset layers that aren't already cached.
+    # Fetch only the requested asset layers that aren't already cached. One lock per
+    # layer file: a second caller wanting the same layer waits for the first's pull
+    # and reads it (its count already in meta.json), instead of making the same
+    # Overpass query alongside it.
     minx, miny, maxx, maxy = boundary.bounds
     bbox = f"{miny - BUFFER_DEG},{minx - BUFFER_DEG},{maxy + BUFFER_DEG},{maxx + BUFFER_DEG}"
-    fetched = False
     for layer in needed:
         if layer not in ASSET_LAYERS:
             continue
         dest = os.path.join(adir, f"{layer}.geojson")
-        was_cached = os.path.exists(dest)
-        emit({"kind": "cache", "what": "osm_layer", "layer": layer,
-              "dest": short_path(dest), "was_cached": was_cached})
-        if was_cached:
-            continue
-        features = _fetch_layer(layer, bbox, boundary)
-        _write(adir, layer, features)
-        info.setdefault("counts", {})[layer] = len(features)
-        fetched = True
+        with _lock(dest):
+            was_cached = os.path.exists(dest)
+            emit({"kind": "cache", "what": "osm_layer", "layer": layer,
+                  "dest": short_path(dest), "was_cached": was_cached})
+            if was_cached:
+                continue
+            features = _fetch_layer(layer, bbox, boundary)
+            _write(adir, layer, features)
+            info = _note(adir, info, {layer: len(features)})
     # Contributed point layers (a hub's evacuation centres, say) are clipped from
     # their master file into this AOI beside the OSM layers, under their own name,
     # so the same exposure count reaches them. Never declined by area: a hub's own
@@ -1111,8 +1168,7 @@ def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=N
     # clip reads as "0 of 0" downstream, and a Thai list was being cited as a
     # clean zero in every Cambodian district. Decided per call from the entry's
     # observed bbox (never persisted, so a re-contributed layer is re-judged).
-    from . import vectors as _vectors
-    visible = _vectors.visible()
+    visible = vectors.visible()
     # The area's country, asked once (reverse geocode of the centroid) and kept in
     # meta.json. Read by every source that declares its countries — a hub's point
     # layer, a risk-pack feed, a table — so a Thai source is never cited into a
@@ -1122,30 +1178,80 @@ def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=N
         _COUNTRY_TRIED[adir] = time.time()
         c = _reverse_country(boundary.centroid.x, boundary.centroid.y)
         if c:
-            info["country"] = c
-            fetched = True
+            info = _note(adir, info, country=c)
     not_applicable = {}
     for layer, entry in visible.items():
         dest = os.path.join(adir, f"{layer}.geojson")
-        na = _vectors.not_applicable(entry, boundary, info.get("country"))
+        na = vectors.not_applicable(entry, boundary, info.get("country"))
         if na:
             not_applicable[layer] = na
             emit({"kind": "cache", "what": "contributed_layer", "layer": layer,
                   "not_applicable": na["reason"]})
             continue
-        emit({"kind": "cache", "what": "contributed_layer", "layer": layer,
-              "dest": short_path(dest), "was_cached": os.path.exists(dest)})
-        if os.path.exists(dest):
-            continue
-        n_pts = _vectors.clip_into(adir, boundary, layer, entry)
-        info.setdefault("counts", {})[layer] = n_pts
-        fetched = True
-    if fetched:
-        json.dump(info, open(meta, "w"), indent=2)
+        with _lock(dest):
+            emit({"kind": "cache", "what": "contributed_layer", "layer": layer,
+                  "dest": short_path(dest), "was_cached": os.path.exists(dest)})
+            if os.path.exists(dest):
+                continue
+            info = _note(adir, info, {layer: vectors.clip_into(adir, boundary, layer, entry)})
+    # As it stands now, with the counts other callers added while this one ran; the
+    # declined layers and a polygon's label are this call's own.
+    info = _read_meta(adir, quiet=True) or info
+    if declined_rec:
+        info = {**info, "assets_declined": declined_rec}
+    if label:
+        info = {**info, "name": label[0], "how": label[1]}
     bundle = _bundle(adir, info, skip=not_applicable)
     if not_applicable:
         bundle["vectors_not_applicable"] = not_applicable
     return bundle
+
+
+def _note(adir, info, counts=None, **fields):
+    """Merge what one call learned about an area (layer counts, its country) into its
+    meta.json as that stands on disk now, under the area's lock; returns the merged
+    record. Two callers fetching different layers of one area each keep the other's
+    count, where writing back a copy read earlier dropped it."""
+    with _lock(adir):
+        disk = _read_meta(adir, quiet=True) or info
+        merged = {**disk, **fields, "counts": {**(disk.get("counts") or {}), **(counts or {})}}
+        write_json(os.path.join(adir, "meta.json"), merged, indent=2)
+        return merged
+
+
+def _read_meta(adir, quiet=False):
+    """A cached area's meta.json, or None when there is none. One that does not parse
+    (a write cut short, or two writes interleaved before writes were atomic) drops
+    the whole area, said in the log, so it is built again: a garbled file used to fail
+    every later question about the same polygon, and it never recovered. `quiet`
+    reads without dropping anything — the caller falls back to what it holds."""
+    meta = os.path.join(adir, "meta.json")
+    try:
+        with open(meta) as f:
+            info = json.load(f)
+        if not isinstance(info, dict):
+            raise ValueError(f"it holds a {type(info).__name__}, not an object")
+        return info
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        if not quiet:
+            _drop_bundle(adir, f"{short_path(meta)} is unreadable ({exc})")
+        return None
+
+
+def _drop_bundle(adir, why):
+    """Remove every file of one cached area, so it is built afresh. Each of them was
+    made for the boundary meta.json describes; with that unreadable, none can be
+    trusted to belong to it."""
+    print(f"   [ingest: {why} — rebuilding {os.path.basename(adir)}]")
+    emit({"kind": "cache", "what": "aoi_rebuilt", "key": os.path.basename(adir), "reason": why})
+    for f in os.listdir(adir):
+        p = os.path.join(adir, f)
+        if os.path.isfile(p):
+            with contextlib.suppress(OSError):
+                os.remove(p)
+
 
 def _osm_name(tags: dict) -> str:
     """The name OSM gives a point, under whichever tag it carries it. 8 of 12
@@ -1230,51 +1336,68 @@ def hazard_clip(aoi, layer, max_pixels=None):
     can SAY what it read. Without a budget the window is read at full resolution."""
     adir = os.path.dirname(aoi["admin"])
     clip = os.path.join(adir, f"{layer}.tif")
-    was_cached = os.path.exists(clip)
-    emit({"kind": "cache", "what": "hazard_clip", "layer": layer,
-          "dest": short_path(clip), "was_cached": was_cached})
-    if not was_cached:
-        boundary = shape(json.load(open(aoi["admin"]))["features"][0]["geometry"])
-        minx, miny, maxx, maxy = boundary.bounds
-        with rasterio.open(source_raster(layer)) as src:
-            win = from_bounds(minx - BUFFER_DEG, miny - BUFFER_DEG,
-                              maxx + BUFFER_DEG, maxy + BUFFER_DEG, src.transform)
-            # INTERSECT with the dataset before reading. read() silently crops the
-            # array to the raster's extent, but window_transform(win) describes the
-            # UNCROPPED request — an AOI straddling the extent got a clip whose
-            # georeference was shifted by the out-of-extent margin, and every
-            # severity lookup after that sampled the wrong pixel: confidently
-            # wrong exposure numbers with no error. Found by adversarial review,
-            # reproduced empirically before fixing.
-            full = rasterio.windows.Window(0, 0, src.width, src.height)
+    # Two callers clipping one layer into one area take turns, and the second reads
+    # the first's clip. A cached clip that will not open (cut short before clips were
+    # written whole) is clipped again rather than served.
+    with _lock(clip):
+        was_cached = os.path.exists(clip)
+        if was_cached:
             try:
-                win = win.intersection(full)
-            except rasterio.errors.WindowError:
-                win = None
-            if win is None or win.width <= 0 or win.height <= 0:
-                raise ValueError(
-                    f"{aoi.get('name', 'this area')} lies outside {layer}'s coverage "
-                    "— the catalog raster does not extend there, so exposure cannot "
-                    "be computed against it")
-            level = 1
-            n_px = float(win.width) * float(win.height)
-            if max_pixels and n_px > float(max_pixels):
-                level = int(2 ** math.ceil(math.log2(math.sqrt(n_px / float(max_pixels)))))
-            transform = src.window_transform(win)
-            if level > 1:
-                out_shape = (max(1, math.ceil(win.height / level)),
-                             max(1, math.ceil(win.width / level)))
-                arr = src.read(1, window=win, out_shape=out_shape)   # nearest: classes never blend
-                transform = rasterio.Affine(transform.a * level, transform.b, transform.c,
-                                            transform.d, transform.e * level, transform.f)
-            else:
-                arr = src.read(1, window=win)
-            prof = src.profile | {"height": arr.shape[0], "width": arr.shape[1],
-                                  "transform": transform, "compress": "lzw"}
-            with rasterio.open(clip, "w", **prof) as dst:
+                rasterio.open(clip).close()
+            except rasterio.errors.RasterioIOError as exc:
+                print(f"   [ingest: {short_path(clip)} is unreadable ({exc}) — clipping it again]")
+                was_cached = False
+        emit({"kind": "cache", "what": "hazard_clip", "layer": layer,
+              "dest": short_path(clip), "was_cached": was_cached})
+        if not was_cached:
+            _clip_raster(aoi, layer, clip, max_pixels)
+    return clip
+
+
+def _clip_raster(aoi, layer, clip, max_pixels):
+    """Write `layer`'s window over the AOI to `clip`, whole or not at all — see hazard_clip."""
+    with open(aoi["admin"]) as f:
+        boundary = shape(json.load(f)["features"][0]["geometry"])
+    minx, miny, maxx, maxy = boundary.bounds
+    with rasterio.open(source_raster(layer)) as src:
+        win = from_bounds(minx - BUFFER_DEG, miny - BUFFER_DEG,
+                          maxx + BUFFER_DEG, maxy + BUFFER_DEG, src.transform)
+        # INTERSECT with the dataset before reading. read() silently crops the
+        # array to the raster's extent, but window_transform(win) describes the
+        # UNCROPPED request — an AOI straddling the extent got a clip whose
+        # georeference was shifted by the out-of-extent margin, and every
+        # severity lookup after that sampled the wrong pixel: confidently
+        # wrong exposure numbers with no error. Found by adversarial review,
+        # reproduced empirically before fixing.
+        full = rasterio.windows.Window(0, 0, src.width, src.height)
+        try:
+            win = win.intersection(full)
+        except rasterio.errors.WindowError:
+            win = None
+        if win is None or win.width <= 0 or win.height <= 0:
+            raise ValueError(
+                f"{aoi.get('name', 'this area')} lies outside {layer}'s coverage "
+                "— the catalog raster does not extend there, so exposure cannot "
+                "be computed against it")
+        level = 1
+        n_px = float(win.width) * float(win.height)
+        if max_pixels and n_px > float(max_pixels):
+            level = int(2 ** math.ceil(math.log2(math.sqrt(n_px / float(max_pixels)))))
+        transform = src.window_transform(win)
+        if level > 1:
+            out_shape = (max(1, math.ceil(win.height / level)),
+                         max(1, math.ceil(win.width / level)))
+            arr = src.read(1, window=win, out_shape=out_shape)   # nearest: classes never blend
+            transform = rasterio.Affine(transform.a * level, transform.b, transform.c,
+                                        transform.d, transform.e * level, transform.f)
+        else:
+            arr = src.read(1, window=win)
+        prof = src.profile | {"height": arr.shape[0], "width": arr.shape[1],
+                              "transform": transform, "compress": "lzw"}
+        with atomic_path(clip) as tmp:
+            with rasterio.open(tmp, "w", **prof) as dst:
                 dst.write(arr, 1)
                 dst.update_tags(overview_level=level)
-    return clip
 
 
 def _to_polygon(geometry):
@@ -1290,5 +1413,5 @@ def _feature(geom, props):
 
 
 def _write(adir, layer, features):
-    json.dump({"type": "FeatureCollection", "features": features},
-              open(os.path.join(adir, f"{layer}.geojson"), "w"))
+    write_json(os.path.join(adir, f"{layer}.geojson"),
+               {"type": "FeatureCollection", "features": features})

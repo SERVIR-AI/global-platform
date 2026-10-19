@@ -72,7 +72,8 @@ def landed() -> dict:
 
 
 def _save(reg: dict) -> None:
-    json.dump(reg, open(_dir() / "registry.json", "w"), indent=2)
+    from .ingest import write_json
+    write_json(_dir() / "registry.json", reg, indent=2)
 
 
 def register(layer: str, entry: dict) -> None:
@@ -270,8 +271,8 @@ def clip_into(adir: str, boundary, layer: str, entry: dict) -> int:
         if part.is_empty:
             continue
         keep.append({"type": "Feature", "geometry": mapping(part), "properties": lay["props"][i]})
-    json.dump({"type": "FeatureCollection", "features": keep},
-              open(os.path.join(adir, f"{layer}.geojson"), "w"))
+    from .ingest import write_json
+    write_json(os.path.join(adir, f"{layer}.geojson"), {"type": "FeatureCollection", "features": keep})
     return len(keep)
 
 
