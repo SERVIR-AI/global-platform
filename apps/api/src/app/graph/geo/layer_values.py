@@ -86,6 +86,16 @@ def _role_rule(contract: dict) -> dict:
     return dict(schema.roles().get(str(contract.get("role") or "")) or {})
 
 
+def namespace_fields() -> dict:
+    """{field: what the form says of it} for every field a raster namespace lets a layer
+    declare beyond the common ones (schema `namespaces.<role>.fields`)."""
+    from . import schema
+    out = {}
+    for rule in schema.namespaces().values():
+        out.update({str(k): str(v) for k, v in (rule.get("fields") or {}).items()})
+    return out
+
+
 def _isnan(v) -> bool:
     try:
         return math.isnan(float(v))
@@ -97,13 +107,18 @@ def _no_value(contract: dict, file_nodata, row: dict) -> tuple[list, str]:
     """Every value that means 'no value' here, and why — all of them, never the first
     rule that matches: a stack's contract says 15 while its older years mark the
     outside of the footprint 0, and both are in the row's `outside_values`."""
+    from .schema import same_nodata
     vals, why = [], []
 
     def add(v, reason):
         if v is None or _isnan(v):
             return
-        v = float(v)
-        if v not in vals:
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return
+        # -3.4e38 declared and the file's float32 -3.3999999521443642e+38 are one value
+        if not any(same_nodata(v, have, 0.0) for have in vals):
             vals.append(v)
             why.append(reason)
     add(contract.get("nodata"), "declared in the contract")
@@ -140,6 +155,19 @@ def _no_value(contract: dict, file_nodata, row: dict) -> tuple[list, str]:
     if _isnan(contract.get("nodata")) or _isnan(file_nodata):
         rule += "; NaN marks no value"
     return vals, rule
+
+
+def _no_value_mask(stored, nod_vals, dtype) -> np.ndarray:
+    """Cells of `stored` (float64) holding a no-value. A float32 file holds each value at
+    float32 precision, so a declared -3.4e38 is matched as the -3.3999999521443642e+38 the
+    file stores."""
+    if not nod_vals:
+        return np.zeros(stored.shape, dtype=bool)
+    nv = np.array(nod_vals, dtype="float64")
+    if np.dtype(dtype) == np.float32:
+        with np.errstate(over="ignore", invalid="ignore"):
+            nv = np.concatenate([nv, nv.astype("float32").astype("float64")])
+    return np.isin(stored, nv)
 
 
 def _cell_km2(dx: float, dy: float, lat: float, geographic: bool) -> float:
@@ -283,8 +311,7 @@ def _class_counts_full(path, area, win, nod_vals, geographic: bool, legend: dict
             t = src.window_transform(w)
             ok = geometry_mask([area.__geo_interface__], out_shape=blk.shape, transform=t,
                                invert=True) & np.isfinite(blk)
-            if nod_vals:
-                ok &= ~np.isin(blk, np.array(nod_vals, dtype="float64"))
+            ok &= ~_no_value_mask(blk, nod_vals, src.dtypes[0])
             if not ok.any():
                 continue
             wk = np.broadcast_to(_row_km2(t, blk.shape[0], geographic)[:, None], blk.shape)[ok]
@@ -527,7 +554,10 @@ def read(layer: str, boundary, *, side: int | None = None,
     read_budget = read_budget or READ_BUDGET
     row = registered().get(layer, {})
     contract = schema.schema_for(layer) or {}
-    rule = _role_rule(contract)
+    # a row with no declared role takes its namespace's (a change_* map's codes are names)
+    role = contract.get("role") or row.get("role") or schema.role_for(layer)
+    roled = {**contract, "role": role} if role else contract
+    rule = _role_rule(roled)
     nominal = str(rule.get("scale", "")).strip().lower() == "nominal"
     path = ingest.source_raster(layer)
     # OVERVIEW_LEVEL=NONE: a budgeted read decimates the full-resolution file. A file's
@@ -584,15 +614,13 @@ def read(layer: str, boundary, *, side: int | None = None,
     if not inside.any():
         raise ValueError(f"{layer} does not extend over this area")
     beyond = max(0, in_total - int(inside.sum()))
-    nod_vals, nod_rule = _no_value(contract, file_nodata, row)
+    nod_vals, nod_rule = _no_value(roled, file_nodata, row)
     stored = arr.astype("float64")
     finite = np.isfinite(stored)
     n_nan = int((inside & ~finite).sum())
     if n_nan:
         nod_rule += f"; {n_nan} cell(s) here are NaN"
-    has_value = finite
-    if nod_vals:
-        has_value = finite & ~np.isin(stored, np.array(nod_vals, dtype="float64"))
+    has_value = finite & ~_no_value_mask(stored, nod_vals, dtype)
     valid = inside & has_value
     # A file storing scaled integers (biomass x10 in int16) is read in its units; the
     # contract's range stays a range of what is stored.
@@ -605,7 +633,7 @@ def read(layer: str, boundary, *, side: int | None = None,
     cell_km2 = _cell_km2(transform.a, transform.e, lat, geographic)
     legend = {str(k): val for k, val in sorted(tiffs.legend(layer).items())}
     units = contract.get("units") or row.get("units") or row.get("unit")
-    kind = _kind(contract, legend, nominal)
+    kind = _kind(roled, legend, nominal)
     classed = kind == "classes" and integer
     w_all = np.broadcast_to(_row_km2(transform, arr.shape[0], geographic)[:, None], arr.shape)
 
@@ -702,7 +730,7 @@ def read(layer: str, boundary, *, side: int | None = None,
         # what the summary was computed as: a classes role holding fractions is an amount
         "values": "classes" if classed else ("amount" if kind == "classes" else kind),
         "scale": "nominal" if nominal else None,
-        "role": contract.get("role") or row.get("role"),
+        "role": role,
         "source": row.get("source"), "licence": row.get("license"),
         "vintage": row.get("vintage"),
         "validation": validation, "validation_note": vnote,
@@ -733,6 +761,11 @@ def read(layer: str, boundary, *, side: int | None = None,
     for k in ("usage_notes", "review", "staged_by", "contribution_id", "description",
               "granularity", "colors", "prepared"):
         if row.get(k):
+            rec[k] = row[k]
+    # what the layer's namespace lets it declare (a change map's from_year, to_year and
+    # the stack it compares) rides every read, from the schema's `fields`, never a list here
+    for k in namespace_fields():
+        if row.get(k) not in (None, ""):
             rec[k] = row[k]
     if row.get("amended"):
         last = row["amended"][-1]
@@ -977,6 +1010,13 @@ def citation_text(layer: str, rec: dict, area_name: str) -> str:
         bits.append(f"{s['cells_beyond_layer']:,} cells of the area lie beyond the layer's extent.")
     if leg:
         bits.append("Legend: " + "; ".join(f"{k}={v}" for k, v in leg.items()) + ".")
+    if rec.get("from_year") is not None or rec.get("compares"):
+        bits.append("A change map"
+                    + (f" from {rec['from_year']} to {rec.get('to_year')}"
+                       if rec.get("from_year") is not None else "")
+                    + (f", comparing the maps of {rec['compares']}" if rec.get("compares") else "")
+                    + ": each class names a change between the years, so its areas are of "
+                    "change classes, not of land cover in either year.")
     nod = rec["nodata"]
     bits.append(f"Unit: {rec['unit_note']}. No-data: "
                 + (", ".join(str(v) for v in nod.get("values") or []) or "none")
@@ -1025,11 +1065,10 @@ def granularity(path: str, contract: dict | None = None, windows: int = 4,
             W, H = src.width, src.height
             s = min(side, W, H)
 
+            dtype = src.dtypes[0]
+
             def valid(a):
-                ok = np.isfinite(a)
-                if nod_vals:
-                    ok &= ~np.isin(a, np.array(nod_vals, dtype="float64"))
-                return ok
+                return np.isfinite(a) & ~_no_value_mask(a, nod_vals, dtype)
 
             oh, ow = min(256, H), min(256, W)
             ov = src.read(1, out_shape=(oh, ow)).astype("float64")

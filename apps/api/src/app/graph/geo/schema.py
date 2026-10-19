@@ -5,6 +5,8 @@ declared here — because filenames and the source sheet lie about units and sca
 file the sheet called 'metres' held millimetres; a '1-5' layer was actually 0-4). The
 schema is the ground truth a file is asserted against before any op uses it.
 """
+import math
+
 import yaml
 
 from ...config import get_settings
@@ -72,6 +74,14 @@ def roles():
     return out
 
 
+def role_for(name):
+    """The role a layer's name gives it — the namespace whose prefix it carries — or None."""
+    for role, rule in namespaces().items():
+        if rule.get("prefix") and str(name or "").startswith(str(rule["prefix"])):
+            return role
+    return None
+
+
 def namespaces():
     """{role: rule} for the namespaces a contributed raster may take (`namespaces` in
     conf/raster_schema.yml): its prefix, what its cells hold, whether it needs a legend,
@@ -90,6 +100,28 @@ def _shipped():
             return yaml.safe_load(f) or {}
     except FileNotFoundError:
         return {}
+
+
+def same_nodata(declared, observed, tol=0.0001) -> bool:
+    """Is a declared nodata the file's? Equal within `tol`, or equal once both are
+    float32 — the file stores the fill -3.4e38 as -3.3999999521443642e+38, and a
+    contributor declaring -3.4e38 means that very value. NaN matches NaN."""
+    if declared is None or observed is None:
+        return declared is None and observed is None
+    try:
+        d, o = float(declared), float(observed)
+    except (TypeError, ValueError):
+        return str(declared).strip() == str(observed).strip()
+    if math.isnan(d) or math.isnan(o):
+        return math.isnan(d) and math.isnan(o)
+    if abs(d - o) <= tol:
+        return True
+    import numpy as np
+    big = float(np.finfo(np.float32).max)
+    if max(abs(d), abs(o)) > big * (1 + 1e-7):     # beyond float32 both would read as inf
+        return False
+    with np.errstate(over="ignore"):
+        return bool(np.float32(d) == np.float32(o))
 
 
 def values_kind(role):

@@ -3,9 +3,11 @@
 # scale (a file the sheet calls "metres" actually held millimetres; a "1-5" layer was
 # really 0-4). The schema is the ground truth a file must satisfy before any op uses it.
 #
-# role: hazard | vulnerability_reclass | raw | risk | measure | population | landcover
+# role: hazard | vulnerability_reclass | raw | risk | measure | population | landcover | change
 # Checked fields (a field is only checked if declared): dtype (exact), valid_min/valid_max
-# (sampled range must fall within, with float_tol), nodata, crs (epsg), pixel_size_deg.
+# (sampled range must fall within, with float_tol), nodata (at the file's float32 precision
+# when it is a float: -3.4e38 is the float32 fill -3.3999999521443642e+38), crs (epsg),
+# pixel_size_deg.
 # The range is of the values AS STORED: a layer's outside values and its nodata are not
 # in it. units/scale are carried for provenance and shown in the report; the range check
 # is what actually catches a wrong-units declaration. scale_factor/offset (a measure
@@ -32,6 +34,7 @@ roles:
   vulnerability:         {zero: nodata, values: classes}   # 0 = no class (contributed vulnerability_*)
   risk:                  {zero: nodata, values: classes}   # 0 = not computed
   landcover:             {zero: nodata, scale: nominal, values: classes}   # 0 = outside the footprint
+  change:                {zero: nodata, scale: nominal, values: classes}   # codes name from->to transitions
   population:            {zero: value, values: count}      # 0 = nobody lives there
   measure:               {zero: value, values: amount}     # 0 m, 0 Mg/ha: a reading
   raw:                   {zero: value, values: amount}
@@ -42,8 +45,12 @@ roles:
 # another CRS is put on EPSG:4326 at ingest (`regrid`): nearest for classes (a class never
 # blends), bilinear for an amount (a surface is interpolated), refused for a count (any
 # re-gridding moves counts between cells). `classes: [1, 5]` is the class contract every
-# hazard/risk reader indexes by; `stack: true` is one year of a land-cover stack. A new kind
-# of raster is a row here, not code.
+# hazard/risk reader indexes by; `stack: true` is one year of a land-cover stack.
+# `unique_labels: true`: classes compared by code (change between years, a change map's
+# from->to) — a legend giving one label to two codes is declined. `fields`: what else a
+# layer of the namespace may declare, and what the form says of each; the gate checks
+# them, the landed row keeps them, every read of the layer states them. A new kind of
+# raster is a row here, not code.
 namespaces:
   hazard:        {prefix: hazard_, values: classes, classes: [1, 5], legend: true, regrid: nearest,
                   about: "a hazard map in classes 1-5"}
@@ -55,7 +62,14 @@ namespaces:
   population:    {prefix: population_, values: count, legend: false, regrid: refuse,
                   about: "a COUNT grid: people per pixel, float; the pack sums it inside each hazard class to report people exposed — no legend"}
   landcover:     {prefix: landcover_, values: classes, legend: true, regrid: nearest, stack: true,
+                  unique_labels: true,
                   about: "one year of a land-cover or extent map, named landcover_<stack>_<year>, any class codes with a legend"}
+  change:        {prefix: change_, values: classes, legend: true, regrid: nearest,
+                  unique_labels: true,
+                  fields: {from_year: "for a change_* map: the first year it compares, e.g. 1985",
+                           to_year: "for a change_* map: the last year it compares, e.g. 2014",
+                           compares: "for a change_* map: the land-cover stack whose maps it compares (landcover_<name>), when there is one"},
+                  about: "a CHANGE map between two years, any class codes with a legend naming each from->to class (persistence, gain, loss); never a year of a stack; from_year, to_year and compares say what it compares; read with assemble_pack(layers=[...]) as km² per change class and per class of the land-cover map beside it"}
   measure:       {prefix: measure_, values: amount, legend: false, regrid: bilinear,
                   about: "a continuous value with units — elevation (a DEM), biomass, canopy height, soil carbon, a climate grid; declared.units is required, no legend; read with assemble_pack(layers=[...]) as mean, percentiles and, for a per-area density, a total"}
 

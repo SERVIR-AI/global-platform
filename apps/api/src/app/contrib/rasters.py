@@ -273,7 +273,85 @@ def _legend_problem(m: dict) -> list[str]:
                          "value is either a class or outside the map, never both: declare "
                          f"outside_values as the values that mark no data (e.g. {eg}), or [] "
                          "when every cell is mapped")
+    if namespace(str(m.get("layer") or "")).get("unique_labels"):
+        # Change compares codes: {1: Mangrove, 10: Mangrove} landed, and 1956->2014 then
+        # said every cell changed.
+        from ..graph.geo import stacks
+        dup = stacks.duplicate_labels_text(legend)
+        if dup:
+            fails.append(dup)
     return fails
+
+
+def _year_num(v):
+    """A year as an int, or None when `v` is not a whole number."""
+    if isinstance(v, bool) or not _isnum(v) or not float(v).is_integer():
+        return None
+    return int(float(v))
+
+
+def _field_problems(m: dict, rule: dict) -> list[str]:
+    """The fields a namespace lets a layer declare (schema `namespaces.<role>.fields`):
+    another namespace's field is refused, never dropped; from_year/to_year go together,
+    in order; `compares` names a registered stack holding those years. A layer that is
+    not a year of a stack takes no stack or year."""
+    layer, prefix = str(m.get("layer") or ""), rule.get("prefix", "")
+    mine = rule.get("fields") or {}
+    fails = []
+    for p, r in namespaces().items():
+        for k in (r.get("fields") or {}):
+            if k not in mine and m.get(k) not in (None, ""):
+                fails.append(f"{k} is a field of a {p}<name> layer; {layer!r} is not one — drop "
+                             f"{k}, or name the layer {p}<name> if that is what it is")
+    if rule and not rule.get("stack"):
+        given = [k for k in ("stack", "year") if m.get(k) not in (None, "")]
+        stack_ns = [p for p, r in namespaces().items() if r.get("stack")]
+        if given:
+            fails.append(f"{' and '.join(given)} place one year of a land-cover stack "
+                         f"({', '.join(f'{p}<name>' for p in stack_ns) or 'a stack namespace'}); "
+                         f"a {prefix}* layer is not one — drop {' and '.join(given)}"
+                         + (f" and say what it covers with {', '.join(mine)}" if mine else
+                            "; the year a layer describes goes in its title or description"))
+    fy, ty = m.get("from_year"), m.get("to_year")
+    if "from_year" in mine or "to_year" in mine:
+        if (fy in (None, "")) != (ty in (None, "")):
+            fails.append("from_year and to_year go together: give both years the map compares "
+                         f"(got from_year {fy!r}, to_year {ty!r}), or neither")
+        elif fy not in (None, ""):
+            a, b = _year_num(fy), _year_num(ty)
+            if a is None or b is None:
+                fails.append(f"from_year and to_year must be years, e.g. 1985 and 2014 — got "
+                             f"{fy!r} and {ty!r}")
+            elif a >= b:
+                fails.append(f"from_year {a} must come before to_year {b}")
+    sid = m.get("compares")
+    if "compares" in mine and sid not in (None, ""):
+        from ..graph.geo import tiffs
+        stacks_now = {k: v for k, v in tiffs.catalog().items() if v.get("kind") == "stack"}
+        st = stacks_now.get(str(sid))
+        if st is None:
+            fails.append(f"compares names {sid!r}, which is not a registered land-cover stack — "
+                         "registered: " + (", ".join(sorted(stacks_now)) or "none")
+                         + "; leave compares out when the maps it compares are not on the platform")
+        elif _year_num(fy) is not None and _year_num(ty) is not None:
+            have = [int(y) for y in st.get("years") or []]
+            off = [y for y in (_year_num(fy), _year_num(ty)) if y not in have]
+            if off:
+                fails.append(f"{sid} has no {' or '.join(map(str, off))} map (its years: "
+                             f"{', '.join(map(str, sorted(have))) or 'none'}) — name the stack "
+                             "whose maps it compares, or leave compares out")
+    return fails
+
+
+def declared_fields(m: dict) -> dict:
+    """The namespace fields a manifest declares, as the staged and landed rows keep them
+    (years as integers) — every read of the layer states them."""
+    out = {}
+    for k in namespace(str(m.get("layer") or "")).get("fields") or {}:
+        v = m.get(k)
+        if v not in (None, ""):
+            out[k] = _year_num(v) if k.endswith("_year") and _year_num(v) is not None else v
+    return out
 
 
 def stack_legend_problem(m: dict, cat: dict | None = None) -> str | None:
@@ -404,6 +482,7 @@ def validate_manifest(m: dict) -> list[str]:
                          + (f", or contribute the continuous values themselves as {amounts} "
                             "with their units" if amounts else ""))
     fails += _legend_problem(m)
+    fails += _field_problems(m, rule)
     if rule.get("stack") and m.get("stack") and isinstance(m.get("legend"), dict):
         clash = stack_legend_problem(m)
         if clash:
