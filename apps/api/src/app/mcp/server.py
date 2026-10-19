@@ -546,10 +546,15 @@ def contribute_status(contribution_id: str | None = None, action: str = "show") 
     contribution — its preview is removed; history it already appears in stays.
 
     action="audit": every APPROVED contribution and whether the platform is
-    actually serving it. Open to anyone, because an approved contribution is
-    public and "is what we approved being used?" is a question a hub lead has to
-    be able to ask. An approval whose landing never happened changes no answer and
-    is otherwise invisible.
+    actually serving it — `serving`, `inert` (approved, not served) or
+    `unverifiable` (not checked, with `why`); `note` counts each. Open to anyone,
+    because an approved contribution is public and "is what we approved being
+    used?" is a question a hub lead has to be able to ask. An approval whose
+    landing never happened changes no answer and is otherwise invisible.
+
+    A contribution held for a human reviewer (even with auto-approve on: a licence
+    that restricts redistribution, or a document holding e-mail addresses) shows
+    `held_for_review` with the reason.
 
     Returns {status: ok|withdrawn|declined, ...}; `note` says why on a decline.
     """

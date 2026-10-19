@@ -276,6 +276,23 @@ def _dig(obj, path: str):
     return cur
 
 
+_TOTAL_KEYS = ("count", "total", "totalCount", "total_count", "totalResults",
+               "numFound", "numberMatched", "totalRecords")
+
+
+def _upstream_total(doc) -> int | None:
+    """How many records the upstream says it matched, when the response says."""
+    if not isinstance(doc, dict):
+        return None
+    for k in _TOTAL_KEYS:
+        v = doc.get(k)
+        if isinstance(v, dict):                   # {"total": {"value": n}} (Elastic)
+            v = v.get("value")
+        if isinstance(v, int) and not isinstance(v, bool) and v >= 0:
+            return v
+    return None
+
+
 def _adapt_generic_json(params: dict, spec: dict) -> dict:
     """Declarative adapter for JSON APIs: records_path finds the list, fields maps
     record keys ({out_name: in_path}). No params passthrough in v1 — a URL is a
@@ -294,7 +311,8 @@ def _adapt_generic_json(params: dict, spec: dict) -> dict:
         r = requests.get(fetch["url"], timeout=30,
                          headers={"Accept": "application/json"})
         r.raise_for_status()
-        raw = _dig(r.json(), fetch["records_path"])
+        doc = r.json()
+        raw = _dig(doc, fetch["records_path"])
         if not isinstance(raw, list) or not raw:
             raise climate_indices.IndexUnavailable(
                 f"records_path {fetch['records_path']!r} found no list at {fetch['url']}")
@@ -304,7 +322,7 @@ def _adapt_generic_json(params: dict, spec: dict) -> dict:
             for name, path in (fetch.get("fields") or {}).items():
                 out[name] = _dig(rec, path)
             rows.append(out)
-        return {"rows": rows}
+        return {"rows": rows, "total": _upstream_total(doc)}
 
     try:
         res = climate_indices.cached(f"declarative:{spec['declarative']}", build)
@@ -313,6 +331,7 @@ def _adapt_generic_json(params: dict, spec: dict) -> dict:
     except (OSError, ValueError) as exc:
         raise FeedDecline(f"feed unavailable: {type(exc).__name__}: {exc}") from exc
     rows = list(res["rows"])
+    total = res.get("total") if isinstance(res.get("total"), int) and res["total"] > len(rows) else None
     # WHICH END IS RECENT? The tail is only the newest if the upstream happens to
     # publish oldest-first. USGS publishes newest-first, so "the latest M4.5+
     # earthquakes" were the OLDEST twelve of the past month — month-old events
@@ -336,9 +355,14 @@ def _adapt_generic_json(params: dict, spec: dict) -> dict:
                              "declares no timestamp field, so these are the last "
                              "records in publication order, which is NOT necessarily "
                              "the most recent"),
-            "summary": f"{len(rows)} records from {spec.get('title')}"
+            # A paged API answers one page of what it matched: "300 records from GBIF"
+            # read as the whole, while GBIF had matched 1,984. Say first N of M.
+            "summary": (f"first {len(rows):,} of {total:,} records the upstream matched, from "
+                        f"{spec.get('title')} (the feed reads one page)" if total else
+                        f"{len(rows)} records from {spec.get('title')}")
                        + (f", latest {as_of}" if as_of else
                           " (no timestamp field declared, so recency is unverified)"),
+            **({"upstream_total": total} if total else {}),
             "query_receipt": f"{fetch['records_path']} via {fetch['url']}",
             "url": fetch["url"],
             "stale_data": {"cadence": spec.get("cadence"),
@@ -349,16 +373,56 @@ def _adapt_generic_json(params: dict, spec: dict) -> dict:
             "note": spec.get("usage_notes") or spec.get("note")}
 
 
+def _fold(v) -> str:
+    """Case- and accent-insensitive form of a cell or a filter value."""
+    import unicodedata
+    t = unicodedata.normalize("NFKD", str(v if v is not None else ""))
+    return " ".join("".join(ch for ch in t if not unicodedata.combining(ch)).casefold().split())
+
+
+def _same(cell, wanted) -> bool:
+    """A filter value matches a cell: as numbers when both are, else as folded text;
+    a list matches any of its values."""
+    if isinstance(wanted, (list, tuple, set)):
+        return any(_same(cell, w) for w in wanted)
+    try:
+        return float(cell) == float(wanted)
+    except (TypeError, ValueError):
+        return _fold(cell) == _fold(wanted)
+
+
+def _coord_columns(names) -> tuple[str | None, str | None]:
+    """(lat, lon) column among `names`, by name: lat/latitude, lon/lng/long/longitude,
+    with or without a suffix (Latitude_decimal_degrees) or prefix (decimalLatitude)."""
+    import re
+    lat = lon = None
+    for n in names:
+        f = str(n).casefold()
+        if lat is None and re.fullmatch(r"(?:\w*latitude|lat)(?:[_ ].*)?", f):
+            lat = n
+        elif lon is None and re.fullmatch(r"(?:\w*longitude|lon|lng|long)(?:[_ ].*)?", f):
+            lon = n
+    return lat, lon
+
+
 def _adapt_generic_csv(params: dict, spec: dict) -> dict:
     """Declarative adapter for LANDED tables (X2c). Serves the platform-archived
     copy and refuses if the bytes changed since landing — a table silently edited
-    after citation is the provenance failure this platform exists to prevent."""
+    after citation is the provenance failure this platform exists to prevent.
+
+    `params`: `limit`, an equality filter per column (output field or CSV header,
+    matched case- and accent-insensitively), and `bbox` when the table has
+    latitude/longitude columns. Anything else is declined with the accepted list:
+    a filter silently ignored returned five United States rows to a question
+    about Costa Rica, status ok."""
     import csv as _csv
     import hashlib as _hashlib
     import io as _io
-    from pathlib import Path as _Path
+
+    from ..contrib import tables as _tables
 
     fetch = spec["fetch"]
+    params = dict(params or {})
     limit = 12
     if params.get("limit") is not None:
         try:
@@ -379,9 +443,53 @@ def _adapt_generic_csv(params: dict, spec: dict) -> dict:
             "contribution time — the file was modified out-of-band; re-land it "
             "so provenance stays true",
             expected_sha256=fetch["sha256"], observed_sha256=digest)
-    rows = []
+    enc = fetch.get("encoding")
+    text = raw.decode(enc) if enc else _tables.decode(raw)[0]
+    reader = _csv.DictReader(_io.StringIO(text.lstrip("﻿")))
+    header = list(reader.fieldnames or [])
     cols = fetch.get("columns") or {}
-    for rec in _csv.DictReader(_io.StringIO(raw.decode("utf-8-sig"))):
+
+    # Filter keys: the table's output fields first, then its raw CSV headers.
+    by_key = {}
+    for name, col in cols.items():
+        by_key.setdefault(_fold(name), col)
+    for col in header:
+        by_key.setdefault(_fold(col), col)
+    lat_col, lon_col = _coord_columns([*cols.values(), *header])
+    filters = {k: v for k, v in params.items() if k not in ("limit", "bbox")}
+    unknown = sorted(k for k in filters if _fold(k) not in by_key)
+    if unknown or (params.get("bbox") is not None and not (lat_col and lon_col)):
+        accepted = ["limit"] + (["bbox"] if lat_col and lon_col else [])
+        names = list(dict.fromkeys([*cols, *header]))
+        raise FeedDecline(
+            (f"this table does not take {unknown}" if unknown else
+             "this table has no latitude/longitude columns, so it cannot be filtered by bbox")
+            + f" — accepted: {', '.join(accepted)}, or an equality filter on a column: "
+            + ", ".join(names))
+    box = None
+    if params.get("bbox") is not None:
+        box = _tables.bbox_of(params["bbox"])
+        if box is None:
+            raise FeedDecline("'bbox' must be [minLon, minLat, maxLon, maxLat], e.g. "
+                              f"[-85.4, 9.6, -84.6, 10.4] — got {params['bbox']!r}")
+
+    def keep(rec) -> bool:
+        for k, v in filters.items():
+            if not _same(rec.get(by_key[_fold(k)]), v):
+                return False
+        if box:
+            try:
+                y, x = float(rec.get(lat_col)), float(rec.get(lon_col))
+            except (TypeError, ValueError):
+                return False
+            return box[0] <= x <= box[2] and box[1] <= y <= box[3]
+        return True
+
+    rows, total = [], 0
+    for rec in reader:
+        total += 1
+        if not keep(rec):
+            continue
         out = {name: rec.get(col) for name, col in cols.items()}
         for k, v in out.items():
             if isinstance(v, str):
@@ -390,22 +498,29 @@ def _adapt_generic_csv(params: dict, spec: dict) -> dict:
                 except ValueError:
                     pass
         rows.append(out)
-    if not rows:
+    if not total:
         raise FeedDecline("the landed table has a header but no rows")
-    as_of = fetch.get("as_of_field") and rows[-1].get(fetch["as_of_field"])
+    asked = ", ".join([f"{k} = {v!r}" for k, v in filters.items()]
+                      + ([f"inside bbox {box}"] if box else []))
+    as_of = fetch.get("as_of_field") and rows and rows[-1].get(fetch["as_of_field"])
+    tail = rows[-limit:]
     return {"as_of": as_of or spec.get("vintage"),
-            "count": len(rows[-limit:]), "records": rows[-limit:],
-            "summary": (f"{len(rows)} rows from {spec.get('title')} "
-                        f"({fetch.get('units')}), landed copy sha {digest[:12]}"),
+            "count": len(tail), "records": tail,
+            "summary": ((f"{len(rows):,} of {total:,} rows match {asked}" if asked else
+                         f"{total:,} rows")
+                        + f" in {spec.get('title')} ({fetch.get('units')})"
+                        + (f"; the last {len(tail)} are returned" if len(tail) < len(rows) else "")
+                        + f", landed copy sha {digest[:12]}"),
             "query_receipt": f"columns {cols} from platform-archived {path.name} "
-                             f"(sha256 {digest[:12]})",
+                             f"(sha256 {digest[:12]})" + (f" where {asked}" if asked else ""),
             "url": None,
             # The landed copy IS the source — there is no live upstream to be
             # stale against. Without the explicit flag, is_stale reads bare
             # presence as the fallback signal and cries wolf (caught by a cold
             # model in UAT repeating the false cache warning).
             "stale_data": {"cadence": spec.get("cadence"), "served_stale": False},
-            "note": spec.get("usage_notes") or spec.get("note")}
+            "note": ((spec.get("usage_notes") or spec.get("note")) if rows else
+                     f"no row matches {asked} (the table holds {total:,} rows)")}
 
 
 ADAPTERS = {"cropmonitor_conditions": _adapt_cropmonitor,
@@ -489,6 +604,9 @@ def query(dataset: str, params: dict | None = None) -> dict:
                 # they rest on different SST datasets (ours ERSSTv5, IRI's OISST — the
                 # gap widens as an event intensifies). Unstated, that reads as an error.
                 "sst_basis": spec.get("sst_basis"),
+                # The licence the contributor declared rides every answer built on it:
+                # a CC-BY-NC record set is not cited like a public-domain one.
+                "license": spec.get("license"),
                 "query": res.get("query_receipt"), "stale_data": res.get("stale_data")}
     if spec.get("staged_by"):
         passport["staged"] = {"contribution_id": spec.get("contribution_id"),

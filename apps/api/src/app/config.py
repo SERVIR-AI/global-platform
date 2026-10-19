@@ -215,6 +215,11 @@ class Settings(BaseSettings):
     # on a shared network: fetches are also refused for private addresses
     # (contrib/fetch_policy.py), independent of this cap.
     grp_contrib_max_bytes: int = 50 * 1024 * 1024
+    # Submissions one contributor may make per rolling hour (GRP_CONTRIB_HOURLY_CAP);
+    # 0 = no cap. Under OAuth each signed-in person is their own contributor; with
+    # OAuth off everyone on the box is one (local-dev) and shares this budget — a
+    # workshop dry run on one box raises it rather than wait out the hour.
+    grp_contrib_hourly_cap: int = 30
     # DEVELOPMENT ONLY: let contributions fetch from private/loopback addresses, so a
     # local dry run can serve test files from a local http server. Never set on a
     # deployed host — the fetch policy exists because the server sits on a shared

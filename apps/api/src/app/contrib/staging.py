@@ -19,6 +19,8 @@ from __future__ import annotations
 import re
 
 import hashlib
+import math
+import os
 from datetime import datetime, timedelta, timezone
 
 from ..mcp import store
@@ -27,7 +29,7 @@ from . import fetch_policy, identity, sources
 KINDS = ("document", "table", "feed", "raster", "vector", "weights", "amend")
 STATUSES = ("pending", "approved", "rejected", "withdrawn", "failed")
 PENDING_CAP = 20               # open contributions per contributor
-HOURLY_CAP = 30                # submissions per contributor per hour
+# Submissions per contributor per rolling hour: GRP_CONTRIB_HOURLY_CAP (config.py).
 
 _HISTORY = ("removal stops future use, it does not rewrite history — packs and "
             "receipts minted while the preview was live stay replayable")
@@ -42,11 +44,14 @@ class Declined(Exception):
 DOCUMENT_FIELDS = {
     "required": {
         "pack": "the domain pack whose library receives it (e.g. food-security)",
-        "url": "where the platform can fetch the original (http/https, public host; a Google "
-               "Drive share link works when the file is shared with Anyone with the link)",
+        "url": "where the platform can fetch the original — the PDF/DOCX/TXT file itself, not "
+               "the page about it (http/https, public host; a Google Drive share link works "
+               "when the file is shared with Anyone with the link, and so does a Google Docs "
+               "document link shared that way — it is fetched as an export)",
         "source": "publisher, e.g. NOAA CPC",
         "title": "the document's title",
-        "pub_date": "publication date as YYYY-MM or YYYY-MM-DD, quoted as text",
+        "pub_date": "publication date as YYYY-MM or YYYY-MM-DD, quoted as text — or 'unstated' "
+                    "when the document does not say (an honest 'unstated' beats a guessed date)",
         "temporal": "forecast | retrospective — gates what may be cited as an outlook",
         "validation": "multi-agency-consensus | peer-reviewed | single-agency | "
                       "official-statistic | unvalidated (say unvalidated rather than invent one)",
@@ -96,6 +101,14 @@ def _prepare_document(m: dict) -> dict:
     except Exception as exc:
         raise Declined(f"could not fetch {m['url']}: {type(exc).__name__}: {exc}") from None
     fname = m.get("filename") or fname
+    # Checked on the bytes before a parser is chosen by the name: a landing page, or
+    # a challenge page served at a .pdf URL, read as "unreadable PDF ... Stream has
+    # ended unexpectedly", which told the contributor nothing.
+    if docloader.is_web_page(raw):
+        raise Declined(f"{m['url']} returned a web page, not a document — give the PDF's own "
+                       "link (the file, not the page about it), or download it and share it "
+                       "from Google Drive (Anyone with the link). A web page whose text IS the "
+                       "document is not accepted: save it as PDF or text and share that")
     try:
         text = docloader.extract_text(raw, fname)
     except Exception as exc:
@@ -113,7 +126,12 @@ def _prepare_document(m: dict) -> dict:
         raise Declined(f"you already staged this document as contribution "
                        f"{existing['metadata'].get('contribution_id')} — withdraw it "
                        "first, or wait for the review")
-    return {"raw": raw, "fname": fname, "text": text, "doc_id": doc_id, "corpus": corpus}
+    return {"raw": raw, "fname": fname, "text": text, "doc_id": doc_id, "corpus": corpus,
+            "emails": len(set(_EMAIL.findall(text)))}
+
+
+# Personal data in a document's text: staff names come with their addresses.
+_EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
 
 
 def _stage_document(rec: dict, prepared: dict) -> dict:
@@ -122,10 +140,13 @@ def _stage_document(rec: dict, prepared: dict) -> dict:
     meta = _document_meta(rec["manifest"]) | {"staged_by": rec["contributor_id"],
                                               "contribution_id": rec["contribution_id"]}
     out = corpus.ingest(prepared["text"], meta, raw=prepared["raw"], filename=prepared["fname"])
+    # corpus_document reads one pack's library and defaults to food-security, so the
+    # call must name the library this went to or it answers "unknown doc_id".
     return {"doc_id": out["doc_id"], "chunks": out["chunks"], "corpus": corpus.name,
             "passport": meta,
             "how_to_test": (f"ask a question the document should answer, or call "
-                            f"corpus_document(doc_id={out['doc_id']!r}); only you and "
+                            f"corpus_document(doc_id={out['doc_id']!r}, "
+                            f"pack={rec['manifest']['pack']!r}); only you and "
                             "reviewers can see it until it is approved")}
 
 
@@ -190,7 +211,15 @@ TABLE_FIELDS = {
     "optional": {
         "csv_text": "the CSV content itself, header row first — for tables pasted into the "
                     "conversation (up to 200 KB); give this OR url",
-        "url": "where the platform can fetch the CSV instead of csv_text (public host)",
+        "url": "where the platform can fetch the CSV instead of csv_text (the file's own link "
+               "on a public host, or a Google Drive share link; UTF-8, Windows-1252 or Mac "
+               "Roman text — the preview says which was read)",
+        "countries": "which countries the table's rows speak to, e.g. [Costa Rica]. Without it "
+                     "the table is treated as global and every answer of its pack reads it — a "
+                     "Gulf of Nicoya soil-carbon factor was applied to Ecuador and Brazil before "
+                     "this was declarable",
+        "bbox": "[minLon, minLat, maxLon, maxLat] (EPSG:4326) of the area the rows were measured "
+                "in, e.g. [-85.4, 9.6, -84.6, 10.4] for the Gulf of Nicoya",
         "as_of_field": "the output field holding the row date, so the feed reports as_of",
         "usage_notes": "a few lines the consuming analyst reads on every query (max 500 chars)",
         "pack": "which domain pack may cite it (default food-security): one of the packs that "
@@ -238,7 +267,8 @@ def _validate_table(manifest) -> list[str]:
     base = {k: v for k, v in m.items() if k not in ("csv_text", "url")}
     problems += [f for f in tables.validate_manifest({**base, "file": "-"})
                  if not f.startswith("file ")]        # a fetched file is checked in prepare()
-    unknown = set(base) - set(tables.REQUIRED) - {"as_of_field", "usage_notes", "pack"}
+    unknown = (set(base) - set(tables.REQUIRED) - set(tables.SCOPE)
+               - {"as_of_field", "usage_notes", "pack"})
     if unknown:
         problems.append(f"unknown fields {sorted(unknown)} — every field is provenance")
     if has_text and isinstance(m.get("columns"), dict):   # pasted: check the header now
@@ -273,6 +303,7 @@ def _prepare_table(m: dict) -> dict:
     taken = _table_name_taken(m["dataset"])
     if taken:
         raise Declined(taken)
+    from ..rag import docloader
     if str(m.get("csv_text") or "").strip():
         raw = m["csv_text"].encode("utf-8")
     else:
@@ -282,6 +313,13 @@ def _prepare_table(m: dict) -> dict:
             raise Declined(str(exc)) from None
         except Exception as exc:
             raise Declined(f"could not fetch {m['url']}: {type(exc).__name__}: {exc}") from None
+        if docloader.is_web_page(raw):
+            raise Declined(f"{m['url']} returned a web page, not a CSV file — give the file's own "
+                           "download link, or download it and share it from Google Drive "
+                           "(Anyone with the link)")
+    # Read in the encoding it was written in; a decode error must never escape as a
+    # raw tool error ("'utf-8' codec can't decode byte 0x87") — Mac exports are common.
+    text, enc = tables.decode(raw)
     fd, tmp = tempfile.mkstemp(prefix="staging-", suffix=".csv", dir=_staged_dir())
     with os.fdopen(fd, "wb") as f:
         f.write(raw)
@@ -291,12 +329,13 @@ def _prepare_table(m: dict) -> dict:
         os.unlink(tmp)
         raise Declined("; ".join(problems))
     return {"tmp": tmp, "sha256": hashlib.sha256(raw).hexdigest(), "base": base,
-            "rows": max(0, raw.decode("utf-8-sig").count("\n") - (0 if raw.endswith(b"\n") else -1) - 1)}
+            "rows": tables.count_rows(text), "encoding": enc}
 
 
-def _table_row(rec: dict, path: str, sha256: str) -> dict:
+def _table_row(rec: dict, path: str, sha256: str, encoding: str = "utf-8") -> dict:
     """The registry row a staged table serves through — the same shape tables.add
     writes, pointed at the staged copy and tagged with its owner."""
+    from . import tables
     m = rec["manifest"]
     return {"title": m["title"], "description": m["description"], "source": m["source"],
             "validation": m["validation"], "residency": "platform-hosted copy (staged)",
@@ -305,8 +344,11 @@ def _table_row(rec: dict, path: str, sha256: str) -> dict:
             "vintage": m["vintage"], "status": "available",
             "fetch": {"path": path, "sha256": sha256, "columns": m["columns"],
                       "units": m["units"],
+                      **({"encoding": encoding} if encoding != "utf-8" else {}),
                       **({"as_of_field": m["as_of_field"]} if m.get("as_of_field") else {})},
-            "params": {"limit": "rows of series to return (default 12)"},
+            "params": tables.params_doc(),
+            # `countries` / `bbox`: where the rows speak — the packs read them first
+            **tables.scope_fields(m),
             **({"usage_notes": m["usage_notes"]} if m.get("usage_notes") else {}),
             "staged_by": rec["contributor_id"], "contribution_id": rec["contribution_id"],
             "contributor_label": rec["contributor_label"]}
@@ -314,15 +356,28 @@ def _table_row(rec: dict, path: str, sha256: str) -> dict:
 
 def _stage_table(rec: dict, prepared: dict) -> dict:
     import os
+    from . import tables
     ds = rec["manifest"]["dataset"]
     dest = _staged_dir() / f"{rec['contribution_id']}.csv"
     os.replace(prepared["tmp"], dest)
-    row = _table_row(rec, str(dest), prepared["sha256"])
+    enc = prepared.get("encoding") or "utf-8"
+    row = _table_row(rec, str(dest), prepared["sha256"], enc)
     _ensure_staged_loaded()
     STAGED_FEEDS[ds] = row
+    hints = ([] if enc == "utf-8" else
+             [f"the file is not UTF-8; it was read as {tables.ENCODING_NAMES.get(enc, enc)} "
+              f"({enc}) — check that accented names read right in feeds_query, and say so "
+              "if they do not"])
+    if not tables.scope_fields(rec["manifest"]):
+        hints.append("no countries or bbox declared, so every answer of its pack reads this "
+                     "table wherever it is asked about — declare where its rows speak if they "
+                     "are not global")
     return {"dataset": ds, "rows": prepared["rows"], "sha256": prepared["sha256"],
-            "staged_copy": str(dest), "row": row,
-            "how_to_test": (f"call feeds_query(dataset={ds!r}) — only you and reviewers get "
+            "encoding": enc, "staged_copy": str(dest), "row": row,
+            **({"hints": hints} if hints else {}),
+            "how_to_test": (f"call feeds_query(dataset={ds!r}) — or filter it, e.g. "
+                            f"feeds_query(dataset={ds!r}, params={{<column>: <value>, "
+                            "limit: 5}}); only you and reviewers get "
                             "it until it is approved; then it is a platform feed for everyone")}
 
 
@@ -624,6 +679,78 @@ def _retire_feed(rec: dict) -> dict:
     return {"removed": removed, "note": "nothing was written to disk for a staged feed"}
 
 
+# --------------------------------------------------------------------------- test hints
+
+def _inside(bbox, lon, lat) -> bool:
+    """Does an extent {lon: [w, e], lat: [s, n]} hold the centre of `bbox`?"""
+    if not (lon and lat and bbox):
+        return False
+    cx, cy = (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
+    return lon[0] <= cx <= lon[1] and lat[0] <= cy <= lat[1]
+
+
+def _where_to_test(name: str, bbox, arg: str, family: str | None = None) -> str:
+    """The assemble_pack call that exercises a contributed layer WHERE IT LIES.
+
+    A pack can only read a layer where the pack's own data reaches: the risk pack
+    where a hazard layer in the catalog declares an extent holding the layer — and
+    then with that real hazard — the land-cover pack where a registered stack's
+    extent holds it. Both are read from live state, so a hub's hazard layer or stack
+    extends where this points. The old hint sent a Costa Rica point layer to the
+    risk pack with hazard='flood' (it failed after two minutes) and a risk_* raster
+    in as its own "hazard" (unknown hazard). With neither, it says so."""
+    box = [float(v) for v in bbox] if bbox and len(bbox) == 4 else None
+    where = (f"lon {box[0]:.2f} to {box[2]:.2f}, lat {box[1]:.2f} to {box[3]:.2f}" if box
+             else "the area the layer covers")
+    area = (f"place=<a place inside {where}> (or geometry=<a bbox or polygon inside "
+            f"{[round(v, 3) for v in box] if box else 'it'}>)")
+    use = f"{arg}=[{name!r}]"
+    if family == "points":
+        does = (f" — the pack counts {name!r} against the hazard beside hospitals and schools")
+    elif family in ("lines", "polygons"):
+        does = (f" — the pack states the {'km of line' if family == 'lines' else 'km² (ha) of polygon'}"
+                " inside its boundary")
+    else:
+        does = f" — the pack returns the layer's values over its area in layers.{name}"
+    try:
+        from ..graph.geo import tiffs
+        from ..mcp.packs import _is_synthetic
+        for k, row in tiffs.catalog().items():
+            ext = (row or {}).get("extent") or {}
+            if (k.startswith("hazard_") and not (row or {}).get("internal")
+                    and not _is_synthetic(row or {})
+                    and _inside(box, ext.get("lon"), ext.get("lat"))):
+                return (f"assemble_pack(pack='risk', {area}, hazard={k.removeprefix('hazard_')!r}"
+                        + ("" if family == "points" else f", {use}") + ")" + does)
+    except Exception:
+        pass
+    try:
+        from ..graph.geo import stacks as _stacks
+        from ..land_cover.synthesis import landcover_stacks
+        for sid, row in landcover_stacks().items():
+            ext = row.get("extent") or {}
+            if _inside(box, ext.get("lon"), ext.get("lat")):
+                ys = sorted(_stacks.years(row) or row.get("years") or [])
+                year = ys[-1] if ys else "<a mapped year>"
+                return (f"assemble_pack(pack='land-cover', {area}, year={year}, stack={sid!r}, "
+                        f"{use})" + (" — the pack counts it inside its area" if family == "points"
+                                     else does))
+    except Exception:
+        pass
+    return (f"no pack with an area reaches {where} yet: the risk pack reads a layer where a "
+            "hazard layer in the catalog covers it, the land-cover pack where a land-cover "
+            f"stack does, and none covers this one — {name!r} is stored and listed, and is "
+            "read the day one does (contribute a stack or a hazard layer for the area)")
+
+
+def _raster_bounds(path) -> list | None:
+    try:
+        from ..graph.geo import stacks as _stacks
+        return _stacks.header(str(path))["bounds"]
+    except Exception:
+        return None
+
+
 # --------------------------------------------------------------------------- rasters
 
 RASTER_FIELDS = {
@@ -782,20 +909,24 @@ def _stage_raster(rec: dict, prepared: dict) -> dict:
     STAGED_RASTERS[layer] = {"entry": entry, "contract": contract}
     _purge_clips(layer)
     short = layer.split("_", 1)[1] if "_" in layer else layer
+    bounds = _raster_bounds(dest)
     if contract["role"] == "landcover":
         how = (f"assemble_pack(pack='land-cover', place=<a place inside the map>, "
                f"year={int(m['year'])}) — or geometry=<a bbox or polygon the map covers>; "
                f"add year_to=<another year of {m['stack']}> for change and transitions, "
                "and classes=[<a legend label>] to detail one class")
-    elif contract["role"] == "population":
-        how = (f"assemble_pack(pack='risk', place=<a place the layer covers>, hazard=<any>) "
-               f"with layers=[{layer!r}] — people exposed are summed from this grid")
+    elif contract["role"] == "hazard":
+        # the one namespace that IS a hazard: the risk pack reads it where it lies
+        where = (f"a place inside lon {bounds[0]:.2f} to {bounds[2]:.2f}, lat {bounds[1]:.2f} "
+                 f"to {bounds[3]:.2f}" if bounds else "a place the layer covers")
+        how = (f"assemble_pack(pack='risk', place=<{where}>, "
+               f"hazard={short!r}) — the pack's hazard passport shows the contract check")
     elif contract["role"] == "vulnerability":
         how = (f"risk_weights(hazard=<hazard>) to weigh {layer!r} into a recipe; "
-               f"assemble_pack(..., layers=[{layer!r}]) returns its values over any area")
+               + _where_to_test(layer, bounds, "layers"))
     else:
-        how = (f"assemble_pack(pack='risk', place=<a place the layer covers>, "
-               f"hazard={short!r}) — the pack's hazard passport shows the contract check")
+        # risk_*, population_*: values read over an area — never passed as a hazard
+        how = _where_to_test(layer, bounds, "layers")
     return {"layer": layer, "observed": prepared["observed"], "staged_file": str(dest),
             "entry": entry, "contract": contract,
             "how_to_test": how + "; only you and reviewers can use it until it is approved"}
@@ -1240,18 +1371,12 @@ def _stage_vector(rec: dict, prepared: dict) -> dict:
     STAGED_VECTORS[layer] = entry
     vectors.purge_clips(layer)
     fam = entry["geometry"]
-    if fam == "points":
-        how = (f"assemble_pack(pack='risk', place=<a place inside the layer's bbox>, "
-               f"hazard='flood') — the pack now counts {layer!r} against the hazard beside "
-               f"hospitals and schools; or any pack with vectors=[{layer!r}] for a count inside its area")
-    else:
-        how = (f"assemble any pack over an area the layer covers with vectors=[{layer!r}] — "
-               f"the pack states the {'km of line' if fam == 'lines' else 'km² (ha) of polygon'} "
-               "inside its boundary"
-               + (f", broken down by {entry['group_field']}" if entry.get("group_field") else ""))
-        if fam == "polygons" and entry.get("name_field"):
-            how += (f"; the features' {entry['name_field']} values now resolve as `place` "
-                    "(resolve_place_time(place=<a feature's name>))")
+    how = _where_to_test(layer, entry.get("bbox"), "vectors", fam)
+    if fam != "points" and entry.get("group_field") and how.startswith("assemble_pack"):
+        how += f", broken down by {entry['group_field']}"
+    if fam == "polygons" and entry.get("name_field"):
+        how += (f"; the features' {entry['name_field']} values now resolve as `place` "
+                "(resolve_place_time(place=<a feature's name>))")
     gp = m.get("group_field")
     props = prepared["observed"].get("properties") or []
     warn = []
@@ -1325,9 +1450,9 @@ def visible_staged_vectors() -> dict:
 
 AMEND_FIELDS = {
     "required": {
-        "layer": "an APPROVED contributed layer to correct — a raster (hazard_*, "
-                 "vulnerability_*, population_*, …) or a point layer. Built-in layers are "
-                 "corrected through code review, not here",
+        "layer": "an APPROVED contributed layer to correct — a raster (hazard_*, risk_*, "
+                 "vulnerability_*, population_*, landcover_*, …) or a vector layer (points, "
+                 "lines or polygons). Built-in layers are corrected through code review, not here",
         "fields": "only the corrected values: any of title, description, usage_notes, source, "
                   "license, vintage (and units, for a raster). The file and its contract do "
                   "not change — a different file is a new layer",
@@ -1467,9 +1592,16 @@ def _stage_amend(rec: dict, prepared: dict) -> dict:
         "staged_by": rec["contributor_id"], "contribution_id": rec["contribution_id"],
         "contributor_label": rec["contributor_label"],
         "rationale": rec["manifest"].get("rationale")}
-    how = (f"assemble any pack over an area with layers=[{prepared['layer']!r}]"
-           if prepared["target_kind"] == "raster" else
-           f"assemble a risk pack for a place the layer covers with map_layer={prepared['layer']!r}")
+    target = _amend_target(prepared["layer"])
+    row = (target or (None, {}))[1]
+    if prepared["target_kind"] == "raster":
+        from pathlib import Path
+        from ..config import get_settings
+        bounds = _raster_bounds(get_settings().tiffs_dir / Path(str(row.get("local_path") or "-")).name)
+        how = _where_to_test(prepared["layer"], bounds, "layers")
+    else:
+        how = _where_to_test(prepared["layer"], row.get("bbox"), "vectors",
+                             row.get("geometry", "points"))
     return {**prepared,
             "how_to_test": (how + " — your packs show the corrected record; everyone else's "
                             "show the current one until a reviewer approves")}
@@ -1516,7 +1648,7 @@ def _land_amend(rec: dict) -> dict:
         from ..graph.geo import vectors
         entry = vectors.landed().get(layer)
         if entry is None:
-            raise Declined(f"{layer!r} is no longer a landed point layer — nothing to correct")
+            raise Declined(f"{layer!r} is no longer a landed vector layer — nothing to correct")
         vectors.register(layer, {**entry, **row_fields, **reviewed(entry),
                                  "amended": [*(entry.get("amended") or []), history]})
     _ensure_staged_loaded()
@@ -1593,25 +1725,140 @@ _KINDS = {
 
 _PUBLIC = ("contribution_id", "kind", "status", "title", "contributor_label",
            "created_at", "updated_at", "preview", "landing", "decision_note",
-           "reviewer_label", "problems")
+           "reviewer_label", "problems", "held_for_review")
+
+
+# A licence that keeps the platform from serving the data on: the platform hosts a
+# copy and hands it to every caller, which IS redistribution. Non-commercial alone
+# is not on this list — serving it for decision support is not commercial use.
+_NO_REDISTRIBUTION = (
+    # "no redistribution", "no sub-licensing or redistribution", "not for redistribution"
+    # — a list of forbidden uses, never "no restrictions on redistribution"
+    re.compile(r"\b(?:no|not\s+for)\s+(?:[\w-]+(?:\s+use)?\s*(?:,|\bor\b|\band\b|/)\s*){0,3}"
+               r"(?:re-?distribution|redistributing)\b", re.I),
+    re.compile(r"\b(?:not|never)\s+(?:be\s+)?(?:re-?distributed|redistribute)\b", re.I),
+    re.compile(r"\bre-?distribution\b[^.;]{0,80}?\bnot\s+(?:allowed|permitted)\b", re.I),
+    re.compile(r"\bre-?distribution\b[^.;]{0,40}?\b(?:is\s+)?(?:prohibited|forbidden)\b", re.I),
+    re.compile(r"\b(?:prohibits?|forbids?)\s+(?:the\s+)?re-?distribution\b", re.I),
+    re.compile(r"\ball\s+rights\s+reserved\b", re.I),
+)
+# "without (prior) (written) permission" restricts serving on only in a clause that
+# forbids something AND is about passing the data on: "free to use without
+# permission" grants, and "commercial use not allowed without permission" is the
+# non-commercial clause, which is not a reason to hold.
+_WITHOUT_PERMISSION = re.compile(r"\bwithout\s+(?:the\s+)?(?:prior\s+|express\s+)*(?:written\s+)?"
+                                 r"(?:permission|consent|authori[sz]ation)\b", re.I)
+_RESTRICTS = re.compile(r"\b(?:no|not|never|prohibited|forbidden|may\s+only|must\s+not)\b", re.I)
+_PASSING_ON = re.compile(r"distribut|sub-?licens|\bshar(?:e|ed|ing)\b|\bpublish|\bcop(?:y|ies)\b"
+                         r"|web\s+services?|third\s+part", re.I)
+
+
+def _restricts_redistribution(licence) -> str | None:
+    """The phrase in a declared licence that forbids serving the data on, or None."""
+    text = str(licence or "")
+    for rx in _NO_REDISTRIBUTION:
+        m = rx.search(text)
+        if m:
+            return " ".join(m.group(0).split())
+    for clause in re.split(r"[.;]", text):
+        m = _WITHOUT_PERMISSION.search(clause)
+        if m and _RESTRICTS.search(clause[:m.start()]) and _PASSING_ON.search(clause):
+            return " ".join(clause.split())
+    return None
+
+
+def _needs_a_human(kind: str, manifest: dict, prepared: dict) -> str | None:
+    """Why this submission must wait for a person even when auto-approve is on, in
+    words its contributor reads — or None. Everything else lands as before."""
+    licence = manifest.get("license")
+    if kind == "amend":
+        licence = (manifest.get("fields") or {}).get("license")
+    said = _restricts_redistribution(licence)
+    if said:
+        return (f"its licence restricts redistribution ('{said}'), and serving it to every "
+                "caller is redistribution — a reviewer checks that the platform has the "
+                "permission the licence asks for before it goes live")
+    n = int((prepared or {}).get("emails") or 0) if kind == "document" else 0
+    if n >= 2:
+        return (f"its text holds {n} e-mail addresses — personal data. The document's owner "
+                "must confirm they may be served to every caller (or share a copy without "
+                "them) before a reviewer lets it go live")
+    return None
 
 
 def _public(rec: dict) -> dict:
     return {k: rec[k] for k in _PUBLIC if rec.get(k) is not None}
 
 
-def _caps(caller: identity.Caller) -> list[str]:
-    pending = store.list_contributions(status="pending", contributor_id=caller.id)
-    problems = []
-    if len(pending) >= PENDING_CAP:
-        problems.append(f"you have {len(pending)} contributions awaiting review — the cap "
-                        f"is {PENDING_CAP}; wait for a decision or withdraw one")
-    since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-    recent = store.list_contributions(contributor_id=caller.id, since=since)
-    if len(recent) >= HOURLY_CAP:
-        problems.append(f"{len(recent)} submissions in the last hour — the cap is "
-                        f"{HOURLY_CAP}; try again later")
-    return problems
+def _caps(caller: identity.Caller) -> tuple[list[str], str | None]:
+    """Check the caps and TAKE a slot in one write transaction: (problems, slot id).
+
+    The check used to read the ledger, then fetch for up to two minutes, then write
+    the record — so concurrent submissions all passed the same check and one reply
+    read "32 submissions in the last hour — the cap is 30". The slot is held while
+    the submission is prepared and released once its record is written (the record
+    then counts in its place) or it is declined. BEGIN IMMEDIATE serialises the
+    check across threads and processes; a slot a crashed worker left behind ages out
+    with the hour. Under OAuth every signed-in participant is their own contributor
+    (identity.py: the token subject); with OAuth off everyone on the box is one."""
+    import sqlite3
+    from ..config import get_settings
+    cap = max(0, int(get_settings().grp_contrib_hourly_cap or 0))
+    now = datetime.now(timezone.utc)
+    since = (now - timedelta(hours=1)).isoformat()
+    try:
+        con = store._connect()
+    except sqlite3.OperationalError:
+        return ["the contribution ledger is busy — submit again in a moment"], None
+    con.isolation_level = None          # explicit transaction below
+    try:
+        con.execute("CREATE TABLE IF NOT EXISTS contribution_slots "
+                    "(id TEXT PRIMARY KEY, contributor_id TEXT NOT NULL, at TEXT NOT NULL)")
+        con.execute("BEGIN IMMEDIATE")
+        con.execute("DELETE FROM contribution_slots WHERE at < ?", (since,))
+        held = [r[0] for r in con.execute(
+            "SELECT at FROM contribution_slots WHERE contributor_id = ?", (caller.id,))]
+        pending = con.execute("SELECT COUNT(*) FROM contributions WHERE status = 'pending' "
+                              "AND contributor_id = ?", (caller.id,)).fetchone()[0]
+        recent = [r[0] for r in con.execute(
+            "SELECT created_at FROM contributions WHERE contributor_id = ? AND created_at >= ?",
+            (caller.id, since))]
+        problems = []
+        if pending + len(held) >= PENDING_CAP:
+            problems.append(f"you have {pending + len(held)} contributions awaiting review — the "
+                            f"cap is {PENDING_CAP}; wait for a decision or withdraw one")
+        used = len(recent) + len(held)
+        if cap and used >= cap:
+            oldest = min(datetime.fromisoformat(t) for t in recent + held)
+            mins = max(1, math.ceil((oldest + timedelta(hours=1) - now).total_seconds() / 60))
+            shared = (f" — everyone reaching this instance without a sign-in submits as "
+                      f"{caller.label!r}, so they share this budget; GRP_CONTRIB_HOURLY_CAP "
+                      "raises it" if caller.source in ("local-dev", "anonymous") else "")
+            problems.append(f"{used} submissions in the last hour — the cap is {cap} per "
+                            f"contributor; the next slot frees in about {mins} min{shared}")
+        if problems:
+            con.execute("ROLLBACK")
+            return problems, None
+        slot = os.urandom(8).hex()
+        con.execute("INSERT INTO contribution_slots(id, contributor_id, at) VALUES (?, ?, ?)",
+                    (slot, caller.id, now.isoformat()))
+        con.execute("COMMIT")
+        return [], slot
+    except sqlite3.OperationalError:     # the busy timeout ran out; closing rolls back
+        return ["the contribution ledger is busy — submit again in a moment"], None
+    finally:
+        con.close()
+
+
+def _release(slot: str | None) -> None:
+    if not slot:
+        return
+    con = store._connect()
+    try:
+        with con:
+            con.execute("DELETE FROM contribution_slots WHERE id = ?", (slot,))
+    finally:
+        con.close()
 
 
 def _not_reviewer(caller: identity.Caller) -> dict:
@@ -1696,7 +1943,7 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
     if problems:
         return {"status": "declined", "kind": kind, "problems": problems,
                 "fields": spec["fields"]}
-    caps = _caps(caller)
+    caps, slot = _caps(caller)
     if caps:
         return {"status": "declined", "kind": kind, "problems": caps}
     token = identity.bind(caller)
@@ -1709,6 +1956,8 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
                "title": spec["title"](manifest),
                "contributor_id": caller.id, "contributor_label": caller.label}
         ident = store.save_contribution(rec)
+        _release(slot)                                # the record counts from here
+        slot = None
         rec = store.load_contribution(ident)
         try:
             preview = spec["stage"](rec, prepared)
@@ -1718,8 +1967,20 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
                     "problems": [f"staging failed: {type(exc).__name__}: {exc}"]}
     finally:
         identity.unbind(token)
-    rec = store.update_contribution(ident, {"preview": preview})
+        _release(slot)
+    hold = _needs_a_human(kind, manifest, prepared)
+    rec = store.update_contribution(ident, {"preview": preview,
+                                            **({"held_for_review": hold} if hold else {})})
     from ..config import get_settings
+    if get_settings().grp_auto_approve and hold:
+        # Auto-approve lands what a machine can vouch for. A licence that forbids
+        # redistribution, or personal data in a document, needs a person to say yes.
+        _notify(f"New {kind} contribution HELD for review despite auto-approve, from "
+                f"{caller.label}: {rec['title']} (id {ident}) — {hold}")
+        return {**_public(rec), "status": "staged",
+                "review": f"HELD FOR A HUMAN REVIEWER — {hold}",
+                "next": ("test it now — only you and reviewers can see it; it goes live when a "
+                         "reviewer approves it, and contribute_status shows the decision")}
     if get_settings().grp_auto_approve:
         # A live session: land it now, and let the record, the reply and the
         # citation all say that no human reviewed it. Landing failure leaves it
@@ -1802,6 +2063,24 @@ def _landed_state(rec: dict) -> dict:
             cat = tiffs.catalog(include_staged=False)
             return {"live": layer in cat, "why": None if layer in cat else
                     f"no catalog row named {layer!r}"}
+        if kind == "vector":
+            # Served = registered AND its master file is there and reads as GeoJSON;
+            # every pack clips from that file, so a row without it serves nothing.
+            from ..graph.geo import vectors
+            layer = m.get("layer")
+            entry = vectors.landed().get(layer)
+            if not entry:
+                return {"live": False, "why": f"no vector registry row named {layer!r}"}
+            path = vectors.master_path(entry)
+            try:
+                with open(path, "rb") as f:
+                    head = f.read(256).lstrip(b"\xef\xbb\xbf").lstrip()
+            except OSError:
+                return {"live": False, "why": f"{layer!r} is registered but its file "
+                                              f"{entry.get('local_path')} is missing"}
+            ok = head.startswith(b"{")
+            return {"live": ok, "why": None if ok else
+                    f"{layer!r} is registered but its file is not GeoJSON"}
         if kind == "weights":
             from ..graph.geo import combine
             adj = combine.adjustment_for("hazard_" + str(m.get("hazard") or ""))
@@ -1850,14 +2129,21 @@ def reconcile(caller: identity.Caller | None = None) -> dict:
                             "contributor_id", "reviewer_id")}
         entry = {**pub, "serving": st.get("live"), "why": st.get("why")}
         (live if st.get("live") else inert if st.get("live") is False else unknown).append(entry)
+    # The note counts what was checked: it said "every approved contribution is
+    # being served" over a list where every vector sat under "unverifiable".
+    counted = f"{len(live)} of {len(rows)} approved served"
+    if inert:
+        counted += f", {len(inert)} approved but NOT served"
+    if unknown:
+        counted += f", {len(unknown)} not checked (see each one's `why`)"
     return {"status": "ok", "approved": len(rows),
             "serving": len(live), "approved_but_inert": len(inert),
             "unverifiable": len(unknown),
             "contributions": {"serving": live, "inert": inert, "unverifiable": unknown},
-            "note": ("an approved contribution that is not being served changed "
-                     "nothing: the approval succeeded and the landing did not"
-                     if inert else
-                     "every approved contribution is being served")}
+            "note": (counted + (" — an approved contribution that is not being served changed "
+                                "nothing: the approval succeeded and the landing did not"
+                                if inert else
+                                "" if unknown else " — every approved contribution is being served"))}
 
 
 def status(contribution_id: str | None = None, caller: identity.Caller | None = None) -> dict:
@@ -1960,6 +2246,12 @@ def _notify(text: str) -> None:
 
 # --------------------------------------------------------------------------- tool text
 
+def _cap_words() -> str:
+    from ..config import get_settings
+    cap = max(0, int(get_settings().grp_contrib_hourly_cap or 0))
+    return f"{cap} submissions" if cap else ""
+
+
 def describe_submit() -> str:
     from ..config import get_settings
     auto = get_settings().grp_auto_approve
@@ -1968,7 +2260,11 @@ def describe_submit() -> str:
              "platform's own contribution commands use. "
              + ("This deployment AUTO-APPROVES: a clean submission lands at once and is live "
                 "for every caller, and its record and every citation built on it say that no "
-                "human reviewed it. (Human review is switched off here, not removed.)"
+                "human reviewed it. (Human review is switched off here, not removed.) Two "
+                "things still wait for a human reviewer, and the reply says which: a declared "
+                "licence that restricts redistribution (no redistribution, not without "
+                "written permission, all rights reserved — non-commercial alone is fine), and "
+                "a document whose text holds two or more e-mail addresses."
                 if auto else
                 "A clean one is STAGED: stored for review and served to you (and to "
                 "reviewers) on every query path — search, inventory, feeds, evidence packs — "
@@ -1992,7 +2288,12 @@ def describe_submit() -> str:
                "Returns {status: staged, contribution_id, preview{doc_id,...}, next} (the record "
                "then shows status pending in contribute_status until a reviewer decides) or ")
               + "{status: declined, problems: [...]} naming every problem at once — fix them all "
-              "and resubmit. Rules: contributions never overwrite an existing source; a "
+              "and resubmit. A url must answer with the FILE: a login page, a bot challenge or "
+              "a web page about the file is declined in words, with what to do (usually: "
+              "download it and share it from Google Drive, Anyone with the link). Each "
+              "contributor may submit "
+              + (f"{_cap_words()} per hour" if _cap_words() else "without an hourly cap")
+              + ". Rules: contributions never overwrite an existing source; a "
               "document already in the library is declined by its doc_id; a table's or feed's "
               "dataset name must be new; `amend` corrects an approved layer's record, never its "
               "file or contract. A feed is test-queried once before it is accepted, so a wrong "
