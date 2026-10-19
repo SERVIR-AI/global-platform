@@ -555,14 +555,36 @@ def whole_only(url: str, found: dict, cap: int) -> str:
             "the clip's link, e.g. shared from Google Drive (Anyone with the link)")
 
 
+# A file that is a RECIPE naming other files or services: GDAL finds these markers
+# anywhere in a file's first bytes (a VRT after a line of junk is still a VRT), so the
+# gate looks for them in the first 4 KB, whatever the first byte is.
+_RECIPES = ((b"<vrtdataset", "a GDAL virtual raster (VRT)"),
+            (b"<ogrvrtdatasource", "an OGR virtual dataset (VRT)"),
+            (b"<gdaltileindexdataset", "a GDAL tile index"),
+            (b"<gdal_wms", "a GDAL web-map service description"),
+            (b"<gdal_wmts", "a GDAL web-map tile service description"),
+            (b"<wms_capabilities", "a WMS service description"),
+            (b"<wmt_ms_capabilities", "a WMS service description"),
+            (b"<wcs_capabilities", "a WCS service description"),
+            (b"<capabilities", "a web map service description"))
+
+
+def recipe(head: bytes) -> str | None:
+    """What recipe `head` holds (a VRT, a service description) in its first 4 KB, or None."""
+    low = bytes(head[:4096]).lower()
+    return next((what for marker, what in _RECIPES if marker in low), None)
+
+
 def text_problem(head: bytes, url: str) -> str | None:
     """A text or XML file offered as a raster — a VRT, a map service's description: GDAL
-    would open whatever it names, on this server or anywhere. Refused before GDAL sees it."""
-    lead = bytes(head[:512]).lstrip(b"\xef\xbb\xbf \t\r\n")
-    if not lead.startswith(b"<"):
-        return None
-    kind = ("a GDAL virtual raster (VRT)" if b"<vrtdataset" in bytes(head[:4096]).lower()
-            else "an XML/text file")
+    would open whatever it names, on this server or anywhere. Refused before GDAL sees it,
+    when its first byte is '<' or when a recipe's marker is anywhere in its first 4 KB."""
+    kind = recipe(head)
+    if kind is None:
+        lead = bytes(head[:512]).lstrip(b"\xef\xbb\xbf \t\r\n")
+        if not lead.startswith(b"<"):
+            return None
+        kind = "an XML/text file"
     return (f"{url} answered with {kind}, not a raster: a description that points at other "
             "files or services, which the platform does not follow — give the raster file "
             "itself (GeoTIFF, .img, NetCDF, GeoPackage)")

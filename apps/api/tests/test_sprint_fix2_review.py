@@ -160,7 +160,7 @@ class _Host:
     'whole' (ignores Range, sends a size) or 'streamed' (ignores Range, chunked, no size)."""
 
     def __init__(self):
-        self.files, self.mode, self.port = {}, {}, None
+        self.files, self.mode, self.port, self.asked = {}, {}, None, set()
 
     def put(self, name, data, mode="ranges"):
         self.files["/" + name], self.mode["/" + name] = data, mode
@@ -176,6 +176,7 @@ def _handler(host):
 
         def _send(self, body):
             path = self.path.split("?")[0]
+            host.asked.add(path)
             data, mode = host.files.get(path), host.mode.get(path)
             if data is None:
                 self.send_response(404)
@@ -454,3 +455,29 @@ def test_feed_and_raster_take_downs_check_the_row_is_still_theirs(env, host, mon
     assert undone["already_replaced"] and (env / "feeds" / "test_table.yml").exists()
     undone, why = staging._take_down({**old, "landing": {"sha256": "b" * 64}})
     assert why is None and undone["removed"] is True and not (env / "feeds" / "test_table.yml").exists()
+
+
+# ------------------------------------------------------------ 6. recipe markers anywhere in 4 KB
+def _vrt(names):
+    return (f'<VRTDataset rasterXSize="8" rasterYSize="8"><SRS>EPSG:4326</SRS>'
+            f'<GeoTransform>-86, 0.25, 0, 11, 0, -0.25</GeoTransform>'
+            f'<VRTRasterBand dataType="Float32" band="1"><SimpleSource>'
+            f'<SourceFilename relativeToVRT="0">{names}</SourceFilename>'
+            f'<SourceBand>1</SourceBand></SimpleSource></VRTRasterBand></VRTDataset>').encode()
+
+
+def test_a_recipe_marker_anywhere_in_the_first_4_kb_is_refused(env, host, log):
+    """A VRT after a line of junk is still a VRT to GDAL: refused from its bytes, and
+    the file it names is never requested; a GeoTIFF's own header passes."""
+    from app.contrib import remote_clip
+    secret = host.put("secret.tif", _tif(_noise(64)))
+    for lead in (b"x", b"\x00" * 300 + b"junk\n", b"#!" + b"a" * 3000):
+        assert "virtual raster (VRT)" in remote_clip.text_problem(lead + _vrt(f"/vsicurl/{secret}"), "u")
+    assert "OGR virtual dataset" in remote_clip.text_problem(b"zz<OGRVRTDataSource>", "u")
+    assert remote_clip.text_problem(_tif(_noise(64)), "u") is None
+    url = host.put("mosaic.bin", b"x" + _vrt(f"/vsicurl/{secret}"))
+    for clip in (None, GULF):
+        out = _submit(_measure("measure_junk_vrt", url, **({"clip": clip} if clip else {})))
+        log("OUTPUT", out["problems"][0])
+        assert out["status"] == "declined" and "virtual raster (VRT)" in out["problems"][0]
+    assert "/mosaic.bin" in host.asked and "/secret.tif" not in host.asked
