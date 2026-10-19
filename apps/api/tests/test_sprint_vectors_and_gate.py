@@ -341,3 +341,23 @@ def test_a_contributed_extent_stack_answers_the_land_cover_pack(tmp_path, monkey
     assert ch["loss_km2"] > 0 and ch["gain_km2"] > 0 and p["stats"]["change"]["km2_one_year_only"] == 0
     assert any("Testland" in w for w in __import__("app.mcp.packs", fromlist=["x"]).PACKS["land-cover"]["where"]())
     staging.STAGED_RASTERS.clear()
+
+
+def test_an_upstream_refusal_names_the_site_and_what_to_do(monkeypatch):
+    class R:
+        status_code, reason, headers = 403, "Forbidden", CaseInsensitiveDict({"content-type": "text/html"})
+        def iter_content(self, chunk_size=1):
+            yield b""
+        def close(self):
+            pass
+    class S:
+        def get(self, url, **kw):
+            return R()
+        def close(self):
+            pass
+    monkeypatch.setattr(fetch_policy, "_addresses", lambda host: [__import__("ipaddress").ip_address("23.62.46.184")])
+    monkeypatch.setattr(fetch_policy, "_session", lambda hostname, scheme: S())
+    with pytest.raises(fetch_policy.FetchRefused) as exc:
+        fetch_policy.fetch("https://www.mdpi.com/2072-4292/14/15/3657/pdf", max_bytes=1000)
+    msg = str(exc.value)
+    assert "www.mdpi.com" in msg and "23.62.46.184" not in msg and "Google Drive" in msg

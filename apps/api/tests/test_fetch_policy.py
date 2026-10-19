@@ -104,7 +104,9 @@ def test_byte_cap_holds_for_declared_and_streamed_bodies(transport, log):
 def test_http_errors_surface_and_the_response_is_closed(transport, log):
     resp = FakeResponse(404, {})
     transport.script["example.org|gone"] = resp
-    with pytest.raises(RuntimeError, match="http 404"):
+    # an upstream error is a governed decline that names the SITE (never the pinned
+    # address) and, for a 404, tells the contributor to check the link
+    with pytest.raises(fetch_policy.FetchRefused, match="example.org/gone answered HTTP 404"):
         fetch_policy.fetch("https://example.org/gone", max_bytes=1000)
     log("OUTPUT", f"closed={resp.closed}")
     assert resp.closed

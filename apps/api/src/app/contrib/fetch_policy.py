@@ -224,7 +224,16 @@ def fetch(url: str, max_bytes: int | None = None) -> tuple[bytes, str]:
                     raise FetchRefused(f"{current} answered {r.status_code} without a location")
                 current = urljoin(current, nxt)
                 continue
-            r.raise_for_status()
+            if r.status_code >= 400:
+                # Name the site, not the pinned address, and say what a contributor can
+                # do: publishers that refuse automated downloads (403) are the common case.
+                where = f"{parts.scheme}://{parts.hostname}{parts.path}"
+                hint = (" — the site refuses automated downloads; download the file yourself "
+                        "and share it from Google Drive (Anyone with the link) or another "
+                        "public host" if r.status_code in (401, 403, 429) else
+                        " — check the link in a browser" if r.status_code == 404 else "")
+                raise FetchRefused(f"{where} answered HTTP {r.status_code} "
+                                   f"{getattr(r, 'reason', '') or ''}".rstrip() + hint)
             declared = r.headers.get("content-length")
             if declared and str(declared).isdigit() and int(declared) > cap:
                 raise FetchRefused(f"{current} declares {int(declared):,} bytes; the cap is {cap:,}")
