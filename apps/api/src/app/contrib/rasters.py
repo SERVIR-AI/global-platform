@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 import os
-
+import re
 import shutil
 from pathlib import Path
 
@@ -113,11 +113,169 @@ def _bands(src) -> tuple[str | None, str | None]:
                   "matters as its own layer")
 
 
+# What a file IS, from its first bytes: a contributor's link names a zip, a picture or
+# a NetCDF as often as a GeoTIFF, and GDAL's own word for each is a path and "not
+# recognized". `sniff` names it; the gate says what to do about it.
+_MAGIC = ((b"PK\x03\x04", "zip"), (b"PK\x05\x06", "zip"), (b"\x1f\x8b", "gzip"),
+          (b"7z\xbc\xaf\x27\x1c", "7z"), (b"Rar!", "rar"),
+          (b"CDF\x01", "netcdf"), (b"CDF\x02", "netcdf"), (b"CDF\x05", "netcdf"),
+          (b"\x89HDF\r\n\x1a\n", "hdf5"),
+          (b"\x89PNG\r\n\x1a\n", "png"), (b"\xff\xd8\xff", "jpeg"), (b"GIF8", "gif"),
+          (b"II*\x00", "tiff"), (b"MM\x00*", "tiff"), (b"II+\x00", "tiff"), (b"MM\x00+", "tiff"),
+          (b"%PDF", "pdf"), (b"SQLite format 3\x00", "sqlite"), (b"EHFA_HEADER_TAG", "img"))
+# the suffix GDAL needs to pick the right driver (a netCDF-4 file is HDF5 inside)
+SUFFIX = {"zip": ".zip", "netcdf": ".nc", "hdf5": ".nc", "png": ".png", "jpeg": ".jpg",
+          "gif": ".gif", "tiff": ".tif", "sqlite": ".gpkg", "img": ".img"}
+# GDAL drivers that read a picture: pixels are colours on a page, not values on the ground
+_PICTURE_DRIVERS = {"PNG": "PNG", "JPEG": "JPEG", "GIF": "GIF", "BMP": "BMP", "WEBP": "WebP"}
+_ARCHIVES = {"zip": "a ZIP archive", "gzip": "a gzip archive", "7z": "a 7-Zip archive",
+             "rar": "a RAR archive", "pdf": "a PDF document"}
+
+
+def sniff(head) -> str | None:
+    """The kind of file `head` (bytes, or a path) begins like, or None."""
+    if not isinstance(head, (bytes, bytearray)):
+        try:
+            with open(head, "rb") as f:
+                head = f.read(64)
+        except OSError:
+            return None
+    head = bytes(head[:64])
+    for magic, kind in _MAGIC:
+        if head.startswith(magic):
+            return kind
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+def picture_problem(src) -> str | None:
+    """A print-layout PNG or JPEG offered as a raster is a picture of a map, and no CRS
+    can make it one — the old advice ("assign its CRS") sent a contributor round in
+    circles. Returns the refusal, or None when the dataset is not a bare picture."""
+    if src.crs is not None or src.driver not in _PICTURE_DRIVERS:
+        return None
+    bands = {1: "greyscale", 2: "greyscale with transparency", 3: "RGB", 4: "RGBA"}.get(src.count, "")
+    return (f"the file is a picture ({_PICTURE_DRIVERS[src.driver]} image, {src.width:,} x "
+            f"{src.height:,} pixels{', ' + bands if bands else ''}) — a map figure drawn for a "
+            "page or a screen, not a georeferenced raster: it carries no coordinates, and its "
+            "pixels are colours, not values. Contribute the layer the figure shows (the GeoTIFF, "
+            ".img or vector map it was drawn from); to keep the figure itself, contribute the "
+            "report it belongs to as a document")
+
+
+_CF_LAT = {"degrees_north", "degree_north", "degree_n", "degrees_n", "degreen", "degreesn"}
+_CF_LON = {"degrees_east", "degree_east", "degree_e", "degrees_e", "degreee", "degreese"}
+
+
+def _cf_lonlat(src) -> tuple[str, str] | None:
+    """(latitude name, longitude name) when the grid is laid on CF latitude/longitude
+    coordinates in degrees — what an ERDDAP or THREDDS NetCDF subset carries instead of
+    a grid_mapping — else None. GDAL builds the grid from those 1-D coordinates, so a
+    regular (non-identity) transform inside the globe is required too."""
+    units, names = {}, {}
+    for k, v in (src.tags() or {}).items():
+        var, _, attr = k.partition("#")
+        if attr == "units":
+            units[var] = str(v).strip().lower()
+        elif attr == "standard_name":
+            names[var] = str(v).strip().lower()
+
+    def find(cf_units, words):
+        for var, u in units.items():
+            if u in cf_units or (u.startswith("degree") and (var.lower() in words
+                                                             or names.get(var) in words)):
+                return var
+        return None
+    lat, lon = find(_CF_LAT, ("lat", "latitude")), find(_CF_LON, ("lon", "long", "longitude"))
+    if not (lat and lon) or src.transform.is_identity:
+        return None
+    b = src.bounds
+    if not (-180 <= min(b.left, b.right) and max(b.left, b.right) <= 360
+            and -90 <= min(b.bottom, b.top) and max(b.bottom, b.top) <= 90):
+        return None
+    return lat, lon
+
+
+def packing(dtype: str, width: int, height: int) -> dict:
+    """How the gate writes a GeoTIFF it keeps: DEFLATE with the predictor that suits the
+    values (floating point, or integer differences), tiled when big enough. A clip cut
+    to fit the size cap must not grow again when it is reprojected."""
+    import numpy as np
+    floats = np.dtype(dtype).kind == "f"
+    out = {"compress": "deflate", "predictor": 3 if floats else 2}
+    if width >= 256 and height >= 256:
+        out.update(tiled=True, blockxsize=256, blockysize=256)
+    return out
+
+
+def unreadable(path: str, exc: Exception) -> str:
+    """Why GDAL could not open a file, in the contributor's terms: what the file is when
+    its first bytes say so, never the server's temporary path."""
+    import zipfile
+    kind = sniff(path)
+    if kind == "zip":
+        try:
+            with zipfile.ZipFile(path) as z:
+                names = [i.filename for i in z.infolist() if not i.is_dir()]
+        except (zipfile.BadZipFile, OSError):
+            names = []
+        listed = ", ".join(names[:8]) + (f" and {len(names) - 8} more" if len(names) > 8 else "")
+        return (f"the file is a ZIP archive{f' of {len(names)} files ({listed})' if names else ''}, "
+                "not a raster — name the raster inside it to contribute with clip_member "
+                "(e.g. clip_member: 'folder/name.tif'), or end the url with '#<member name>'")
+    if kind in _ARCHIVES:
+        return (f"the file is {_ARCHIVES[kind]}, not a raster — give the raster itself (a GeoTIFF, "
+                ".img, NetCDF or GeoPackage)")
+    said = str(exc).replace(str(path), "the file")
+    said = re.sub(r"'?/[^'\s]*staged-tmp-[^'\s]*'?", "the file", said)
+    return f"the file could not be read as a raster: {said}"
+
+
+def crs_of(src, what: str = "") -> tuple:
+    """(the CRS the gate reads the grid on, a note or None). A picture is refused as a
+    picture; a CF latitude/longitude grid with no CRS is WGS 84 by the convention's own
+    default — ERDDAP and THREDDS subsets say it that way and never with a CRS — and the
+    note says so; any other file with no CRS is refused."""
+    from rasterio.crs import CRS
+    if src.crs is not None:
+        return src.crs, None
+    picture = picture_problem(src)
+    if picture:
+        raise ValueError(picture)
+    cf = _cf_lonlat(src)
+    if not cf:
+        raise ValueError("the file carries no coordinate reference system" + what + " — assign "
+                         "its CRS (gdal_edit -a_srs, or QGIS: Layer -> Set CRS) and resubmit")
+    west, _, east, _ = src.bounds
+    if max(west, east) > 180 + abs(src.transform.a):
+        raise ValueError(f"the grid's longitudes run {min(west, east):g} to {max(west, east):g} "
+                         "(0 to 360); the platform reads -180 to 180 — shift it (cdo "
+                         "sellonlatbox,-180,180,-90,90, or gdalwarp -t_srs EPSG:4326 --config "
+                         "CENTER_LONG 0) and resubmit")
+    return CRS.from_epsg(4326), (f"the file carries no CRS, but its grid is laid on CF "
+                                 f"coordinates {cf[0]!r} and {cf[1]!r} in degrees (latitude/"
+                                 "longitude), so it was read as EPSG:4326 (WGS 84); values "
+                                 "unchanged")
+
+
+# Formats whose file is a recipe naming OTHER files or services — a VRT, a WMS
+# description, a label beside its data. GDAL would read whatever they name, on this
+# server or anywhere, so they are refused once opened and before a cell is read.
+INDIRECT = frozenset({"VRT", "GTI", "WMS", "WMTS", "WCS", "KMLSUPEROVERLAY", "STACTA",
+                      "STACIT", "PLMOSAIC", "DAAS", "EEDA", "EEDAI", "OGCAPI", "HTTP",
+                      "PDS", "PDS4", "ISIS2", "ISIS3", "ERS", "TIL", "MRF", "ECRGTOC",
+                      "RPFTOC"})
+
+
 def _open_target(path: str, layer_name) -> tuple[str, str | None]:
     """(what GDAL opens, a note): the file itself, or the raster named `layer_name`
     inside a container that holds several (a GeoPackage with several gridded tables)."""
     import rasterio
     with rasterio.open(path) as src:
+        if src.driver in INDIRECT:
+            raise ValueError(f"the file is a {src.driver} description that points at other files "
+                             "or services, not a raster — give the raster file itself")
         subs, count = list(src.subdatasets or []), src.count
     if not subs:
         return path, None           # a plain raster: there is nothing to choose
@@ -158,18 +316,18 @@ def normalise(path: str, role: str, declared: dict | None = None,
     if picked:
         notes.append(picked)
     with rasterio.open(target) as src:
-        if src.crs is None:
-            raise ValueError("the file carries no coordinate reference system — assign its CRS "
-                             "(gdal_edit -a_srs, or QGIS: Layer -> Set CRS) and resubmit")
+        crs, said = crs_of(src)
+        if said:
+            notes.append(said)
         refusal, band_note = _bands(src)
         if refusal:
             raise ValueError(refusal)
         if band_note:
             notes.append(band_note)
-        epsg = src.crs.to_epsg()
-        geographic = bool(src.crs.is_geographic)
+        epsg = crs.to_epsg()
+        geographic = bool(crs.is_geographic)
         driver = src.driver
-        same_crs = epsg == 4326 or (geographic and epsg is None and "WGS 84" in src.crs.to_wkt())
+        same_crs = epsg == 4326 or (geographic and epsg is None and "WGS 84" in crs.to_wkt())
         declared_nodata = (declared or {}).get("nodata")
         tag = (float(declared_nodata) if src.nodata is None and _isnum(declared_nodata)
                else None)
@@ -177,7 +335,7 @@ def normalise(path: str, role: str, declared: dict | None = None,
             return path, notes
         if not same_crs and regrid == "refuse":
             raise ValueError(
-                f"the file is on {src.crs.to_string()} (EPSG:{epsg}); a {role}_* layer is a count "
+                f"the file is on {crs.to_string()} (EPSG:{epsg}); a {role}_* layer is a count "
                 "grid, which the platform never re-grids (reprojecting moves counts between "
                 "cells) — reproject it yourself with a sum-preserving method and resubmit on "
                 "EPSG:4326")
@@ -191,13 +349,12 @@ def normalise(path: str, role: str, declared: dict | None = None,
             if driver != "GTiff":
                 notes.append(f"converted from {driver} to GeoTIFF at ingest; values unchanged")
             with rasterio.open(out, "w", driver="GTiff", width=src.width, height=src.height,
-                               count=1, dtype=dtype, crs=src.crs, transform=src.transform,
-                               nodata=nodata, compress="lzw",
-                               tiled=(src.width >= 256 and src.height >= 256)) as dst:
+                               count=1, dtype=dtype, crs=crs, transform=src.transform,
+                               nodata=nodata, **packing(dtype, src.width, src.height)) as dst:
                 dst.write(src.read(1), 1)
             return out, notes
         transform, width, height = calculate_default_transform(
-            src.crs, "EPSG:4326", src.width, src.height, *src.bounds)
+            crs, "EPSG:4326", src.width, src.height, *src.bounds)
         fill = nodata
         if fill is None:
             fill = 0
@@ -206,19 +363,19 @@ def normalise(path: str, role: str, declared: dict | None = None,
         method = Resampling.bilinear if regrid == "bilinear" else Resampling.nearest
         arr = np.full((height, width), fill, dtype=dtype)
         reproject(source=rasterio.band(src, 1), destination=arr,
-                  src_transform=src.transform, src_crs=src.crs,
+                  src_transform=src.transform, src_crs=crs,
                   dst_transform=transform, dst_crs="EPSG:4326",
                   src_nodata=nodata, dst_nodata=nodata, resampling=method)
         with rasterio.open(out, "w", driver="GTiff", width=width, height=height, count=1,
                            dtype=dtype, crs="EPSG:4326", transform=transform, nodata=nodata,
-                           compress="lzw", tiled=(width >= 256 and height >= 256)) as dst:
+                           **packing(dtype, width, height)) as dst:
             dst.write(arr, 1)
         how = ("bilinear — the surface is interpolated between cell centres, so a cell's "
                "value may differ slightly from any one source cell"
                if method == Resampling.bilinear else
                "nearest neighbour — class values unchanged, cell edges moved")
-        notes.insert(0, f"reprojected at ingest from {src.crs.to_string()} (EPSG:{epsg}, "
-                        f"{abs(src.transform.a):g} {src.crs.linear_units or 'unit'} cells) to "
+        notes.insert(0, f"reprojected at ingest from {crs.to_string()} (EPSG:{epsg}, "
+                        f"{abs(src.transform.a):g} {crs.linear_units or 'unit'} cells) to "
                         f"EPSG:4326, {how}"
                         + ("; converted from " + driver if driver != "GTiff" else ""))
     return out, notes
@@ -508,11 +665,14 @@ def _explain(mismatch: str, decl: dict) -> str:
 
 
 def add(manifest: dict, dry_run: bool = False, review: str | None = None,
-        keep_prepared: bool = False, prepared_before: list | None = None) -> dict:
+        keep_prepared: bool = False, prepared_before: list | None = None,
+        fetched: dict | None = None) -> dict:
     """Gate then land: validate -> verify file against the DECLARED contract ->
     copy into TIFFS_DIR -> append tiffs.yml row + raster_schema.yml contract.
     A mismatch refuses and writes NOTHING. `prepared_before`: what was done to the file
-    when it was staged (reprojected, a band dropped) — the landed row keeps saying it."""
+    when it was staged (reprojected, a band dropped) — the landed row keeps saying it.
+    `fetched`: where a clip or a zip member was read from (url, box, member, sha256) —
+    the row keeps it so the stored file can be cut again and compared."""
     from ..config import get_settings
     from ..graph.geo import schema as schema_mod, verify
 
@@ -536,7 +696,7 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None,
         return {"status": "declined", "verified": False, "failures": [str(exc)]}
     except Exception as exc:
         return {"status": "declined", "verified": False,
-                "failures": [f"the file could not be read as a raster: {type(exc).__name__}: {exc}"]}
+                "failures": [unreadable(str(manifest["file"]), exc)]}
     original = str(manifest["file"])
     manifest = {**manifest, "file": src_file}
     prepared = [*(prepared_before or []), *(n for n in prepared if n not in (prepared_before or []))]
@@ -614,6 +774,7 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None,
               if manifest.get("usage_notes") else {}),
            **({"review": review} if review else {}),
            **({"prepared": prepared} if prepared else {}),
+           **({"fetched": fetched} if fetched else {}),
            **({"outside_values": outside} if outside is not None else {}),
            **({"countries": list(manifest["countries"])} if manifest.get("countries") else {}),
            "contributed": True}
