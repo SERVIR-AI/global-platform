@@ -542,8 +542,13 @@ def contribute_status(contribution_id: str | None = None, action: str = "show") 
 
     No arguments: everything you submitted, newest first (reviewers also get
     `pending_review`, the queue). With a contribution_id: that record.
-    action="withdraw" with a contribution_id: take back your own pending
-    contribution — its preview is removed; history it already appears in stays.
+    action="withdraw" with a contribution_id: take back your own contribution. A
+    pending one's preview is removed; an APPROVED one (auto-approved included) stops
+    being served to every caller — its layer, table, feed, document, recipe or
+    correction leaves the platform and the name is free to resubmit — and `unlanded`
+    says what was undone. Only its contributor may withdraw it (a reviewer removes
+    anyone's with contribute_review). Packs and receipts already built on it stay
+    replayable: removal stops future use, it does not rewrite history.
 
     action="audit": every APPROVED contribution and whether the platform is
     actually serving it — `serving`, `inert` (approved, not served) or
@@ -564,6 +569,9 @@ def contribute_status(contribution_id: str | None = None, action: str = "show") 
         return _staging.withdraw(contribution_id)
     if action == "audit":
         return _staging.reconcile()
+    if action != "show":
+        return {"status": "declined",
+                "note": f"unknown action {action!r} — show, withdraw or audit"}
     return _staging.status(contribution_id)
 
 
@@ -577,18 +585,22 @@ def contribute_review(action: str = "list", contribution_id: str | None = None,
     exactly as the contributor did before deciding. action="approve" with a
     contribution_id (optional note): lands it for everyone through the same gate.
     action="reject" with a contribution_id and a note the contributor can act on:
-    removes the preview, keeps the record and the note. Returns {status, ...}; on a
-    decline `note` says why.
+    a pending one's preview is removed; an APPROVED one (auto-approved included) is
+    taken down for every caller — `unlanded` says what was undone — and its record
+    keeps the note. action="remove" is the same for an approved one. Packs and
+    receipts already built on it stay replayable. Returns {status, ...}; on a decline
+    `note` says why.
     """
     if action == "list":
         return _staging.review_list(status_filter=status_filter)
+    if action not in ("approve", "reject", "remove"):
+        return {"status": "declined",
+                "note": f"unknown action {action!r} — list, approve, reject or remove"}
     if not contribution_id:
         return {"status": "declined", "note": f"{action} needs a contribution_id"}
     if action == "approve":
         return _staging.approve(contribution_id, note=note)
-    if action == "reject":
-        return _staging.reject(contribution_id, note or "")
-    return {"status": "declined", "note": f"unknown action {action!r} — list, approve or reject"}
+    return _staging.reject(contribution_id, note or "")
 
 
 @mcp.tool()

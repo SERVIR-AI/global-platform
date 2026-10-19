@@ -34,6 +34,39 @@ PENDING_CAP = 20               # open contributions per contributor
 _HISTORY = ("removal stops future use, it does not rewrite history — packs and "
             "receipts minted while the preview was live stay replayable")
 
+PREVIEW = "UNREVIEWED PREVIEW"
+
+
+def _preview_review(rec: dict) -> str:
+    """The `review` every staged artefact carries — the field each reader already
+    puts into a citation ("Review: …") — so a citation of a staged source says it is
+    an unreviewed preview, not only the pack around it. A source held for a human
+    (a licence, personal data) was usable by its contributor at once and cited like
+    an approved one."""
+    hold = rec.get("held_for_review")
+    return (f"{PREVIEW} — staged contribution {rec.get('contribution_id')}, not yet approved "
+            "by a reviewer; served only to its contributor and to reviewers"
+            + (f"; held for a human reviewer because {hold}" if hold else ""))
+
+
+def _as_preview(row: dict) -> dict:
+    """A staged row as a reader gets it: marked, including rows staged before the
+    marker existed (they are rebuilt from their records after a restart)."""
+    if str(row.get("review") or "").startswith(PREVIEW):
+        return row
+    return {**row, "review": _preview_review({"contribution_id": row.get("contribution_id")})}
+
+
+def _landed_preview(preview: dict | None) -> dict:
+    """The record's preview once it has landed: the staged row it shows no longer
+    says "not yet approved" beside status approved."""
+    out = dict(preview or {})
+    for k in ("row", "entry", "passport"):
+        part = out.get(k)
+        if isinstance(part, dict) and str(part.get("review") or "").startswith(PREVIEW):
+            out[k] = {kk: vv for kk, vv in part.items() if kk != "review"}
+    return out
+
 
 class Declined(Exception):
     """A submission the platform will not stage; the message says why."""
@@ -138,7 +171,8 @@ def _stage_document(rec: dict, prepared: dict) -> dict:
     """Ingest with the staged tag; the record exists, so its id rides the metadata."""
     corpus = prepared["corpus"]
     meta = _document_meta(rec["manifest"]) | {"staged_by": rec["contributor_id"],
-                                              "contribution_id": rec["contribution_id"]}
+                                              "contribution_id": rec["contribution_id"],
+                                              "review": _preview_review(rec)}
     out = corpus.ingest(prepared["text"], meta, raw=prepared["raw"], filename=prepared["fname"])
     # corpus_document reads one pack's library and defaults to food-security, so the
     # call must name the library this went to or it answers "unknown doc_id".
@@ -351,7 +385,7 @@ def _table_row(rec: dict, path: str, sha256: str, encoding: str = "utf-8") -> di
             **tables.scope_fields(m),
             **({"usage_notes": m["usage_notes"]} if m.get("usage_notes") else {}),
             "staged_by": rec["contributor_id"], "contribution_id": rec["contribution_id"],
-            "contributor_label": rec["contributor_label"]}
+            "contributor_label": rec["contributor_label"], "review": _preview_review(rec)}
 
 
 def _stage_table(rec: dict, prepared: dict) -> dict:
@@ -474,7 +508,7 @@ def visible_staged_feed(dataset: str) -> dict | None:
     row = STAGED_FEEDS.get(dataset)
     if row is None or not identity.current().may_see(row.get("staged_by")):
         return None
-    return row
+    return _as_preview(row)
 
 
 def visible_staged_feeds_for_pack(pack: str) -> dict:
@@ -482,7 +516,7 @@ def visible_staged_feeds_for_pack(pack: str) -> dict:
     contributor can preview their own feed inside a real answer before review."""
     _ensure_staged_loaded()
     caller = identity.current()
-    return {ds: row for ds, row in STAGED_FEEDS.items()
+    return {ds: _as_preview(row) for ds, row in STAGED_FEEDS.items()
             if row.get("pack") == pack and caller.may_see(row.get("staged_by"))}
 
 
@@ -512,7 +546,9 @@ FEED_FIELDS = {
                    "(a JSON API with a record list)",
         "fetch": "adapter settings — generic_table: {url, index_name, units, missing_below?, "
                  "bands?: [{min?, max?, label}]}; generic_json: {url, records_path (dot path "
-                 "to the record list), fields (output field -> dot path in a record), "
+                 "to the record list), fields (output field -> dot path in a record; "
+                 "feeds_query filters by any output field, and by a bbox when two of them "
+                 "are named lat/lon or latitude/longitude), "
                  "as_of_field (STRONGLY RECOMMENDED — the output field holding each "
                  "record's timestamp). Without it the platform cannot tell which end "
                  "of your feed is recent, has to serve the last records in publication "
@@ -527,6 +563,11 @@ FEED_FIELDS = {
                       "it the platform treats it as global and cites it in every "
                       "answer for this pack — a Battambang rainfall table was cited "
                       "into a Kenya maize brief before this was declarable."),
+        "bbox": ("[minLon, minLat, maxLon, maxLat] (EPSG:4326) of the area the feed's "
+                 "records are about, e.g. [-85.30, 9.93, -84.76, 10.30] for a Gulf of Nicoya "
+                 "checklist. A pack reads it only for an area that meets the box — with "
+                 "countries alone, a checklist of one gulf was cited in every answer for "
+                 "its country"),
         "hazards": ("which hazards this feed speaks to, e.g. [earthquake, tsunami]. "
                     "Without it a risk feed is cited in EVERY risk answer — a flood "
                     "brief carried global earthquakes until these were declared. A "
@@ -572,7 +613,7 @@ def _review_note(rec: dict, noun: str) -> str | None:
 
 
 def _validate_feed(manifest) -> list[str]:
-    from . import feedspecs
+    from . import feedspecs, tables
     if not isinstance(manifest, dict):
         return ["manifest must be a mapping of feed settings"]
     m = dict(manifest)
@@ -594,21 +635,35 @@ def _validate_feed(manifest) -> list[str]:
     unknown = set(m) - _FEED_KNOWN
     if unknown:
         problems.append(f"unknown fields {sorted(unknown)} — every field is provenance")
+    problems += tables.scope_problems(m)
     url = (m.get("fetch") or {}).get("url") if isinstance(m.get("fetch"), dict) else None
     if url:
         problems += fetch_policy.check_url(url)
     return problems
 
 
+def _feed_spec(m: dict) -> dict:
+    """The row a feed manifest serves through, staged or landed: its scope in the
+    shape a table's takes (`countries` a list of names, `bbox` four floats — the
+    packs read both before citing it) and its params said from its own fields."""
+    from ..mcp import feeds
+    from . import tables
+    row = {k: v for k, v in m.items() if k not in ("dataset", "countries", "bbox")}
+    row.update(tables.scope_fields(m))
+    row["params"] = feeds.params_doc(row)
+    return row
+
+
 def _feed_row(rec: dict) -> dict:
     m = rec["manifest"]
-    row = {k: v for k, v in m.items() if k != "dataset"}
+    row = _feed_spec(m)
     # File-loaded rows carry `declarative` (their filename); the adapters key
     # their fetch cache on it, so a staged row names its contribution instead.
     row.update({"status": "available", "pack": m.get("pack", "food-security"),
                 "declarative": f"staged:{rec['contribution_id']}",
                 "staged_by": rec["contributor_id"], "contribution_id": rec["contribution_id"],
-                "contributor_label": rec["contributor_label"]})
+                "contributor_label": rec["contributor_label"],
+                "review": _preview_review(rec)})
     return row
 
 
@@ -638,12 +693,25 @@ def _prepare_feed(m: dict) -> dict:
 
 
 def _stage_feed(rec: dict, prepared: dict) -> dict:
+    from . import tables
     ds = rec["manifest"]["dataset"]
     _ensure_staged_loaded()
-    STAGED_FEEDS[ds] = _feed_row(rec)
-    return {"dataset": ds, "sample": prepared["sample"], "row": STAGED_FEEDS[ds],
-            "how_to_test": (f"call feeds_query(dataset={ds!r}) — only you and reviewers get it "
-                            "until it is approved; then it is a platform feed for everyone")}
+    STAGED_FEEDS[ds] = row = _feed_row(rec)
+    hints = []
+    if not tables.scope_fields(rec["manifest"]):
+        hints.append("no countries or bbox declared, so every answer of its pack cites this "
+                     "feed wherever it is asked about — declare where its records speak if "
+                     "they are not global")
+    filt = ""
+    if row.get("adapter") == "generic_json":
+        names = list((row.get("fetch") or {}).get("fields") or {})
+        filt = (f" — or filter what it reads, e.g. feeds_query(dataset={ds!r}, params="
+                f"{{{names[0] if names else '<field>'}: <value>, limit: 5}}), on any output "
+                f"field ({', '.join(names)})" + (" or a bbox" if "bbox" in row["params"] else ""))
+    return {"dataset": ds, "sample": prepared["sample"], "row": row,
+            **({"hints": hints} if hints else {}),
+            "how_to_test": (f"call feeds_query(dataset={ds!r}){filt}; only you and reviewers "
+                            "get it until it is approved; then it is a platform feed for everyone")}
 
 
 def _land_feed(rec: dict) -> dict:
@@ -659,7 +727,8 @@ def _land_feed(rec: dict) -> dict:
     if taken:
         raise Declined(taken)
     note = _review_note(rec, "feed")
-    spec = {**m, "contributed": True, **({"review": note} if note else {})}
+    spec = {"dataset": m["dataset"], **_feed_spec(m), "contributed": True,
+            **({"review": note} if note else {})}
     path = get_settings().feeds_conf_dir / f"{m['dataset']}.yml"
     if path.exists():
         raise Declined(f"{path.name} already exists — contributions never overwrite")
@@ -1071,7 +1140,7 @@ def _stage_raster(rec: dict, prepared: dict) -> dict:
                 if (prepared.get("observed") or {}).get("prepared") else {}),
              **({"fetched": prepared["fetched"]} if prepared.get("fetched") else {}),
              "contributed": True, "staged_by": rec["contributor_id"], "contribution_id": cid,
-             "contributor_label": rec["contributor_label"]}
+             "contributor_label": rec["contributor_label"], "review": _preview_review(rec)}
     from . import rasters as _r
     rule = _r.namespace(layer)
     contract = {**m["declared"], "role": _r._role(layer)}
@@ -1185,7 +1254,8 @@ def _stage_stack_row(entry: dict, staged_by: str, cid: str) -> None:
                          **({"colors": entry["colors"]} if entry.get("colors") else {}),
                          "layer_pattern": f"{sid}_{{year}}", "years": [],
                          "extent": {"lon": [b[0], b[2]], "lat": [b[1], b[3]]},
-                         "staged_by": staged_by, "contribution_id": cid},
+                         "staged_by": staged_by, "contribution_id": cid,
+                         **({"review": entry["review"]} if entry.get("review") else {})},
                "contract": None}
         STAGED_RASTERS[sid] = row
     st = row["entry"]
@@ -1215,7 +1285,7 @@ def visible_staged_rasters() -> dict:
     """{layer: catalog entry} for the staged layers the current caller may see."""
     _ensure_staged_loaded()
     caller = identity.current()
-    return {layer: row["entry"] for layer, row in STAGED_RASTERS.items()
+    return {layer: _as_preview(row["entry"]) for layer, row in STAGED_RASTERS.items()
             if caller.may_see(row["entry"].get("staged_by"))}
 
 
@@ -1373,13 +1443,7 @@ def _land_weights(rec: dict) -> dict:
     if path.exists():
         doc = yaml.safe_load(path.read_text()) or {}
     doc.setdefault("weights", {})[pv["hazard"]] = pv["after"]
-    doc.setdefault("adjusted", {})[pv["hazard"]] = {
-        "by": rec["contributor_label"], "contribution_id": rec["contribution_id"],
-        "rationale": rec["manifest"].get("rationale"),
-        "replaced": pv["before"],
-        **({"review": _review_note(rec, "recipe")} if rec.get("auto_approved") else {}),
-        **({"usage_notes": rec["manifest"]["usage_notes"]}
-           if rec["manifest"].get("usage_notes") else {})}
+    doc.setdefault("adjusted", {})[pv["hazard"]] = _weights_block(rec)
     path.write_text(
         "# Hub-adjusted Layer-2 vulnerability weights \u2014 machine-owned, written by\n"
         "# the contribution gate on approval. Hand-edit conf/risk_l2.yml, never this.\n"
@@ -1500,6 +1564,27 @@ def _service_xml_problem(raw: bytes, url: str, what: str) -> str | None:
     return None
 
 
+# The files of a shapefile besides the .zip that holds them; a link to any one of them
+# alone used to hear "not GeoJSON, a zipped shapefile or a GeoPackage", which never
+# said what to do with the folder of parts a hub actually has.
+_SHAPEFILE_PARTS = (".shp", ".shx", ".dbf", ".prj", ".cpg", ".sbn", ".sbx", ".qix",
+                    ".shp.xml", ".qmd")
+
+
+def _shapefile_part(raw: bytes, fname: str | None) -> str | None:
+    """'the .shp file <name>' when these bytes are one loose part of a shapefile, else
+    None. By the name the host gave the file, or by the main file's own header
+    (file code 9994, version 1000) when the name says nothing."""
+    name = str(fname or "").strip()
+    low = name.lower()
+    for ext in sorted(_SHAPEFILE_PARTS, key=len, reverse=True):
+        if low.endswith(ext):
+            return f"the {ext} file {name!r}"
+    if len(raw) >= 100 and raw[:4] == b"\x00\x00\x27\x0a" and raw[28:32] == b"\xe8\x03\x00\x00":
+        return "a shapefile's .shp (or .shx) file"
+    return None
+
+
 def _vector_taken(layer: str) -> str | None:
     import re
     from ..graph.geo import ingest, vectors
@@ -1555,6 +1640,13 @@ def _prepare_vector(m: dict) -> dict:
     service = _service_xml_problem(raw, m["url"], "vector file (GeoJSON, zipped shapefile, GeoPackage)")
     if service:
         raise Declined(service)
+    part = _shapefile_part(raw, fname)
+    if part:
+        raise Declined(f"{m['url']} is {part} — one part of a shapefile, which is several files "
+                       "that only work together. Put the .shp, .shx, .dbf and .prj (and the .cpg, "
+                       "if there is one) of the layer in ONE .zip, share that .zip (Google Drive: "
+                       "Anyone with the link) and give its link. If the folder also holds the "
+                       "layer as a GeoPackage (.gpkg) or GeoJSON, that one file goes in as it is")
     # A zipped shapefile or a GeoPackage is read into GeoJSON on EPSG:4326 here;
     # what lands is always GeoJSON, and the record says what ingest did.
     from ..graph.geo import vecio
@@ -1597,7 +1689,7 @@ def _stage_vector(rec: dict, prepared: dict) -> dict:
                 if prepared["observed"].get("prepared") else {}),
              **({"usage_notes": m["usage_notes"]} if m.get("usage_notes") else {}),
              "contributed": True, "staged_by": rec["contributor_id"], "contribution_id": cid,
-             "contributor_label": rec["contributor_label"]}
+             "contributor_label": rec["contributor_label"], "review": _preview_review(rec)}
     _ensure_staged_vectors_loaded()
     STAGED_VECTORS[layer] = entry
     vectors.purge_clips(layer)
@@ -1641,8 +1733,9 @@ def _land_vector(rec: dict) -> dict:
     if dest.exists():
         raise Declined(f"layer {layer!r} already landed")
     os.replace(src, dest)
+    # the preview's own marker stays behind: a landed layer is reviewed, or says it was not
     entry = {k: v for k, v in preview["entry"].items()
-             if k not in ("staged_by", "contributor_label")}
+             if k not in ("staged_by", "contributor_label", "review")}
     entry["local_path"] = f"vectors/{layer}.geojson"
     if rec.get("auto_approved"):
         entry["review"] = "auto-approved — no human reviewed this layer"
@@ -1674,7 +1767,7 @@ def visible_staged_vectors() -> dict:
     """{layer: entry} for the staged point layers the current caller may see."""
     _ensure_staged_vectors_loaded()
     caller = identity.current()
-    return {layer: e for layer, e in STAGED_VECTORS.items()
+    return {layer: _as_preview(e) for layer, e in STAGED_VECTORS.items()
             if caller.may_see(e.get("staged_by"))}
 
 # --------------------------------------------------------------------------- amend
@@ -1917,37 +2010,224 @@ def amended_row(layer: str, row: dict, contract: bool = False) -> dict:
     # reads an unreviewed record, and the pack it lands in must be a preview
     return {**row, **over, "staged_by": a.get("staged_by"),
             "contribution_id": a.get("contribution_id"),
-            "review": "STAGED correction of this record — not yet reviewed"}
+            "review": (f"{PREVIEW} — a staged correction of this record "
+                       f"({a.get('contribution_id')}), not yet approved by a reviewer")}
+
+
+# --------------------------------------------------------------------------- unlanding
+# An APPROVED contribution taken down — by its contributor (withdraw) or by a
+# reviewer (reject). With auto-approve on, a mistaken layer is live for every caller
+# the moment it lands, and approved contributions could not be withdrawn or rejected
+# over MCP: a change map taken for a land-cover stack stayed the default stack. Each
+# kind undoes its own landing through the removal the CLI runs (contrib/removal.py):
+# future use stops; packs and receipts already minted stay replayable. Every one
+# raises Declined, in words, when it cannot.
+
+def _unland_document(rec: dict) -> dict:
+    from ..rag.store import Corpus
+    from . import removal
+    landing, m = rec.get("landing") or {}, rec.get("manifest") or {}
+    doc_id = landing.get("doc_id") or (rec.get("preview") or {}).get("doc_id")
+    if not doc_id:
+        raise Declined("the record names no landed doc_id, so there is nothing to take down")
+    if landing.get("corpus"):
+        corpus = Corpus(landing["corpus"])
+    else:
+        corpus, why = sources._corpus_for(m.get("pack") or "food-security")
+        if corpus is None:
+            raise Declined(why)
+    hit = corpus.find(doc_id)
+    if hit and (hit.get("metadata") or {}).get("staged_by"):
+        raise Declined(f"doc_id {doc_id} in the {corpus.name} library is someone's staged "
+                       "copy, not this landing — nothing of this contribution is live")
+    out = corpus.remove(doc_id)
+    if not out["found"]:
+        return {"removed": False, "note": f"doc_id {doc_id} is no longer in the {corpus.name} "
+                                          "library — nothing of it was being served"}
+    return {"removed": True, "doc_id": doc_id, "library": corpus.name,
+            "removed_chunks": out["removed_chunks"],
+            "raw_archive_kept": out.get("raw_archive_kept", False), "note": removal._HISTORY}
+
+
+def _unland_feed(rec: dict) -> dict:
+    """A landed table or feed: its row leaves conf/feeds and the live registry at once;
+    a table's archived copy moves aside, kept for replay."""
+    from ..mcp import registry
+    from . import removal
+    ds = (rec.get("manifest") or {}).get("dataset")
+    out = removal.remove_feed(ds)
+    if out["status"] != "removed":
+        if ds not in registry.FEEDS:
+            return {"removed": False, "note": f"{ds!r} is no longer a platform feed — nothing "
+                                              "of it was being served"}
+        raise Declined("; ".join(out["failures"]))
+    registry.reload_declarative_feeds()
+    return {"removed": True, "dataset": ds, "feed_row": out["feed_row"],
+            **({"archived_copy": out["archived_copy"]} if out.get("archived_copy") else {}),
+            "note": removal._HISTORY}
+
+
+def _unland_raster(rec: dict) -> dict:
+    """A landed layer leaves the catalog and its declared contract; a land-cover year
+    leaves its stack, and a stack with no year left leaves with it — so it is no
+    longer a stack any pack can choose. The file moves aside, kept for replay."""
+    from ..graph.geo import tiffs
+    from . import removal
+    layer = (rec.get("manifest") or {}).get("layer")
+    if layer not in tiffs.catalog(include_staged=False):
+        return {"removed": False, "note": f"{layer!r} is no longer in the catalog — nothing of "
+                                          "it was being served"}
+    out = removal.remove_raster(layer)
+    if out["status"] != "removed":
+        raise Declined("; ".join(out["failures"]))
+    return {"removed": True, **{k: v for k, v in out.items() if k not in ("status", "note")},
+            "note": removal._HISTORY}
+
+
+def _unland_vector(rec: dict) -> dict:
+    from pathlib import Path
+    from ..graph.geo import vectors
+    from . import removal
+    layer = (rec.get("manifest") or {}).get("layer")
+    entry = vectors.landed().get(layer)
+    if not entry:
+        return {"removed": False, "note": f"{layer!r} is no longer a landed vector layer — "
+                                          "nothing of it was being served"}
+    vectors.unregister(layer)
+    out = {"removed": True, "layer": layer, "registry_row": "removed",
+           "clips_purged": vectors.purge_clips(layer)}
+    path = Path(vectors.master_path(entry))
+    if path.is_file():
+        retired = path.with_name(path.name + ".retired")
+        path.rename(retired)
+        out["file"] = f"moved aside to {retired.name} (kept for replay)"
+    return {**out, "note": removal._HISTORY}
+
+
+def _weights_block(rec: dict) -> dict:
+    """The `adjusted` block an approved weights contribution writes — on landing, and
+    again when a later one is taken down and this one is in force once more."""
+    auto = rec.get("auto_approved") or rec.get("reviewer_id") == "auto-approve"
+    return {"by": rec["contributor_label"], "contribution_id": rec["contribution_id"],
+            "rationale": (rec.get("manifest") or {}).get("rationale"),
+            "replaced": (rec.get("preview") or {}).get("before"),
+            **({"review": _review_note({"auto_approved": True}, "recipe")} if auto else {}),
+            **({"usage_notes": rec["manifest"]["usage_notes"]}
+               if (rec.get("manifest") or {}).get("usage_notes") else {})}
+
+
+def _unland_weights(rec: dict) -> dict:
+    """The hazard's weights go back to what was in force before: the latest OTHER
+    approved adjustment for it, else the platform recipe (conf/risk_l2.yml)."""
+    import yaml
+    from ..config import get_settings
+    from . import removal
+    hz = (rec.get("preview") or {}).get("hazard")
+    path = get_settings().risk_l2_contrib_path
+    doc = (yaml.safe_load(path.read_text()) or {}) if path.exists() else {}
+    adj = (doc.get("adjusted") or {}).get(hz) or {}
+    if adj.get("contribution_id") != rec["contribution_id"]:
+        return {"removed": False,
+                "note": (f"a later adjustment ({adj['contribution_id']}) is in force for {hz}, so "
+                         "this one no longer is — nothing to take down" if adj.get("contribution_id")
+                         else f"no adjustment is in force for {hz} — nothing to take down")}
+    earlier = next((r for r in store.list_contributions(status="approved", kind="weights")
+                    if r["contribution_id"] != rec["contribution_id"]
+                    and (r.get("preview") or {}).get("hazard") == hz
+                    and r.get("created_at", "") < rec.get("created_at", "")), None)
+    if earlier:
+        doc.setdefault("weights", {})[hz] = earlier["preview"]["after"]
+        doc.setdefault("adjusted", {})[hz] = _weights_block(earlier)
+        now = f"the earlier approved adjustment {earlier['contribution_id']} is in force again"
+    else:
+        doc.get("weights", {}).pop(hz, None)
+        doc.get("adjusted", {}).pop(hz, None)
+        now = "the platform recipe (conf/risk_l2.yml) is in force again"
+    path.write_text(
+        "# Hub-adjusted Layer-2 vulnerability weights — machine-owned, written by\n"
+        "# the contribution gate on approval. Hand-edit conf/risk_l2.yml, never this.\n"
+        + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+    return {"removed": True, "hazard": hz, "now": now, "note": removal._HISTORY}
+
+
+def _unland_amend(rec: dict) -> dict:
+    """A correction taken back: every field that still says what it set returns to
+    what it replaced; a field a later correction changed again is left alone and named."""
+    import yaml
+    from ..config import get_settings
+    from . import removal
+    pv, cid = rec.get("preview") or {}, rec["contribution_id"]
+    layer, after, before = pv.get("layer"), pv.get("after") or {}, pv.get("before") or {}
+    target = _amend_target(str(layer or ""))
+    if target is None:
+        return {"removed": False, "note": f"{layer!r} is no longer a landed layer — nothing to restore"}
+    kind, row = target
+    restore = {k: before.get(k) for k, v in after.items()
+               if str(row.get(k) or "").strip() == str(v).strip()}
+    kept = sorted(set(after) - set(restore))
+    if not restore:
+        return {"removed": False, "note": f"later corrections replaced every field this one set "
+                                          f"({', '.join(kept)}) — none of it is in force"}
+
+    def undone(current: dict) -> dict:
+        fields = {k: v for k, v in current.items() if k not in restore or k not in _AMENDABLE}
+        fields.update({k: v for k, v in restore.items() if k in _AMENDABLE and v is not None})
+        review = "; ".join(p for p in str(current.get("review") or "").split("; ")
+                           if p and f"({cid})" not in p)
+        fields.pop("review", None)
+        return {**fields, **({"review": review} if review else {}),
+                "amended": [*(current.get("amended") or []),
+                            {"contribution_id": cid, "withdrawn": True, "restored": restore}]}
+    s = get_settings()
+    if kind == "raster":
+        rows = yaml.safe_load(s.tiffs_contrib_path.read_text()) or {}
+        rows[layer] = undone(rows[layer])
+        s.tiffs_contrib_path.write_text(
+            "# Contributed raster rows — machine-owned; written by the\n"
+            "# contribution gate. Hand-edit conf/tiffs.yml, never this.\n"
+            + yaml.safe_dump(rows, sort_keys=False, allow_unicode=True))
+        if "units" in restore:
+            sp = s.raster_schema_contrib_path
+            doc = (yaml.safe_load(sp.read_text()) or {}) if sp.exists() else {}
+            doc.setdefault("layers", {}).setdefault(layer, {})["units"] = restore["units"]
+            sp.write_text("# Contributed raster contracts — machine-owned.\n"
+                          + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+    else:
+        from ..graph.geo import vectors
+        vectors.register(layer, undone(vectors.landed()[layer]))
+    return {"removed": True, "layer": layer, "restored": restore,
+            **({"left_as_corrected_later": kept} if kept else {}), "note": removal._HISTORY}
 
 
 _KINDS = {
     "document": {"validate": _validate_document, "prepare": _prepare_document,
                  "stage": _stage_document, "land": _land_document,
-                 "retire": _retire_document, "fields": DOCUMENT_FIELDS,
+                 "retire": _retire_document, "unland": _unland_document,
+                 "fields": DOCUMENT_FIELDS,
                  "title": lambda m: str(m.get("title") or "untitled document")},
     "table": {"validate": _validate_table, "prepare": _prepare_table,
               "stage": _stage_table, "land": _land_table, "retire": _retire_table,
-              "fields": TABLE_FIELDS,
+              "unland": _unland_feed, "fields": TABLE_FIELDS,
               "title": lambda m: f"{m.get('title') or 'untitled table'} ({m.get('dataset')})"},
     "feed": {"validate": _validate_feed, "prepare": _prepare_feed,
              "stage": _stage_feed, "land": _land_feed, "retire": _retire_feed,
-             "fields": FEED_FIELDS,
+             "unland": _unland_feed, "fields": FEED_FIELDS,
              "title": lambda m: f"{m.get('title') or 'untitled feed'} ({m.get('dataset')})"},
     "raster": {"validate": _validate_raster, "prepare": _prepare_raster,
                "stage": _stage_raster, "land": _land_raster, "retire": _retire_raster,
-               "fields": RASTER_FIELDS,
+               "unland": _unland_raster, "fields": RASTER_FIELDS,
                "title": lambda m: f"{m.get('title') or 'untitled layer'} ({m.get('layer')})"},
     "vector": {"validate": _validate_vector, "prepare": _prepare_vector,
                "stage": _stage_vector, "land": _land_vector, "retire": _retire_vector,
-               "fields": VECTOR_FIELDS,
+               "unland": _unland_vector, "fields": VECTOR_FIELDS,
                "title": lambda m: f"{m.get('title') or 'untitled point layer'} ({m.get('layer')})"},
     "weights": {"validate": _validate_weights, "prepare": _prepare_weights,
                 "stage": _stage_weights, "land": _land_weights, "retire": _retire_weights,
-                "fields": WEIGHTS_FIELDS,
+                "unland": _unland_weights, "fields": WEIGHTS_FIELDS,
                 "title": lambda m: f"vulnerability weights for {m.get('hazard')}"},
     "amend": {"validate": _validate_amend, "prepare": _prepare_amend,
               "stage": _stage_amend, "land": _land_amend, "retire": _retire_amend,
-              "fields": AMEND_FIELDS,
+              "unland": _unland_amend, "fields": AMEND_FIELDS,
               "title": lambda m: f"correction of the record of {m.get('layer')}"},
 }
 
@@ -1956,7 +2236,7 @@ _KINDS = {
 
 _PUBLIC = ("contribution_id", "kind", "status", "title", "contributor_label",
            "created_at", "updated_at", "preview", "landing", "decision_note",
-           "reviewer_label", "problems", "held_for_review")
+           "reviewer_label", "problems", "held_for_review", "unlanded")
 
 
 # A licence that keeps the platform from serving the data on: the platform hosts a
@@ -2183,9 +2463,13 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
             prepared = spec["prepare"](manifest)      # fetches and checks; stores nothing
         except Declined as exc:
             return {"status": "declined", "kind": kind, "problems": [str(exc)]}
+        # Known before anything is staged, so the preview's own marker can say why it
+        # waits for a person (the licence, the e-mail addresses).
+        hold = _needs_a_human(kind, manifest, prepared)
         rec = {"kind": kind, "status": "pending", "manifest": dict(manifest),
                "title": spec["title"](manifest),
-               "contributor_id": caller.id, "contributor_label": caller.label}
+               "contributor_id": caller.id, "contributor_label": caller.label,
+               **({"held_for_review": hold} if hold else {})}
         ident = store.save_contribution(rec)
         _release(slot)                                # the record counts from here
         slot = None
@@ -2199,9 +2483,7 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
     finally:
         identity.unbind(token)
         _release(slot)
-    hold = _needs_a_human(kind, manifest, prepared)
-    rec = store.update_contribution(ident, {"preview": preview,
-                                            **({"held_for_review": hold} if hold else {})})
+    rec = store.update_contribution(ident, {"preview": preview})
     from ..config import get_settings
     if get_settings().grp_auto_approve and hold:
         # Auto-approve lands what a machine can vouch for. A licence that forbids
@@ -2226,7 +2508,8 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
         rec = store.update_contribution(ident, {
             "status": "approved", "landing": landing, "reviewer_id": "auto-approve",
             "reviewer_label": "auto-approve (GRP_AUTO_APPROVE on — no human reviewed this)",
-            "decision_note": "auto-approved: this deployment lands contributions without review"})
+            "decision_note": "auto-approved: this deployment lands contributions without review",
+            "preview": _landed_preview(rec.get("preview"))})
         _notify(f"New {kind} contribution AUTO-APPROVED for {caller.label}: "
                 f"{rec['title']} (id {ident})")
         preview = dict(rec.get("preview") or {})
@@ -2238,7 +2521,9 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
         return {**_public(rec), "status": "approved",
                 "review": "AUTO-APPROVED — this deployment is configured to land "
                           "contributions without human review; the record says so",
-                "next": "it is live for every caller now — ask a question that uses it"}
+                "next": ("it is live for every caller now — ask a question that uses it. If it "
+                         "is wrong, take it down: contribute_status(contribution_id="
+                         f"{ident!r}, action='withdraw')")}
     _notify(f"New {kind} contribution staged by {caller.label}: "
             f"{rec['title']} (id {ident}) — awaiting review")
     return {**_public(rec), "status": "staged",
@@ -2394,14 +2679,45 @@ def status(contribution_id: str | None = None, caller: identity.Caller | None = 
     return out
 
 
+def _take_down(rec: dict) -> tuple[dict | None, str | None]:
+    """(what was undone, None) for an approved contribution, or (None, why not)."""
+    try:
+        return _KINDS[rec["kind"]]["unland"](rec), None
+    except Declined as exc:
+        return None, str(exc)
+    except Exception as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+
+
 def withdraw(contribution_id: str, caller: identity.Caller | None = None) -> dict:
+    """The contributor takes their own contribution back: a pending one's preview is
+    removed; an APPROVED one stops being served to anyone (status withdrawn)."""
     caller = caller or identity.current()
     rec = store.load_contribution(contribution_id)
+    if rec is not None and not caller.owns(rec["contributor_id"]) and caller.is_reviewer:
+        return {"status": "declined",
+                "note": (f"contribution {contribution_id} is not yours to withdraw — as a reviewer, "
+                         f"take it down with contribute_review(action='reject', contribution_id="
+                         f"{contribution_id!r}, note=<why, in words its contributor can act on>)")}
     if rec is None or not caller.owns(rec["contributor_id"]):
         return {"status": "declined", "note": f"unknown contribution {contribution_id!r}"}
+    if rec["status"] == "approved":
+        undone, why = _take_down(rec)
+        if why:
+            return {"status": "declined",
+                    "note": f"contribution {contribution_id} could not be taken down: {why}"}
+        rec = store.update_contribution(contribution_id, {
+            "status": "withdrawn", "unlanded": undone,
+            "decision_note": f"withdrawn after approval by its contributor ({caller.label})"})
+        _notify(f"Approved contribution WITHDRAWN by its contributor {caller.label}: "
+                f"{rec['title']} (id {contribution_id})")
+        return {**_public(rec), "status": "withdrawn", "unlanded": undone,
+                "next": "no caller is served it from now on; resubmit with contribute_submit "
+                        "once it is right — the name is free again"}
     if rec["status"] != "pending":
         return {"status": "declined",
-                "note": f"contribution {contribution_id} is {rec['status']}, not pending"}
+                "note": (f"contribution {contribution_id} is {rec['status']} — only a pending or an "
+                         "approved contribution can be withdrawn")}
     retired = _KINDS[rec["kind"]]["retire"](rec)
     rec = store.update_contribution(contribution_id, {"status": "withdrawn", "retired": retired})
     return {**_public(rec), "status": "withdrawn", "retired": retired}
@@ -2437,7 +2753,8 @@ def approve(contribution_id: str, caller: identity.Caller | None = None,
         return {"status": "declined", "note": f"landing failed: {type(exc).__name__}: {exc}"}
     rec = store.update_contribution(contribution_id, {
         "status": "approved", "landing": landing, "reviewer_id": caller.id,
-        "reviewer_label": caller.label, "decision_note": note or "approved"})
+        "reviewer_label": caller.label, "decision_note": note or "approved",
+        "preview": _landed_preview(rec.get("preview"))})
     _notify(f"Contribution approved by {caller.label}: {rec['title']} (id {contribution_id})")
     return {**_public(rec), "status": "approved"}
 
@@ -2451,9 +2768,23 @@ def reject(contribution_id: str, note: str, caller: identity.Caller | None = Non
     rec = store.load_contribution(contribution_id)
     if rec is None:
         return {"status": "declined", "note": f"unknown contribution {contribution_id!r}"}
+    if rec["status"] == "approved":
+        # A reviewer takes down what landed — under auto-approve, what no human saw.
+        undone, why = _take_down(rec)
+        if why:
+            return {"status": "declined",
+                    "note": f"contribution {contribution_id} could not be taken down: {why}"}
+        rec = store.update_contribution(contribution_id, {
+            "status": "rejected", "unlanded": undone, "reviewer_id": caller.id,
+            "reviewer_label": caller.label,
+            "decision_note": f"removed after approval: {note}"})
+        _notify(f"Approved contribution REMOVED by {caller.label}: {rec['title']} "
+                f"(id {contribution_id}) — {note}")
+        return {**_public(rec), "status": "rejected", "unlanded": undone}
     if rec["status"] != "pending":
         return {"status": "declined",
-                "note": f"contribution {contribution_id} is {rec['status']}, not pending"}
+                "note": (f"contribution {contribution_id} is {rec['status']} — only a pending or an "
+                         "approved contribution can be rejected")}
     retired = _KINDS[rec["kind"]]["retire"](rec)
     rec = store.update_contribution(contribution_id, {
         "status": "rejected", "retired": retired, "reviewer_id": caller.id,
@@ -2527,7 +2858,10 @@ def describe_submit() -> str:
               + ". Rules: contributions never overwrite an existing source; a "
               "document already in the library is declined by its doc_id; a table's or feed's "
               "dataset name must be new; `amend` corrects an approved layer's record, never its "
-              "file or contract. A feed is test-queried once before it is accepted, so a wrong "
+              "file or contract. A contribution is taken back with contribute_status(action="
+              "'withdraw') by the person who submitted it — pending or already approved; an "
+              "approved one stops being served to anyone, and packs and receipts already built "
+              "on it stay replayable. A feed is test-queried once before it is accepted, so a wrong "
               "index name or dead URL is refused with the adapter's reason. A raster is fetched "
               "and verified against its declared contract before it is accepted. "
               + ("Accepted, a table or feed is queried with feeds_query(dataset) and a raster is "
