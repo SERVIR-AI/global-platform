@@ -136,6 +136,8 @@ def _addresses(host: str) -> list[ipaddress._BaseAddress]:
 
 
 def _refuse_private(host: str, addrs) -> str | None:
+    if get_settings().grp_contrib_allow_private_hosts:      # development only (config.py)
+        return None
     for addr in addrs:
         if not addr.is_global:
             return (f"host {host!r} resolves to {addr}, a private, loopback or link-local "

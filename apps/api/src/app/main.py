@@ -26,6 +26,10 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from .api.routes import api_router
 from .config import get_settings
 from .mcp import auth, store
+from .config import get_settings as _settings_for_banner
+if _settings_for_banner().grp_contrib_allow_private_hosts:
+    print("GRP_CONTRIB_ALLOW_PRIVATE_HOSTS is ON — contributions may fetch from private addresses. "
+          "Development only; never run a deployed host this way.")
 from .mcp.server import _http_transport, mcp
 from . import web_auth
 

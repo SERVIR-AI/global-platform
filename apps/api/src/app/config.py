@@ -215,6 +215,11 @@ class Settings(BaseSettings):
     # on a shared network: fetches are also refused for private addresses
     # (contrib/fetch_policy.py), independent of this cap.
     grp_contrib_max_bytes: int = 50 * 1024 * 1024
+    # DEVELOPMENT ONLY: let contributions fetch from private/loopback addresses, so a
+    # local dry run can serve test files from a local http server. Never set on a
+    # deployed host — the fetch policy exists because the server sits on a shared
+    # network. Logged at startup when on.
+    grp_contrib_allow_private_hosts: bool = False
     # Optional Mattermost incoming-webhook URL; unset = no notifications.
     grp_mattermost_webhook: str = ""
 

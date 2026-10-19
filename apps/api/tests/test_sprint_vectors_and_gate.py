@@ -461,3 +461,11 @@ def test_a_factor_table_bound_to_land_cover_multiplies_class_areas_and_change(bi
     for v in (soil["value"], soil["value_lost"]):
         assert f"{v:,.0f}" in text
     registry.reload_declarative_feeds()
+
+
+def test_private_hosts_stay_refused_unless_the_dev_switch_is_on(monkeypatch):
+    s = get_settings()
+    monkeypatch.setattr(s, "grp_contrib_allow_private_hosts", False)
+    assert fetch_policy.check_url("http://127.0.0.1:8899/x.geojson")
+    monkeypatch.setattr(s, "grp_contrib_allow_private_hosts", True)
+    assert fetch_policy.check_url("http://127.0.0.1:8899/x.geojson") == []
