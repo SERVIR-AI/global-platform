@@ -184,6 +184,12 @@ def test_a_measure_per_class_of_a_class_map_handed_over_by_any_pack(gate, monkey
     v = p["layers"]["vulnerability_toy"]["summary"]["by_class_of"]["classes"]
     assert set(v["Mangrove"]["by_value"]) == {"2"} and set(v["Other"]["by_value"]) == {"4"}
     assert v["Mangrove"]["by_value"]["2"] == pytest.approx(_rows_km2(range(5, 15), range(5, 10)), rel=1e-3)
+    # the map itself, or another year of its stack, is the pack's own figures: not crossed
+    assert layer_values._same_map(cg, "landcover_toy_extent_2020", cg["path"])
+    assert layer_values._same_map(cg, "landcover_toy_extent_1996", "/elsewhere.tif",
+                                  {"stack": "landcover_toy_extent"})
+    assert not layer_values._same_map(cg, "landcover_other_2020", "/elsewhere.tif",
+                                      {"stack": "landcover_other"})
 
 
 def test_the_land_cover_pack_reads_a_measure_by_name(lc_env, monkeypatch, tmp_path, log):

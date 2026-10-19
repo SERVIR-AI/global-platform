@@ -423,10 +423,11 @@ def _class_map(cg: dict, boundary, read_budget: int):
     return arr, transform, crs, level
 
 
-def _same_map(cg: dict, layer: str, path: str) -> bool:
-    """Is the class map this layer's own file? A year map read as a layer is not
-    cross-tabulated with itself."""
-    if cg.get("layer") == layer:
+def _same_map(cg: dict, layer: str, path: str, row: dict | None = None) -> bool:
+    """Is the class map this layer's own file, or a year of the same stack? A year map
+    read as a layer is not cross-tabulated with itself, and two years of one stack are
+    the pack's own change figures, not a second table of them."""
+    if cg.get("layer") == layer or (cg.get("stack") and (row or {}).get("stack") == cg["stack"]):
         return True
     try:
         return bool(cg.get("path")) and os.path.realpath(str(cg["path"])) == os.path.realpath(str(path))
@@ -677,7 +678,7 @@ def read(layer: str, boundary, *, side: int | None = None,
            else None)
     unit_word = "deg" if geographic else "m"
     by_class_of = None
-    if class_grid and v.size and not _same_map(class_grid, layer, path):
+    if class_grid and v.size and not _same_map(class_grid, layer, path, row):
         try:
             by_class_of = _cross(class_grid, boundary, np.where(has_value, a, np.nan), transform,
                                  crs_obj, "classes" if classed else "amount", units, legend,
