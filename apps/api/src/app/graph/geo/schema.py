@@ -70,3 +70,32 @@ def roles():
     except FileNotFoundError:
         pass
     return out
+
+
+def namespaces():
+    """{role: rule} for the namespaces a contributed raster may take (`namespaces` in
+    conf/raster_schema.yml): its prefix, what its cells hold, whether it needs a legend,
+    how a projected file is re-gridded. A schema that declares none (a stripped test or
+    deployment schema) falls back to the platform's shipped table — the namespaces are
+    data, never a list typed into code."""
+    rows = _doc().get("namespaces") or _shipped().get("namespaces")
+    return {str(k): dict(v or {}) for k, v in (rows or {}).items()}
+
+
+def _shipped():
+    """The platform's own conf/raster_schema.yml, whatever schema is configured."""
+    from ...config import _REPO_ROOT
+    try:
+        with open(_REPO_ROOT / "conf" / "raster_schema.yml") as f:
+            return yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        return {}
+
+
+def values_kind(role):
+    """What a role's cells hold — 'classes', 'count' or 'amount' — from the configured
+    roles, else its namespace, else the platform's shipped roles; None when none says."""
+    role = str(role or "")
+    return ((roles().get(role) or {}).get("values")
+            or (namespaces().get(role) or {}).get("values")
+            or ((_shipped().get("roles") or {}).get(role) or {}).get("values"))

@@ -753,34 +753,56 @@ def _raster_bounds(path) -> list | None:
 
 # --------------------------------------------------------------------------- rasters
 
+def _raster_layer_text() -> str:
+    """The `layer` field's text, derived from the schema's namespace table — the same
+    table the gate enforces, so the form never lists a namespace the gate refuses or
+    omits one it takes."""
+    try:
+        from . import rasters
+        return "namespaced name, one of: " + rasters.namespace_text()
+    except Exception:                             # the form text never fails an import
+        return "namespaced name (see the namespaces table in conf/raster_schema.yml)"
+
+
 RASTER_FIELDS = {
     "required": {
-        "layer": "namespaced name: hazard_<name> (classes 1-5), risk_<name>, "
-                 "vulnerability_<name> (classes 1-5, weightable via the 'weights' kind), or "
-                 "population_<name> (a COUNT grid: people per pixel, float; the pack sums it "
-                 "inside each hazard class to report people exposed — no legend needed)",
+        "layer": _raster_layer_text(),
         "url": "where the platform can fetch the raster (GeoTIFF, or any GDAL-readable raster "
-               "such as ERDAS .img — converted to GeoTIFF and reprojected to EPSG:4326 at "
-               "ingest; public host or a Google Drive share link; up to the size cap)",
+               "such as ERDAS .img or a GeoPackage — converted to GeoTIFF and reprojected to "
+               "EPSG:4326 at ingest; public host or a Google Drive share link; up to the size "
+               "cap). One band is read: a multi-band file is read as band 1, and a colour "
+               "rendering (RGB/RGBA) is refused — give the single-band values",
         "title": "what the layer is",
         "description": "what a pixel value means and how the layer was produced",
         "source": "who produced it, derived from what",
         "license": "e.g. CC-BY-4.0, or 'unstated' (silence is not accepted)",
         "vintage": "when the layer was produced, YYYY-MM",
         "legend": "mapping class number -> label, e.g. {1: Very Low, ..., 5: Very High} "
-                  "(not required for a population_* count grid)",
+                  "(not for a population_* count grid or a measure_* layer: their values are "
+                  "amounts, and declared.units says what one means)",
         "declared": "the CONTRACT the file is verified against: {dtype, valid_min, valid_max, "
-                    "nodata?, units?} — say what the file IS; the platform checks it before "
-                    "staging. `units` (e.g. 'people per pixel', 'index 0-1', 'class') is carried "
-                    "into every pack that reads the layer's values",
+                    "nodata?, units?, scale_factor?, offset?} — say what the file IS; the "
+                    "platform checks it before staging. valid_min/valid_max are the values AS "
+                    "STORED, not counting nodata or outside_values. `units` (e.g. 'people per "
+                    "pixel', 'class', 'Mg/ha', 'm', 't C/ha', 'degC', 'mm') is carried into every "
+                    "pack that reads the layer's values and is REQUIRED for a measure_* layer; a "
+                    "density per area (Mg/ha, t/ha, per km2) is also totalled over the area. "
+                    "scale_factor/offset: when the file stores scaled integers (biomass x10 in "
+                    "int16: scale_factor 0.1), value = stored x scale_factor + offset",
     },
     "optional": {
         "usage_notes": "a few lines the consuming analyst reads in the hazard passport (max 500 chars)",
         "stack": "for a landcover_* year: the stack it belongs to (landcover_<name>); the layer "
-                 "must be named <stack>_<year>",
+                 "must be named <stack>_<year>, and its legend must be the stack's",
         "year": "for a landcover_* year: the map year",
         "stack_title": "for the FIRST year of a new stack: the series' title",
-        "outside_values": "pixel values meaning outside-footprint or unclassified (default [0])",
+        "outside_values": "pixel values that are not readings — outside the footprint, "
+                          "unclassified, a fill such as -9999 or 255 over the sea; never a "
+                          "legend class, and not checked against valid_min/valid_max. For a "
+                          "landcover_* year the default is [0] plus declared.nodata; [] says "
+                          "every cell is mapped",
+        "layer_name": "for a file holding several rasters (a GeoPackage with several gridded "
+                      "tables): the one to contribute",
         "authority": "who stands behind the map: national agency, regional hub product, ...",
         "accuracy": "documented accuracy, or 'unstated' (never invent one)",
         "colors": "optional {class: '#rrggbb'} for the map legend",
@@ -896,21 +918,29 @@ def _stage_raster(rec: dict, prepared: dict) -> dict:
              "contributed": True, "staged_by": rec["contributor_id"], "contribution_id": cid,
              "contributor_label": rec["contributor_label"]}
     from . import rasters as _r
+    rule = _r.namespace(layer)
     contract = {**m["declared"], "role": _r._role(layer)}
+    # the values that are not readings ride the row every reader takes them from — as
+    # the gate resolved them against the file (a stack year's default takes its nodata)
+    obs = prepared.get("observed") or {}
+    outside = obs["outside_values"] if "outside_values" in obs else _r.outside_values(m)
+    if outside is not None:
+        entry["outside_values"] = outside
+    if m.get("countries"):
+        entry["countries"] = list(m["countries"])
     _ensure_staged_loaded()
-    if contract["role"] == "landcover":
+    if rule.get("stack"):
         from ..graph.geo import stacks as _stacks
-        entry.update({"stack": str(m["stack"]), "year": int(m["year"]), "role": "landcover",
+        entry.update({"stack": str(m["stack"]), "year": int(m["year"]), "role": contract["role"],
                       "bounds": _stacks.header(str(dest))["bounds"],
-                      **{k: m[k] for k in ("stack_title", "authority", "accuracy",
-                                           "outside_values", "colors", "countries")
+                      **{k: m[k] for k in ("stack_title", "authority", "accuracy", "colors")
                          if m.get(k) is not None}})
         _stage_stack_row(entry, rec["contributor_id"], cid)
     STAGED_RASTERS[layer] = {"entry": entry, "contract": contract}
     _purge_clips(layer)
     short = layer.split("_", 1)[1] if "_" in layer else layer
     bounds = _raster_bounds(dest)
-    if contract["role"] == "landcover":
+    if rule.get("stack"):
         how = (f"assemble_pack(pack='land-cover', place=<a place inside the map>, "
                f"year={int(m['year'])}) — or geometry=<a bbox or polygon the map covers>; "
                f"add year_to=<another year of {m['stack']}> for change and transitions, "
@@ -925,10 +955,18 @@ def _stage_raster(rec: dict, prepared: dict) -> dict:
         how = (f"risk_weights(hazard=<hazard>) to weigh {layer!r} into a recipe; "
                + _where_to_test(layer, bounds, "layers"))
     else:
-        # risk_*, population_*: values read over an area — never passed as a hazard
+        # measure_*, risk_*, population_*: values read over an area — never passed as a hazard
         how = _where_to_test(layer, bounds, "layers")
+        if rule.get("values") == "amount":
+            how += ("; a measure gives its mean, percentiles and, for a per-area density, its "
+                    "total over the place, and the same per class of a land-cover map there")
+    # What was done to the file and what it cannot do, in words at the top of the reply:
+    # a band dropped, a projection changed, a stack that will never show change.
+    said = [*(obs.get("prepared") or []), *(obs.get("hints") or [])]
     return {"layer": layer, "observed": prepared["observed"], "staged_file": str(dest),
             "entry": entry, "contract": contract,
+            **({"note": " ".join(s[:1].upper() + s[1:].rstrip(".") + "." for s in said)}
+               if said else {}),
             "how_to_test": how + "; only you and reviewers can use it until it is approved"}
 
 
@@ -939,7 +977,9 @@ def _land_raster(rec: dict) -> dict:
     manifest = {**{k: v for k, v in m.items() if k != "url"}, "file": preview["staged_file"]}
     _ensure_staged_loaded()
     STAGED_RASTERS.pop(m["layer"], None)          # so the gate's own taken-check sees the catalog only
-    out = rasters.add(manifest, review=_review_note(rec, "layer"))
+    # the staged file was already converted; what was done to it stays on the landed row
+    out = rasters.add(manifest, review=_review_note(rec, "layer"),
+                      prepared_before=(preview.get("entry") or {}).get("prepared"))
     if out["status"] == "declined":
         STAGED_RASTERS[m["layer"]] = {"entry": preview["entry"], "contract": preview["contract"]}
         raise Declined("; ".join(out["failures"]))
@@ -982,8 +1022,7 @@ def _stage_stack_row(entry: dict, staged_by: str, cid: str) -> None:
                          "description": entry.get("description", ""), "source": entry.get("source"),
                          "license": entry.get("license"), "legend": entry.get("legend") or {},
                          "vintage": entry.get("vintage"),
-                         "outside_values": ([0] if entry.get("outside_values") is None
-                                            else [int(v) for v in entry["outside_values"]]),
+                         "outside_values": [],
                          **({"countries": list(entry["countries"])} if entry.get("countries") else {}),
                          "authority": entry.get("authority") or "contributed; authority unstated",
                          "accuracy": entry.get("accuracy") or "unstated",
@@ -994,6 +1033,10 @@ def _stage_stack_row(entry: dict, staged_by: str, cid: str) -> None:
                "contract": None}
         STAGED_RASTERS[sid] = row
     st = row["entry"]
+    from . import rasters as _r
+    # a year staged before outside values were resolved at the gate carries none: [0]
+    # was the default then
+    _r.merge_outside(st, [0] if entry.get("outside_values") is None else entry["outside_values"])
     st["years"] = sorted(set(int(y) for y in st.get("years") or []) | {year})
     ext = st["extent"]
     st["extent"] = {"lon": [min(ext["lon"][0], b[0]), max(ext["lon"][1], b[2])],

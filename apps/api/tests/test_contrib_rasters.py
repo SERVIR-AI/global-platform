@@ -42,7 +42,10 @@ def conf_env(monkeypatch, tmp_path):
 def test_manifest_failures_all_named(log):
     fails = rasters.validate_manifest({"layer": "heat"})
     log("OUTPUT", "; ".join(fails)[:140])
-    assert any("hazard_*, risk_*, vulnerability_* or population_*" in f for f in fails)
+    # the namespaces are derived from the schema's table, so the decline names every one
+    ns = next(f for f in fails if "namespaced" in f)
+    assert all(f"{p}<name>" in ns for p in rasters.namespaces())
+    assert "measure_<name>" in ns and "risk_<name> (a risk map in classes 1-5)" in ns
     named = {f.split("'")[1] for f in fails if "missing required" in f}
     assert {"file", "title", "source", "license", "vintage", "legend"} <= named
 

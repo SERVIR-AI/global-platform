@@ -118,9 +118,11 @@ def test_projected_class_raster_is_reprojected_at_ingest_and_said_so(tmp_path):
 
 def test_one_class_legend_gets_the_binary_map_hint():
     m = {"layer": "landcover_gmw_test_2020", "legend": {1: "Mangrove"}}
-    assert rasters.hints(m) and "declare it as a class" in rasters.hints(m)[0]
+    assert rasters.hints(m) and "declare the background value as a class" in rasters.hints(m)[0]
+    assert "will NOT be computed" in rasters.hints(m)[0]
     assert rasters.hints({**m, "legend": {0: "Not mangrove", 1: "Mangrove"}, "outside_values": []}) == []
-    assert rasters.hints({**m, "outside_values": [255]}) == []
+    # whatever its outside values, a one-class stack never shows change, so it is said
+    assert rasters.hints({**m, "outside_values": [255]})
 
 
 # ----------------------------------------------------- binary stack: loss and gain

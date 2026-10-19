@@ -3,11 +3,13 @@
 # scale (a file the sheet calls "metres" actually held millimetres; a "1-5" layer was
 # really 0-4). The schema is the ground truth a file must satisfy before any op uses it.
 #
-# role: hazard | vulnerability_reclass | raw | risk
+# role: hazard | vulnerability_reclass | raw | risk | measure | population | landcover
 # Checked fields (a field is only checked if declared): dtype (exact), valid_min/valid_max
 # (sampled range must fall within, with float_tol), nodata, crs (epsg), pixel_size_deg.
-# units/scale are carried for provenance and shown in the report; the range check is what
-# actually catches a wrong-units declaration.
+# The range is of the values AS STORED: a layer's outside values and its nodata are not
+# in it. units/scale are carried for provenance and shown in the report; the range check
+# is what actually catches a wrong-units declaration. scale_factor/offset (a measure
+# stored as scaled integers) turn a stored value into its units when it is read back.
 #
 # Measured values come from the file-content verification spike (real reads). Layers marked
 # "expected" are confirmed/locked on the first live verify run.
@@ -18,16 +20,44 @@ defaults:
 
 # What a role's values mean when they are read back (layer values in a pack): `zero`
 # says whether 0 is a reading or "no value"; `scale: nominal` marks class codes that are
-# names, not amounts, so nothing averages them. A role not listed counts 0 as a value.
+# names, not amounts, so nothing averages them; `values` says what a cell holds —
+# classes (counted as area per class), a count (people per cell) or an amount (a
+# continuous measure with units). A role not listed counts 0 as a value.
 # The L2 engine drops a 0 from its vulnerability inputs (rule R6) and writes 0 where no
 # risk was computed. The gate names a contributed vulnerability_* layer's role
 # `vulnerability` — the same role as the hand-authored `vulnerability_reclass`.
 roles:
-  hazard:                {zero: value}    # 0 = outside the hazard: a real reading
-  vulnerability_reclass: {zero: nodata}   # 0 = no class
-  vulnerability:         {zero: nodata}   # 0 = no class (contributed vulnerability_*)
-  risk:                  {zero: nodata}   # 0 = not computed
-  landcover:             {zero: nodata, scale: nominal}   # 0 = outside the footprint
+  hazard:                {zero: value, values: classes}    # 0 = outside the hazard: a real reading
+  vulnerability_reclass: {zero: nodata, values: classes}   # 0 = no class
+  vulnerability:         {zero: nodata, values: classes}   # 0 = no class (contributed vulnerability_*)
+  risk:                  {zero: nodata, values: classes}   # 0 = not computed
+  landcover:             {zero: nodata, scale: nominal, values: classes}   # 0 = outside the footprint
+  population:            {zero: value, values: count}      # 0 = nobody lives there
+  measure:               {zero: value, values: amount}     # 0 m, 0 Mg/ha: a reading
+  raw:                   {zero: value, values: amount}
+
+# The namespaces a CONTRIBUTED raster may take — the prefix IS the role, and the gate
+# (contrib/rasters.py) reads every rule from here: which prefixes exist, what the
+# contribution form says of each (`about`), whether a legend is needed, and how a file on
+# another CRS is put on EPSG:4326 at ingest (`regrid`): nearest for classes (a class never
+# blends), bilinear for an amount (a surface is interpolated), refused for a count (any
+# re-gridding moves counts between cells). `classes: [1, 5]` is the class contract every
+# hazard/risk reader indexes by; `stack: true` is one year of a land-cover stack. A new kind
+# of raster is a row here, not code.
+namespaces:
+  hazard:        {prefix: hazard_, values: classes, classes: [1, 5], legend: true, regrid: nearest,
+                  about: "a hazard map in classes 1-5"}
+  risk:          {prefix: risk_, values: classes, classes: [1, 5], legend: true, regrid: nearest,
+                  about: "a risk map in classes 1-5"}
+  vulnerability: {prefix: vulnerability_, values: classes, classes: [1, 5], legend: true,
+                  regrid: nearest,
+                  about: "a vulnerability map in classes 1-5, weightable via the 'weights' kind"}
+  population:    {prefix: population_, values: count, legend: false, regrid: refuse,
+                  about: "a COUNT grid: people per pixel, float; the pack sums it inside each hazard class to report people exposed — no legend"}
+  landcover:     {prefix: landcover_, values: classes, legend: true, regrid: nearest, stack: true,
+                  about: "one year of a land-cover or extent map, named landcover_<stack>_<year>, any class codes with a legend"}
+  measure:       {prefix: measure_, values: amount, legend: false, regrid: bilinear,
+                  about: "a continuous value with units — elevation (a DEM), biomass, canopy height, soil carbon, a climate grid; declared.units is required, no legend; read with assemble_pack(layers=[...]) as mean, percentiles and, for a per-area density, a total"}
 
 layers:
   # --- Layer-2 flood ingredient set (already-reclassed 1-5) ---
