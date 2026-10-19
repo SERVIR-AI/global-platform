@@ -231,7 +231,9 @@ def attach(spec: dict, target: dict, stats: dict, citations: list, gaps: list,
 
 def verify(pack: dict) -> dict | None:
     """{layer: True|False|'<why not>'} — each stored features hash recomputed from the
-    stored boundary and the layer as it is NOW; a removed or changed layer says so."""
+    stored boundary and the layer as it is NOW; a removed or changed layer says so, and
+    so does a record measured by an earlier method (before areas were the ellipsoid's),
+    whose hash cannot match by design."""
     recs = pack.get("vectors") or {}
     where = pack.get("vectors_area") or {}
     if not recs:
@@ -254,6 +256,11 @@ def verify(pack: dict) -> dict | None:
             now = _vectors.summarise(entry, boundary)
         except Exception as exc:
             out[layer] = f"could not be re-measured: {type(exc).__name__}"
+            continue
+        if rec.get("measure") != now.get("measure"):
+            out[layer] = (f"measured by an earlier method ({rec.get('measure') or 'the authalic sphere'}); "
+                          f"this platform now measures by {now.get('measure')}, so the figures differ "
+                          "by design — assemble the pack again to replay it")
             continue
         out[layer] = now.get("features_sha256") == rec.get("features_sha256")
     return out

@@ -489,6 +489,7 @@ def family(entry: dict) -> str:
 
 
 _TOP = 12          # groups and names stated per layer
+MEASURE = "wgs84-ellipsoid"   # the method every record carries; a replay of an older one says so
 
 
 def summarise(entry: dict, boundary, cap_features: int = 250_000) -> dict:
@@ -552,7 +553,7 @@ def summarise(entry: dict, boundary, cap_features: int = 250_000) -> dict:
             footprint = area_km2(unary_union(parts_for_union))
         except Exception:
             footprint = None
-    out = {"geometry": fam, "unit": unit, "features_inside": n_in,
+    out = {"geometry": fam, "unit": unit, "measure": MEASURE, "features_inside": n_in,
            "total": round(total, 3) if fam != "points" else n_in,
            **({"total_ha": round(total * 100, 1)} if fam == "polygons" else {}),
            **({"footprint_km2": round(footprint, 3)} if footprint is not None

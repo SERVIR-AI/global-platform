@@ -449,3 +449,16 @@ def test_areas_and_lengths_are_the_wgs84_ellipsoids():
         A * math.radians(1) / 1000, rel=1e-9)                                # 111.319 km on the equator
     assert vectors.length_km(shape({"type": "LineString", "coordinates": [[0, 0], [0, 1]]})) == pytest.approx(
         110.574, abs=0.001)                                                  # the meridian arc 0-1°
+
+
+def test_a_record_measured_on_the_sphere_replays_as_a_method_change_not_a_mismatch(gate):
+    sq = _fc([_ft(mapping(box(-85.0, 10.0, -84.9, 10.1)), NAME="a")])
+    assert _submit(gate, "test_sq", "https://x.test/sq.geojson", sq)["status"] == "approved"
+    stats = {"_area": {"name": "Bay", "how": "supplied", "geometry": mapping(box(-85.1, 9.9, -84.8, 10.2))}}
+    block, where = _as(OWNER, lambda: vectors_step.attach({"id": "any-pack"}, {"place": "Bay"}, stats, [], [],
+                                                          ["test_sq"], {}))
+    pack = {"vectors": block, "vectors_area": where}
+    assert _as(OWNER, lambda: vectors_step.verify(pack)) == {"test_sq": True}
+    old = {"test_sq": {k: v for k, v in block["test_sq"].items() if k != "measure"}}
+    said = _as(OWNER, lambda: vectors_step.verify({"vectors": old, "vectors_area": where}))["test_sq"]
+    assert said.startswith("measured by an earlier method (the authalic sphere)")
