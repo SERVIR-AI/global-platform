@@ -397,7 +397,7 @@ def pack_manifest(pack_id: str = "food-security") -> dict:
     ]
     if corpus.get("status") != "available":
         gaps.append(f"corpus unavailable: {corpus.get('reason')}")
-    demo = store_latest_receipt()
+    demo = store_latest_receipt("food-security")
     return {
         "id": "food-security", "display_name": "Food Security Platform",
         "version": "v0",
@@ -444,10 +444,10 @@ def pack_manifest(pack_id: str = "food-security") -> dict:
     }
 
 
-def store_latest_receipt():
+def store_latest_receipt(pack: str | None = None):
     from . import store  # local import keeps registry importable without the DB
     try:
-        return store.latest_receipt_id()
+        return store.latest_receipt_id(pack)
     except Exception:
         return None
 

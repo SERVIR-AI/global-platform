@@ -408,7 +408,7 @@ def _passport_citation(n, sid, row, layer, year, clip, level, legend, gaps):
             "text": " ".join(bits)}
 
 
-def _method_citation(n, outside_values, two_years, level):
+def _method_citation(n, outside_values, two_years, level, how=""):
     text = (
         "Land-cover figures are pixel counts. Window: the boundary's bounding box in the "
         "year's own grid, intersected with the dataset"
@@ -427,9 +427,8 @@ def _method_citation(n, outside_values, two_years, level):
            "mapped one class in the first year and another in the second counts as change, "
            "which includes classifier disagreement. "
            if two_years else "")
-        + "The boundary is OpenStreetMap's administrative or protected-area boundary at pack "
-        "time, or the caller's own polygon when one was supplied. No model runs in this pack; "
-        "the LLM does no arithmetic.")
+        + "Boundary: " + _boundary_phrase(how) + ". No model runs in this pack; the LLM does "
+        "no arithmetic.")
     return {"n": n, "kind": "method", "retrieval": "config", "source": "platform method registry",
             "title": "land-cover counting method", "validation": "documented-method", "text": text}
 
@@ -455,21 +454,29 @@ def _standing_gaps(row, pixel_size_deg):
     return out
 
 
+def _boundary_phrase(how: str) -> str:
+    h = str(how or "")
+    if h.startswith("contributed boundary"):
+        return f"a contributed polygon — {h.split(': ', 1)[-1]}"
+    if h.startswith(("supplied polygon", "drawn")):
+        return "the caller's own polygon (no administrative boundary was resolved)"
+    if h:
+        return f"OpenStreetMap at pack time ({h})"
+    return "OpenStreetMap at pack time"
+
+
 def _boundary_gap(how: str) -> str:
     """One sentence about where the boundary came from — the one actually used."""
     h = str(how or "")
     if h.startswith("contributed boundary"):
-        return (f"the boundary is a contributed polygon ({h.split(': ', 1)[-1]}); the hub's official "
-                "boundary may differ from OpenStreetMap's and from other contributed layers")
+        return (f"the boundary is {_boundary_phrase(h)}; the hub's official boundary may differ "
+                "from it and from OpenStreetMap's")
     if h.startswith(("supplied polygon", "drawn")):
         return "the boundary is the caller's own polygon; no administrative boundary was resolved"
-    return ("the boundary comes from OpenStreetMap at pack time; the hub's official boundary "
-            "may differ")
+    return (f"the boundary comes from {_boundary_phrase(h)}; the hub's official boundary may differ")
 
 
 STANDING_GAPS = (
-    "no degradation, canopy, biomass, carbon, NDVI or building figures: this pack counts "
-    "classes, it does not model inside them",
 )
 
 
@@ -644,6 +651,7 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
     # Contributed tables bound to this pack: a FACTOR table (class, factor) is
     # applied to the areas, losses and gains above; any other is cited as context.
     factor_stats = {}
+    _gaps_before_tables = len(gaps)
     for ds, spec, res in _bound_tables(aoi.get("country"), gaps, trace):
         cols = (spec.get("fetch") or {}).get("columns") or {}
         if "class" in cols and "factor" in cols:
@@ -658,12 +666,24 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
             n += 1
             citations.append(_context_table_citation(n, ds, spec, res))
 
+    if factor_stats:
+        gaps.insert(_gaps_before_tables, (
+            "no degradation, canopy or NDVI figures, and no carbon MODELLED inside a class: the "
+            "carbon-type figures here are class areas multiplied by contributed per-hectare factors "
+            f"({', '.join(sorted(factor_stats))}), stated with their arithmetic — defaults, not "
+            "measurements of this site"))
+    else:
+        gaps.insert(_gaps_before_tables, (
+            "no degradation, canopy, biomass, carbon, NDVI or building figures: this pack counts "
+            "classes, it does not model inside them; a contributed factor table (class, factor per "
+            "hectare) bound to this pack would turn class areas into stocks"))
+
     for yr, ly, cl, lv in ((year, layer, clip, level),
                            *(((year_to, layer_to, aoi[layer_to], level_to),) if layer_to else ())):
         n += 1
         citations.append(_passport_citation(n, sid, row, ly, yr, cl, lv, legend, gaps))
     n += 1
-    citations.append(_method_citation(n, outside, bool(layer_to), level))
+    citations.append(_method_citation(n, outside, bool(layer_to), level, how))
 
     if unknown:
         gaps.append(f"classes not in this stack's legend and not detailed: {', '.join(unknown)} "
@@ -677,8 +697,6 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
     missing_years = row.get("missing_years") or {}
     if missing_years:
         gaps.append("years with no map: " + "; ".join(f"{y} ({r})" for y, r in missing_years.items()))
-    if how.startswith(("admin boundary", "protected-area boundary", "contributed boundary")):
-        gaps.append("boundary: " + how)
 
     stats = {"queries": [t for t in trace if t.startswith("retrieve ")] or None,
              "aoi": {"requested": place, "name": name, "area_km2": aoi.get("area_km2"),
@@ -969,7 +987,15 @@ def manifest() -> dict:
                    "year": "a mapped year", "year_to": "optional later year, for change",
                    "classes": "optional class names to detail, e.g. [\"Forest\"] — with year_to, "
                               "also a per-year series"},
-        "gaps": list(STANDING_GAPS) + [
+        "gaps": [
+            "accuracy is stated per stack where its producer declared one (see each stack's "
+            "accuracy above); a stack that declares none is said to have none in every answer",
+            "a class is the producer's label for one cell of the stack's own resolution; features "
+            "narrower than one cell are not resolved",
+            "the boundary comes from OpenStreetMap at pack time, a contributed polygon layer, or "
+            "the caller's polygon — every answer says which",
+            "carbon and other per-hectare figures come only from contributed factor tables bound "
+            "to this pack (class x factor), never from a model inside a class",
             "a Southeast Asia land-cover layer is listed in the raster inventory but not "
             "registered as a stack",
         ],

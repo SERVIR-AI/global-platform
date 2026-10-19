@@ -784,3 +784,11 @@ def test_a_local_projected_raster_leaves_no_converted_copy_behind(tmp_path, monk
     assert out["status"] == "landed" and sorted(x.name for x in src.iterdir()) == ["utm.tif"]
     with rasterio.open(out["file"]) as ds:
         assert ds.crs.to_epsg() == 4326
+
+
+def test_method_and_gaps_state_the_boundary_once_and_the_carbon_rule_honestly(binary_stack):
+    p = assemble.assemble(pack="land-cover", place="Test bay", year="2020", geometry=binary_stack["poly"])
+    method = next(c for c in p["citations"] if c["kind"] == "method")["text"]
+    assert "Boundary: the caller's own polygon" in method and "OpenStreetMap" not in method
+    assert sum("boundary" in g.lower() for g in p["gaps"]) == 1
+    assert any("would turn class areas into stocks" in g for g in p["gaps"])     # no factor table bound

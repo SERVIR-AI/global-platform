@@ -126,18 +126,29 @@ def load_report(report_id: str) -> dict | None:
     return _load("reports", report_id)
 
 
-def latest_receipt_id() -> str | None:
+def latest_receipt_id(pack: str | None = None) -> str | None:
     """Most recent receipt — the pack manifest points at it as a REAL worked example
-    (so a builder resolves a genuine receipt instead of faking a payload)."""
+    (so a builder resolves a genuine receipt instead of faking a payload). With
+    `pack`, only a receipt minted on that pack: a land-cover receipt is no worked
+    example of a food-security answer."""
     con = _connect()
     try:
         rows = con.execute(
-            "SELECT id, body FROM receipts ORDER BY created_at DESC LIMIT 50").fetchall()
+            "SELECT id, body FROM receipts ORDER BY created_at DESC LIMIT 200").fetchall()
     finally:
         con.close()
     for ident, body in rows:                    # never advertise someone's preview
-        if not json.loads(body).get("staged_by"):
-            return ident
+        rec = json.loads(body)
+        if rec.get("staged_by"):
+            continue
+        if pack is not None:
+            pk = rec.get("pack")
+            if pk is None and rec.get("pack_id"):
+                p = load_pack(rec["pack_id"]) or {}
+                pk = p.get("pack")
+            if pk != pack:
+                continue
+        return ident
     return None
 
 

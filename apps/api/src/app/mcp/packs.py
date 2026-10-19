@@ -426,11 +426,18 @@ def _lc_usage_notes() -> str:
     except Exception:
         rows = {}
     cells, declared = [], []
+    from ..graph.geo import stacks as _stacks
     for sid, row in rows.items():
-        try:
-            px = (_schema._doc().get("stacks") or {}).get(sid, {}).get("pixel_size_deg")
+        px = None
+        try:                                   # the first year's file header — cheap, and true
+            ys = _stacks.years(row)
+            path = _stacks.year_path(str(row["layer_pattern"]).format(year=ys[0])) if ys else None
+            px = _stacks.header(path)["pixel_size_deg"] if path else None
         except Exception:
-            px = None
+            try:
+                px = (_schema._doc().get("stacks") or {}).get(sid, {}).get("pixel_size_deg")
+            except Exception:
+                px = None
         if px:
             cells.append(f"{round(float(px) * 111_320)} m")
         acc = str(row.get("accuracy") or "").strip()
