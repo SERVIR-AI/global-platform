@@ -150,6 +150,15 @@ def _is_pulled(c: dict) -> bool:
     return _retrieval(c) == "pulled-at-pack-time"
 
 
+def _staged_review(c: dict) -> str:
+    """A staged source's review in the gate's own words (UNREVIEWED PREVIEW — …): the
+    citation's, else the marker rebuilt from its contribution id."""
+    from ..contrib import staging
+    said = str(c.get("review_status") or "")
+    return said if said.startswith(staging.PREVIEW) else staging.cited_review(
+        {"staged_by": c["staged_by"], "contribution_id": c.get("contribution_id")})
+
+
 def _sources(pack: dict) -> list[dict]:
     """The full passport per source. Previously this kept 5 fields and dropped
     pub_date, url, the literal query and staleness — so a receipt resting on a
@@ -189,8 +198,7 @@ def _sources(pack: dict) -> list[dict]:
                  # which thing. That is the question a reviewer actually asks.
                  **({"staged_by": c["staged_by"],
                      "contribution_id": c.get("contribution_id"),
-                     "review_status": ("STAGED — contributed and not yet reviewed; "
-                                       "visible to its contributor and reviewers only")}
+                     "review_status": _staged_review(c)}
                     if c.get("staged_by") else {})}
         stale = c.get("stale_data")
         if stale:

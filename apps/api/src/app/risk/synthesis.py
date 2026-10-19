@@ -108,10 +108,23 @@ def _effective_weights(aoi, hz, weights) -> tuple[dict, list]:
 RISK_CORPUS = "risk"
 
 
-def _document_hits(place, hz, focus, trace, gaps):
+def _aoi_bounds(aoi):
+    """(w, s, e, n) of the area's boundary, or None when it cannot be read."""
+    try:
+        import json as _json
+        from shapely.geometry import shape as _shape
+        with open(aoi["admin"]) as f:
+            return _shape(_json.load(f)["features"][0]["geometry"]).bounds
+    except Exception:
+        return None
+
+
+def _document_hits(place, hz, focus, trace, gaps, country=None):
     """Document evidence for this place and hazard, mirroring the food-security pack:
     one forward-looking slice, one retrospective. An empty or unreadable library is a
-    declared gap, never a failure — the computed numbers still stand on their own."""
+    declared gap, never a failure — the computed numbers still stand on their own. A
+    document that declares other countries than the area's is passed over (the next
+    one down takes its place) and the gap says which."""
     from ..llm import MissingAPIKey
     from ..rag.store import Corpus, CorpusError
     hazard = re.sub(r"_rp\d+$", "", hz.removeprefix("hazard_"))
@@ -129,15 +142,25 @@ def _document_hits(place, hz, focus, trace, gaps):
         return corpus, []
     queries = ((f"{hazard} hazard risk assessment {place} {focus}".strip(), "forecast"),
                (f"past {hazard} event impact and damage in {place}".strip(), "retrospective"))
-    hits = []
+    hits, skipped = [], {}
+    where = [country] if country else []
     for q, temporal in queries:
         try:
-            got = corpus.search(q, k=3, temporal=temporal)
+            got = corpus.search(q, k=3, temporal=temporal, where=where, skipped=skipped)
         except (CorpusError, MissingAPIKey) as exc:
             gaps.append(f"document retrieval failed ({exc})")
             return corpus, hits
         trace.append(f"retrieve[{temporal}] {q!r} -> {len(got)} hits")
         hits.extend(got)
+    elsewhere = {w: sorted(set(t)) for w, t in (skipped.get("elsewhere") or {}).items()}
+    if elsewhere:
+        trace.append(f"retrieve: skipped documents about other countries: {sorted(elsewhere)}")
+        gaps.append(f"documents about other countries than {country} were passed over and not "
+                    "cited — " + "; ".join(f"{w}: {', '.join(t[:3])}" for w, t in elsewhere.items())
+                    + ("" if hits else f". The risk library holds no document about {place} "
+                       f"({country}) above the relevance floor"))
+        if not hits:
+            return corpus, hits
     if not hits:
         gaps.append(f"the risk library holds {n_docs} document(s), none relevant to "
                     f"{hazard} in {place} above the relevance floor — a decline, not a "
@@ -232,7 +255,7 @@ def _feed_speaks_to(spec: dict, hazard: str) -> bool:
     return base.lower() in names or str(hazard).lower() in names
 
 
-def _pack_feeds(place, trace, gaps, hazard=None, country=None):
+def _pack_feeds(place, trace, gaps, hazard=None, country=None, bounds=None):
     """Every feed bound to the risk pack, queried and returned with its passport.
 
     The risk gatherer read no feeds at all, so a contributed table or API feed could
@@ -248,17 +271,17 @@ def _pack_feeds(place, trace, gaps, hazard=None, country=None):
                      if k not in rows})
     except Exception:
         pass
-    from ..graph.geo import vectors as _vectors
-    out, off_topic, off_country = [], [], []
+    out, off_topic, elsewhere = [], [], {}
     for ds in sorted(rows):
         if hazard and not _feed_speaks_to(rows[ds], hazard):
             off_topic.append(ds)
             continue
-        # A source that declares its countries is cited only where it speaks. The
-        # field text promised this; a Thai gauge was being cited into every
-        # Cambodian and Philippine flood brief regardless.
-        if not _vectors.country_matches(rows[ds].get("countries"), country):
-            off_country.append(ds)
+        # A source that declares its countries or its box is cited only where it
+        # speaks (mcp.feeds.scope_miss, every pack's rule). A Thai gauge was cited into
+        # every Cambodian flood brief, and a Gulf of Nicoya box into all of Costa Rica.
+        miss = feeds.scope_miss(rows[ds], [country] if country else [], bounds)
+        if miss:
+            elsewhere[ds] = miss
             continue
         res = feeds.query(ds, {"limit": 3})
         if res.get("status") != "ok":
@@ -272,11 +295,9 @@ def _pack_feeds(place, trace, gaps, hazard=None, country=None):
         gaps.append(f"{len(off_topic)} feed(s) bound to this pack were NOT cited "
                     f"because they declare other hazards ({', '.join(off_topic)}). "
                     "They are available through feeds_query if you want them.")
-    if off_country:
-        trace.append(f"feeds[skipped:{','.join(off_country)}] declare other countries")
-        gaps.append(f"{len(off_country)} feed(s) bound to this pack were NOT cited "
-                    f"because they declare other countries than {country} "
-                    f"({', '.join(off_country)}). They are available through feeds_query.")
+    if elsewhere:
+        trace.append(f"feeds[skipped:{','.join(sorted(elsewhere))}] scoped elsewhere")
+        gaps.append(feeds.scope_gap(elsewhere, "feed"))
     return out
 
 
@@ -402,7 +423,7 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     trace.append(f"clip[{hz}]")
 
     citations, gaps = [], []
-    corpus, doc_hits = _document_hits(place, hz, focus, trace, gaps)
+    corpus, doc_hits = _document_hits(place, hz, focus, trace, gaps, country=aoi.get("country"))
     # A layer that is silent over this area reports the same "0 exposed" as an area
     # that is genuinely safe, and the two mean opposite things. Found live: the JRC
     # 1 km return-period maps hold no flooded cell anywhere inside Battambang town
@@ -430,6 +451,7 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     counts: dict = {}
 
     # --- what has been published about this place and hazard ------------------
+    from ..contrib import staging
     for h in doc_hits:
         m = h["metadata"]
         n += 1
@@ -439,18 +461,20 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
             "pub_date": m.get("pub_date"), "validation": m.get("validation"),
             "temporal": m.get("temporal"), "url": m.get("url"), "score": h["score"],
             "doc_id": h["doc_id"], "chunk_id": h["id"],
-            **({"review_status": m["review"]} if m.get("review") else {}),
+            **({"review_status": staging.cited_review(m)} if staging.cited_review(m) else {}),
             "archived_copy": (f"/api/rag/{RISK_CORPUS}/document/{h['doc_id']}"
                               if corpus and corpus.raw_path(h["doc_id"]) else None),
             "usage_notes": m.get("usage_notes"),
             **({"staged_by": m["staged_by"], "contribution_id": m.get("contribution_id")}
                if m.get("staged_by") else {}),
-            "text": h["text"]})
+            "text": h["text"] + (f" Review: {staging.cited_review(m)}."
+                                 if staging.cited_review(m) else "")})
     if doc_hits:
         trace.append(f"documents[{len(doc_hits)}] cited")
 
     # --- feeds bound to this pack --------------------------------------------
-    for ds, spec, res in _pack_feeds(place, trace, gaps, hazard=hz, country=aoi.get("country")):
+    for ds, spec, res in _pack_feeds(place, trace, gaps, hazard=hz, country=aoi.get("country"),
+                                     bounds=_aoi_bounds(aoi)):
         records = res.get("records") or []
         pp = res.get("passport") or {}
         n += 1

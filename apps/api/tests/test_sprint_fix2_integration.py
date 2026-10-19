@@ -21,8 +21,12 @@ from app.config import get_settings
 from app.contrib import catalog_io, fetch_policy, identity, rasters, removal, staging, tables
 from app.graph.geo import align, combine, ingest, schema, stacks, tiffs, vectors
 from app.land_cover import synthesis as lc
-from app.mcp import app_ui, assemble, packs, publish, record, store
+from app.food_security import synthesis as fs
+from app.mcp import app_ui, assemble, feeds, packs, publish, record, registry, store
+from app.rag import filters as rag_filters
+from app.risk import synthesis as risk
 
+from test_layer_values import POLY as RISK_POLY, world  # noqa: F401  (the risk pack's toy area)
 from test_sprint_fix_landcover import H, LEFT, POLY, PX, TOP, W, _write, lc_env  # noqa: F401
 
 OWNER = identity.Caller("user_owner", "gis@hub.test", False, "bound")
@@ -555,3 +559,166 @@ def test_a_vectors_ingest_notes_ride_its_measured_record(env, monkeypatch):
 def test_the_view_says_where_a_clip_was_cut_from():
     html = app_ui.template()
     assert "fetchedHTML(s.fetched)" in html and "Cut from" in html
+
+
+# ------------------------------------------- 6. scope and preview in every pack
+NICOYA = [-85.2977, 9.9337, -84.7561, 10.2968]
+TERRABA = (-83.9, 8.8, -83.2, 9.3)                 # Costa Rica's south, outside the Nicoya box
+INSIDE = (-85.1, 10.0, -84.9, 10.2)
+
+
+def test_the_scope_rule_is_one_for_every_pack():
+    gulf = {"countries": ["Costa Rica"], "bbox": NICOYA}
+    assert feeds.scope_miss(gulf, ["Costa Rica"], TERRABA)[1] == "this area lies outside that box"
+    assert feeds.scope_miss(gulf, ["Costa Rica"], INSIDE) is None
+    assert feeds.scope_miss(gulf, ["Ecuador"], INSIDE)[1] == "this area is in Ecuador"
+    assert feeds.scope_miss({"bbox": NICOYA}, [], INSIDE) is None
+    # a pack with no area: a box is placed through the countries, a box alone is said
+    assert feeds.scope_miss(gulf, ["Costa Rica"], None) is None
+    assert "holds no area to place that box" in feeds.scope_miss({"bbox": NICOYA}, ["Kenya"], None)[1]
+    assert feeds.scope_miss({"countries": ["Kenya"]}, [], None) is None       # unknown rules nothing out
+    assert feeds.scope_miss({}, ["Kenya"], None) is None
+    assert lc._scope_miss(gulf, ["Costa Rica"], box(*TERRABA)) == feeds.scope_miss(gulf, ["Costa Rica"], TERRABA)
+
+
+def _bound_feeds(monkeypatch, pack, rows):
+    monkeypatch.setattr(registry, "FEEDS", {k: {"pack": pack, "status": "available", "title": k, **v}
+                                            for k, v in rows.items()})
+    monkeypatch.setattr(staging, "visible_staged_feeds_for_pack", lambda pack: {})
+    monkeypatch.setattr(feeds, "query", lambda ds, q=None: {
+        "status": "ok", "records": [{"v": 1}], "count": 1, "as_of": None, "passport": {}})
+
+
+def test_risk_feeds_honour_a_declared_box(monkeypatch, log):
+    _bound_feeds(monkeypatch, "risk", {"nicoya_obis": {"countries": ["Costa Rica"], "bbox": NICOYA},
+                                       "cr_gauges": {"countries": ["Costa Rica"]},
+                                       "global_quakes": {}})
+    gaps = []
+    out = risk._pack_feeds("Térraba", [], gaps, country="Costa Rica", bounds=TERRABA)
+    log("OUTPUT", gaps[-1])
+    assert sorted(d for d, _, _ in out) == ["cr_gauges", "global_quakes"]
+    assert "nicoya_obis speaks to Costa Rica (lon -85.30 to -84.76" in gaps[-1]
+    assert "this area lies outside that box" in gaps[-1]
+    out = risk._pack_feeds("Nicoya", [], [], country="Costa Rica", bounds=INSIDE)
+    assert sorted(d for d, _, _ in out) == ["cr_gauges", "global_quakes", "nicoya_obis"]
+
+
+def test_food_security_sources_honour_a_declared_box(monkeypatch):
+    _bound_feeds(monkeypatch, "food-security", {
+        "trans_nzoia_plots": {"countries": ["Kenya"], "bbox": [34.6, 0.7, 35.4, 1.3]},
+        "box_only": {"bbox": [34.6, 0.7, 35.4, 1.3]}, "global_table": {}})
+    gaps = []
+    out = fs._pack_bound_sources([], gaps, country="Kenya")
+    assert sorted(c["title"] for c in out) == ["global_table", "trans_nzoia_plots"]
+    assert "box_only speaks to (lon 34.60 to 35.40" in gaps[-1] and "holds no area" in gaps[-1]
+    gaps = []
+    out = fs._pack_bound_sources([], gaps, country="Zambia")
+    assert [c["title"] for c in out] == ["global_table"]
+    assert "trans_nzoia_plots speaks to Kenya" in gaps[-1] and "this area is in Zambia" in gaps[-1]
+
+
+def test_the_risk_gatherer_passes_its_areas_country_and_box(world, monkeypatch):
+    """And a staged document it cites says so in the citation's own text."""
+    seen = {}
+    monkeypatch.setattr(ingest, "_reverse_country", lambda lon, lat: "Cambodia")
+
+    def feeds_spy(place, trace, gaps, hazard=None, country=None, bounds=None):
+        seen["feeds"] = (country, bounds)
+        return []
+
+    def docs_spy(place, hz, focus, trace, gaps, country=None):
+        seen["docs"] = country
+        return None, [_hit("hub_memo", ["Cambodia"], **STAGED_DOC)]
+    monkeypatch.setattr(risk, "_pack_feeds", feeds_spy)
+    monkeypatch.setattr(risk, "_document_hits", docs_spy)
+    p = assemble.assemble(pack="risk", place="Toyville", hazard="toyflood", geometry=RISK_POLY)
+    assert p["status"] == "ok", p.get("note")
+    assert seen["docs"] == "Cambodia" and seen["feeds"][0] == "Cambodia"
+    assert tuple(round(v, 3) for v in seen["feeds"][1]) == (103.005, 13.005, 103.015, 13.015)
+    doc = next(c for c in p["citations"] if c["kind"] == "document")
+    assert "Review: UNREVIEWED PREVIEW — staged contribution c0ffee" in doc["text"]
+
+
+class _Library:
+    """A corpus of fixed passages, searched by the platform's own sift."""
+
+    def __init__(self, hits):
+        self.hits, self.calls = hits, []
+
+    def documents(self):
+        return [{"doc_id": h["doc_id"]} for h in self.hits]
+
+    def raw_path(self, doc_id):
+        return None
+
+    def search(self, q, k=5, min_relevance=None, *, where=None, skipped=None, references=False,
+               **filters):
+        self.calls.append({"where": where, "temporal": filters.get("temporal")})
+        got = [h for h in self.hits if not filters.get("temporal")
+               or h["metadata"].get("temporal") == filters["temporal"]]
+        return rag_filters.sift(got, where=where, skipped=skipped, references=references)[:k]
+
+
+def _hit(doc, countries=None, temporal="forecast", score=0.9, **meta):
+    return {"id": f"{doc}-0", "doc_id": doc, "score": score,
+            "text": f"{doc} says the rains failed in the season.",
+            "metadata": {"title": doc, "source": "s", "temporal": temporal,
+                         **({"countries": countries} if countries else {}), **meta}}
+
+
+def test_risk_documents_about_other_countries_are_passed_over_and_said(monkeypatch, log):
+    lib = _Library([_hit("ecuador_floods", ["Ecuador"], score=0.95),
+                    _hit("cr_floods", ["Costa Rica"]), _hit("global_method", score=0.8),
+                    _hit("past_ecuador", ["Ecuador"], temporal="retrospective")])
+    import app.rag.store as rag_store
+    monkeypatch.setattr(rag_store, "Corpus", lambda name: lib)
+    gaps = []
+    _corpus, hits = risk._document_hits("Térraba", "hazard_flood", "", [], gaps, country="Costa Rica")
+    log("OUTPUT", gaps[-1])
+    assert [h["doc_id"] for h in hits] == ["cr_floods", "global_method"]
+    assert all(c["where"] == ["Costa Rica"] for c in lib.calls)
+    assert "documents about other countries than Costa Rica were passed over" in gaps[-1]
+    assert "Ecuador: ecuador_floods" in gaps[-1] or "Ecuador: past_ecuador" in gaps[-1]
+
+
+def _fs_offline(monkeypatch, lib):
+    monkeypatch.setattr(fs, "Corpus", lambda name: lib)
+    monkeypatch.setattr(fs, "_conditions_citation", lambda crop, country, trace: (None, "no conditions"))
+    monkeypatch.setattr(fs, "_driver_citations", lambda trace: ([], []))
+    monkeypatch.setattr(fs, "_pack_bound_sources", lambda trace, gaps, country=None: [])
+    monkeypatch.setattr(fs.crop_calendar, "citation", lambda *a, **k: None)
+
+
+def test_food_security_retrieval_keeps_to_the_country_and_says_when_the_library_does_not(monkeypatch):
+    lib = _Library([_hit("kenya_outlook", ["Kenya"]), _hit("zambia_outlook", ["Zambia"], score=0.95),
+                    _hit("kenya_past", ["Kenya"], temporal="retrospective")])
+    _fs_offline(monkeypatch, lib)
+    cits, gaps, _ = fs.gather_evidence({"crop": "maize", "country": "Kenya", "focus": ""}, [])
+    assert [c["doc_id"] for c in cits if c["kind"] == "document"] == ["kenya_outlook", "kenya_past"]
+    assert lib.calls and all(c["where"] == ["Kenya"] for c in lib.calls)
+    assert not any("NO DOCUMENT IN THE LIBRARY" in g for g in gaps)
+    cits, gaps, _ = fs.gather_evidence({"crop": "maize", "country": "Ethiopia", "focus": ""}, [])
+    assert not [c for c in cits if c["kind"] == "document"]
+    assert gaps[0].startswith("NO DOCUMENT IN THE LIBRARY IS ABOUT ETHIOPIA. Its closest matches "
+                              "are about Kenya, Zambia and were NOT cited")
+
+
+STAGED_DOC = {"staged_by": "user_owner", "contribution_id": "c0ffee"}       # staged before the marker
+
+
+def test_a_staged_document_says_unreviewed_preview_in_every_packs_citation(monkeypatch):
+    lib = _Library([_hit("hub_memo", ["Kenya"], **STAGED_DOC)])
+    _fs_offline(monkeypatch, lib)
+    cits, _gaps, _ = fs.gather_evidence({"crop": "maize", "country": "Kenya", "focus": ""}, [])
+    doc = next(c for c in cits if c["kind"] == "document")
+    assert "Review: UNREVIEWED PREVIEW — staged contribution c0ffee" in doc["text"]
+    assert doc["review_status"].startswith(staging.PREVIEW)
+    landc = lc._document_citation(1, _hit("hub_memo", **STAGED_DOC), None)
+    assert "Review: UNREVIEWED PREVIEW — staged contribution c0ffee" in landc["text"]
+    # an approved document with a review of its own says that, not a preview
+    approved = lc._document_citation(1, _hit("ok", review="auto-approved — no human reviewed it"), None)
+    assert approved["text"].endswith("Review: auto-approved — no human reviewed it.")
+    # the receipt uses the gate's own words, whether the citation carried them or not
+    src = record._sources({"citations": [{**doc}, {"n": 2, **STAGED_DOC, "kind": "document"}]})
+    assert all(s["review_status"].startswith("UNREVIEWED PREVIEW — staged contribution c0ffee")
+               for s in src)

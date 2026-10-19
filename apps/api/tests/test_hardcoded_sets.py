@@ -201,7 +201,7 @@ def test_risk_feeds_are_cited_only_where_they_speak(monkeypatch, log):
     out = risk._pack_feeds("Battambang", trace, gaps, country="Cambodia")
     log("OUTPUT", f"cited={[d for d, _, _ in out]} gap={gaps[-1][:90] if gaps else None}")
     assert [d for d, _, _ in out] == ["global_quakes"]
-    assert any("declare other countries than Cambodia (thai_gauge)" in g for g in gaps)
+    assert any("thai_gauge speaks to Thailand — this area is in Cambodia" in g for g in gaps)
     out = risk._pack_feeds("Bangkok", [], [], country="Thailand")
     assert sorted(d for d, _, _ in out) == ["global_quakes", "thai_gauge"]
     out = risk._pack_feeds("Somewhere", [], [], country=None)          # unknown: everything, as before

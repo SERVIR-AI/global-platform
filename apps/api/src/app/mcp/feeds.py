@@ -14,6 +14,51 @@ from ..food_security import cropmonitor
 from . import climate_indices, enso_forecast, registry
 
 
+def scope_miss(spec: dict, countries, bounds=None):
+    """None when a table or feed may be cited for an area, else (where it is scoped, why
+    the area is not in it) — the rule every pack applies. A source that declares
+    `countries` or a `bbox` [w, s, e, n] speaks only to an area in one of those countries
+    and touching that box; one that declares neither is global. `countries`: the area's
+    (unknown rules nothing out, as for documents and vectors); `bounds` (w, s, e, n): its
+    extent, or None for a pack that answers for a whole country and holds no area (food
+    security) — a box is then placed only through the countries the source also
+    declares, and a box alone is said, never guessed."""
+    from ..rag.filters import speaks_to
+    declared = [str(c) for c in (spec.get("countries") or
+                                 ([spec["country"]] if spec.get("country") else [])) if str(c).strip()]
+    bbox = spec.get("bbox")
+    try:
+        bbox = [float(v) for v in bbox] if isinstance(bbox, (list, tuple)) and len(bbox) == 4 else None
+    except (TypeError, ValueError):
+        bbox = None
+    if not declared and not bbox:
+        return None
+    countries = [str(c) for c in (countries or []) if str(c).strip()]
+    where = ", ".join(declared) + (" " if declared and bbox else "") + (
+        f"(lon {bbox[0]:.2f} to {bbox[2]:.2f}, lat {bbox[1]:.2f} to {bbox[3]:.2f})" if bbox else "")
+    if bbox and bounds is not None:
+        w, s, e, n = bounds
+        if bbox[2] < w or bbox[0] > e or bbox[3] < s or bbox[1] > n:
+            return where, "this area lies outside that box"
+    if declared and countries and not speaks_to(declared, countries):
+        return where, f"this area is in {', '.join(countries)}"
+    if bbox and bounds is None and not (declared and countries):
+        return where, ("this pack answers for a whole country and holds no area to place that "
+                       "box against")
+    return None
+
+
+def scope_gap(missed: dict, noun: str = "source") -> str | None:
+    """One gap naming every bound source a pack did not cite because it is scoped
+    elsewhere: {dataset: (where, why)}."""
+    if not missed:
+        return None
+    return (f"{len(missed)} {noun}(s) bound to this pack were NOT cited because they are "
+            "scoped elsewhere: " + "; ".join(f"{ds} speaks to {w} — {why}"
+                                            for ds, (w, why) in sorted(missed.items()))
+            + ". They are available through feeds_query.")
+
+
 def is_stale(stale_data: dict | None) -> bool:
     """THE single definition of "this evidence was served stale".
 

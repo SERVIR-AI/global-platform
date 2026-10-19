@@ -57,6 +57,16 @@ def _as_preview(row: dict) -> dict:
     return {**row, "review": _preview_review({"contribution_id": row.get("contribution_id")})}
 
 
+def cited_review(meta: dict) -> str | None:
+    """The review a citation states for a source (a document's metadata, a feed row): a
+    staged one says UNREVIEWED PREVIEW in these words — including one staged before
+    the marker existed — and a landed one its own review, if any."""
+    meta = meta or {}
+    if meta.get("staged_by"):
+        return _as_preview(meta)["review"]
+    return meta.get("review") or None
+
+
 def _landed_preview(preview: dict | None) -> dict:
     """The record's preview once it has landed: the staged row it shows no longer
     says "not yet approved" beside status approved."""

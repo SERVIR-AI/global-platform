@@ -372,12 +372,11 @@ def _source_speaks_to(spec: dict, country: str | None) -> bool:
     matter — the same failure as a flood brief citing global earthquakes, made on
     the food-security side by giving it the path without the filter.
 
-    A source that declares its countries is filtered on them. One that declares
-    none is global as far as the platform knows, so it is still included.
+    A source that declares its countries (or a box) is filtered on them, by the rule
+    every pack applies (mcp.feeds.scope_miss). One that declares neither is global.
     """
-    from ..graph.geo import vectors as _vectors
-    declared = spec.get("countries") or ([spec["country"]] if spec.get("country") else None)
-    return _vectors.country_matches(declared, country)
+    from ..mcp import feeds
+    return feeds.scope_miss(spec, [country] if country else [], None) is None
 
 
 def _pack_bound_sources(trace, gaps, country=None):
@@ -401,10 +400,14 @@ def _pack_bound_sources(trace, gaps, country=None):
                      if n not in rows})
     except Exception:
         pass
-    out, off_topic = [], []
+    out, elsewhere = [], {}
     for ds in sorted(rows):
-        if not _source_speaks_to(rows[ds], country):
-            off_topic.append(ds)
+        # countries and a box, the rule every pack applies (mcp.feeds.scope_miss). This
+        # pack answers for a whole country: a box is placed through the countries the
+        # source also declares, and a box alone is said, never guessed.
+        miss = feeds.scope_miss(rows[ds], [country] if country else [], None)
+        if miss:
+            elsewhere[ds] = miss
             continue
         res = feeds.query(ds, {"limit": 4})
         if res.get("status") != "ok":
@@ -449,10 +452,9 @@ def _pack_bound_sources(trace, gaps, country=None):
                        if spec.get("usage_notes") else ""),
         })
         trace.append(f"pack_source[{ds}] {res.get('count')} rows")
-    if off_topic:
-        gaps.append(f"{len(off_topic)} source(s) bound to this pack were NOT cited "
-                    f"because they declare other countries ({', '.join(off_topic)}). "
-                    "They are available through feeds_query if you want them.")
+    if elsewhere:
+        trace.append(f"pack_sources[skipped:{','.join(sorted(elsewhere))}] scoped elsewhere")
+        gaps.append(feeds.scope_gap(elsewhere))
     return out
 
 
@@ -476,8 +478,11 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
     q_now = f"El Nino seasonal rainfall forecast outlook {country} {crop} {focus}".strip()
     q_past = (f"{focus} — impact of past events on {crop or 'crop'} production and "
               f"food security in {country}").strip()
-    forecast_hits = corpus.search(q_now, k=5, temporal="forecast")
-    retro_hits = corpus.search(q_past, k=5, temporal="retrospective")
+    # A document about another country is passed over and the next one down takes its
+    # place, so k stays filled with this country's (or undeclared) documents.
+    where, skipped = ([country] if country else []), {}
+    forecast_hits = corpus.search(q_now, k=5, temporal="forecast", where=where, skipped=skipped)
+    retro_hits = corpus.search(q_past, k=5, temporal="retrospective", where=where, skipped=skipped)
     trace.append(f"retrieve[forecast] {q_now!r} -> {len(forecast_hits)} hits")
     trace.append(f"retrieve[retrospective] {q_past!r} -> {len(retro_hits)} hits")
     if not retro_hits:
@@ -490,7 +495,8 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
         # query the platform ever ran until now.
         q_general = (f"impact of past El Nino events on {crop or 'crop'} production "
                      f"and food security in {country}").strip()
-        retro_hits = corpus.search(q_general, k=5, temporal="retrospective")
+        retro_hits = corpus.search(q_general, k=5, temporal="retrospective", where=where,
+                                   skipped=skipped)
         trace.append(f"retrieve[retrospective:fallback] {q_general!r} -> "
                      f"{len(retro_hits)} hits")
         if retro_hits:
@@ -511,7 +517,8 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
     q_current = (f"{country} {crop or 'crop'} current season to date — rainfall "
                  f"received, crop and rangeland condition, harvest prospects "
                  f"{focus}").strip()
-    current_hits = corpus.search(q_current, k=3, temporal="retrospective")
+    current_hits = corpus.search(q_current, k=3, temporal="retrospective", where=where,
+                                 skipped=skipped)
     already = {h["id"] for h in retro_hits}
     added = [h for h in current_hits if h["id"] not in already]
     retro_hits = retro_hits + added
@@ -533,19 +540,20 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
     # Kenya or Zambia, and declared no gap at all. A brief drafted from that reads
     # as authoritative and is about the wrong country — the failure that moves
     # emergency resources to the wrong place.
+    # Documents about other countries are now passed over at retrieval (above), so
+    # the library's silence about this country is read from what was skipped.
     if country:
-        covered = {str(c).strip().lower()
-                   for h in forecast_hits + retro_hits
-                   for c in (h["metadata"].get("countries") or [])}
-        if covered and country.strip().lower() not in covered:
+        about = [h for h in forecast_hits + retro_hits if h["metadata"].get("countries")]
+        others = sorted({str(c).strip() for w in (skipped.get("elsewhere") or {})
+                         for c in w.split(", ") if str(c).strip()})
+        if others and not about:
+            n_cited = len(forecast_hits) + len(retro_hits)
             gaps.insert(0, (
-                f"NO DOCUMENT IN THE LIBRARY IS ABOUT {country.upper()}. The "
-                f"{len(forecast_hits) + len(retro_hits)} document(s) cited below were "
-                f"retrieved by meaning and are about "
-                f"{', '.join(sorted(c.title() for c in covered))}. They may describe a "
-                "shared driver, but nothing here observes this country. Do not read "
-                "any of it as evidence about "
-                f"{country}."))
+                f"NO DOCUMENT IN THE LIBRARY IS ABOUT {country.upper()}. Its closest "
+                f"matches are about {', '.join(others)} and were NOT cited"
+                + (f"; the {n_cited} document(s) cited below declare no country. They may "
+                   "describe a shared driver, but nothing here observes this country. Do "
+                   f"not read any of it as evidence about {country}." if n_cited else ".")))
 
     # The same check for CROP, which was never written. Country was varied all
     # through testing and crop never was — every test asked about maize — so an
@@ -565,6 +573,7 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
                 f"failure modes differ by crop. Do not read any of it as evidence "
                 f"about {crop}."))
 
+    from ..contrib import staging
     citations = []
     for h in forecast_hits + retro_hits:
         m = h["metadata"]
@@ -577,7 +586,7 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
             # cannot see a geography mismatch it is about to write over.
             "countries": m.get("countries"),
             "doc_id": h["doc_id"], "chunk_id": h["id"],
-            **({"review_status": m["review"]} if m.get("review") else {}),
+            **({"review_status": staging.cited_review(m)} if staging.cited_review(m) else {}),
             "archived_copy": (f"/api/food-security/rag/document/{h['doc_id']}"
                               if corpus.raw_path(h["doc_id"]) else None),
             "usage_notes": m.get("usage_notes"),
@@ -585,7 +594,8 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
             # on it inherit the contributor's visibility (contrib/staging.py)
             **({"staged_by": m["staged_by"], "contribution_id": m.get("contribution_id")}
                if m.get("staged_by") else {}),
-            "text": h["text"]})
+            "text": h["text"] + (f" Review: {staging.cited_review(m)}."
+                                 if staging.cited_review(m) else "")})
     cond, gap = _conditions_citation(crop, country, trace)
     if cond:
         citations.append(cond)

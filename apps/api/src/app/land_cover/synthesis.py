@@ -1077,6 +1077,7 @@ _looks_like_references = _rag_filters.looks_like_references
 
 
 def _document_citation(n, h, corpus):
+    from ..contrib import staging
     m = h.get("metadata") or {}
     return {"n": n, "kind": "document", "retrieval": "archived-document",
             "source": m.get("source"), "title": m.get("title"),
@@ -1084,37 +1085,23 @@ def _document_citation(n, h, corpus):
             "temporal": m.get("temporal"), "url": m.get("url"), "score": h.get("score"),
             "doc_id": h.get("doc_id"), "chunk_id": h.get("id"),
             **({"countries": m["countries"]} if m.get("countries") else {}),
-            **({"review_status": m["review"]} if m.get("review") else {}),
+            **({"review_status": staging.cited_review(m)} if staging.cited_review(m) else {}),
             "archived_copy": (f"/api/rag/{PACK_ID}/document/{h.get('doc_id')}"
                               if corpus and h.get("doc_id") and corpus.raw_path(h["doc_id"]) else None),
             "usage_notes": m.get("usage_notes"),
             **({"staged_by": m["staged_by"], "contribution_id": m.get("contribution_id")}
                if m.get("staged_by") else {}),
-            "text": h.get("text")}
+            "text": (h.get("text") or "") + (f" Review: {staging.cited_review(m)}."
+                                             if staging.cited_review(m) else "")}
 
 
 def _scope_miss(spec, countries, boundary):
     """None when a table or feed may be read for this area, else (where it is scoped,
     why this area is not in it). One that declares countries or a bbox [w, s, e, n]
     is read only for an area in one of those countries and inside that box; one that
-    declares neither is global."""
-    declared = [str(c) for c in (spec.get("countries") or []) if str(c).strip()]
-    bbox = spec.get("bbox")
-    bbox = [float(v) for v in bbox] if isinstance(bbox, (list, tuple)) and len(bbox) == 4 else None
-    if not declared and not bbox:
-        return None
-    where = ", ".join(declared) + (" " if declared and bbox else "") \
-        + (f"({_box_phrase(bbox)})" if bbox else "")
-    if bbox:
-        minx, miny, maxx, maxy = boundary.bounds
-        if bbox[2] < minx or bbox[0] > maxx or bbox[3] < miny or bbox[1] > maxy:
-            return where, "this area lies outside that box"
-    if declared:
-        if countries and not _speaks_to(declared, countries):
-            return where, f"this area is in {', '.join(countries)}"
-        if not countries and not bbox:
-            return where, "this area's country could not be determined"
-    return None
+    declares neither is global. The rule is every pack's (mcp.feeds.scope_miss)."""
+    from ..mcp import feeds
+    return feeds.scope_miss(spec, countries, boundary.bounds if boundary is not None else None)
 
 
 TABLE_ROWS = 100_000      # rows read per bound table or feed; more is said, never hidden
