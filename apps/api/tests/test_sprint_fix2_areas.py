@@ -189,3 +189,81 @@ def test_a_clip_cut_short_is_clipped_again_not_served(env, monkeypatch, capsys):
     assert "is unreadable" in capsys.readouterr().out
     with rasterio.open(path) as c:
         assert c.read(1).max() == 3
+
+
+# ------------------------------------------------------- 2. stated areas on the ellipsoid
+def test_a_drawn_polygon_is_stated_at_the_area_its_measures_add_up_to(env):
+    aoi = ingest.ensure_aoi(geometry=GULF, name="Golfo de Nicoya (box)", layers=(), area_cap_km2=CAP)
+    exact = vectors.area_km2(shape(GULF))
+    assert round(exact, 1) == 2384.0
+    assert aoi["area_km2"] == round(exact) == 2384               # was ~2,399 on the plane
+    assert ingest.area_of(aoi)["area_km2"] == 2384
+    assert json.loads((_adir(aoi) / "meta.json").read_text())["measure"] == vectors.MEASURE
+
+
+def test_a_geocoded_boundary_is_stated_on_the_ellipsoid_in_its_area_and_its_how(env, monkeypatch):
+    ring = [list(p) for p in BASIN.exterior.coords]
+    monkeypatch.setattr(ingest, "_search", lambda q: [{
+        "class": "boundary", "type": "administrative", "place_rank": 12, "display_name": "Cuenca Uno, Testland",
+        "lon": "-83.4", "lat": "9.0", "geojson": {"type": "Polygon", "coordinates": [ring]}}])
+    n = round(vectors.area_km2(BASIN))
+    r = ingest.resolve_place("Cuenca Uno Province")
+    assert r["status"] == "ok" and r["area_km2"] == n and f"~{n} km²" in r["how"]
+    aoi = ingest.ensure_aoi(place="Cuenca Uno Province", layers=())
+    assert aoi["area_km2"] == n and aoi["how"] == r["how"]
+
+
+def test_an_area_cached_on_the_plane_is_restated_on_the_ellipsoid_and_keeps_its_layers(env):
+    """A bundle cached before this fix carries the planar figure in area_km2 and in how.
+    It is restated from its own boundary, without re-resolving or re-fetching."""
+    d = env["cache"] / "golfo-cached"
+    d.mkdir(parents=True)
+    (d / "admin.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {"name": "Golfo"}, "geometry": GULF}]}))
+    (d / "schools.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": []}))
+    (d / "meta.json").write_text(json.dumps({
+        "name": "Golfo", "area_km2": 2399, "counts": {"schools": 0}, "resolver": ingest.RESOLVER_VERSION,
+        "how": "admin boundary ~2399 km² — this is Golfo itself, not the wider area (~9000 km²)"}))
+    aoi = ingest.ensure_aoi(place="Golfo cached", layers=("schools",))
+    assert aoi["area_km2"] == 2384
+    assert aoi["how"] == "admin boundary ~2384 km² — this is Golfo itself, not the wider area (~9000 km²)"
+    assert env["fetched"] == [] and aoi["counts"] == {"schools": 0}
+    assert json.loads((d / "meta.json").read_text())["measure"] == vectors.MEASURE
+
+
+def test_a_freshly_contributed_basin_is_stated_at_its_measured_area_by_every_seam(env, monkeypatch, log):
+    """A polygon layer contributed through the gate names a basin. The resolve bone, the
+    risk pack's area (default cap) and the land-cover pack's area-only citation all state
+    the area its own measure gives, not a planar one ~0.7% higher."""
+    fc = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {"NOMBRE": "Cuenca Prueba"}, "geometry": mapping(BASIN)}]}
+    monkeypatch.setattr(fetch_policy, "check_url", lambda url: [])
+    monkeypatch.setattr(fetch_policy, "fetch", lambda url, max_bytes=None: (json.dumps(fc).encode(), "c.geojson"))
+    tok = identity.bind(OWNER)
+    try:
+        out = staging.submit("vector", {"layer": "t_basins", "url": "https://x.test/c.geojson",
+                                        "title": "Test basins (synthetic)", "description": "synthetic",
+                                        "source": "test fixture", "license": "CC0-1.0", "vintage": "2026",
+                                        "name_field": "NOMBRE"}, OWNER)
+        assert out["status"] in ("approved", "landed"), out
+        entry = vectors.landed()["t_basins"]
+        measured = vectors.summarise(entry, BASIN)["total"]
+        n = round(measured)
+        planar = BASIN.area * 111.32 ** 2 * np.cos(np.radians(BASIN.centroid.y))
+        log("OUTPUT", f"measured {measured} km², planar {planar:.1f} km²")
+        assert round(planar) != n
+
+        r = ingest.resolve_place("Cuenca Prueba")
+        assert r["status"] == "ok" and r["is_contributed_boundary"] and r["area_km2"] == n
+        risk_aoi = ingest.ensure_aoi(place="Cuenca Prueba", layers=())          # the risk pack's cap
+        assert risk_aoi["area_km2"] == n
+        spec = packs.PACKS["land-cover"]
+        extras = {"vectors": ["t_basins"]}
+        target, why = packs.build_target("land-cover", {"place": "Cuenca Prueba", "year": "", **extras})
+        assert why is None
+        citations, _gaps, stats = spec["gather"](target, spec["default_focus"](target), [], extras)
+        log("OUTPUT", citations[0]["text"][:160])
+        assert citations[0]["kind"] == "area" and f"~{n:,} km²" in citations[0]["text"]
+        assert stats["aoi"]["area_km2"] == n and stats["_area"]["area_km2"] == n
+    finally:
+        identity.unbind(tok)

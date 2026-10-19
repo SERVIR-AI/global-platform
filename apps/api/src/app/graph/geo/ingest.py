@@ -150,12 +150,12 @@ def _slug(place):
     return re.sub(r"[^a-z0-9]+", "-", place.lower()).strip("-")
 
 
-def _est_km2(geom):
-    """Planar area estimate in km² for a lon/lat shape, scaled by the cosine of its
-    latitude. The old constants (111 x 108) were tuned to ~13 N and overstated a
-    Himalayan province by ~9%."""
-    lat = geom.centroid.y if not geom.is_empty else 0.0
-    return geom.area * 111.32 * 111.32 * max(math.cos(math.radians(lat)), 0.05)
+def _km2(geom):
+    """Area of a lon/lat shape in km² on the WGS 84 ellipsoid — the measure every layer
+    summed inside a boundary uses, so the area a boundary is stated at is the one its
+    measures add up to. The planar estimate this replaced ran 0.6% high at 10° N (the
+    Gulf of Nicoya box stated ~2,399 km² beside measures over 2,384.0)."""
+    return vectors.area_km2(geom)
 
 
 # Boundaries a question can be about. OpenStreetMap tags parks and reserves as their
@@ -632,7 +632,7 @@ def _resolve(place, cap=None, contributed=None):
     c = _contributed(place) if contributed is None else contributed
     if c["area"]:
         a = c["area"]
-        return {"km2": _est_km2(a["geometry"]), "name": a["label"], "geometry": a["geometry"],
+        return {"km2": _km2(a["geometry"]), "name": a["label"], "geometry": a["geometry"],
                 "how": a["how"], "approximate": False, "nearby": [], "contributed": c}
     note = _contributed_note(c)
     try:
@@ -744,7 +744,7 @@ def _geocoded(place, cap=None):
         how = (f"{RADIUS_KM:.0f} km radius box around {found} — an approximation, NOT the "
                f"boundary of {found}: the geocoder gave a point and no admin or "
                "protected-area boundary for it")
-    return (_est_km2(g), name, g, how, True)
+    return (_km2(g), name, g, how, True)
 
 
 def _search(place):
@@ -792,7 +792,7 @@ def _under_cap_admin(results, cap=None):
         kind = _boundary_kind(d)
         if kind:
             g = shape(d["geojson"])
-            km2 = _est_km2(g)
+            km2 = _km2(g)
             if km2 <= cap:
                 under.append((km2, d["display_name"].split(",")[0], g, kind))
     return max(under, key=lambda c: c[0]) if under else None
@@ -848,7 +848,7 @@ def _admin_over_cap(results):
     for d in results:
         if _boundary_kind(d):
             g = shape(d["geojson"])
-            admins.append((_est_km2(g), d, g))
+            admins.append((_km2(g), d, g))
     return max(admins, key=lambda c: c[0]) if admins else None
 
 
@@ -1095,9 +1095,12 @@ def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=N
             except Exception as exc:                 # missing, garbled or not a shape
                 _drop_bundle(adir, f"its boundary file is unreadable ({exc})")
                 cached = None
+            else:
+                if _remeasure(info, boundary):
+                    write_json(meta, info, indent=2)
         if cached is None:
             if geometry is not None:
-                km2 = _est_km2(boundary)
+                km2 = _km2(boundary)
                 if km2 > cap:
                     raise ValueError(f"{'the contributed area' if contributed_how else 'drawn area'} "
                                      f"is too large (~{km2:.0f} km², over the {cap:.0f} km² cap)"
@@ -1115,7 +1118,7 @@ def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=N
             os.makedirs(adir, exist_ok=True)
             _write(adir, "admin", [_feature(boundary, {"name": name})])
             info = {"name": name, "area_km2": round(km2), "how": how, "counts": {},
-                    "resolver": RESOLVER_VERSION, **approximate}
+                    "resolver": RESOLVER_VERSION, "measure": vectors.MEASURE, **approximate}
             write_json(meta, info, indent=2)
 
     # Over a large area the heavy OSM layers are declined rather than attempted.
@@ -1251,6 +1254,20 @@ def _drop_bundle(adir, why):
         if os.path.isfile(p):
             with contextlib.suppress(OSError):
                 os.remove(p)
+
+
+def _remeasure(info, boundary) -> bool:
+    """Restate a cached area on the ellipsoid when it was measured another way (planar,
+    before this was fixed): the area is recomputed from its own boundary file, and the
+    figure written for it in `how` ('admin boundary ~5091 km²') moves with it. True
+    when anything changed. Cheaper than re-resolving, which would re-fetch its layers."""
+    if info.get("measure") == vectors.MEASURE:
+        return False
+    old, new = info.get("area_km2"), round(_km2(boundary))
+    info["area_km2"], info["measure"] = new, vectors.MEASURE
+    if old is not None and isinstance(info.get("how"), str):
+        info["how"] = info["how"].replace(f"~{old} km²", f"~{new} km²", 1)
+    return True
 
 
 def _osm_name(tags: dict) -> str:

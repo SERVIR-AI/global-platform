@@ -297,7 +297,10 @@ def test_a_box_cached_before_it_said_approximate_is_re_resolved_alone(gaz, log):
     assert aoi["approximate"] is True and "NOT the boundary" in aoi["how"] and aoi["nearby_contributed"]
     assert not (old_box / "roads.geojson").exists()
     aoi = ingest.ensure_aoi(place="Somewhere", layers=("roads",))
-    assert aoi["how"] == "admin boundary ~579 km²" and not aoi["approximate"]
+    # Not re-resolved; but seeded without a measure, as before areas were stated on
+    # the ellipsoid, so its area is restated from its own boundary (486 km², not the
+    # seeded 579) and the figure in `how` with it.
+    assert aoi["how"] == "admin boundary ~486 km²" and aoi["area_km2"] == 486 and not aoi["approximate"]
     assert (kept / "roads.geojson").exists()
 
 
