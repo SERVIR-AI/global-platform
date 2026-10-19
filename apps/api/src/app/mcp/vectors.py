@@ -3,9 +3,10 @@
 After any gatherer has run, the contributed vector layers the caller named
 (`vectors=[...]`) — or the pack's own `default_vectors` — are measured inside the
 area that pack used: how many points, how many km of line, how many km² of
-polygon, by the field the contributor named, with the largest named features.
-The area comes from the gatherer's reserved `_area` stats key (see mcp/layers.py;
-this step reads it, the layer-values step pops it). Nothing here names a pack.
+polygon, by the field the contributor named, with the largest named lines and
+polygons (or, for points, the names that recur most). The area comes from the
+gatherer's reserved `_area` stats key (see mcp/layers.py; this step reads it, the
+layer-values step pops it). Nothing here names a pack.
 
 Each layer becomes one numbered citation whose text carries every number a brief
 may state, plus a `features_sha256` the receipt records; the records ride the
@@ -14,6 +15,7 @@ pack's top-level `vectors` block, never `stats` (the gate scans stats for number
 
 from __future__ import annotations
 
+from ..graph.geo import vecio as _vecio
 from ..graph.geo import vectors as _vectors
 
 MAX_LAYERS = 8
@@ -74,10 +76,10 @@ def restrict_within(layer: str, area_geom, area_label: str) -> tuple:
         raise ValueError(f"within={layer!r} is a {_vectors.family(entry)} layer; `within` needs a "
                          "POLYGON layer (protected areas, a watershed, a map's class polygons)")
     inside = _vectors.union_inside(entry, area_geom)
-    if inside.is_empty or _vectors.area_km2(inside) <= 0:
+    km2_in = 0.0 if inside.is_empty else _vectors.area_km2(inside)
+    if km2_in <= 0:
         raise ValueError(f"no part of {area_label} lies inside {entry.get('title') or layer} ({layer}) — "
                          "nothing can be measured there")
-    km2_in = _vectors.area_km2(inside)
     km2_all = _vectors.area_km2(area_geom) if area_geom.geom_type in ("Polygon", "MultiPolygon") else None
     title = entry.get("title") or layer
     label = f"{area_label} — inside {title}"
@@ -105,11 +107,17 @@ def citation_text(layer: str, entry: dict, rec: dict, area_name: str) -> str:
                 f"{_fmt(rec['by_group_rest']['total'], unit)}" if rec.get("by_group_rest") else "")
         bits.append(f"By {rec['group_field']}: {parts}{tail}.")
     if rec.get("largest_named"):
-        parts = "; ".join(f"{d['name']} ({_fmt(d['measure'], unit)})" if unit != "features" else d["name"]
-                          for d in rec["largest_named"][:6])
-        more = rec["features_inside"] - min(len(rec["largest_named"]), 6)
+        parts = "; ".join(f"{d['name']} ({_fmt(d['measure'], unit)})" for d in rec["largest_named"][:6])
+        more = rec["features_inside"] - (rec.get("unnamed") or 0) - min(len(rec["largest_named"]), 6)
         bits.append(f"Largest named ({rec['name_field']}): {parts}"
-                    + (f"; {more:,} more" if more > 0 else "")
+                    + (f"; {more:,} more named" if more > 0 else "")
+                    + (f"; {rec['unnamed']:,} unnamed" if rec.get("unnamed") else "") + ".")
+    if rec.get("most_frequent_named"):
+        # A point has no size: what its names say is how often each one recurs.
+        parts = ", ".join(f"{d['name']} ({d['count']:,})" for d in rec["most_frequent_named"][:6])
+        more = (rec.get("distinct_names") or 0) - min(len(rec["most_frequent_named"]), 6)
+        bits.append(f"Most frequent {rec['name_field']}: {parts}"
+                    + (f"; {more:,} other name(s)" if more > 0 else "")
                     + (f"; {rec['unnamed']:,} unnamed" if rec.get("unnamed") else "") + ".")
     if rec.get("footprint_km2") is not None:
         bits.append(f"Its features overlap inside {area_name}: counting shared ground once, they "
@@ -120,9 +128,18 @@ def citation_text(layer: str, entry: dict, rec: dict, area_name: str) -> str:
     if rec.get("skipped_unreadable"):
         bits.append(f"{rec['skipped_unreadable']:,} feature(s) could not be clipped to the boundary "
                     "and are not counted; the figures are a lower bound.")
-    bits.append("Measured on the authalic sphere (the same one the platform's raster areas use), "
-                f"over {rec['features_in_layer']:,} features in the layer; replayable by the "
-                "features hash on the receipt.")
+    if rec.get("unreadable_in_layer"):
+        bits.append(f"{rec['unreadable_in_layer']:,} feature(s) of the layer could not be read or "
+                    "repaired and are not counted anywhere; the figures are a lower bound.")
+    lost = _vecio.losses(entry.get("prepared"))
+    if lost:
+        bits.append("At ingest, " + "; ".join(lost) + ".")
+    how = {"km2": "areas exact on the WGS 84 ellipsoid (through the authalic latitude, as the "
+                  "platform's raster areas)",
+           "km": "lengths on the WGS 84 ellipsoid",
+           "features": "points counted where they fall"}[unit]
+    bits.append(f"Measured as {how}, over {rec['features_in_layer']:,} features in the layer; "
+                "replayable by the features hash on the receipt.")
     if entry.get("usage_notes"):
         bits.append(f"Contributor's note: {entry['usage_notes']}")
     if entry.get("review"):
