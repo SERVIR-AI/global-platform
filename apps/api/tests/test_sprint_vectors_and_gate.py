@@ -33,8 +33,11 @@ def test_drive_share_links_become_direct_downloads_and_folders_are_refused():
     assert fetch_policy.direct_url("https://example.org/a.tif") == "https://example.org/a.tif"
     folder = fetch_policy.check_url("https://drive.google.com/drive/folders/1dUNKBDyfIP14y2Mx8keZwQxdAlJuhFe9")
     assert folder and "FOLDER" in folder[0]
-    doc = fetch_policy.check_url("https://docs.google.com/document/d/1abcdefghijklmnop/edit")
-    assert doc and "Google Docs" in doc[0]
+    # a Google Docs DOCUMENT is fetched through its export; Sheets/Slides stay refused
+    assert fetch_policy.direct_url("https://docs.google.com/document/d/1abcdefghijklmnop/edit") == \
+        "https://docs.google.com/document/d/1abcdefghijklmnop/export?format=docx"
+    sheet = fetch_policy.check_url("https://docs.google.com/spreadsheets/d/1abcdefghijklmnop/edit")
+    assert sheet and "Google Sheets" in sheet[0]
 
 
 def test_drive_confirm_page_is_followed_once_and_a_sign_in_page_is_refused(monkeypatch):
