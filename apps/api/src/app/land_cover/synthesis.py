@@ -15,7 +15,9 @@ accompanied path for consumers with no model of their own.
 from __future__ import annotations
 
 import json
+import math
 import os
+import re
 
 from shapely.geometry import shape
 
@@ -85,27 +87,96 @@ def landcover_stacks():
     return {k: v for k, v in stacks.rows().items() if v.get("role") == ROLE}
 
 
-def _pick_stack(boundary, wanted=None, years=()):
-    """(stack_id, row, others): the registered land-cover stack to read for this
-    area, and every OTHER registered stack that also covers it. Unless the caller
-    names one (`stack`), the first covering stack that HAS the requested years is
-    read; the others are declared as a gap, never silently ignored. It used to
-    return the first match and say nothing: a hub's national 10 m stack over Nepal
-    would have sat unread beside the 30 m regional one, with no answer ever
-    mentioning it — and a 1996 question declined because the first stack over the
-    Gulf of Nicoya held only 2014 while the second held 1996."""
+class NoStackHere(ValueError):
+    """No registered stack can count classes for this area (and year). A class
+    question declines with it; a request that only measures vectors or layers gets
+    an area-only answer that carries `brief` as a gap. `outside`: no stack's map
+    reaches the area at all."""
+
+    def __init__(self, message, brief=None, outside=False):
+        super().__init__(message)
+        self.brief = brief or message
+        self.outside = outside
+
+
+def _extent_box(row):
+    """(w, s, e, n) of a stack's declared extent, or None when it declares none."""
+    ext = row.get("extent") or {}
+    lon, lat = ext.get("lon"), ext.get("lat")
+    if not lon or not lat:
+        return None
+    return float(lon[0]), float(lat[0]), float(lon[1]), float(lat[1])
+
+
+def _box_phrase(b):
+    return f"lon {b[0]:.2f} to {b[2]:.2f}, lat {b[1]:.2f} to {b[3]:.2f}"
+
+
+def _km_to_box(boundary, b):
+    """Great-circle km from the area's centre to the nearest point of an extent box."""
+    c = boundary.centroid
+    lon, lat = min(max(c.x, b[0]), b[2]), min(max(c.y, b[1]), b[3])
+    p1, p2 = math.radians(c.y), math.radians(lat)
+    h = (math.sin((p2 - p1) / 2) ** 2
+         + math.cos(p1) * math.cos(p2) * math.sin(math.radians(lon - c.x) / 2) ** 2)
+    return 2 * 6371.0 * math.asin(min(1.0, math.sqrt(h)))
+
+
+def _stacks_by_distance(boundary, rows, limit=None):
+    """'title (id): lon .. lat .., ~N km away' for registered stacks, nearest first."""
+    placed = sorted(((_km_to_box(boundary, b), sid, row) for sid, row in rows.items()
+                     if (b := _extent_box(row))), key=lambda t: t[0])
+    out = [f"{row.get('title', sid)} ({sid}): {_box_phrase(_extent_box(row))}, "
+           f"~{km:,.0f} km away" for km, sid, row in placed[:limit]]
+    return "; ".join(out)
+
+
+def _cover_share(boundary, row):
+    """How much of the area the stack's declared extent covers, 0-1 (0 when undeclared)."""
+    from shapely.geometry import box
+    b = _extent_box(row)
+    if not b or boundary.area <= 0:
+        return 0.0
+    return boundary.intersection(box(*b)).area / boundary.area
+
+
+def stack_cell_deg(sid, row):
+    """The stack's cell size in degrees: its first year's file header (cheap, and
+    true), else its declared contract; None when neither can be read."""
+    try:
+        ys = stacks.years(row)
+        path = stacks.year_path(str(row["layer_pattern"]).format(year=ys[0])) if ys else None
+        if path:
+            return float(stacks.header(path)["pixel_size_deg"])
+    except Exception:
+        pass
+    try:
+        px = (schema._doc().get("stacks") or {}).get(sid, {}).get("pixel_size_deg")
+        return float(px) if px else None
+    except Exception:
+        return None
+
+
+def _pick_stack(boundary, wanted=None, years=(), name="this area"):
+    """(stack_id, row, others, why): the registered land-cover stack to read for this
+    area, every OTHER registered stack that also covers it, and why this one was
+    read. Unless the caller names one (`stack`), the covering stacks that HAVE the
+    requested years are ranked — two or more classes first (a one-class map cannot
+    show loss or gain), then the one whose extent covers most of the area, then the
+    finest cells — and the others are declared as a gap, never silently ignored.
+    The first registered match used to win: a one-class mangrove extent map was read
+    over a Costa Rica bay while an eleven-class map of the same years sat beside it."""
     rows = landcover_stacks()
     if not rows:
-        raise ValueError("no land-cover stack is registered on this platform — a hub "
-                         "contributes one as a `kind: stack` catalog row")
+        raise NoStackHere("no land-cover stack is registered on this platform — a hub "
+                          "contributes one as a `kind: stack` catalog row")
     minx, miny, maxx, maxy = boundary.bounds
     covering = []
     for sid, row in rows.items():
-        ext = row.get("extent") or {}
-        lon, lat = ext.get("lon"), ext.get("lat")
-        if not lon or not lat:           # extent undeclared: cannot rule it out
+        b = _extent_box(row)
+        if b is None:                    # extent undeclared: cannot rule it out
             covering.append((sid, row))
-        elif maxx >= lon[0] and minx <= lon[1] and maxy >= lat[0] and miny <= lat[1]:
+        elif maxx >= b[0] and minx <= b[2] and maxy >= b[1] and miny <= b[3]:
             covering.append((sid, row))
     if wanted:
         w = str(wanted).strip()
@@ -117,13 +188,14 @@ def _pick_stack(boundary, wanted=None, years=()):
                              "covering stacks: "
                              + (", ".join(sid for sid, _ in covering) or "none"))
         others = [(sid, row) for sid, row in covering if sid != w]
-        return w, rows[w], others
+        return w, rows[w], others, "named by the caller"
     if not covering:
-        sid, row = next(iter(rows.items()))
-        ext = row.get("extent") or {}
-        raise ValueError(
-            f"this area lies outside every registered land-cover stack — {row.get('title', sid)} "
-            f"covers lon {ext.get('lon')} and lat {ext.get('lat')}; nothing can be counted there")
+        raise NoStackHere(
+            f"{name} lies outside every registered land-cover stack, so no class can be "
+            f"counted there. The {len(rows)} registered stack(s), nearest first: "
+            + _stacks_by_distance(boundary, rows)
+            + ". To measure contributed layers there instead, pass vectors=[...] or layers=[...]",
+            brief="it lies outside every registered land-cover stack", outside=True)
     want = [int(y) for y in years if y]
     able = [(sid, row) for sid, row in covering
             if all(y in stacks.years(row) for y in want)] if want else covering
@@ -132,12 +204,23 @@ def _pick_stack(boundary, wanted=None, years=()):
         # published by the producer") rather than a bare list of years.
         able = covering
     if not able:
-        raise ValueError(
-            f"no registered land-cover stack covering this area has {', '.join(map(str, want))} — "
+        raise NoStackHere(
+            f"no registered land-cover stack covering {name} has {', '.join(map(str, want))} — "
             + "; ".join(f"{row.get('title', sid)} ({sid}) has {stacks._span(stacks.years(row)) or 'no years'}"
                         for sid, row in covering))
+    facts = {sid: (len(_legend(row)), _cover_share(boundary, row), stack_cell_deg(sid, row))
+             for sid, row in able}
+    # Stable: registration order still breaks a tie.
+    able = sorted(able, key=lambda sr: (facts[sr[0]][0] < 2, -round(facts[sr[0]][1], 2),
+                                        facts[sr[0]][2] or float("inf")))
     sid, row = able[0]
-    return sid, row, [(s, r) for s, r in covering if s != sid]
+    n_cls, share, cell = facts[sid]
+    why = (f"chosen among the {len(able)} stack(s) holding the years asked — two or more classes "
+           "first, then the extent covering most of the area, then the finest cells: it maps "
+           f"{n_cls} class(es), its extent covers {share * 100:.0f}% of {name}"
+           + (f" and its cells are {cell * 111_320:.0f} m" if cell else "")
+           if len(able) > 1 else "the only covering stack holding the years asked")
+    return sid, row, [(s, r) for s, r in covering if s != sid], why
 
 
 _BOUNDARY_OK = ("admin boundary", "protected-area boundary", "contributed boundary",
@@ -148,8 +231,9 @@ def _resolve_aoi(place, extras, trace):
     geometry = extras.get("geometry")
     if geometry is not None:
         kw = {"how": extras["within_how"]} if extras.get("within_how") else {}
-        aoi = ingest.ensure_aoi(geometry=geometry, name=place or None, layers=(),
-                                area_cap_km2=AREA_CAP_KM2, **kw)
+        # A geometry with no place is still the caller's own area, and is labelled so.
+        aoi = ingest.ensure_aoi(geometry=geometry, name=place or "the area you supplied",
+                                layers=(), area_cap_km2=AREA_CAP_KM2, **kw)
     else:
         aoi = ingest.ensure_aoi(place=place, layers=(), area_cap_km2=AREA_CAP_KM2)
     how = str(aoi.get("how") or "")
@@ -190,11 +274,12 @@ def _outside(row):
 
 def _match_classes(wanted, legend):
     """Class names a caller asked about, matched to the legend; unknown names declared."""
-    by_name = {v.lower(): k for k, v in legend.items()}
+    by_name = {_fold(v): k for k, v in legend.items()}
     hits, unknown = [], []
     for w in wanted:
-        k = by_name.get(w.lower()) or next((k for k, v in legend.items()
-                                            if w.lower() in v.lower()), None)
+        k = by_name.get(_fold(w))
+        if k is None:
+            k = next((k for k, v in legend.items() if w.lower() in v.lower()), None)
         (hits if k is not None else unknown).append(k if k is not None else w)
     return hits, unknown
 
@@ -221,8 +306,8 @@ def _class_area_citation(n, name, year, row, st, level, source):
             + "; ".join(parts) + "."
             + (f" Classes absent from this area: {', '.join(absent)}." if absent else "")
             + f" Pixels: {st['pixels_classified']:,} classified of {st['pixels_inside']:,} inside "
-            "the boundary. Area per pixel is its spherical area at its own latitude, summed; "
-            "counts are never resampled.")
+            "the boundary. Area per pixel is its area on the WGS84 ellipsoid at its own "
+            "latitude, summed; counts are never resampled.")
     if st["values_not_in_legend"]:
         text += (f" Values present but not in the legend: {st['values_not_in_legend']} "
                  "(counted as classified, reported here, not attributed to a class).")
@@ -377,11 +462,13 @@ def _passport_citation(n, sid, row, layer, year, clip, level, legend, gaps):
         bits.append(f"Grid: {hdr['width']}×{hdr['height']} px, lon {b[0]}..{b[2]}, "
                     f"lat {b[1]}..{b[3]}; overview levels {hdr['overviews'] or 'none'}.")
     bits.append(f"Read here at {'full resolution' if level <= 1 else f'overview level {level}'}.")
-    acc = str(row.get("accuracy") or "").strip()
-    if acc and acc.lower() not in ("unstated", "unknown", "none", "n/a"):
-        bits.append(f"Accuracy, as declared by the producer (not assessed for this area): {acc}.")
+    acc = declared_accuracy(layer, row)
+    if acc:
+        bits.append(f"Accuracy, as declared by the producer for this year's map (not assessed "
+                    f"for this area): {acc}.")
     else:
-        bits.append("Accuracy: not documented on this platform — no accuracy figure is cited.")
+        bits.append("Accuracy: not documented on this platform — no accuracy figure was declared "
+                    "with this layer, so none is cited.")
     validation = "unvalidated"
     if contract and obs and obs.get("sampled_min") is not None:
         # The clip was read at an overview: its cells are `level` source cells wide.
@@ -414,7 +501,7 @@ def _passport_citation(n, sid, row, layer, year, clip, level, legend, gaps):
             "text": " ".join(bits)}
 
 
-def _method_citation(n, outside_values, two_years, level, how=""):
+def _method_citation(n, outside_values, two_years, level, how="", one_class=False):
     text = (
         "Land-cover figures are pixel counts. Window: the boundary's bounding box in the "
         "year's own grid, intersected with the dataset"
@@ -422,38 +509,64 @@ def _method_citation(n, outside_values, two_years, level, how=""):
            f", read through the file's overviews at level {level} because the window exceeds the "
            f"pack's {PIXEL_BUDGET:,}-pixel full-resolution budget; the level is stated on every "
            "figure. ")
-        + "Membership: a pixel counts when its centre falls inside the boundary. Area: each "
-        "pixel's own spherical area at its latitude (authalic radius 6371.0072 km; the "
-        "WGS84-ellipsoid figure is 0.08% smaller), summed per class — no constant pixel area, "
-        f"no resampling of counts. Outside or unclassified: the producer's values {sorted(outside_values)} "
+        + "Membership: a pixel counts when its centre falls inside the boundary. Area: computed "
+        "on the WGS84 ellipsoid — each pixel's area is exact at its own latitude (via the "
+        "authalic latitude), summed per class — no constant pixel area, no resampling of "
+        f"counts. Outside or unclassified: the producer's values {sorted(outside_values)} "
         "are reported as one excluded area, never as a class, and shares are of the classified "
         "area only. "
         + ("Change: computed only on pixels classified in both years, after placing the later "
            "year on the earlier year's grid by whole pixels (nearest, no blending); a pixel "
            "mapped one class in the first year and another in the second counts as change, "
            "which includes classifier disagreement. "
-           if two_years else "")
+           if two_years and not one_class else "")
+        + ("Change: not computed — the map holds one class and everything else is outside it, "
+           "so a pixel of that class in one year and outside the map in the other cannot be "
+           "told from a pixel with no data; the years are compared by their areas only. "
+           if two_years and one_class else "")
         + "Boundary: " + _boundary_phrase(how) + ". No model runs in this pack; the LLM does "
         "no arithmetic.")
     return {"n": n, "kind": "method", "retrieval": "config", "source": "platform method registry",
             "title": "land-cover counting method", "validation": "documented-method", "text": text}
 
 
-def _standing_gaps(row, pixel_size_deg):
+_UNSTATED = ("unstated", "unknown", "none", "n/a")
+
+
+def declared_accuracy(layer, row):
+    """The accuracy declared with one year's map — its own row first, then the stack's —
+    or None. A stack whose years carry different maps (WorldCover v100 in 2020, v200
+    in 2021) declares a figure per year, and only the first year's was ever cited."""
+    try:
+        meta = tiffs.entry(layer) if layer else {}
+    except Exception:
+        meta = {}
+    for v in (meta.get("accuracy"), row.get("accuracy")):
+        s = str(v or "").strip()
+        if s and s.lower() not in _UNSTATED:
+            return s
+    return None
+
+
+def _standing_gaps(row, pixel_size_deg, accuracy=None):
     """The gaps every land-cover answer declares, read from the stack it answers
-    from: the accuracy the producer states (or that none is recorded), the cell
-    size the map actually has. These were two typed sentences — '30 m', 'no
-    accuracy' — that stayed true only for the first stack ever registered."""
-    acc = str(row.get("accuracy") or "").strip()
+    from: the accuracy the producer states for each year read (or that none is
+    declared), the cell size the map actually has. These were two typed sentences —
+    '30 m', 'no accuracy' — that stayed true only for the first stack ever registered."""
+    accuracy = accuracy if accuracy is not None else {None: declared_accuracy(None, row)}
     metres = round(float(pixel_size_deg or 0) * 111_320)
     cell = f"{metres} m" if metres else "one cell"
     out = []
-    if not acc or acc.lower() in ("unstated", "unknown", "none", "n/a"):
-        out.append("accuracy of the land-cover maps is not documented in this platform's "
-                   "registry, so no accuracy figure is cited — the producer's method "
-                   "publication has not been archived here")
+    stated = {y: a for y, a in accuracy.items() if a}
+    if not stated:
+        out.append("accuracy of these land-cover maps is not documented: no accuracy figure was "
+                   "declared with the layer, so none is cited")
+    elif len(set(accuracy.values())) == 1:
+        out.append("accuracy as declared by the producer, not assessed for this area: "
+                   + next(iter(stated.values())))
     else:
-        out.append(f"accuracy as declared by the producer, not assessed for this area: {acc}")
+        out.append("accuracy as declared by the producer, not assessed for this area, per year — "
+                   + "; ".join(f"{y}: {a or 'none declared'}" for y, a in accuracy.items()))
     out.append(f"a land-cover class is the producer's label for a {cell} pixel at the equator; "
                "features narrower than one cell are not resolved")
     out.extend(STANDING_GAPS)
@@ -503,52 +616,130 @@ def _viz(aoi, name, layer_key, raster_path, legend_entries, label, caption, metr
 
 # ------------------------------------------------------------------ gather
 
+def _measures_asked(extras) -> bool:
+    """Did the call name contributed vectors or raster layers to measure? The seam
+    passes the names it was given; only they make an answer without classes worth
+    returning."""
+    extras = extras or {}
+    return bool(extras.get("vectors") or extras.get("layers"))
+
+
+def _one_class_gap(row, sid, legend):
+    label = next(iter(legend.values()), "the class")
+    return (f"{row.get('title', sid)} ({sid}) maps one class ({label}) and nothing else: a pixel "
+            f"that is {label} in one year and outside the map in the other cannot be told from a "
+            "pixel with no data, so loss, gain and transitions are not computed — compare the "
+            "per-year areas (net change only). Contribute the map with its background as a class "
+            f"(for example 0 = not {label.lower()}, outside_values: []) to get them")
+
+
+def _area_only(aoi, boundary, how, name, place, why, trace):
+    """An answer for the area alone: its boundary as a citation and a gap saying why no
+    class is counted; the seam then measures the vectors and layers the caller named
+    inside it. Outside every stack the pack used to refuse everything, so a hub's
+    polygons in Kenya or Guyana could not be measured by any pack at all."""
+    km2 = aoi.get("area_km2")
+    text = (f"The area measured is {name}" + (f", ~{km2:,} km²" if km2 else "")
+            + f"; boundary: {_boundary_phrase(how)}. No land-cover class is counted in this "
+            "answer; each contributed vector or raster layer named in the request is measured "
+            "inside this boundary in a citation of its own.")
+    gap = f"no land-cover class is counted in {name}: {why.brief}"
+    if why.outside:
+        near = _stacks_by_distance(boundary, landcover_stacks(), limit=3)
+        gap += f". The registered stacks nearest it: {near}" if near else ""
+    trace.append("area-only: no classes counted; the seam measures the layers asked")
+    stats = {"queries": None,
+             "aoi": {"requested": place, "name": name, "area_km2": km2, "how": how,
+                     "is_admin_boundary": how.startswith("admin boundary")},
+             "stack": None, "classes_counted": False,
+             "_area": ingest.area_of(aoi), "_layer_defaults": []}
+    return ([{"n": 1, "kind": "area", "retrieval": "computed-at-pack-time",
+              "source": "platform boundary resolution", "title": f"the area measured, {name}",
+              "validation": "boundary as resolved at pack time", "text": text}],
+            [gap, _boundary_gap(how)], stats)
+
+
 def gather_land_cover_evidence(target: dict, focus: str, trace: list,
                                extras: dict) -> tuple[list, list, dict]:
     from ..config import get_settings
     place = str(target.get("place") or "").strip()
-    year = _year(target.get("year"))
+    measures = _measures_asked(extras)
+    year = _year(target.get("year")) if target.get("year") not in (None, "") else None
     year_to = _year(target.get("year_to"), "year_to") if target.get("year_to") else None
+    if year is None and not measures:
+        raise ValueError("pack 'land-cover' needs year: the map year to count classes in (e.g. "
+                         "2020). Only a call that measures contributed vectors=[...] or "
+                         "layers=[...] may leave it out")
+    if year is None and year_to is not None:
+        raise ValueError(f"year_to ({year_to}) needs year, the earlier map year to compare it with")
     if year_to is not None and year_to <= year:
         raise ValueError(f"year_to ({year_to}) must come after year ({year})")
+    if not place and (extras or {}).get("geometry") is None:
+        raise ValueError("pack 'land-cover' needs place (a district, province, park or country) "
+                         "or geometry (a GeoJSON polygon or a [w, s, e, n] bbox; place is then its "
+                         "label)")
     wanted = _classes(target.get("classes"))
 
     aoi, boundary, how = _resolve_aoi(place, extras, trace)
     name = aoi.get("name", place)
-    sid, row, other_stacks = _pick_stack(boundary, wanted=target.get("stack"),
-                                         years=tuple(y for y in (year, year_to) if y))
-    legend, outside, colors = _legend(row), _outside(row), None
+    try:
+        if year is None:
+            sid, row, other_stacks, _ = _pick_stack(boundary, wanted=target.get("stack"), name=name)
+            raise NoStackHere(
+                f"no map year was asked; the stack(s) covering {name}: "
+                + "; ".join(f"{r.get('title', s)} ({s}) has {stacks._span(stacks.years(r)) or 'no years'}"
+                            for s, r in [(sid, row), *other_stacks])
+                + " — pass year= to count their classes")
+        sid, row, other_stacks, why = _pick_stack(boundary, wanted=target.get("stack"),
+                                                  years=tuple(y for y in (year, year_to) if y),
+                                                  name=name)
+        try:
+            layer = stacks.layer_for(sid, year)
+            layer_to = stacks.layer_for(sid, year_to) if year_to else None
+        except ValueError as exc:
+            raise NoStackHere(f"{row.get('title', sid)}: {exc}") from None
+        # A registered year whose file is not on this server declines in words, not a
+        # traceback: a second host gets the code and the catalog before (or without) the
+        # 14 GB of maps.
+        inst = stacks.installed(sid)
+        absent = [y for y in (year, year_to) if y and not inst.get(y, False)]
+        if absent:
+            raise NoStackHere(f"{row.get('title', sid)}: the map for "
+                              f"{', '.join(str(y) for y in absent)} is not installed on this server "
+                              f"({sum(inst.values())} of {len(inst)} declared years are)")
+        legend, outside = _legend(row), _outside(row)
+        clip, level = _clip(aoi, layer, trace)
+        st = stacks.class_areas(clip, boundary, legend, outside)
+        trace.append(f"class_areas[{layer}] {st['pixels_classified']} px classified")
+        if st["pixels_classified"] == 0:
+            raise NoStackHere(
+                f"{name} falls inside the bounding box of {row.get('title', sid)} "
+                f"({_box_phrase(_extent_box(row)) if _extent_box(row) else 'extent undeclared'}) but "
+                f"every one of its {st['pixels_inside']:,} pixels is outside the mapped footprint — "
+                "this product does not cover it, so no class area exists to report",
+                outside=True)
+    except NoStackHere as exc:
+        if not measures:
+            raise
+        return _area_only(aoi, boundary, how, name, place, exc, trace)
+
     colors = _colors(row, legend)
     source = f"{row.get('source', sid)} (platform computation)"
-    layer = stacks.layer_for(sid, year)
-    layer_to = stacks.layer_for(sid, year_to) if year_to else None
-    # A registered year whose file is not on this server declines in words, not a traceback:
-    # a second host gets the code and the catalog before (or without) the 14 GB of maps.
-    inst = stacks.installed(sid)
-    absent = [y for y in (year, year_to) if y and not inst.get(y, False)]
-    if absent:
-        raise ValueError(f"{row.get('title', sid)}: the map for {', '.join(str(y) for y in absent)} "
-                         f"is not installed on this server ({sum(inst.values())} of {len(inst)} "
-                         f"declared years are)")
     hits, unknown = _match_classes(wanted, legend)
+    # A one-class map (mangrove, with everything else outside it) shows each year's
+    # area; it cannot show loss or gain, and its own values hold one number.
+    one_class = len(legend) < 2
+    accuracy = {y: declared_accuracy(ly, row) for y, ly in ((year, layer), (year_to, layer_to)) if ly}
+    countries = _area_countries(aoi, row)
 
-    clip, level = _clip(aoi, layer, trace)
-    st = stacks.class_areas(clip, boundary, legend, outside)
-    trace.append(f"class_areas[{layer}] {st['pixels_classified']} px classified")
-    if st["pixels_classified"] == 0:
-        ext = row.get("extent") or {}
-        raise ValueError(
-            f"{name} falls inside the bounding box of {row.get('title', sid)} (lon {ext.get('lon')}, "
-            f"lat {ext.get('lat')}) but every one of its {st['pixels_inside']:,} pixels is outside "
-            "the mapped footprint — this product does not cover it, so no class area exists to report")
-
-    citations, gaps = [], _standing_gaps(row, st["pixel_size_deg"])
+    citations, gaps = [], _standing_gaps(row, st["pixel_size_deg"], accuracy)
     gaps.append(_boundary_gap(how))
     if other_stacks:
         gaps.append(f"{len(other_stacks)} other registered land-cover stack(s) also cover "
                     f"{name}: " + "; ".join(f"{r.get('title', s)} ({s})" for s, r in other_stacks)
-                    + f". This answer reads {row.get('title', sid)} ({sid}); pass stack=<id> "
-                    "to read another.")
+                    + f". This answer reads {row.get('title', sid)} ({sid})"
+                    + (f", {why}" if why != "named by the caller" else "")
+                    + "; pass stack=<id> to read another.")
     n = 1
     citations.append(_class_area_citation(n, name, year, row, st, level, source))
     legend_entries = {str(k): {"label": v, "color": colors[k]} for k, v in legend.items()}
@@ -563,49 +754,57 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
                 "by_class": {d["label"]: round(d["km2"], 1) for d in st["by_class"].values()}},
                outside)
     change_stats = None
-    detail = []
+    detail, st_to, ch, level_to = [], None, None, None
     if layer_to:
         clip_to, level_to = _clip(aoi, layer_to, trace)
         st_to = stacks.class_areas(clip_to, boundary, legend, outside)
-        detail = hits or _default_detail_from_areas(st, st_to, legend)
-        focus_cls = detail[0] if detail else None
-        change_path = None
-        if focus_cls is not None:
-            change_path = os.path.join(os.path.dirname(aoi["admin"]),
-                                       f"landcover_change_{focus_cls}_{year}_{year_to}.tif")
-        ch = stacks.change(clip, clip_to, boundary, legend, outside,
-                           focus_class=focus_cls, out_path=change_path)
-        trace.append(f"change[{layer}->{layer_to}] {ch['pixels_common']} px common")
-        n += 1
-        citations.append(_class_area_citation(n, name, year_to, row, st_to, level_to, source))
-        n += 1
-        citations.append(_change_citation(n, name, year, year_to, ch, source))
-        for cls in detail:
+        if one_class:
             n += 1
-            citations.append(_transition_citation(n, name, year, year_to, cls,
-                                                  ch["by_class"][cls], source))
-        change_stats = {"km2_common": ch["km2_common"], "km2_changed": ch["km2_changed"],
-                        "km2_one_year_only": ch["km2_one_year_only"],
-                        "by_class": {d["label"]: {"km2_from": d["km2_a"], "km2_to": d["km2_b"],
-                                                  "loss_km2": d["loss_km2"], "gain_km2": d["gain_km2"]}
-                                     for d in ch["by_class"].values()}}
-        if change_path and os.path.exists(change_path):
-            fl = legend[focus_cls]
-            fd = ch["by_class"][focus_cls]
-            viz = _viz(aoi, name, f"landcover_change_{focus_cls}_{year}_{year_to}", change_path,
-                       {"1": {"label": f"stable {fl.lower()}", "color": CHANGE_COLORS[1]},
-                        "2": {"label": f"{fl.lower()} loss", "color": CHANGE_COLORS[2]},
-                        "3": {"label": f"{fl.lower()} gain", "color": CHANGE_COLORS[3]}},
-                       f"{fl} change {year} -> {year_to} ({row.get('title', sid)})",
-                       f"Pixels mapped {fl} in both years, in {year} only (loss) or in {year_to} only "
-                       f"(gain), on the common classified mask; {_res_phrase(level, st['pixel_size_deg'])}; "
-                       "rendered from the receipt's recorded evidence pack",
-                       {"value": round(fd["km2_b"] - fd["km2_a"], 1), "unit": "km2",
-                        "label": f"net {fl.lower()} change", "total": round(ch["km2_common"], 1),
-                        "loss_km2": round(fd["loss_km2"], 1), "gain_km2": round(fd["gain_km2"], 1)},
-                       [15])
-        # A time series for the classes the caller named, when the span allows one.
-        if hits and year_to - year >= 2:
+            citations.append(_class_area_citation(n, name, year_to, row, st_to, level_to, source))
+            gaps.append(_one_class_gap(row, sid, legend))
+            trace.append(f"change[{layer}->{layer_to}] not computed: one-class map")
+        else:
+            detail = hits or _default_detail_from_areas(st, st_to, legend)
+            focus_cls = detail[0] if detail else None
+            change_path = None
+            if focus_cls is not None:
+                change_path = os.path.join(os.path.dirname(aoi["admin"]),
+                                           f"landcover_change_{focus_cls}_{year}_{year_to}.tif")
+            ch = stacks.change(clip, clip_to, boundary, legend, outside,
+                               focus_class=focus_cls, out_path=change_path)
+            trace.append(f"change[{layer}->{layer_to}] {ch['pixels_common']} px common")
+            n += 1
+            citations.append(_class_area_citation(n, name, year_to, row, st_to, level_to, source))
+            n += 1
+            citations.append(_change_citation(n, name, year, year_to, ch, source))
+            for cls in detail:
+                n += 1
+                citations.append(_transition_citation(n, name, year, year_to, cls,
+                                                      ch["by_class"][cls], source))
+            change_stats = {"km2_common": ch["km2_common"], "km2_changed": ch["km2_changed"],
+                            "km2_one_year_only": ch["km2_one_year_only"],
+                            "by_class": {d["label"]: {"km2_from": d["km2_a"], "km2_to": d["km2_b"],
+                                                      "loss_km2": d["loss_km2"], "gain_km2": d["gain_km2"]}
+                                         for d in ch["by_class"].values()}}
+            if change_path and os.path.exists(change_path):
+                fl = legend[focus_cls]
+                fd = ch["by_class"][focus_cls]
+                viz = _viz(aoi, name, f"landcover_change_{focus_cls}_{year}_{year_to}", change_path,
+                           {"1": {"label": f"stable {fl.lower()}", "color": CHANGE_COLORS[1]},
+                            "2": {"label": f"{fl.lower()} loss", "color": CHANGE_COLORS[2]},
+                            "3": {"label": f"{fl.lower()} gain", "color": CHANGE_COLORS[3]}},
+                           f"{fl} change {year} -> {year_to} ({row.get('title', sid)})",
+                           f"Pixels mapped {fl} in both years, in {year} only (loss) or in {year_to} only "
+                           f"(gain), on the common classified mask; {_res_phrase(level, st['pixel_size_deg'])}; "
+                           "rendered from the receipt's recorded evidence pack",
+                           {"value": round(fd["km2_b"] - fd["km2_a"], 1), "unit": "km2",
+                            "label": f"net {fl.lower()} change", "total": round(ch["km2_common"], 1),
+                            "loss_km2": round(fd["loss_km2"], 1), "gain_km2": round(fd["gain_km2"], 1)},
+                           [15])
+        # A time series for the classes the caller named, when the span allows one — and
+        # for the class of a one-class map, whose areas are the only comparison it has.
+        series_cls = hits or (list(legend) if one_class else [])
+        if series_cls and (year_to - year >= 2 or one_class):
             years_in = [y for y in stacks.years(row) if year <= y <= year_to and inst.get(y, False)]
             skipped = [y for y in stacks.years(row) if year <= y <= year_to and not inst.get(y, False)]
             if skipped:
@@ -618,12 +817,12 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
                 c_y, _ = _clip(aoi, ly, trace)
                 per_year[y] = stacks.class_areas(c_y, boundary, legend, outside)
             missing = sorted(int(y) for y in (row.get("missing_years") or {}))
-            for cls in hits:
+            for cls in series_cls:
                 pts = [(y, per_year[y]["by_class"][cls]["km2"]) for y in years_in]
                 n += 1
                 citations.append(_series_citation(n, name, cls, legend[cls], pts, missing,
                                                   level, st["pixel_size_deg"], source))
-            trace.append(f"series[{','.join(legend[c] for c in hits)}] {len(years_in)} years")
+            trace.append(f"series[{','.join(legend[c] for c in series_cls)}] {len(years_in)} years")
 
     # Fire detections registered on this stack, when the derived file has been built.
     fire_stats = None
@@ -647,30 +846,46 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
     # What the library holds about this question: a method paper, the national map's
     # memo, a guideline — cited so a brief can lean on more than pixel counts.
     labels = [legend[c] for c in (detail or hits or [])] or list(legend.values())
-    corpus, doc_hits = _library_hits(name, focus, labels, trace, gaps)
+    corpus, doc_hits = _library_hits(name, focus, labels, trace, gaps, countries=countries)
     for h in doc_hits:
         n += 1
         citations.append(_document_citation(n, h, corpus))
     if doc_hits:
         trace.append(f"documents[{len(doc_hits)}] cited")
 
-    # Contributed tables bound to this pack: a FACTOR table (class, factor) is
-    # applied to the areas, losses and gains above; any other is cited as context.
-    factor_stats = {}
+    # Contributed tables and feeds bound to this pack, each read only where it speaks: a
+    # FACTOR table (class, factor) is applied to the areas, losses and gains above; any
+    # other is cited by its rows about this area. A source that is simply about
+    # somewhere else is left to the trace — a mangrove table has nothing to say to a
+    # Himalayan valley, and saying so in every answer there is noise, not honesty.
+    factor_stats, unplaced, factor_tables = {}, [], 0
     _gaps_before_tables = len(gaps)
-    for ds, spec, res in _bound_tables(aoi.get("country"), gaps, trace):
-        cols = (spec.get("fetch") or {}).get("columns") or {}
-        if "class" in cols and "factor" in cols:
+    for ds, spec, res, miss in _bound_tables(countries, boundary, gaps, trace):
+        if _is_factor_table(spec):
+            factor_tables += 1
+            if miss:
+                if _names_legend_class(res, legend):
+                    gaps.append(f"{spec.get('title') or ds} ({ds}) is scoped to {miss[0]}; not "
+                                f"applied here — {miss[1]}. Available through feeds_query.")
+                continue
             cit, fstats = _factor_citation(n + 1, ds, spec, res, name, year, year_to, legend,
-                                           st, st_to if layer_to else None, ch if layer_to else None,
-                                           gaps, trace)
+                                           st, st_to, ch, gaps, trace)
             if cit:
                 n += 1
                 citations.append(cit)
                 factor_stats[ds] = fstats
         else:
-            n += 1
-            citations.append(_context_table_citation(n, ds, spec, res))
+            cit, note, placeable = _context_citation(n + 1, ds, spec, res, name, countries, boundary)
+            trace.append(f"table[{ds}] " + (note if cit else f"not cited: {note}"))
+            if cit:
+                n += 1
+                citations.append(cit)
+            elif not placeable:
+                unplaced.append(f"{spec.get('title') or ds} ({ds})")
+    if unplaced:
+        gaps.append(f"{len(unplaced)} table(s) or feed(s) bound to this pack were not cited: "
+                    + "; ".join(unplaced) + " — they have no coordinate or country column and declare "
+                    "no country, so no row can be placed in an area. Available through feeds_query.")
 
     if factor_stats:
         gaps.insert(_gaps_before_tables, (
@@ -681,15 +896,18 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
     else:
         gaps.insert(_gaps_before_tables, (
             "no degradation, canopy, biomass, carbon, NDVI or building figures: this pack counts "
-            "classes, it does not model inside them; a contributed factor table (class, factor per "
-            "hectare) bound to this pack would turn class areas into stocks"))
+            "classes, it does not model inside them; "
+            + (f"none of the {factor_tables} factor table(s) bound to it applies to this map's "
+               "classes here" if factor_tables else
+               "a contributed factor table (class, factor per hectare) bound to this pack would "
+               "turn class areas into stocks")))
 
     for yr, ly, cl, lv in ((year, layer, clip, level),
                            *(((year_to, layer_to, aoi[layer_to], level_to),) if layer_to else ())):
         n += 1
         citations.append(_passport_citation(n, sid, row, ly, yr, cl, lv, legend, gaps))
     n += 1
-    citations.append(_method_citation(n, outside, bool(layer_to), level, how))
+    citations.append(_method_citation(n, outside, bool(layer_to), level, how, one_class=one_class))
 
     if unknown:
         gaps.append(f"classes not in this stack's legend and not detailed: {', '.join(unknown)} "
@@ -704,6 +922,12 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
     if missing_years:
         gaps.append("years with no map: " + "; ".join(f"{y} ({r})" for y, r in missing_years.items()))
 
+    if one_class:
+        # Its values are the class area already counted — one value where the class is,
+        # none elsewhere — so they are not read again as a layer.
+        trace.append("layer defaults: none — a one-class map's values are its class area")
+    end_year, end_layer, end_clip, end_level = ((year_to, layer_to, aoi[layer_to], level_to)
+                                                if layer_to else (year, layer, clip, level))
     stats = {"queries": [t for t in trace if t.startswith("retrieve ")] or None,
              "aoi": {"requested": place, "name": name, "area_km2": aoi.get("area_km2"),
                      "how": how, "is_admin_boundary": how.startswith("admin boundary")},
@@ -718,16 +942,37 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
              # for the assemble seam's layer-values step: the area this pack read and
              # the map(s) its class areas are counted from
              "_area": ingest.area_of(aoi),
-             "_layer_defaults": [
+             "_layer_defaults": [] if one_class else [
                  {"layer": ly, "why": f"the {y} map these class areas are counted from"}
-                 for y, ly in ((year, layer), (year_to, layer_to)) if ly]}
+                 for y, ly in ((year, layer), (year_to, layer_to)) if ly],
+             # for the layer step's cross-tabulation (a measure layer's values by class):
+             # the end year's class map as counted here. Reserved: the step pops it.
+             "_class_grid": {"path": end_clip, "legend": dict(legend),
+                             "outside_values": list(outside), "year": str(end_year),
+                             "stack": sid, "label": row.get("title", sid),
+                             "layer": end_layer, "overview_level": end_level}}
     return citations, gaps, stats
 
 
-def _library_hits(name, focus, labels, trace, gaps, k=3):
+def _area_countries(aoi, row=None):
+    """The countries this area is in: the one its boundary resolved to, else the ones
+    the stack read here declares (a drawn polygon carries none of its own)."""
+    if aoi.get("country"):
+        return [str(aoi["country"])]
+    return [str(c) for c in ((row or {}).get("countries") or []) if str(c).strip()]
+
+
+def _speaks_to(declared, countries) -> bool:
+    from ..graph.geo import vectors as _vectors
+    return any(_vectors.country_matches(declared, c) for c in countries)
+
+
+def _library_hits(name, focus, labels, trace, gaps, k=3, countries=()):
     """Documents in this pack's library that speak to the question: a method paper,
     a national map's technical memo, a guideline. Mirrors the risk pack: an empty or
-    unreadable library is a declared gap, never a failure. Returns (corpus, hits)."""
+    unreadable library is a declared gap, never a failure. A document that declares
+    its countries is cited only for an area in one of them — a Gulf of Nicoya report
+    was being cited in Gulf of Guayaquil answers. Returns (corpus, hits)."""
     from ..llm import MissingAPIKey
     from ..rag.store import Corpus, CorpusError
     try:
@@ -747,36 +992,79 @@ def _library_hits(name, focus, labels, trace, gaps, k=3):
         return corpus, []
     queries = [f"{focus} {name}".strip(),
                f"{' '.join(labels[:3])} map method classes accuracy {name}".strip()]
-    hits, seen = [], set()
+    hits, seen, elsewhere = [], set(), {}
     for q in queries:
         try:
-            got = corpus.search(q, k=k)
+            # The area's own countries first, so its documents are not crowded out by a
+            # better-scored library about somewhere else; then the rest, filtered below.
+            got = (corpus.search(q, k=k, countries=list(countries)) if countries else []) \
+                + corpus.search(q, k=3 * k)
         except (CorpusError, MissingAPIKey) as exc:
             gaps.append(f"document retrieval failed ({exc})")
             return corpus, hits
         trace.append(f"retrieve {q!r} -> {len(got)} hits")
-        for h in got:
-            if _looks_like_references(h.get("text") or ""):
-                trace.append(f"retrieve: skipped a reference-list passage of {((h.get('metadata') or {}).get('title') or 'a document')[:50]}")
+        kept = []
+        for h in sorted(got, key=lambda h: -(h.get("score") or 0)):
+            m = h.get("metadata") or {}
+            if h.get("id") in seen:
                 continue
-            if h.get("id") not in seen:
-                seen.add(h.get("id"))
-                hits.append(h)
-    if not hits:
+            seen.add(h.get("id"))
+            if _looks_like_references(h.get("text") or ""):
+                trace.append(f"retrieve: skipped a reference-list passage of {(m.get('title') or 'a document')[:50]}")
+                continue
+            declared = [str(c) for c in (m.get("countries") or []) if str(c).strip()]
+            if declared and countries and not _speaks_to(declared, countries):
+                elsewhere.setdefault(", ".join(declared), set()).add(str(m.get("title") or h.get("doc_id")))
+                continue
+            kept.append(h)
+        hits.extend(kept[:k])
+    if elsewhere:
+        trace.append(f"retrieve: skipped documents about other countries: {sorted(elsewhere)}")
+    if not hits and elsewhere:
+        gaps.append(f"the land-cover library holds no document about {name} ({', '.join(countries)}) "
+                    "above the relevance floor; its closest matches are about other countries and are "
+                    "not cited — " + "; ".join(f"{where}: {', '.join(sorted(t)[:3])}"
+                                               for where, t in elsewhere.items()))
+    elif not hits:
         gaps.append(f"the land-cover library holds {n_docs} document(s), none relevant to "
                     f"{name} above the relevance floor — a decline, not a weak match")
     return corpus, hits[:2 * k]
 
 
+# A reference list, a bibliography or a table of contents matches many queries and
+# says nothing about the place. Headings in the languages hubs publish in.
+_REF_HEADING = re.compile(
+    r"^\W*(?:\d+(?:\.\d+)*\.?\s*)?(?:references?|bibliography|literature cited|works cited|"
+    r"bibliograf[ií]a(?:\s+(?:citada|consultada))?|literatura\s+(?:citada|consultada)|"
+    r"referencias(?:\s+bibliogr[aá]ficas)?|refer[eê]ncias(?:\s+bibliogr[aá]ficas)?|bibliographie|"
+    r"r[ée]f[ée]rences(?:\s+bibliographiques)?|(?:table\s+of\s+)?contents|"
+    r"[ií]ndice(?:\s+general)?|contenidos?|tabla\s+de\s+contenidos?|sum[aá]rio)\W*$", re.I | re.M)
+# "Surname, A." / "Surname, A. B." — a surname and initials, in any Latin script.
+_AUTHOR = re.compile(r"\b[A-ZÁÉÍÓÚÑÜÇ][a-záéíóúñüçãõ'’\-]+,\s(?:[A-ZÁÉÍÓÚÑ]\.\s?-?){1,3}")
+_IMPRINT = re.compile(r"(?:^|\s)(?:In|En|Em|Dans):\s|\b[A-Z][a-zé]+(?:,\s?[A-Z]{2,})?:\s+[A-Z][\w&.\-]*")
+_PAGES = re.compile(r"\b\d+\s?(?:p|pp|págs?|pages?)\.(?=\s|$)|\bpp?\.\s?\d+", re.I)
+_LEADER = re.compile(r"(?:\.\s?){4,}\s*\d{1,4}\b|…\s*\d{1,4}\b")
+
+
 def _looks_like_references(text: str) -> bool:
     """A bibliography page matches many queries and says nothing about the place:
-    many author-year citations, few sentences of its own."""
-    import re as _re
-    years = len(_re.findall(r"\b(?:19|20)\d\d[a-z]?\b", text))
+    many author-year citations, few sentences of its own — in any language
+    ('Bibliografía', 'Literatura citada', 'Referencias'), and the fragments a
+    reference list is cut into ('In: Paris: Food and Agriculture Organization'). A
+    contents page is the same kind of noise: dotted leaders to page numbers."""
+    years = len(re.findall(r"\b(?:19|20)\d\d[a-z]?\b", text))
     etal = text.lower().count("et al")
     dois = text.lower().count("doi")
     words = max(1, len(text.split()))
-    return (years >= 12 and years / words > 0.04) or etal >= 6 or dois >= 4
+    authors = len(_AUTHOR.findall(text))
+    imprint = len(_IMPRINT.findall(text))
+    pages = len(_PAGES.findall(text))
+    leaders = len(_LEADER.findall(text))
+    return ((years >= 12 and years / words > 0.04) or etal >= 6 or dois >= 4
+            or (authors >= 4 and authors / words > 0.02)
+            or leaders >= 3
+            or (bool(_REF_HEADING.search(text)) and authors + years + leaders + pages >= 3)
+            or (words < 40 and imprint > 0 and (years + pages + authors + imprint) >= 2))
 
 
 def _document_citation(n, h, corpus):
@@ -786,6 +1074,7 @@ def _document_citation(n, h, corpus):
             "pub_date": m.get("pub_date"), "validation": m.get("validation"),
             "temporal": m.get("temporal"), "url": m.get("url"), "score": h.get("score"),
             "doc_id": h.get("doc_id"), "chunk_id": h.get("id"),
+            **({"countries": m["countries"]} if m.get("countries") else {}),
             **({"review_status": m["review"]} if m.get("review") else {}),
             "archived_copy": (f"/api/rag/{PACK_ID}/document/{h.get('doc_id')}"
                               if corpus and h.get("doc_id") and corpus.raw_path(h["doc_id"]) else None),
@@ -795,12 +1084,45 @@ def _document_citation(n, h, corpus):
             "text": h.get("text")}
 
 
-def _bound_tables(country, gaps, trace):
-    """Every contributed table (and staged one the caller may see) bound to this
-    pack, with its rows — the same rule the risk pack applies: a source that
-    declares its countries is read only where it speaks."""
+def _scope_miss(spec, countries, boundary):
+    """None when a table or feed may be read for this area, else (where it is scoped,
+    why this area is not in it). One that declares countries or a bbox [w, s, e, n]
+    is read only for an area in one of those countries and inside that box; one that
+    declares neither is global."""
+    declared = [str(c) for c in (spec.get("countries") or []) if str(c).strip()]
+    bbox = spec.get("bbox")
+    bbox = [float(v) for v in bbox] if isinstance(bbox, (list, tuple)) and len(bbox) == 4 else None
+    if not declared and not bbox:
+        return None
+    where = ", ".join(declared) + (" " if declared and bbox else "") \
+        + (f"({_box_phrase(bbox)})" if bbox else "")
+    if bbox:
+        minx, miny, maxx, maxy = boundary.bounds
+        if bbox[2] < minx or bbox[0] > maxx or bbox[3] < miny or bbox[1] > maxy:
+            return where, "this area lies outside that box"
+    if declared:
+        if countries and not _speaks_to(declared, countries):
+            return where, f"this area is in {', '.join(countries)}"
+        if not countries and not bbox:
+            return where, "this area's country could not be determined"
+    return None
+
+
+TABLE_ROWS = 100_000      # rows read per bound table or feed; more is said, never hidden
+
+
+def _is_factor_table(spec) -> bool:
+    return {"class", "factor"} <= set((spec.get("fetch") or {}).get("columns") or {})
+
+
+def _bound_tables(countries, boundary, gaps, trace):
+    """Every contributed table and feed (and staged one the caller may see) bound to
+    this pack, with its rows and, for one scoped elsewhere, (where, why) — the rule
+    every pack applies: a source that declares its countries or its box is read only
+    where it speaks. A Gulf of Nicoya soil-carbon factor was being multiplied into
+    Ecuador and Brazil. A factor table scoped elsewhere is still read, so the caller
+    can say so where its classes are this legend's."""
     from ..contrib import staging
-    from ..graph.geo import vectors as _vectors
     from ..mcp import feeds, registry
     rows = {k: v for k, v in registry.FEEDS.items()
             if v.get("pack") == PACK_ID and v.get("status") == "available"}
@@ -812,25 +1134,68 @@ def _bound_tables(country, gaps, trace):
     out = []
     for ds in sorted(rows):
         spec = rows[ds]
-        if not _vectors.country_matches(spec.get("countries"), country):
-            trace.append(f"table[{ds}] declares other countries — not read")
-            gaps.append(f"{spec.get('title') or ds} ({ds}) was not read: it declares "
-                        f"{', '.join(str(c) for c in spec.get('countries') or [])} and this area is in "
-                        f"{country}. Available through feeds_query.")
-            continue
-        res = feeds.query(ds, {"limit": 10_000})
+        miss = _scope_miss(spec, countries, boundary)
+        if miss:
+            trace.append(f"table[{ds}] scoped to {miss[0]}; not read here: {miss[1]}")
+            if not _is_factor_table(spec):
+                continue
+        res = feeds.query(ds, {"limit": TABLE_ROWS})
         if res.get("status") != "ok":
-            gaps.append(f"table {ds} bound to this pack did not answer: {res.get('note', 'no reason given')}")
+            if not miss:
+                gaps.append(f"table {ds} bound to this pack did not answer: {res.get('note', 'no reason given')}")
             continue
-        trace.append(f"table[{ds}] {res.get('count')} rows")
-        out.append((ds, spec, res))
+        if not miss:
+            trace.append(f"table[{ds}] {len(res.get('records') or [])} rows read")
+        out.append((ds, spec, res, miss))
     return out
+
+
+def _names_legend_class(res, legend) -> bool:
+    """Does a factor table name a class of this legend, or one plausibly the same
+    (a shared word: 'Mangrove' and 'Mangrove forest')?"""
+    labels = [_words(v) for v in legend.values()]
+    folded = {_fold(v) for v in legend.values()}
+    for rec in res.get("records") or []:
+        for a in str(rec.get("class") or "").split("|"):
+            if _fold(a) in folded or any(_words(a) & w for w in labels):
+                return True
+    return False
 
 
 def _norm_label(text) -> str:
     import unicodedata
     t = unicodedata.normalize("NFKD", str(text or ""))
     return " ".join("".join(ch for ch in t if not unicodedata.combining(ch)).casefold().split())
+
+
+def _singular(w: str) -> str:
+    if len(w) > 4 and w.endswith("ies"):
+        return w[:-3] + "y"
+    if len(w) > 4 and w.endswith(("ches", "shes", "sses", "xes", "zes")):
+        return w[:-2]
+    if len(w) > 3 and w.endswith("s") and not w.endswith(("ss", "us", "is")):
+        return w[:-1]
+    return w
+
+
+def _fold(text) -> str:
+    """One class name however it is written: case, accents, punctuation and simple
+    plurals folded ('Mangroves' is 'mangrove'). Whole names only — 'Non-mangrove'
+    stays 'non mangrove', never 'mangrove'."""
+    return " ".join(_singular(w) for w in re.sub(r"[^0-9a-z]+", " ", _norm_label(text)).split())
+
+
+_GENERIC_WORDS = {"and", "or", "of", "the", "de", "del", "la", "el", "y", "e", "non", "not", "no",
+                  "other", "others", "area", "cover", "land", "class", "with", "without"}
+
+
+def _words(text) -> set:
+    """The words that make a class name what it is — none for a negated one ('Non-
+    mangrove' is never plausibly 'Mangrove')."""
+    words = _fold(text).split()
+    if words and words[0] in ("non", "not", "no", "sin", "without"):
+        return set()
+    return {w for w in words if w not in _GENERIC_WORDS and not w.isdigit()}
 
 
 def _num(v):
@@ -845,70 +1210,114 @@ def _fmt_t(v: float) -> str:
     return f"{v:,.0f}" if abs(v) >= 100 else f"{v:,.1f}"
 
 
+_ALT_COLUMNS = ("climate", "region", "zone", "scope", "ecoregion", "basis")
+
+
+def _distinguishing(recs):
+    """The column that tells rows of the same class and pool apart, preferring the
+    ones that name where a factor applies ('climate', 'region', 'scope', 'basis')."""
+    keys = [k for k in recs[0] if k not in ("class", "factor", "low", "high", "unit", "pool")]
+    differ = [k for k in keys if len({str(r.get(k) or "").strip() for r in recs}) > 1]
+    return next((k for k in _ALT_COLUMNS if k in differ), differ[0] if differ else None)
+
+
 def _factor_citation(n, ds, spec, res, name, year, year_to, legend, st, st_to, ch, gaps, trace):
     """One citation applying a factor table to the class areas the pack counted —
     every product stated in the text, the arithmetic visible, the caveat in the
-    same sentence. Returns (citation or None, stats)."""
+    same sentence. A row's class may list aliases ('Mangrove|Mangroves|Mangrove
+    forest|Manglar'), matched as whole names. Rows of the same class and pool are
+    ALTERNATIVES (tropical wet vs dry), stated side by side, never as one answer.
+    Returns (citation or None, stats)."""
     cols = (spec.get("fetch") or {}).get("columns") or {}
     if "class" not in cols or "factor" not in cols:
         return None, None
-    by_label = {_norm_label(v): k for k, v in legend.items()}
+    by_label = {}
+    for k, v in legend.items():
+        by_label.setdefault(_fold(v), []).append(k)
     matched, unmatched = [], []
     for rec in res.get("records") or []:
-        key = by_label.get(_norm_label(rec.get("class")))
         f = _num(rec.get("factor"))
-        if key is None or f is None:
-            unmatched.append(str(rec.get("class")))
+        aliases = [a.strip() for a in str(rec.get("class") or "").split("|") if a.strip()]
+        keys = sorted({k for a in aliases for k in by_label.get(_fold(a), [])})
+        if not keys or f is None:
+            unmatched.append(aliases[0] if aliases else str(rec.get("class")))
             continue
-        matched.append((key, f, rec))
+        matched.extend((k, f, rec) for k in keys)
     if not matched:
-        gaps.append(f"{spec.get('title') or ds} ({ds}) names classes "
-                    f"{', '.join(sorted(set(unmatched))[:6]) or 'none'}; none is in this stack's legend "
-                    f"({', '.join(legend.values())}) — the table was not applied")
+        # Only a legend that plausibly names the same thing earns the gap; a table of
+        # mangrove factors says nothing to a Himalayan legend of snow and rock.
+        near = sorted({lab for lab in legend.values()
+                       if any(_words(lab) & _words(u) for u in set(unmatched))})
+        if near:
+            gaps.append(f"{spec.get('title') or ds} ({ds}) names classes "
+                        f"{', '.join(sorted(set(unmatched))[:6]) or 'none'}; none is a class of this "
+                        f"stack's legend, though {', '.join(near[:4])} may be the same thing — the table "
+                        "was not applied. A factor row's class may list aliases separated by '|' "
+                        f"(for example '{sorted(set(unmatched))[0]}|{near[0]}')")
+        trace.append(f"factors[{ds}] no class of this legend")
         return None, None
     units = (spec.get("fetch") or {}).get("units") or "per hectare"
-    parts, stats = [], {}
+    groups = {}
     for cls, f, rec in matched:
+        groups.setdefault((cls, str(rec.get("pool") or "").strip()), []).append((f, rec))
+    parts, stats = [], {}
+    for (cls, pool), rows in groups.items():
         label = legend[cls]
-        unit = str(rec.get("unit") or units)
-        pool = str(rec.get("pool") or "").strip()
-        basis = str(rec.get("basis") or "").strip()
-        ha = float(st["by_class"][cls]["ha"])
-        value = ha * f
-        line = (f"{label} {year}: {ha:,.1f} ha × {f:g} {unit}"
-                + (f" ({pool}" + (f"; {basis}" if basis else "") + ")" if pool or basis else "")
-                + f" = {_fmt_t(value)} {unit.split('/')[0].strip() or 'units'}")
-        entry = {"class": label, "ha": round(ha, 1), "factor": f, "unit": unit,
-                 **({"pool": pool} if pool else {}), **({"basis": basis} if basis else {}),
-                 "value": round(value, 1)}
-        lo, hi = _num(rec.get("low")), _num(rec.get("high"))
-        if lo is not None and hi is not None:
-            line += (f" (with the table's low-high range for this factor, {lo:g}-{hi:g}: "
-                     f"{_fmt_t(ha * lo)} to {_fmt_t(ha * hi)})")
-            entry["value_low"], entry["value_high"] = round(ha * lo, 1), round(ha * hi, 1)
-        if ch is not None and year_to:
-            cd = ch["by_class"][cls]
-            loss_ha, gain_ha = cd["loss_km2"] * 100.0, cd["gain_km2"] * 100.0
-            ha_to = float(st_to["by_class"][cls]["ha"]) if st_to else None
-            line += (f"; {year_to}: {ha_to:,.1f} ha × {f:g} = {_fmt_t(ha_to * f)}" if ha_to is not None else "")
-            line += (f"; {year}->{year_to} loss {loss_ha:,.1f} ha × {f:g} = {_fmt_t(loss_ha * f)} in lost extent, "
-                     f"gain {gain_ha:,.1f} ha × {f:g} = {_fmt_t(gain_ha * f)} in gained extent, "
-                     f"net {_fmt_t((gain_ha - loss_ha) * f)}")
-            entry.update({"loss_ha": round(loss_ha, 1), "gain_ha": round(gain_ha, 1),
-                          "value_lost": round(loss_ha * f, 1), "value_gained": round(gain_ha * f, 1),
-                          **({"ha_to": round(ha_to, 1), "value_to": round(ha_to * f, 1)} if ha_to is not None else {})})
-        parts.append(line)
-        stats.setdefault(label, []).append(entry)
+        by = _distinguishing([r for _, r in rows]) if len(rows) > 1 else None
+        lines = []
+        for f, rec in rows:
+            unit = str(rec.get("unit") or units)
+            basis = str(rec.get("basis") or "").strip()
+            alt = str(rec.get(by) or "").strip() if by else ""
+            ha = float(st["by_class"][cls]["ha"])
+            value = ha * f
+            note = [p for p in ((pool if not by else ""), (basis if by != "basis" else "")) if p]
+            line = ((f"[{by}: {alt}] " if by else "")
+                    + f"{label} {year}: {ha:,.1f} ha × {f:g} {unit}"
+                    + (f" ({'; '.join(note)})" if note else "")
+                    + f" = {_fmt_t(value)} {unit.split('/')[0].strip() or 'units'}")
+            entry = {"class": label, "ha": round(ha, 1), "factor": f, "unit": unit,
+                     **({"pool": pool} if pool else {}), **({"basis": basis} if basis else {}),
+                     **({"alternatives_by": by, by: alt} if by else {}),
+                     "value": round(value, 1)}
+            lo, hi = _num(rec.get("low")), _num(rec.get("high"))
+            if lo is not None and hi is not None:
+                line += (f" (with the table's low-high range for this factor, {lo:g}-{hi:g}: "
+                         f"{_fmt_t(ha * lo)} to {_fmt_t(ha * hi)})")
+                entry["value_low"], entry["value_high"] = round(ha * lo, 1), round(ha * hi, 1)
+            if st_to is not None and year_to:
+                ha_to = float(st_to["by_class"][cls]["ha"])
+                line += f"; {year_to}: {ha_to:,.1f} ha × {f:g} = {_fmt_t(ha_to * f)}"
+                entry.update({"ha_to": round(ha_to, 1), "value_to": round(ha_to * f, 1)})
+            if ch is not None and year_to:
+                # Loss and gain exist only where change was computed — never on a
+                # one-class map, where both read as zero beside a falling series.
+                cd = ch["by_class"][cls]
+                loss_ha, gain_ha = cd["loss_km2"] * 100.0, cd["gain_km2"] * 100.0
+                line += (f"; {year}->{year_to} loss {loss_ha:,.1f} ha × {f:g} = {_fmt_t(loss_ha * f)} in lost extent, "
+                         f"gain {gain_ha:,.1f} ha × {f:g} = {_fmt_t(gain_ha * f)} in gained extent, "
+                         f"net {_fmt_t((gain_ha - loss_ha) * f)}")
+                entry.update({"loss_ha": round(loss_ha, 1), "gain_ha": round(gain_ha, 1),
+                              "value_lost": round(loss_ha * f, 1), "value_gained": round(gain_ha * f, 1)})
+            lines.append(line)
+            stats.setdefault(label, []).append(entry)
+        if by:
+            parts.append(f"{label} ({pool or 'the same pool'}) — the table gives one row per {by}; use "
+                         "the one that applies, never their sum: " + " | ".join(lines))
+        else:
+            parts.extend(lines)
     pools = sorted({p["pool"] for v in stats.values() for p in v if p.get("pool")})
+    skipped = sorted(set(unmatched))
     text = (f"Applying {spec.get('title') or ds} ({ds}; {spec.get('source') or 'source unstated'}, "
             f"vintage {spec.get('vintage') or 'unstated'}, validation {spec.get('validation') or 'unstated'}, "
             f"licence {spec.get('license') or 'unstated'}) to the class areas counted in {name}: "
             + "; ".join(parts) + ". "
             "Each figure is area × a per-hectare factor, not a measurement of this site: it holds only "
-            "where the mapped class and the factor's domain match, and a change figure is the stock "
-            "associated with lost or gained extent, not an emission estimate."
+            "where the mapped class and the factor's domain match"
+            + (", and a change figure is the stock associated with lost or gained extent, not an "
+               "emission estimate." if ch is not None and year_to else ".")
             + (f" Pools stated: {', '.join(pools)}." if pools else "")
-            + (f" {len(set(unmatched))} row(s) named classes not in this legend and were skipped." if unmatched else "")
+            + (f" {len(skipped)} row(s) named classes not in this legend and were skipped." if skipped else "")
             + (f" Contributor's note: {spec['usage_notes']}" if spec.get("usage_notes") else "")
             + (f" Review: {spec['review']}." if spec.get("review") else ""))
     cit = {"n": n, "kind": "class_factor", "retrieval": "computed-at-pack-time",
@@ -928,24 +1337,117 @@ def _factor_citation(n, ds, spec, res, name, year, year_to, legend, st, st_to, c
     return cit, stats
 
 
-def _context_table_citation(n, ds, spec, res):
+_LAT_KEYS = ("lat", "latitude", "decimallatitude")
+_LON_KEYS = ("lon", "lng", "long", "longitude", "decimallongitude")
+_COUNTRY_KEYS = ("country", "country_name", "countryname", "pais", "país", "nation")
+
+
+def _key_of(recs, names):
+    keys = {str(k).lower(): k for r in recs[:50] for k in r}
+    return next((keys[n] for n in names if n in keys), None)
+
+
+def _fmt_v(v: float) -> str:
+    if v == int(v) and abs(v) < 1e12:
+        return f"{int(v):,}" if abs(v) >= 10_000 else str(int(v))      # a year stays 2014
+    return f"{v:,.1f}" if abs(v) >= 10_000 else f"{v:.1f}" if abs(v) >= 100 else f"{v:.4g}"
+
+
+def _is_identifier(key) -> bool:
+    k = str(key).lower()
+    return k in ("id", "key", "code", "fid", "objectid") or k.endswith(("_id", "_key", "_code"))
+
+
+def _true_count(res) -> int:
+    """The source's own row count: the adapter's summary states it ("16,715 rows from
+    ..."); the records are only what was read."""
+    m = re.match(r"\s*([\d,]+)\s+(?:rows|records)\b", str(res.get("summary") or ""))
+    read = len(res.get("records") or [])
+    return max(read, int(m.group(1).replace(",", ""))) if m else read
+
+
+def _context_citation(n, ds, spec, res, name, countries, boundary):
+    """(citation, note, placeable) for the rows of a table or feed that are about this
+    area — by their coordinates, by a country column, or all of them when the source
+    declares this area's country — stated as a count and a summary per column; (None,
+    why, placeable) when no row is about it or none can be placed at all. It used to
+    quote the first three rows of whatever was bound, so a Gulf of Nicoya answer cited
+    a UK salt-marsh core."""
+    from shapely.geometry import Point
+    from shapely.prepared import prep
     recs = res.get("records") or []
-    sample = "; ".join(", ".join(f"{k}={v}" for k, v in r.items() if v not in (None, ""))
-                       for r in recs[:3])
-    text = (f"{spec.get('title') or ds} ({ds}; {spec.get('source') or 'source unstated'}, vintage "
-            f"{spec.get('vintage') or 'unstated'}, validation {spec.get('validation') or 'unstated'}): "
-            f"{res.get('count')} row(s) bound to this pack, first rows: {sample}."
+    total = _true_count(res)
+    lat_k, lon_k = _key_of(recs, _LAT_KEYS), _key_of(recs, _LON_KEYS)
+    cty_k = _key_of(recs, _COUNTRY_KEYS)
+    declared = [str(c) for c in (spec.get("countries") or []) if str(c).strip()]
+    if lat_k and lon_k:
+        inside_area = prep(boundary)
+        rows = [r for r in recs if _num(r.get(lat_k)) is not None and _num(r.get(lon_k)) is not None
+                and inside_area.intersects(Point(_num(r.get(lon_k)), _num(r.get(lat_k))))]
+        how, placed_by = f"their {lat_k}/{lon_k} fall inside the boundary", f"its {lat_k}/{lon_k}"
+    elif cty_k and countries:
+        rows = [r for r in recs if str(r.get(cty_k) or "").strip()
+                and _speaks_to([str(r[cty_k])], countries)]
+        how, placed_by = f"their {cty_k} is {', '.join(countries)}", f"its {cty_k} column"
+    elif declared and countries and _speaks_to(declared, countries):
+        rows = list(recs)
+        how, placed_by = f"the source declares {', '.join(declared)}, where this area is", "its countries"
+    else:
+        return None, "it has no coordinate or country column and declares no country", False
+    if not rows:
+        return None, f"none of its {total:,} row(s) is about {name} (placed by {placed_by})", True
+    # A summary per column: min/mean/max of a numeric one, the counts of a text one
+    # whose values repeat. Identifiers and one-off values (dates, names) say nothing.
+    nums, texts = [], []
+    for k in [k for k in rows[0] if k not in (lat_k, lon_k)]:
+        vals = [r.get(k) for r in rows if r.get(k) not in (None, "", "NA")]
+        fl = [_num(v) for v in vals]
+        if vals and all(v is not None for v in fl):
+            if _is_identifier(k):
+                continue
+            nums.append(f"{k} min {_fmt_v(min(fl))}, mean {_fmt_v(sum(fl) / len(fl))}, "
+                        f"max {_fmt_v(max(fl))}" + (f" ({len(fl):,} with a value)" if len(fl) < len(rows) else ""))
+        elif vals:
+            counts = {}
+            for v in vals:
+                counts[str(v)[:60]] = counts.get(str(v)[:60], 0) + 1
+            if len(counts) <= 8 and (len(counts) < len(vals) or len(vals) == 1) and len(texts) < 6:
+                texts.append(f"{k}: " + ", ".join(f"{v} ({c:,})" for v, c in
+                                                   sorted(counts.items(), key=lambda kv: -kv[1])))
+    is_feed = not (spec.get("fetch") or {}).get("path")      # a landed table names its copy
+    kind = "feed" if is_feed else "table"
+    read = len(recs)
+    text = (f"{spec.get('title') or ds} ({ds}; a {'live ' if is_feed else ''}{kind}, "
+            f"{spec.get('source') or 'source unstated'}, vintage {spec.get('vintage') or 'unstated'}, "
+            f"validation {spec.get('validation') or 'unstated'}): {len(rows):,} of its {total:,} row(s) "
+            f"are about {name} — {how}."
+            + (f" Only the last {read:,} of the {total:,} rows were read; the figures are over those."
+               if read < total else "")
+            + (" Over those rows: " + "; ".join(nums) + "." if nums else "")
+            + (" Values: " + "; ".join(texts) + "." if texts else "")
             + (f" Contributor's note: {spec['usage_notes']}" if spec.get("usage_notes") else "")
             + (f" Review: {spec['review']}." if spec.get("review") else ""))
-    cit = {"n": n, "kind": "table", "retrieval": "pulled-at-pack-time",
-           "source": spec.get("source") or "contributed table (source unstated)",
-           "title": spec.get("title") or ds, "pub_date": spec.get("vintage"),
-           "validation": f"contributed-table ({spec.get('validation') or 'unstated'})",
-           "dataset": ds, "text": text}
+    pp = res.get("passport") or {}
+    contributed = "contributed-" if spec.get("contributed") or spec.get("staged_by") else ""
+    cit = {"n": n, "kind": kind,
+           "retrieval": "pulled-at-pack-time" if is_feed else "computed-at-pack-time",
+           "source": spec.get("source") or f"contributed {kind} (source unstated)",
+           "title": spec.get("title") or ds,
+           "pub_date": (res.get("as_of") if is_feed else None) or spec.get("vintage"),
+           "validation": f"{contributed}{kind} ({spec.get('validation') or 'unstated'})",
+           "dataset": ds, "rows_about_area": len(rows), "rows_total": total, "text": text}
+    if is_feed and pp.get("url"):
+        cit["url"] = pp["url"]
+    if is_feed and pp.get("stale_data"):
+        cit["stale_data"] = pp["stale_data"]
+    if spec.get("usage_notes"):
+        cit["usage_notes"] = spec["usage_notes"]
+    if spec.get("review"):
+        cit["review_status"] = spec["review"]
     if spec.get("staged_by"):
         cit["staged_by"] = spec["staged_by"]
         cit["contribution_id"] = spec.get("contribution_id")
-    return cit
+    return cit, f"{len(rows)} of {total} rows about the area", True
 
 
 def _default_detail_from_areas(st_a, st_b, legend):
@@ -1005,7 +1507,10 @@ def manifest() -> dict:
         "sources": {"stacks": sources, "points": points, "corpus": corpus_state(PACK_ID)},
         "target": {"place": "district, province, park or country inside a stack's footprint "
                             f"(up to {AREA_CAP_KM2:,.0f} km²; or pass geometry and use place as its label)",
-                   "year": "a mapped year", "year_to": "optional later year, for change",
+                   "year": "a mapped year — may be left out when the call only measures vectors=[...] "
+                           "or layers=[...]; where no stack covers the area such a call answers for "
+                           "the area alone",
+                   "year_to": "optional later year, for change",
                    "classes": "optional class names to detail, e.g. [\"Forest\"] — with year_to, "
                               "also a per-year series"},
         "gaps": [

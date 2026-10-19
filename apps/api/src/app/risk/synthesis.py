@@ -312,6 +312,56 @@ def _series(sid: str, by_severity: dict, legend: dict, unit: str) -> dict | None
     return {"id": sid, "points": pts, "unit": unit, "categorical": True}
 
 
+def _outside_coverage(hz: str, aoi: dict, place: str) -> str | None:
+    """Why the risk pack cannot answer this area for `hz`, or None. Coverage is read
+    from the catalog (packs.risk_coverage): the hazard's own extent, else the extents
+    its sibling hazard maps declare — never a typed region. A Costa Rica question ran
+    two minutes and ended in the Drive downloader's own error for a Southeast Asia map."""
+    import json
+
+    from shapely.geometry import shape
+
+    from ..graph.geo import vectors as _vectors
+    from ..mcp import packs as _packs
+    if aoi.get(hz) or os.path.exists(os.path.join(os.path.dirname(aoi["admin"]), f"{hz}.tif")):
+        return None                        # already clipped here: the map reaches it
+    cov = _packs.risk_coverage()
+    mine = cov.get(hz) or {}
+    known = {k: c for k, c in cov.items() if c.get("bounds") or c.get("countries")}
+    ref = {hz: mine} if (mine.get("bounds") or mine.get("countries")) else known
+    boxes = [c["bounds"] for c in ref.values() if c.get("bounds")]
+    countries = sorted({x for c in ref.values() for x in c.get("countries") or []})
+    if not boxes and not countries:
+        return None                        # nothing declared: cannot rule it out
+    with open(aoi["admin"]) as f:
+        minx, miny, maxx, maxy = shape(json.load(f)["features"][0]["geometry"]).bounds
+    if any(b[2] >= minx and b[0] <= maxx and b[3] >= miny and b[1] <= maxy for b in boxes):
+        return None
+    country = aoi.get("country")
+    if countries and ((not country and not boxes)            # its country unknown: cannot tell
+                      or (country and _vectors.country_matches(countries, country))):
+        return None
+    name = aoi.get("name") or place or "this area"
+    spans = {}
+    for c in known.values():
+        if c.get("bounds"):
+            spans.setdefault(tuple(round(v, 2) for v in c["bounds"]), []).append(c["title"])
+    covers = "; ".join(f"lon {b[0]} to {b[2]}, lat {b[1]} to {b[3]} ({', '.join(t[:3])}"
+                       + (f" and {len(t) - 3} more" if len(t) > 3 else "") + ")"
+                       for b, t in spans.items())
+    if countries:
+        covers += ("; " if covers else "") + "the countries " + ", ".join(countries)
+    elsewhere = [pid for pid, sp in _packs.PACKS.items()
+                 if pid != "risk" and "place" in sp.get("target_keys", ())]
+    return (f"{name} lies outside the risk pack's coverage, so no exposure can be counted there "
+            f"and nothing was fetched: {mine.get('title') or hz} has no map there. The risk pack's "
+            f"hazard maps cover {covers or 'no declared area'}."
+            + (f" To measure contributed vectors or raster layers in {name}, use the "
+               f"{elsewhere[0]} pack: assemble_pack(pack='{elsewhere[0]}', place=... or geometry=..., "
+               "vectors=[...] or layers=[...]) — it answers for an area alone when no map of its "
+               "own covers it." if elsewhere else ""))
+
+
 def gather_risk_evidence(target: dict, focus: str, trace: list,
                          extras: dict) -> tuple[list, list, dict]:
     """Citations + declared gaps + stats(viz) for one place x hazard."""
@@ -330,11 +380,20 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     legend = tiffs.legend(hz)
 
     geometry = extras.get("geometry")
+    kw = {"how": extras["within_how"]} if (extras or {}).get("within_how") else {}
+    # The boundary alone first (cached, no OSM asset fetch): an area outside every
+    # hazard map declines here, before minutes of Overpass and a map download.
+    if geometry is not None:
+        aoi = ingest.ensure_aoi(geometry=geometry, name=place or None, layers=(), **kw)
+    else:
+        aoi = ingest.ensure_aoi(place=place, layers=())
+    outside = _outside_coverage(hz, aoi, place)
+    if outside:
+        raise ValueError(outside)
     if geometry is not None:
         # The caller holds the authoritative boundary — a GADM district, a hub's
         # own admin polygon — so the geocoder is not consulted and `place` is the
         # label the citations carry. This is the join another system makes.
-        kw = {"how": extras["within_how"]} if (extras or {}).get("within_how") else {}
         aoi = ingest.ensure_aoi(geometry=geometry, name=place or None, **kw)
     else:
         aoi = ingest.ensure_aoi(place=place)

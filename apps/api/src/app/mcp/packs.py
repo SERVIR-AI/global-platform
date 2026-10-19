@@ -131,9 +131,62 @@ def _risk_hazard_words() -> str:
     return ", ".join(words) if words else "mapped hazards"
 
 
+def risk_coverage() -> dict:
+    """Where the risk pack's hazard maps reach, from the catalog — never a typed
+    region: {layer: {title, bounds [w, s, e, n] or None, countries}}. Bounds are the
+    row's declared extent or bbox, else the file's own header when it is on this
+    server; a layer with neither is unknown, not global."""
+    from ..graph.geo import stacks, tiffs
+    try:
+        cat = tiffs.catalog()
+    except Exception:
+        return {}
+    out = {}
+    for k, row in cat.items():
+        if not k.startswith("hazard_") or (row or {}).get("kind") == "stack":
+            continue
+        row = row or {}
+        ext, bbox, bounds = row.get("extent") or {}, row.get("bbox"), None
+        if ext.get("lon") and ext.get("lat"):
+            bounds = [float(ext["lon"][0]), float(ext["lat"][0]), float(ext["lon"][1]), float(ext["lat"][1])]
+        elif isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+            bounds = [float(v) for v in bbox]
+        else:
+            try:
+                path = stacks.year_path(k, cat)
+                bounds = list(stacks.header(path)["bounds"]) if path else None
+            except Exception:
+                bounds = None
+        out[k] = {"title": row.get("title") or k, "bounds": bounds,
+                  "countries": [str(c) for c in (row.get("countries") or []) if str(c).strip()]}
+    return out
+
+
+def _in_risk_region(entry: dict, cov: dict) -> bool:
+    """Is a contributed point layer inside the region the risk pack's hazard maps
+    cover? Its box's centre must lie in one of their boxes, or its declared countries
+    among theirs. A layer that can be placed nowhere stays listed, as before."""
+    boxes = [c["bounds"] for c in cov.values() if c.get("bounds")]
+    countries = sorted({x for c in cov.values() for x in c.get("countries") or []})
+    bbox = entry.get("bbox")
+    if boxes and isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+        cx, cy = (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
+        if any(b[0] <= cx <= b[2] and b[1] <= cy <= b[3] for b in boxes):
+            return True
+        if not countries:
+            return False
+    declared = [str(c) for c in (entry.get("countries") or []) if str(c).strip()]
+    if declared and countries:
+        from ..graph.geo import vectors
+        return any(vectors.country_matches(countries, c) for c in declared)
+    return not boxes or not isinstance(bbox, (list, tuple))
+
+
 def _risk_asset_words() -> str:
     """What can be counted under a hazard: people when a count grid is landed, the
-    built-in OSM classes, and every contributed point layer by its title."""
+    built-in OSM classes, and every contributed point layer inside the region the
+    hazard maps cover, by its title. A Costa Rica occurrence layer was being offered
+    as a hazard-exposure asset for Southeast Asia."""
     from ..graph.geo import registry as geo_registry, tiffs, vectors
     words = []
     try:
@@ -144,8 +197,9 @@ def _risk_asset_words() -> str:
     words += ["roads", "schools", "hospitals", "buildings"]
     try:
         vis = vectors.visible()
+        cov = risk_coverage()
         for layer in geo_registry.countable():
-            if layer in vis:
+            if layer in vis and _in_risk_region(vis[layer], cov):
                 words.append(str(vis[layer].get("title") or layer).lower())
     except Exception:
         pass
@@ -185,34 +239,44 @@ def _fs_keywords() -> str:
 
 
 def _lc_stacks_words() -> tuple[str, str]:
-    """(classes, where) from the registered stacks' legends, titles, years and the
-    countries their rows declare — a contributed national mangrove stack names its
-    country here the moment it lands."""
+    """(classes, where) from the registered stacks: the class names most stacks share,
+    and each stack by title, span and class count, grouped by the countries its row
+    declares — a contributed national mangrove stack names its country here the
+    moment it lands. Every contributed legend run together read as one product's
+    seventy classes."""
     try:
-        from ..land_cover.synthesis import landcover_stacks
+        from ..land_cover.synthesis import _fold, landcover_stacks
         from ..graph.geo import stacks as _stacks
         rows = landcover_stacks()
     except Exception:
         rows = {}
     if not rows:
         return "land-cover classes", "no land-cover stack is registered yet"
-    classes, where = [], []
+    shared, named, groups = {}, {}, {}
     for sid, row in rows.items():
-        for _k, label in sorted(((int(k), v) for k, v in (row.get("legend") or {}).items()),
-                                key=lambda kv: kv[0]):
-            lab = str(label).lower()
-            if lab not in classes:
-                classes.append(lab)
+        legend = [str(v) for _k, v in sorted(((int(k), v) for k, v in (row.get("legend") or {}).items()),
+                                             key=lambda kv: kv[0])]
+        for lab in legend:
+            f = _fold(lab)
+            named.setdefault(f, lab.lower())
+            shared[f] = shared.get(f, 0) + 1
         try:
             ys = _stacks.years(row)
-            span = f"{min(ys)}-{max(ys)}" if ys else ""
+            span = (f"{min(ys)}-{max(ys)}" if min(ys) != max(ys) else str(ys[0])) if ys else ""
         except Exception:
             span = ""
         title = str(row.get("title") or sid)
-        countries = [str(c) for c in (row.get("countries") or []) if str(c).strip()]
-        where.append(title + (f", {span}" if span and span not in title else "")
-                     + (f" ({', '.join(countries)})" if countries else ""))
-    return ", ".join(classes), "; ".join(where)
+        n_cls = f"{len(legend)} class{'' if len(legend) == 1 else 'es'}"
+        countries = ", ".join(str(c) for c in (row.get("countries") or []) if str(c).strip())
+        groups.setdefault(countries, []).append(
+            title + (f", {span}" if span and span not in title else "")
+            + (f" ({n_cls})" if n_cls not in title else ""))
+    order = list(named)
+    top = sorted(named, key=lambda f: (-shared[f], order.index(f)))[:10]
+    classes = ", ".join(named[f] for f in top) + (
+        " and the other classes of each stack's own legend" if len(named) > len(top) else "")
+    where = "; ".join((f"{c}: " if c else "") + ", ".join(titles) for c, titles in groups.items())
+    return classes, where
 
 
 def _lc_where() -> list[str]:
@@ -238,9 +302,9 @@ def _lc_summary() -> str:
 
 
 def _lc_keywords() -> str:
-    classes, where = _lc_stacks_words()
+    classes, _where = _lc_stacks_words()
     return (f"land cover: {classes}, land-cover change, deforestation and forest gain, "
-            f"fire detections ({where})")
+            f"fire detections ({'; '.join(dict.fromkeys(_lc_where()))})")
 
 
 def target_shapes(sep: str = " | ") -> str:
@@ -383,9 +447,14 @@ PACKS: dict[str, dict] = {
         # and every risk call without a hazard would become ambiguous.
         "target_keys": ("place", "year", "year_to", "classes", "stack"),
         "optional_keys": ("year_to", "classes", "stack"),
+        # ...but a caller's polygon stands in for a place, and a call that only measures
+        # contributed vectors or layers needs no map year (build_target reads this).
+        "satisfied_by": {"place": ("geometry",), "year": ("vectors", "layers")},
         "target_doc": {"place": "district, province or park name inside a registered "
                                 "land-cover stack's footprint (or pass geometry; place is then its label)",
-                       "year": "a mapped year, e.g. 2022",
+                       "year": "a mapped year, e.g. 2022 — may be left out when the call only "
+                               "measures vectors=[...] or layers=[...]; outside every stack such "
+                               "a call still answers, for the area alone",
                        "year_to": "optional later year — adds change and transitions",
                        "classes": "optional class names to detail, e.g. [\"Forest\"]",
                        "stack": "optional: which registered stack to read when more than one "
@@ -406,7 +475,8 @@ PACKS: dict[str, dict] = {
         "subjects": ["land cover by class", "forest, cropland, grassland and built-up change "
                      "between mapped years"],
         "where": _lc_where,
-        "default_focus": lambda t: (f"land cover of {t.get('place', '')} in {t.get('year', '')}"
+        "default_focus": lambda t: (f"land cover of {t.get('place') or 'the area you supplied'}"
+                                    + (f" in {t['year']}" if t.get("year") else "")
                                     + (f" against {t['year_to']}" if t.get("year_to") else "")).strip(),
         "doctor_target": {"place": "Bagmati Province, Nepal", "year": "2022"},
         "default_layers_doc": "the year maps its class areas are counted from",
@@ -420,24 +490,13 @@ def _lc_usage_notes() -> str:
     sizes and whether any declares an accuracy — two sentences that were typed for
     the first stack and stayed wrong for every stack after it."""
     try:
-        from ..land_cover.synthesis import landcover_stacks
-        from ..graph.geo import schema as _schema
+        from ..land_cover.synthesis import landcover_stacks, stack_cell_deg
         rows = landcover_stacks()
     except Exception:
         rows = {}
     cells, declared = [], []
-    from ..graph.geo import stacks as _stacks
     for sid, row in rows.items():
-        px = None
-        try:                                   # the first year's file header — cheap, and true
-            ys = _stacks.years(row)
-            path = _stacks.year_path(str(row["layer_pattern"]).format(year=ys[0])) if ys else None
-            px = _stacks.header(path)["pixel_size_deg"] if path else None
-        except Exception:
-            try:
-                px = (_schema._doc().get("stacks") or {}).get(sid, {}).get("pixel_size_deg")
-            except Exception:
-                px = None
+        px = stack_cell_deg(sid, row)          # the first year's file header — cheap, and true
         if px:
             cells.append(f"{round(float(px) * 111_320)} m")
         acc = str(row.get("accuracy") or "").strip()
@@ -521,14 +580,22 @@ def infer(pack: str | None, **params) -> str | None:
 
 
 def build_target(pack_id: str, params: dict) -> tuple[dict | None, str | None]:
-    """The generic target dict, or (None, reason) when required params are absent."""
+    """The generic target dict, or (None, reason) when required params are absent.
+    A row's `satisfied_by` names the call params that may stand in for a required
+    key — a geometry for a place, a vector or layer measure for a year — so a pack
+    with an area answers for the caller's polygon without a label, and measures
+    contributed layers without a map year it would not read."""
     spec = PACKS[pack_id]
     target = {k: params.get(k) for k in spec["target_keys"] if params.get(k)}
+    alt = spec.get("satisfied_by") or {}
     missing = [k for k in spec["target_keys"] if not target.get(k)
-               and k not in spec.get("optional_keys", ())]
+               and k not in spec.get("optional_keys", ())
+               and not any(params.get(a) not in (None, "", [], ()) for a in alt.get(k, ()))]
     if missing:
-        return None, (f"pack {pack_id!r} needs {', '.join(missing)} "
-                      f"(target params: {', '.join(spec['target_keys'])})")
+        return None, (f"pack {pack_id!r} needs "
+                      + ", ".join(k + (f" (or {' / '.join(alt[k])})" if alt.get(k) else "")
+                                  for k in missing)
+                      + f" (target params: {', '.join(spec['target_keys'])})")
     return target, None
 
 
