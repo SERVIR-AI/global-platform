@@ -22,6 +22,7 @@ import re
 from shapely.geometry import shape
 
 from ..graph.geo import ingest, rasterstats, schema, stacks, tiffs, verify
+from ..rag import filters as _rag_filters
 
 SECTIONS = (
     "## What the maps show",
@@ -83,7 +84,10 @@ def _res_phrase(level, px_deg):
 
 
 def landcover_stacks():
-    """{stack_id: row} for every registered stack with role landcover."""
+    """{stack_id: row} for every registered stack whose role is land cover, in
+    registration order. The role is the stack's namespace as the gate assigned it
+    (contrib.rasters), so a stack of another role — a change map, say — is never
+    counted, chosen or listed as land cover, whatever its id looks like."""
     return {k: v for k, v in stacks.rows().items() if v.get("role") == ROLE}
 
 
@@ -157,15 +161,34 @@ def stack_cell_deg(sid, row):
         return None
 
 
+CELL_TIE = 0.01      # cell sizes within 1% are one size: reprojection moves them by less
+
+
+def _cell_tiers(cells):
+    """{cell: tier} — 0 for the finest, counting up; a cell within CELL_TIE of the
+    tier's finest shares its tier. Two copies of one 30 m grid reprojected from
+    different UTM extents differ by 0.02%, and that difference used to decide which
+    map a question read."""
+    tiers, tier, base = {}, -1, None
+    for c in sorted(set(cells)):
+        if base is None or c > base * (1 + CELL_TIE):
+            tier, base = tier + 1, c
+        tiers[c] = tier
+    return tiers
+
+
 def _pick_stack(boundary, wanted=None, years=(), name="this area"):
     """(stack_id, row, others, why): the registered land-cover stack to read for this
     area, every OTHER registered stack that also covers it, and why this one was
     read. Unless the caller names one (`stack`), the covering stacks that HAVE the
     requested years are ranked — two or more classes first (a one-class map cannot
     show loss or gain), then the one whose extent covers most of the area, then the
-    finest cells — and the others are declared as a gap, never silently ignored.
+    finest cells (within 1% counts as the same size), then the most years, then the
+    first registered — and the others are declared as a gap, never silently ignored.
     The first registered match used to win: a one-class mangrove extent map was read
-    over a Costa Rica bay while an eleven-class map of the same years sat beside it."""
+    over a Costa Rica bay while an eleven-class map of the same years sat beside it.
+    Then a raw cell size 0.02% finer, from reprojection alone, let a contributed copy
+    beat the map it was made from."""
     rows = landcover_stacks()
     if not rows:
         raise NoStackHere("no land-cover stack is registered on this platform — a hub "
@@ -208,17 +231,22 @@ def _pick_stack(boundary, wanted=None, years=(), name="this area"):
             f"no registered land-cover stack covering {name} has {', '.join(map(str, want))} — "
             + "; ".join(f"{row.get('title', sid)} ({sid}) has {stacks._span(stacks.years(row)) or 'no years'}"
                         for sid, row in covering))
-    facts = {sid: (len(_legend(row)), _cover_share(boundary, row), stack_cell_deg(sid, row))
+    order = {sid: i for i, sid in enumerate(rows)}
+    facts = {sid: (len(_legend(row)), _cover_share(boundary, row), stack_cell_deg(sid, row),
+                   len(stacks.years(row)))
              for sid, row in able}
-    # Stable: registration order still breaks a tie.
+    tiers = _cell_tiers(f[2] for f in facts.values() if f[2])
     able = sorted(able, key=lambda sr: (facts[sr[0]][0] < 2, -round(facts[sr[0]][1], 2),
-                                        facts[sr[0]][2] or float("inf")))
+                                        tiers.get(facts[sr[0]][2], len(tiers)),
+                                        -facts[sr[0]][3], order[sr[0]]))
     sid, row = able[0]
-    n_cls, share, cell = facts[sid]
+    n_cls, share, cell, n_years = facts[sid]
     why = (f"chosen among the {len(able)} stack(s) holding the years asked — two or more classes "
-           "first, then the extent covering most of the area, then the finest cells: it maps "
+           "first, then the extent covering most of the area, then the finest cells (within 1% "
+           "counts as the same size), then the most years, then the first registered: it maps "
            f"{n_cls} class(es), its extent covers {share * 100:.0f}% of {name}"
-           + (f" and its cells are {cell * 111_320:.0f} m" if cell else "")
+           + (f", its cells are {cell * 111_320:.0f} m" if cell else "")
+           + f" and it holds {n_years} year(s)"
            if len(able) > 1 else "the only covering stack holding the years asked")
     return sid, row, [(s, r) for s, r in covering if s != sid], why
 
@@ -460,6 +488,10 @@ def _passport_citation(n, sid, row, layer, year, clip, level, legend, gaps):
         bits.append(f"Grid: {hdr['width']}×{hdr['height']} px, lon {b[0]}..{b[2]}, "
                     f"lat {b[1]}..{b[3]}; overview levels {hdr['overviews'] or 'none'}.")
     bits.append(f"Read here at {'full resolution' if level <= 1 else f'overview level {level}'}.")
+    # what ingest did to the contributed file (reprojected, recoded, band 1 of 4)
+    prepared = [str(p).rstrip(".") for p in (meta.get("prepared") or []) if str(p).strip()]
+    if prepared:
+        bits.append("At ingest: " + "; ".join(prepared) + ".")
     acc = declared_accuracy(layer, row)
     if acc:
         bits.append(f"Accuracy, as declared by the producer for this year's map (not assessed "
@@ -495,6 +527,7 @@ def _passport_citation(n, sid, row, layer, year, clip, level, legend, gaps):
             **({"staged_by": meta["staged_by"], "contribution_id": meta.get("contribution_id")}
                if meta.get("staged_by") else {}),
             **({"review_status": review} if review else {}),
+            **({"prepared": prepared} if prepared else {}),
             "authority": row.get("authority"), "residency": "platform-hosted",
             "text": " ".join(bits)}
 
@@ -637,15 +670,21 @@ def _area_only(aoi, boundary, how, name, place, why, trace):
     inside it. Outside every stack the pack used to refuse everything, so a hub's
     polygons in Kenya or Guyana could not be measured by any pack at all."""
     km2 = aoi.get("area_km2")
-    text = (f"The area measured is {name}" + (f", ~{km2:,} km²" if km2 else "")
-            + f"; boundary: {_boundary_phrase(how)}. No land-cover class is counted in this "
-            "answer; each contributed vector or raster layer named in the request is measured "
-            "inside this boundary in a citation of its own.")
     gap = f"no land-cover class is counted in {name}: {why.brief}"
     if why.outside:
         near = _stacks_by_distance(boundary, landcover_stacks(), limit=3)
         gap += f". The registered stacks nearest it: {near}" if near else ""
+    gaps = [gap, _boundary_gap(how)]
     trace.append("area-only: no classes counted; the seam measures the layers asked")
+    # The tables and feeds bound to the pack are read here exactly as beside a class
+    # count — by their rows inside this boundary.
+    tables, _f, _n = _table_citations(1, _area_countries(aoi), boundary, name, gaps, trace)
+    text = (f"The area measured is {name}" + (f", ~{km2:,} km²" if km2 else "")
+            + f"; boundary: {_boundary_phrase(how)}. No land-cover class is counted in this "
+            "answer; each contributed vector or raster layer named in the request is measured "
+            "inside this boundary in a citation of its own"
+            + (", and each table or feed bound to this pack that has rows inside it is cited by "
+               "those rows." if tables else "."))
     stats = {"queries": None,
              "aoi": {"requested": place, "name": name, "area_km2": km2, "how": how,
                      "is_admin_boundary": how.startswith("admin boundary")},
@@ -653,8 +692,8 @@ def _area_only(aoi, boundary, how, name, place, why, trace):
              "_area": ingest.area_of(aoi), "_layer_defaults": []}
     return ([{"n": 1, "kind": "area", "retrieval": "computed-at-pack-time",
               "source": "platform boundary resolution", "title": f"the area measured, {name}",
-              "validation": "boundary as resolved at pack time", "text": text}],
-            [gap, _boundary_gap(how)], stats)
+              "validation": "boundary as resolved at pack time", "text": text}, *tables],
+            gaps, stats)
 
 
 def gather_land_cover_evidence(target: dict, focus: str, trace: list,
@@ -851,39 +890,12 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
     if doc_hits:
         trace.append(f"documents[{len(doc_hits)}] cited")
 
-    # Contributed tables and feeds bound to this pack, each read only where it speaks: a
-    # FACTOR table (class, factor) is applied to the areas, losses and gains above; any
-    # other is cited by its rows about this area. A source that is simply about
-    # somewhere else is left to the trace — a mangrove table has nothing to say to a
-    # Himalayan valley, and saying so in every answer there is noise, not honesty.
-    factor_stats, unplaced, factor_tables = {}, [], 0
     _gaps_before_tables = len(gaps)
-    for ds, spec, res, miss in _bound_tables(countries, boundary, gaps, trace):
-        if _is_factor_table(spec):
-            factor_tables += 1
-            if miss:
-                if _names_legend_class(res, legend):
-                    gaps.append(f"{spec.get('title') or ds} ({ds}) is scoped to {miss[0]}; not "
-                                f"applied here — {miss[1]}. Available through feeds_query.")
-                continue
-            cit, fstats = _factor_citation(n + 1, ds, spec, res, name, year, year_to, legend,
-                                           st, st_to, ch, gaps, trace)
-            if cit:
-                n += 1
-                citations.append(cit)
-                factor_stats[ds] = fstats
-        else:
-            cit, note, placeable = _context_citation(n + 1, ds, spec, res, name, countries, boundary)
-            trace.append(f"table[{ds}] " + (note if cit else f"not cited: {note}"))
-            if cit:
-                n += 1
-                citations.append(cit)
-            elif not placeable:
-                unplaced.append(f"{spec.get('title') or ds} ({ds})")
-    if unplaced:
-        gaps.append(f"{len(unplaced)} table(s) or feed(s) bound to this pack were not cited: "
-                    + "; ".join(unplaced) + " — they have no coordinate or country column and declare "
-                    "no country, so no row can be placed in an area. Available through feeds_query.")
+    cits, factor_stats, factor_tables = _table_citations(
+        n, countries, boundary, name, gaps, trace,
+        {"year": year, "year_to": year_to, "legend": legend, "st": st, "st_to": st_to, "ch": ch})
+    citations.extend(cits)
+    n += len(cits)
 
     if factor_stats:
         gaps.insert(_gaps_before_tables, (
@@ -952,6 +964,51 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
     return citations, gaps, stats
 
 
+def _table_citations(n, countries, boundary, name, gaps, trace, counted=None):
+    """(citations numbered after `n`, factor stats, factor tables seen) for the
+    contributed tables and feeds bound to this pack, each read only where it speaks: a
+    FACTOR table (class, factor) is applied to the class areas, losses and gains in
+    `counted` ({year, year_to, legend, st, st_to, ch}); any other is cited by its rows
+    about this area. An answer that counts no class (`counted` None: the area alone)
+    still cites the rows inside it — a Kenya mangrove answer cited none while the soil
+    cores bound to the pack sat inside its boundary. A source that is simply about
+    somewhere else is left to the trace: a mangrove table has nothing to say to a
+    Himalayan valley, and saying so in every answer there is noise, not honesty."""
+    out, factor_stats, unplaced, factor_tables = [], {}, [], 0
+    legend = (counted or {}).get("legend") or {}
+    for ds, spec, res, miss in _bound_tables(countries, boundary, gaps, trace):
+        if _is_factor_table(spec):
+            factor_tables += 1
+            if counted is None:
+                trace.append(f"factors[{ds}] not applied: no class area is counted in this answer")
+                continue
+            if miss:
+                if _names_legend_class(res, legend):
+                    gaps.append(f"{spec.get('title') or ds} ({ds}) is scoped to {miss[0]}; not "
+                                f"applied here — {miss[1]}. Available through feeds_query.")
+                continue
+            cit, fstats = _factor_citation(n + 1, ds, spec, res, name, counted["year"],
+                                           counted["year_to"], legend, counted["st"],
+                                           counted["st_to"], counted["ch"], gaps, trace)
+            if cit:
+                n += 1
+                out.append(cit)
+                factor_stats[ds] = fstats
+        else:
+            cit, note, placeable = _context_citation(n + 1, ds, spec, res, name, countries, boundary)
+            trace.append(f"table[{ds}] " + (note if cit else f"not cited: {note}"))
+            if cit:
+                n += 1
+                out.append(cit)
+            elif not placeable:
+                unplaced.append(f"{spec.get('title') or ds} ({ds})")
+    if unplaced:
+        gaps.append(f"{len(unplaced)} table(s) or feed(s) bound to this pack were not cited: "
+                    + "; ".join(unplaced) + " — they have no coordinate or country column and declare "
+                    "no country, so no row can be placed in an area. Available through feeds_query.")
+    return out, factor_stats, factor_tables
+
+
 def _area_countries(aoi, row=None):
     """The countries this area is in: the one its boundary resolved to, else the ones
     the stack read here declares (a drawn polygon carries none of its own)."""
@@ -961,8 +1018,7 @@ def _area_countries(aoi, row=None):
 
 
 def _speaks_to(declared, countries) -> bool:
-    from ..graph.geo import vectors as _vectors
-    return any(_vectors.country_matches(declared, c) for c in countries)
+    return _rag_filters.speaks_to(declared, countries)
 
 
 def _library_hits(name, focus, labels, trace, gaps, k=3, countries=()):
@@ -990,32 +1046,30 @@ def _library_hits(name, focus, labels, trace, gaps, k=3, countries=()):
         return corpus, []
     queries = [f"{focus} {name}".strip(),
                f"{' '.join(labels[:3])} map method classes accuracy {name}".strip()]
-    hits, seen, elsewhere = [], set(), {}
+    hits, seen, skipped = [], set(), {}
     for q in queries:
         try:
             # The area's own countries first, so its documents are not crowded out by a
-            # better-scored library about somewhere else; then the rest, filtered below.
-            got = (corpus.search(q, k=k, countries=list(countries)) if countries else []) \
-                + corpus.search(q, k=3 * k)
+            # better-scored library about somewhere else; then the rest. The library
+            # passes over reference lists and documents about other countries
+            # (rag.filters) and says which in `skipped`; sifted again here, whatever
+            # the library did, so the rule holds for any corpus.
+            got = (corpus.search(q, k=k, countries=list(countries), skipped=skipped)
+                   if countries else []) \
+                + corpus.search(q, k=3 * k, where=list(countries), skipped=skipped)
         except (CorpusError, MissingAPIKey) as exc:
             gaps.append(f"document retrieval failed ({exc})")
             return corpus, hits
         trace.append(f"retrieve {q!r} -> {len(got)} hits")
-        kept = []
+        fresh = []
         for h in sorted(got, key=lambda h: -(h.get("score") or 0)):
-            m = h.get("metadata") or {}
-            if h.get("id") in seen:
-                continue
-            seen.add(h.get("id"))
-            if _looks_like_references(h.get("text") or ""):
-                trace.append(f"retrieve: skipped a reference-list passage of {(m.get('title') or 'a document')[:50]}")
-                continue
-            declared = [str(c) for c in (m.get("countries") or []) if str(c).strip()]
-            if declared and countries and not _speaks_to(declared, countries):
-                elsewhere.setdefault(", ".join(declared), set()).add(str(m.get("title") or h.get("doc_id")))
-                continue
-            kept.append(h)
-        hits.extend(kept[:k])
+            if h.get("id") not in seen:
+                seen.add(h.get("id"))
+                fresh.append(h)
+        hits.extend(_rag_filters.sift(fresh, where=countries, skipped=skipped)[:k])
+    for title in sorted(set(skipped.get("references") or [])):
+        trace.append(f"retrieve: skipped a reference-list passage of {title[:50]}")
+    elsewhere = {where: set(t) for where, t in (skipped.get("elsewhere") or {}).items()}
     if elsewhere:
         trace.append(f"retrieve: skipped documents about other countries: {sorted(elsewhere)}")
     if not hits and elsewhere:
@@ -1029,40 +1083,8 @@ def _library_hits(name, focus, labels, trace, gaps, k=3, countries=()):
     return corpus, hits[:2 * k]
 
 
-# A reference list, a bibliography or a table of contents matches many queries and
-# says nothing about the place. Headings in the languages hubs publish in.
-_REF_HEADING = re.compile(
-    r"^\W*(?:\d+(?:\.\d+)*\.?\s*)?(?:references?|bibliography|literature cited|works cited|"
-    r"bibliograf[ií]a(?:\s+(?:citada|consultada))?|literatura\s+(?:citada|consultada)|"
-    r"referencias(?:\s+bibliogr[aá]ficas)?|refer[eê]ncias(?:\s+bibliogr[aá]ficas)?|bibliographie|"
-    r"r[ée]f[ée]rences(?:\s+bibliographiques)?|(?:table\s+of\s+)?contents|"
-    r"[ií]ndice(?:\s+general)?|contenidos?|tabla\s+de\s+contenidos?|sum[aá]rio)\W*$", re.I | re.M)
-# "Surname, A." / "Surname, A. B." — a surname and initials, in any Latin script.
-_AUTHOR = re.compile(r"\b[A-ZÁÉÍÓÚÑÜÇ][a-záéíóúñüçãõ'’\-]+,\s(?:[A-ZÁÉÍÓÚÑ]\.\s?-?){1,3}")
-_IMPRINT = re.compile(r"(?:^|\s)(?:In|En|Em|Dans):\s|\b[A-Z][a-zé]+(?:,\s?[A-Z]{2,})?:\s+[A-Z][\w&.\-]*")
-_PAGES = re.compile(r"\b\d+\s?(?:p|pp|págs?|pages?)\.(?=\s|$)|\bpp?\.\s?\d+", re.I)
-_LEADER = re.compile(r"(?:\.\s?){4,}\s*\d{1,4}\b|…\s*\d{1,4}\b")
-
-
-def _looks_like_references(text: str) -> bool:
-    """A bibliography page matches many queries and says nothing about the place:
-    many author-year citations, few sentences of its own — in any language
-    ('Bibliografía', 'Literatura citada', 'Referencias'), and the fragments a
-    reference list is cut into ('In: Paris: Food and Agriculture Organization'). A
-    contents page is the same kind of noise: dotted leaders to page numbers."""
-    years = len(re.findall(r"\b(?:19|20)\d\d[a-z]?\b", text))
-    etal = text.lower().count("et al")
-    dois = text.lower().count("doi")
-    words = max(1, len(text.split()))
-    authors = len(_AUTHOR.findall(text))
-    imprint = len(_IMPRINT.findall(text))
-    pages = len(_PAGES.findall(text))
-    leaders = len(_LEADER.findall(text))
-    return ((years >= 12 and years / words > 0.04) or etal >= 6 or dois >= 4
-            or (authors >= 4 and authors / words > 0.02)
-            or leaders >= 3
-            or (bool(_REF_HEADING.search(text)) and authors + years + leaders + pages >= 3)
-            or (words < 40 and imprint > 0 and (years + pages + authors + imprint) >= 2))
+# The reference-list test is every pack's (rag.filters); the name stays for callers.
+_looks_like_references = _rag_filters.looks_like_references
 
 
 def _document_citation(n, h, corpus):
