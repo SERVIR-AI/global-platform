@@ -248,8 +248,9 @@ def fetch(url: str, max_bytes: int | None = None) -> tuple[bytes, str]:
                     raise FetchRefused(f"fetch exceeded the {DEADLINE}s deadline")
             host = (parts.hostname or "").lower()
             ctype = (r.headers.get("content-type") or "").lower()
-            if drive_id and (host in _DRIVE_HOSTS or host == _DRIVE_CONTENT_HOST) \
-                    and ctype.startswith("text/html"):
+            # A Drive link that ends on ANY web page — the confirm page, or a redirect to
+            # accounts.google.com because the file is not shared — never passes as the file.
+            if drive_id and ctype.startswith("text/html"):
                 # Drive answered a page instead of the file: either the "can't scan
                 # for viruses" confirm page (follow its form once) or a sign-in /
                 # not-shared page (refuse, in the contributor's terms).

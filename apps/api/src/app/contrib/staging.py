@@ -730,6 +730,8 @@ def _prepare_raster(m: dict) -> dict:
         raise Declined(str(exc)) from None
     except Exception as exc:
         raise Declined(f"could not fetch {m['url']}: {type(exc).__name__}: {exc}") from None
+    if _is_web_page(raw):
+        raise Declined(_WEB_PAGE.format(url=m["url"], what="raster file (GeoTIFF, .img)"))
     tiffs_dir = get_settings().tiffs_dir
     tiffs_dir.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix="staged-tmp-", suffix=".tif", dir=tiffs_dir)
@@ -1128,6 +1130,17 @@ def _ensure_staged_vectors_loaded() -> None:
             STAGED_VECTORS[pv["layer"]] = pv["entry"]
 
 
+_WEB_PAGE = ("{url} answered with a web page, not a {what}: it is a portal, catalogue or "
+             "viewer page (ArcGIS Hub 'explore', a Google Earth Engine catalogue entry, a data "
+             "portal item). Find the page's download link for the file itself — or download it "
+             "and share it from Google Drive (Anyone with the link) — and give that link")
+
+
+def _is_web_page(raw: bytes) -> bool:
+    head = raw[:512].lstrip().lower()
+    return head.startswith((b"<!doctype html", b"<html", b"<?xml version")) and b"<html" in raw[:4096].lower()
+
+
 def _vector_taken(layer: str) -> str | None:
     import re
     from ..graph.geo import ingest, vectors
@@ -1178,6 +1191,8 @@ def _prepare_vector(m: dict) -> dict:
         raise Declined(str(exc)) from None
     except Exception as exc:
         raise Declined(f"could not fetch {m['url']}: {type(exc).__name__}: {exc}") from None
+    if _is_web_page(raw):
+        raise Declined(_WEB_PAGE.format(url=m["url"], what="vector file (GeoJSON, zipped shapefile, GeoPackage)"))
     # A zipped shapefile or a GeoPackage is read into GeoJSON on EPSG:4326 here;
     # what lands is always GeoJSON, and the record says what ingest did.
     from ..graph.geo import vecio

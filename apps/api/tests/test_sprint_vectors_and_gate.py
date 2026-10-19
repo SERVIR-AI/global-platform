@@ -721,3 +721,41 @@ def test_an_invalid_polygon_is_repaired_not_dropped(tmp_path, monkeypatch):
     monkeypatch.setattr(vectors, "master_path", lambda e: p)
     rec = vectors.summarise({"geometry": "polygons", "group_field": "clase"}, box(0.25, -1, 2, 2))
     assert rec["features_inside"] == 1 and rec["total"] > 0 and not rec.get("skipped_unreadable")
+
+
+def test_a_drive_link_that_lands_on_a_sign_in_page_is_refused(monkeypatch):
+    """Drive redirects a file that is not shared publicly to accounts.google.com; the
+    sign-in page must never be taken for the file."""
+    import ipaddress
+    class R:
+        def __init__(self, status, headers, body=b""):
+            self.status_code, self.headers, self._b = status, CaseInsensitiveDict(headers), body
+            self.reason = "OK"
+        def iter_content(self, chunk_size=1):
+            yield self._b
+        def raise_for_status(self):
+            pass
+        def close(self):
+            pass
+    class S:
+        def get(self, url, **kw):
+            host = (kw.get("headers") or {}).get("Host", "")
+            if host.startswith("drive.google.com"):
+                return R(302, {"location": "https://accounts.google.com/v3/signin/identifier?continue=x"})
+            return R(200, {"content-type": "text/html; charset=utf-8"}, b"<!doctype html><html>Sign in</html>")
+        def close(self):
+            pass
+    monkeypatch.setattr(fetch_policy, "_addresses", lambda host: [ipaddress.ip_address("142.250.1.1")])
+    monkeypatch.setattr(fetch_policy, "_session", lambda hostname, scheme: S())
+    with pytest.raises(fetch_policy.FetchRefused, match="Anyone with the link"):
+        fetch_policy.fetch("https://drive.google.com/file/d/1-63tasDfaRuD1gLPD45zIsnmcMUFg1oE/view?usp=drive_link",
+                           max_bytes=10_000_000)
+
+
+def test_a_portal_page_given_as_a_raster_or_vector_is_declined_in_words(vec_env):
+    import app.contrib.fetch_policy as fp
+    fp.fetch = lambda url, max_bytes=None: (b"<!DOCTYPE html><html><head><title>Explore</title></head></html>", "explore")
+    out = staging.submit("vector", {"layer": "portal_test", "url": "https://opendata.example.org/datasets/x/explore",
+                                    "title": "t", "description": "d", "source": "s", "license": "unstated",
+                                    "vintage": "unstated"}, OWNER)
+    assert out["status"] == "declined" and "web page, not a vector file" in " ".join(out["problems"])
