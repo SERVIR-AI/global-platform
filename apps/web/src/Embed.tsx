@@ -34,6 +34,7 @@ const loadByReceipt = async (receiptId: string): Promise<ProvenanceData> => {
       grounded: report.checks ?? null,
     },
     receipt.question ?? '',
+    pack.pack ?? null,
   );
 };
 

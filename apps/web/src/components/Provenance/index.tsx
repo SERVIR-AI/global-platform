@@ -33,7 +33,7 @@ const SECTION_BORDER = [
   'border-amber-400',
   'border-violet-400',
 ];
-const KIND_ICON = { document: FileText, conditions: Radio, calendar: CalendarCog } as const;
+const KIND_ICON: Record<string, typeof FileText> = { document: FileText, conditions: Radio, calendar: CalendarCog };
 
 interface Edge {
   from: string;

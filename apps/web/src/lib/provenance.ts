@@ -68,10 +68,55 @@ const citesIn = (text: string): number[] => {
   return [...nums].filter((n) => n > 0 && n < 1000).sort((a, b) => a - b);
 };
 
+// What a pack's evidence steps are called, by citation kind. A pack this map does not
+// know still gets one lane per kind it returned, named after the kind — the left
+// column shows what RAN for this answer, never another pack's steps.
+const KIND_LABELS: Record<string, string> = {
+  document: 'Library retrieval',
+  table: 'Contributed table',
+  feed: 'Live feed',
+  class_area: 'Class areas counted from the map',
+  class_change: 'Change between the two years',
+  class_transitions: 'Transitions of the detailed classes',
+  class_series: 'Per-year series',
+  class_factor: 'Factor table applied (area × factor)',
+  vector_summary: 'Contributed layers measured inside the area',
+  layer_values: 'Layer values over the area',
+  landcover_layer: 'Map passport (contract check)',
+  fire: 'Fire detections',
+  exposure: 'Exposure counted against the hazard',
+  people: 'People in the hazard zone',
+  roads: 'Road length in the hazard zone',
+  hazard_passport: 'Hazard layer passport',
+  risk_level: 'Vulnerability-weighted risk levels',
+  method: 'Counting method',
+};
+
+const buildPackFeeds = (citations: Citation[], queries: unknown): Feed[] => {
+  const kinds: string[] = [];
+  for (const c of citations) {
+    const k = String(c.kind);
+    if (k === 'gaps' || kinds.includes(k)) continue;
+    kinds.push(k);
+  }
+  const retrieval = Array.isArray(queries) ? (queries as unknown[]).map(String) : [];
+  return kinds.map((k) => ({
+    id: `feed-${k}`,
+    label: KIND_LABELS[k] ?? k.replace(/_/g, ' '),
+    detail: k === 'document' && retrieval.length ? retrieval.join(' · ') : undefined,
+    cites: citations.filter((c) => String(c.kind) === k).map((c) => c.n),
+    empty: false,
+  }));
+};
+
 const buildFeeds = (
   citations: Citation[],
   evidence: Partial<ChatResponse>['evidence'],
+  packId?: string | null,
 ): Feed[] => {
+  if (packId && packId !== 'food-security') {
+    return buildPackFeeds(citations, (evidence as { queries?: unknown } | undefined)?.queries);
+  }
   const byKind = (pred: (c: Citation) => boolean) =>
     citations.filter(pred).map((c) => c.n);
   const queries = evidence?.queries;
@@ -136,6 +181,7 @@ const buildDocs = (citations: Citation[]): DocGroup[] => {
 export const parseProvenance = (
   item: Partial<ChatResponse>,
   question: string,
+  packId?: string | null,
 ): ProvenanceData => {
   const brief = item.brief ?? '';
   const citations = item.citations ?? [];
@@ -179,7 +225,7 @@ export const parseProvenance = (
     sections,
     claims,
     citations,
-    feeds: buildFeeds(citations, item.evidence),
+    feeds: buildFeeds(citations, item.evidence, packId),
     docs: buildDocs(citations),
   };
 };

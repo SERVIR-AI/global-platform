@@ -112,7 +112,8 @@ export interface SeasonSpec {
 /** One numbered evidence entry behind a food-security brief. */
 export interface Citation {
   n: number;
-  kind: 'document' | 'conditions' | 'calendar';
+  // food-security kinds plus any other pack's (class_area, vector_summary, exposure, ...)
+  kind: 'document' | 'conditions' | 'calendar' | (string & {});
   /** For calendar entries: true when the requester adjusted the season windows. */
   adjusted?: boolean;
   source: string | null;
