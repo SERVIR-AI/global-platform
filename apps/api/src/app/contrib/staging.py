@@ -1255,6 +1255,14 @@ def _stage_vector(rec: dict, prepared: dict) -> dict:
     gp = m.get("group_field")
     props = prepared["observed"].get("properties") or []
     warn = []
+    import re as _re
+    vin = _re.match(r"(\d{4})", str(m.get("vintage") or ""))
+    for note in prepared["observed"].get("prepared") or []:
+        named = _re.search(r"layer (\S+)|shapefile (\S+)", note)
+        years = _re.findall(r"(?<!\d)((?:19|20)\d\d)(?!\d)", " ".join(g for g in (named.groups() if named else ()) if g))
+        if vin and years and vin.group(1) not in years:
+            warn.append(f"the file's own layer name carries the year {', '.join(sorted(set(years)))} but the "
+                        f"declared vintage is {m.get('vintage')} — confirm which version this is")
     if gp and gp not in props:
         warn.append(f"group_field {gp!r} is not a property of the features (properties: "
                     f"{', '.join(props[:12])}) — the breakdown will be empty")

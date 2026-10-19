@@ -479,7 +479,7 @@ def resolve_place(place):
             "area_cap_km2": AREA_CAP_KM2}
 
 
-def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=None):
+def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=None, how=None):
     """Return a cached bundle of file paths for an AOI — resolved from a `place` name, or
     from a user-drawn `geometry` (GeoJSON Polygon or [minLon,minLat,maxLon,maxLat] bbox,
     EPSG:4326).
@@ -500,7 +500,7 @@ def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=N
     # could have taken the polygon.
     cap = AREA_CAP_KM2 if area_cap_km2 is None else float(area_cap_km2)
     cache = str(get_settings().cache_dir)
-    contributed_how = None
+    contributed_how = how if (geometry is not None and how) else None
     if geometry is None and place:
         from . import vectors as _vectors
         named = _vectors.named_area(place)

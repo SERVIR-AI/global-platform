@@ -147,8 +147,9 @@ _BOUNDARY_OK = ("admin boundary", "protected-area boundary", "contributed bounda
 def _resolve_aoi(place, extras, trace):
     geometry = extras.get("geometry")
     if geometry is not None:
+        kw = {"how": extras["within_how"]} if extras.get("within_how") else {}
         aoi = ingest.ensure_aoi(geometry=geometry, name=place or None, layers=(),
-                                area_cap_km2=AREA_CAP_KM2)
+                                area_cap_km2=AREA_CAP_KM2, **kw)
     else:
         aoi = ingest.ensure_aoi(place=place, layers=(), area_cap_km2=AREA_CAP_KM2)
     how = str(aoi.get("how") or "")
@@ -359,10 +360,12 @@ def _passport_citation(n, sid, row, layer, year, clip, level, legend, gaps):
             "Residency: platform-hosted copy, read in place from "
             + ("a stored zip archive." if "/vsizip/" in path else "local disk.")]
     if contract:
+        extra = [str(contract["crs"])] if contract.get("crs") else []
+        if contract.get("pixel_size_deg") is not None:
+            extra.append(f"{contract['pixel_size_deg']}° per pixel")
         bits.append(f"Declared contract: dtype {contract.get('dtype')}, classes "
                     f"{contract.get('valid_min')}-{contract.get('valid_max')}, nodata "
-                    f"{contract.get('nodata')}, {contract.get('crs')}, "
-                    f"{contract.get('pixel_size_deg')}° per pixel.")
+                    f"{contract.get('nodata')}" + (", " + ", ".join(extra) if extra else "") + ".")
     else:
         gaps.append(f"{layer}: no declared contract — layer unvalidated")
     if obs and obs.get("sampled_min") is not None:
@@ -374,8 +377,11 @@ def _passport_citation(n, sid, row, layer, year, clip, level, legend, gaps):
         bits.append(f"Grid: {hdr['width']}×{hdr['height']} px, lon {b[0]}..{b[2]}, "
                     f"lat {b[1]}..{b[3]}; overview levels {hdr['overviews'] or 'none'}.")
     bits.append(f"Read here at {'full resolution' if level <= 1 else f'overview level {level}'}.")
-    bits.append(f"Accuracy: {row.get('accuracy') or 'not documented in this platform'} — "
-                "no accuracy figure is cited.")
+    acc = str(row.get("accuracy") or "").strip()
+    if acc and acc.lower() not in ("unstated", "unknown", "none", "n/a"):
+        bits.append(f"Accuracy, as declared by the producer (not assessed for this area): {acc}.")
+    else:
+        bits.append("Accuracy: not documented on this platform — no accuracy figure is cited.")
     validation = "unvalidated"
     if contract and obs and obs.get("sampled_min") is not None:
         # The clip was read at an overview: its cells are `level` source cells wide.
@@ -750,6 +756,9 @@ def _library_hits(name, focus, labels, trace, gaps, k=3):
             return corpus, hits
         trace.append(f"retrieve {q!r} -> {len(got)} hits")
         for h in got:
+            if _looks_like_references(h.get("text") or ""):
+                trace.append(f"retrieve: skipped a reference-list passage of {((h.get('metadata') or {}).get('title') or 'a document')[:50]}")
+                continue
             if h.get("id") not in seen:
                 seen.add(h.get("id"))
                 hits.append(h)
@@ -757,6 +766,17 @@ def _library_hits(name, focus, labels, trace, gaps, k=3):
         gaps.append(f"the land-cover library holds {n_docs} document(s), none relevant to "
                     f"{name} above the relevance floor — a decline, not a weak match")
     return corpus, hits[:2 * k]
+
+
+def _looks_like_references(text: str) -> bool:
+    """A bibliography page matches many queries and says nothing about the place:
+    many author-year citations, few sentences of its own."""
+    import re as _re
+    years = len(_re.findall(r"\b(?:19|20)\d\d[a-z]?\b", text))
+    etal = text.lower().count("et al")
+    dois = text.lower().count("doi")
+    words = max(1, len(text.split()))
+    return (years >= 12 and years / words > 0.04) or etal >= 6 or dois >= 4
 
 
 def _document_citation(n, h, corpus):
@@ -863,7 +883,8 @@ def _factor_citation(n, ds, spec, res, name, year, year_to, legend, st, st_to, c
                  "value": round(value, 1)}
         lo, hi = _num(rec.get("low")), _num(rec.get("high"))
         if lo is not None and hi is not None:
-            line += f" (with the factor's 95% CI {lo:g}-{hi:g}: {_fmt_t(ha * lo)} to {_fmt_t(ha * hi)})"
+            line += (f" (with the table's low-high range for this factor, {lo:g}-{hi:g}: "
+                     f"{_fmt_t(ha * lo)} to {_fmt_t(ha * hi)})")
             entry["value_low"], entry["value_high"] = round(ha * lo, 1), round(ha * hi, 1)
         if ch is not None and year_to:
             cd = ch["by_class"][cls]
@@ -1041,7 +1062,7 @@ _SYNTH_SYSTEM_TMPL = """You write land-cover briefs for planners, foresters and 
 Non-negotiable rules:
 - Use ONLY the numbered evidence provided. Every paragraph must carry at least one citation marker like [3]. Never use a citation number that is not in the evidence list.
 - Never state a number that does not appear in the evidence text, and quote each with its year.
-- The figures are pixel counts of a mapped product, not measurements or model predictions — attribute them to the named stack and method, never to yourself. No accuracy figure exists in the evidence: say so in the what's-missing section and cite the declared-gaps entry.
+- The figures are pixel counts of a mapped product, not measurements or model predictions — attribute them to the named stack and method, never to yourself. If the evidence states the producer's declared accuracy, quote it as declared (not assessed for this area); if it states none, say so in the what's-missing section and cite the declared-gaps entry.
 - Change between two years is on the common classified mask and includes classifier disagreement; say so in the reading section. Loss is not degradation; gain is not planting.
 - If the evidence cannot support an answer, write no sections; reply with one paragraph starting "DECLINE:" naming exactly what is missing.
 

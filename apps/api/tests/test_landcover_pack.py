@@ -130,7 +130,7 @@ def test_class_areas_one_year(lc_env, log):
     assert lv["summary"]["cells_in_area"] == 64 and "counted from" in lv["why"]
     passport = p["citations"][1]
     assert passport["validation"] == "structural-contract-checked"
-    assert "Accuracy: unstated" in passport["text"]
+    assert "Accuracy: not documented on this platform" in passport["text"]
     assert p["required_sections"][0] == "## What the maps show"
 
 

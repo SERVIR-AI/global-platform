@@ -61,6 +61,32 @@ def _fmt(v, unit: str) -> str:
     return f"{v:,.2f} km"
 
 
+def restrict_within(layer: str, area_geom, area_label: str) -> tuple:
+    """(geometry, label, how) of `area_geom` restricted to the inside of a contributed
+    POLYGON layer, dissolved — or raises ValueError in words."""
+    reg = registered()
+    entry = reg.get(layer)
+    if not entry:
+        have = ", ".join(sorted(k for k, e in reg.items() if _vectors.family(e) == "polygons")) or "none yet"
+        raise ValueError(f"within={layer!r} is not a contributed polygon layer — contributed polygon "
+                         f"layers: {have}")
+    if _vectors.family(entry) != "polygons":
+        raise ValueError(f"within={layer!r} is a {_vectors.family(entry)} layer; `within` needs a "
+                         "POLYGON layer (protected areas, a watershed, a map's class polygons)")
+    inside = _vectors.union_inside(entry, area_geom)
+    if inside.is_empty or _vectors.area_km2(inside) <= 0:
+        raise ValueError(f"no part of {area_label} lies inside {entry.get('title') or layer} ({layer}) — "
+                         "nothing can be measured there")
+    km2_in = _vectors.area_km2(inside)
+    km2_all = _vectors.area_km2(area_geom) if area_geom.geom_type in ("Polygon", "MultiPolygon") else None
+    title = entry.get("title") or layer
+    label = f"{area_label} — inside {title}"
+    how = (f"contributed boundary: {area_label} restricted to the inside of {title} ({layer}; "
+           f"{entry.get('source') or 'source unstated'}), its features merged so overlaps count once: "
+           f"{km2_in:,.1f} km²" + (f" of {km2_all:,.1f} km²" if km2_all else ""))
+    return inside, label, how
+
+
 def citation_text(layer: str, entry: dict, rec: dict, area_name: str) -> str:
     unit = rec["unit"]
     what = {"points": "features", "lines": "of line", "polygons": "of mapped area"}[rec["geometry"]]
@@ -85,6 +111,10 @@ def citation_text(layer: str, entry: dict, rec: dict, area_name: str) -> str:
         bits.append(f"Largest named ({rec['name_field']}): {parts}"
                     + (f"; {more:,} more" if more > 0 else "")
                     + (f"; {rec['unnamed']:,} unnamed" if rec.get("unnamed") else "") + ".")
+    if rec.get("footprint_km2") is not None:
+        bits.append(f"Its features overlap inside {area_name}: counting shared ground once, they "
+                    f"cover {_fmt(rec['footprint_km2'], 'km2')} (the per-{rec.get('group_field') or 'feature'} "
+                    "figures above each count overlapping ground, so they do not add up to this).")
     if rec.get("truncated"):
         bits.append("The layer was read up to its feature cap; the figures are a lower bound.")
     if rec.get("skipped_unreadable"):

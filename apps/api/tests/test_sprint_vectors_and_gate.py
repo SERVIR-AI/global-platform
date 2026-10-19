@@ -453,7 +453,7 @@ def test_a_factor_table_bound_to_land_cover_multiplies_class_areas_and_change(bi
     ha = p["stats"]["classes_km2"]["Mangrove"] * 100          # stats round to 0.1 km2 (10 ha)
     # stats round ha to 0.1 and value is computed from the unrounded area
     assert abs(soil["ha"] - ha) <= 10 and abs(soil["value"] - soil["ha"] * 386) < 386 * 0.1
-    assert f"× 386 t C/ha" in text and "= " in text and "95% CI 351-424" in text
+    assert f"× 386 t C/ha" in text and "= " in text and "low-high range for this factor, 351-424" in text
     assert "loss" in text and "gain" in text and "not an emission estimate" in text
     assert "1 row(s) named classes not in this legend" in text      # the seagrass row
     assert soil["value_lost"] > 0 and soil["value_gained"] > 0
@@ -792,3 +792,77 @@ def test_method_and_gaps_state_the_boundary_once_and_the_carbon_rule_honestly(bi
     assert "Boundary: the caller's own polygon" in method and "OpenStreetMap" not in method
     assert sum("boundary" in g.lower() for g in p["gaps"]) == 1
     assert any("would turn class areas into stocks" in g for g in p["gaps"])     # no factor table bound
+
+
+def test_connect_time_text_follows_contributions(binary_stack):
+    """A stack contributed after the server started appears in the instructions and in
+    assemble_pack's description the next time a client connects."""
+    import asyncio
+    from app.mcp import server
+    mw = next(m for m in server.mcp.middleware if type(m).__name__ == "_LiveText")
+    mw._at = 0.0
+    mw._fresh()
+    assert "Testland" in mw._instr
+    assert "Testland" in mw._descs["assemble_pack"]
+
+    class Ctx:
+        pass
+
+    async def run():
+        async def nxt(ctx):
+            return None
+        await mw.on_initialize(Ctx(), nxt)
+    asyncio.run(run())
+    assert "Testland" in server.mcp.instructions
+
+
+def test_within_restricts_any_packs_area_and_overlaps_count_once(binary_stack, tmp_path, monkeypatch, log):
+    """Two overlapping protected areas cover the left half of the bay: `within` restricts the
+    land-cover answer to their dissolved union, and their own measure states the footprint."""
+    s = get_settings()
+    monkeypatch.setattr(s, "grp_mattermost_webhook", "")
+    monkeypatch.setattr(s, "grp_auto_approve", True)
+    PX, LEFT, TOP = binary_stack["PX"], binary_stack["LEFT"], binary_stack["TOP"]
+    a = box(LEFT, TOP - 10 * PX, LEFT + 4 * PX, TOP)                 # columns 0-3
+    b = box(LEFT + 2 * PX, TOP - 10 * PX, LEFT + 5 * PX, TOP)        # columns 2-4, overlaps a
+    fc = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {"NAME": "Park A", "DESIG": "Parque"}, "geometry": mapping(a)},
+        {"type": "Feature", "properties": {"NAME": "Ramsar B", "DESIG": "Ramsar"}, "geometry": mapping(b)}]}
+    monkeypatch.setattr(fetch_policy, "check_url", lambda url: [])
+    monkeypatch.setattr(fetch_policy, "fetch", lambda url, max_bytes=None: (json.dumps(fc).encode(), "pa.geojson"))
+    staging.STAGED_VECTORS.clear()
+    monkeypatch.setattr(staging, "_STAGED_VECTORS_LOADED", True)
+    out = staging.submit("vector", {"layer": "test_pas", "url": "https://x.test/pa.geojson", "title": "Test protected areas",
+                                    "description": "synthetic", "source": "test fixture", "license": "CC0-1.0",
+                                    "vintage": "unstated", "name_field": "NAME", "group_field": "DESIG"}, OWNER)
+    assert out["status"] == "approved", out
+    full = assemble.assemble(pack="land-cover", place="Test bay", year="1996", geometry=binary_stack["poly"],
+                             classes=["Mangrove"], vectors=["test_pas"])
+    inside = assemble.assemble(pack="land-cover", place="Test bay", year="1996", geometry=binary_stack["poly"],
+                               classes=["Mangrove"], within="test_pas")
+    assert full["status"] == "ok" and inside["status"] == "ok", inside.get("note")
+    # the bay polygon covers columns 1-8; 1996 mangrove is columns 0-3 -> inside the bay: 1-3; union of PAs: 0-4
+    m_full = full["stats"]["classes_km2"]["Mangrove"]
+    m_in = inside["stats"]["classes_km2"]["Mangrove"]
+    nm_in = inside["stats"]["classes_km2"]["Not mangrove"]
+    log("OUTPUT", f"mangrove full {m_full} km2, inside PAs {m_in} km2, not-mangrove inside {nm_in}")
+    assert m_in == m_full                       # all bay mangrove (cols 1-3) is inside the PA union (cols 0-4)
+    assert inside["target"]["within"] == "test_pas" and "inside Test protected areas" in inside["target"]["place"]
+    assert any("restricted to the inside of" in g for g in inside["gaps"])
+    rec = full["vectors"]["test_pas"]
+    assert rec["footprint_km2"] < rec["total"]   # overlap of columns 2-3 counted once
+    assert "counting shared ground once" in next(c for c in full["citations"] if c["kind"] == "vector_summary")["text"]
+    bad = assemble.assemble(pack="land-cover", place="Test bay", year="1996", geometry=binary_stack["poly"],
+                            within="nope")
+    assert bad["status"] == "declined" and "not a contributed polygon layer" in bad["note"]
+    staging.STAGED_VECTORS.clear()
+
+
+def test_reference_list_passages_are_not_cited():
+    from app.land_cover import synthesis as lc
+    refs = ("Adame, M. F., et al. (2012). Carbon stocks. Estuaries 35, 1-10. doi:10.1007/x "
+            "Alongi, D. M. (2010) Wetlands. Bouillon, S. et al. 2008 Global Biogeochem. doi:10.1029/y "
+            "Donato, D. C. et al. (2011) Nat. Geosci. 4, 293. Kauffman, J. B. et al. 2011 Wetlands 31, 343. "
+            "Komiyama A. et al 2008 Aquat Bot 89, 128. Saenger P. 2002. Chmura G. et al. 2003. Twilley 1992.")
+    assert lc._looks_like_references(refs)
+    assert not lc._looks_like_references("Mangle alto: bosque de mangle de más de 10 m de altura, clasificado en 2021 con imágenes de 2019 y 2020.")

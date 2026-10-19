@@ -334,7 +334,8 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
         # The caller holds the authoritative boundary — a GADM district, a hub's
         # own admin polygon — so the geocoder is not consulted and `place` is the
         # label the citations carry. This is the join another system makes.
-        aoi = ingest.ensure_aoi(geometry=geometry, name=place or None)
+        kw = {"how": extras["within_how"]} if (extras or {}).get("within_how") else {}
+        aoi = ingest.ensure_aoi(geometry=geometry, name=place or None, **kw)
     else:
         aoi = ingest.ensure_aoi(place=place)
     trace.append(f"aoi[{aoi.get('name', place)}] {aoi.get('area_km2')} km2 via {aoi.get('how')}")

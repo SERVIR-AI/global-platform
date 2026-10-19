@@ -313,6 +313,42 @@ def area_km2(geom) -> float:
     return max(total, 0.0)
 
 
+def union_inside(entry: dict, area):
+    """The dissolved union of a polygon layer's features inside `area` (shapely), or an
+    empty geometry. Overlapping features count once — what 'inside the protected
+    areas' means, as opposed to a sum over designations."""
+    from shapely.geometry import GeometryCollection
+    from shapely.prepared import prep
+    fc = json.load(open(master_path(entry)))
+    minx, miny, maxx, maxy = area.bounds
+    ready = prep(area)
+    parts = []
+    for ft in fc.get("features") or []:
+        g = ft.get("geometry") or {}
+        if FAMILIES.get(g.get("type")) != "polygons":
+            continue
+        try:
+            geom = _valid(shape(g))
+        except Exception:
+            continue
+        bx = geom.bounds
+        if bx[2] < minx or bx[0] > maxx or bx[3] < miny or bx[1] > maxy:
+            continue
+        if not ready.intersects(geom):
+            continue
+        try:
+            parts.append(geom.intersection(area))
+        except Exception:
+            continue
+    if not parts:
+        return GeometryCollection()
+    u = unary_union(parts)
+    if u.geom_type == "GeometryCollection":
+        polys = [g for g in u.geoms if g.geom_type in ("Polygon", "MultiPolygon")]
+        u = unary_union(polys) if polys else GeometryCollection()
+    return u
+
+
 def _valid(geom):
     """A polygon a hub's GIS left invalid (a self-touching ring, nested shells) is
     repaired before it is clipped or measured — GEOS refuses to intersect it otherwise,
@@ -352,6 +388,7 @@ def summarise(entry: dict, boundary, cap_features: int = 250_000) -> dict:
     named: list = []
     total = 0.0
     n_in = 0
+    parts_for_union: list = []
     digest = hashlib.sha256()
     truncated = False
     skipped = 0
@@ -386,6 +423,8 @@ def summarise(entry: dict, boundary, cap_features: int = 250_000) -> dict:
             measure = length_km(part) if fam == "lines" else area_km2(part)
             if measure <= 0:
                 continue
+            if fam == "polygons":
+                parts_for_union.append(part)
         n_in += 1
         total += measure
         props = ft.get("properties") or {}
@@ -397,9 +436,19 @@ def summarise(entry: dict, boundary, cap_features: int = 250_000) -> dict:
         digest.update(f"{ft.get('id', i)}:{measure:.6f};".encode())
     unit = {"points": "features", "lines": "km", "polygons": "km2"}[fam]
     by_group = sorted(groups.items(), key=lambda kv: -kv[1])
+    footprint = None
+    if fam == "polygons" and len(parts_for_union) > 1:
+        # Overlapping polygons (a Ramsar site over a national park) are each counted in
+        # `total`; the footprint counts their shared ground once.
+        try:
+            footprint = area_km2(unary_union(parts_for_union))
+        except Exception:
+            footprint = None
     out = {"geometry": fam, "unit": unit, "features_inside": n_in,
            "total": round(total, 3) if fam != "points" else n_in,
            **({"total_ha": round(total * 100, 1)} if fam == "polygons" else {}),
+           **({"footprint_km2": round(footprint, 3)} if footprint is not None
+              and total - footprint > max(0.005 * total, 1e-6) else {}),
            "features_in_layer": len(feats), "features_sha256": digest.hexdigest(),
            "truncated": truncated, **({"skipped_unreadable": skipped} if skipped else {})}
     if gkey:

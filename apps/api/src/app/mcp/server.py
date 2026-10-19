@@ -12,6 +12,7 @@ import base64
 import os
 
 from fastmcp import FastMCP
+from fastmcp.server.middleware import Middleware
 from mcp.types import Icon
 
 from . import (app_ui, assemble, auth, compose, context, feeds, fetch, loop,
@@ -87,7 +88,12 @@ def _audiences_line() -> str:
         "food-security analysts, hub teams and ministry advisors deciding whether to act months ahead"
 
 
-INSTRUCTIONS = f"""The Global Risk Platform — a GOVERNED TOOLKIT for decision support across \
+def _instructions() -> str:
+    """The connect-time instructions, built from what the platform holds NOW — the
+    packs' summaries, places and target shapes read live. Built once at import they
+    went stale the moment a hub contributed: a Costa Rica mangrove stack landed and
+    every new connection was still told land cover covers the HKH."""
+    return f"""The Global Risk Platform — a GOVERNED TOOLKIT for decision support across \
 {_domain_count()} domains, not a chatbot: {_domains_line()}. Every insight carries its evidence; \
 declines say why; answers are replayable; a groundedness gate blocks ungrounded briefs.
 
@@ -166,6 +172,9 @@ for the (adjustable) crop calendar when the question is food security.
 If the user asks how to use this server, read the `servirplatform://how-to-use` resource (a \
 human-readable guide) — or run the `explain_platform` prompt — and answer from it."""
 
+
+INSTRUCTIONS = _instructions()
+
 # Host, port, transport security and statelessness are no longer constructor
 # arguments: they belong to whoever builds the ASGI app or runs the transport, so
 # they come from _http_transport() at that point.
@@ -190,6 +199,56 @@ def _brand_icons() -> list[Icon]:
 
 mcp = FastMCP("servirplatform", instructions=INSTRUCTIONS, icons=_brand_icons(),
               website_url=get_settings().grp_public_url.strip() or None)
+
+
+class _LiveText(Middleware):
+    """Connect-time text that follows the platform's state. Every description built
+    from live state (packs, stacks, contributed layers, feeds) is regenerated for each
+    new connection rather than frozen at process start; a 30-second cache keeps a
+    burst of reconnects cheap."""
+    TTL = 30.0
+
+    def __init__(self):
+        self._at = 0.0
+        self._instr = None
+        self._descs: dict = {}
+
+    def _fresh(self) -> None:
+        import time
+        if self._instr is not None and time.monotonic() - self._at < self.TTL:
+            return
+        gens = {"assemble_pack": registry.describe_assemble, "publish_answer": publish.describe,
+                "feeds_query": feeds.describe, "ui_design": ui.describe_design,
+                "ui_catalog": ui.describe_catalog, "ui_component": ui.describe_component,
+                "ui_embed": ui.describe_embed, "contribute_submit": _staging.describe_submit,
+                "risk_weights": weights_ui.describe}
+        descs = {}
+        for name, fn in gens.items():
+            try:
+                descs[name] = fn()
+            except Exception:                 # keep the registered text rather than fail a listing
+                pass
+        try:
+            self._instr = _instructions()
+        except Exception:
+            self._instr = None
+        self._descs = descs
+        self._at = time.monotonic()
+
+    async def on_initialize(self, context, call_next):
+        self._fresh()
+        if self._instr:
+            mcp.instructions = self._instr
+        return await call_next(context)
+
+    async def on_list_tools(self, context, call_next):
+        tools = await call_next(context)
+        self._fresh()
+        out = []
+        for t in tools:
+            d = self._descs.get(getattr(t, "name", None))
+            out.append(t.model_copy(update={"description": d}) if d and d != t.description else t)
+        return out
 
 
 # async because the surface accessors are coroutines: there is no sync way to ask
@@ -269,7 +328,8 @@ def assemble_pack(country: str | None = None, crop: str | None = None,
                   classes: list[str] | None = None,
                   stack: str | None = None,
                   layers: list[str] | None = None,
-                  vectors: list[str] | None = None) -> dict:
+                  vectors: list[str] | None = None,
+                  within: str | None = None) -> dict:
     """Assembles a deterministic, citable EVIDENCE PACK for one domain pack's target
     (country/crop; place/hazard; place/year) and mints a `pack_id`. For a pack whose
     target is a place, pass `geometry` (a GeoJSON Polygon/MultiPolygon in EPSG:4326, or a
@@ -283,6 +343,10 @@ def assemble_pack(country: str | None = None, crop: str | None = None,
     inside the pack's area — a count, km of line, km² (ha) of polygon, broken down by
     the contributor's group field, with the largest named features — each as a cited
     item [n] and in `vectors.<name>`; an unknown name declines with the list.
+    `within` names a contributed POLYGON layer (protected areas, a watershed): the pack's
+    area becomes the part of `place`/`geometry` inside that layer, its features merged so
+    overlaps count once — "mangrove inside protected areas", "exposure inside the
+    watershed". Every figure in the pack is then for that restricted area.
     `map_layer` names which counted point layer the map draws — hospitals, schools,
     buildings, or a contributed layer such as evacuation_centres; unnamed ones are
     declined by name. Whatever is drawn, every counted layer's places — name,
@@ -310,7 +374,7 @@ def assemble_pack(country: str | None = None, crop: str | None = None,
                              override=override, override_country=override_country,
                              override_crop=override_crop,
                              year=year, year_to=year_to, classes=classes,
-                             layers=layers, vectors=vectors)
+                             layers=layers, vectors=vectors, within=within)
 
 
 @mcp.tool()
@@ -693,6 +757,9 @@ def main() -> None:
             host=os.environ.get("GRP_MCP_HOST", "127.0.0.1"),
             port=int(os.environ.get("GRP_MCP_PORT", "8000")),
             **_http_transport())
+
+
+mcp.add_middleware(_LiveText())
 
 
 if __name__ == "__main__":

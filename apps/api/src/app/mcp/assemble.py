@@ -28,7 +28,8 @@ def assemble(country: str | None = None, crop: str | None = None,
              classes: list[str] | None = None,
              stack: str | None = None,
              layers: list[str] | None = None,
-             vectors: list[str] | None = None) -> dict:
+             vectors: list[str] | None = None,
+             within: str | None = None) -> dict:
     """Gather one pack's evidence into a numbered, gap-declaring pack; mint and
     persist a pack_id. Back-compat: bare (country, crop) calls stay food-security,
     and FS packs keep top-level country/crop keys — Desktop configs and the embed
@@ -65,12 +66,37 @@ def assemble(country: str | None = None, crop: str | None = None,
     bad_vectors = vectors_step.check(vectors)
     if bad_vectors:
         return {"status": "declined", "note": bad_vectors}
+    within_how = None
+    if within:
+        # Any pack with an area: the area becomes the part of it inside a contributed
+        # polygon layer — mangrove inside protected areas, exposure inside a watershed.
+        if not any(k in spec["target_keys"] for k in ("place",)):
+            return {"status": "declined",
+                    "note": f"within needs a pack that analyses an area; {pack_id_name} has none"}
+        from ..graph.geo import ingest as _ingest
+        from shapely.geometry import mapping as _mapping
+        try:
+            if geometry is not None:
+                base = _ingest._to_polygon(geometry)
+                base_label = place or "the area you supplied"
+            else:
+                if not place:
+                    return {"status": "declined", "note": "within needs a place or a geometry to restrict"}
+                _km2, base_label, base, _how = _ingest._boundary(place, 250_000.0)
+            restricted, label, within_how = vectors_step.restrict_within(str(within).strip(), base, base_label)
+        except ValueError as exc:
+            return {"status": "declined", "note": str(exc)}
+        geometry = _mapping(restricted)
+        place = label
+        target = {**target, "place": label, "within": str(within).strip()}
     focus = (focus or spec["default_focus"](target)).strip()
     trace: list[str] = []
     extras = {"override": override, "override_country": override_country,
               "override_crop": override_crop, "min_severity": min_severity}
     if geometry is not None:
         extras["geometry"] = geometry   # the caller's own boundary; see gather_risk_evidence
+    if within_how:
+        extras["within_how"] = within_how
     if map_layer:
         extras["map_layer"] = map_layer  # which counted point layer the map should draw
     t_gather = time.perf_counter()
