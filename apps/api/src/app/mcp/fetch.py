@@ -84,7 +84,7 @@ def search(query: str, k: int = 5, country: str | None = None, crop: str | None 
         filters = {"countries": country, "crops": crop,
                    "temporal": temporal, "doc_type": doc_type}
         skipped: dict = {}
-        hits = corpus.search(query, k=k, skipped=skipped, **filters)
+        hits = corpus.search(query, k=k, skipped=skipped, skip_references=True, **filters)
     except MissingAPIKey as exc:
         return {**base, "status": "declined", "note": f"embedding key missing: {exc}"}
     except CorpusError as exc:

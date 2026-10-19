@@ -278,14 +278,14 @@ class Corpus:
                 "raw_archive_kept": self.raw_path(doc_id) is not None}
 
     def search(self, query: str, k: int = 5, min_relevance: float | None = None,
-               *, where=None, skipped: dict | None = None, references: bool = False,
+               *, where=None, skipped: dict | None = None, skip_references: bool = False,
                **filters) -> list[dict]:
         """Top-k above the relevance floor; metadata filters narrow BEFORE ranking;
-        below the floor returns []. Every caller gets passages of their own: a
-        reference list or contents page is passed over (unless `references`), and
-        with `where` (the countries of the area asked about) so is a document that
-        declares other countries — the next passage down takes its place, so k
-        stays k. `skipped` (a dict) collects what was passed over (rag.filters.sift)."""
+        below the floor returns []. With `where` (the countries of the area asked
+        about) a document that declares other countries is passed over; with
+        `skip_references` (opt-in) so is a reference list or contents page — the next
+        passage down takes its place, so k stays k. `skipped` (a dict) collects what
+        was passed over (rag.filters.sift)."""
         from .filters import sift
         if min_relevance is None:
             min_relevance = get_settings().rag_min_relevance
@@ -302,7 +302,7 @@ class Corpus:
                 break
             hit = {"score": round(float(sims[j]), 4),
                    **{key: self._chunks[idx[j]][key] for key in ("id", "doc_id", "text", "metadata")}}
-            out.extend(sift([hit], where=where, skipped=skipped, references=references))
+            out.extend(sift([hit], where=where, skipped=skipped, skip_references=skip_references))
         return out
 
     def count(self, **filters) -> int:

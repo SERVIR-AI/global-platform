@@ -1,48 +1,75 @@
-"""What a retrieved passage must be before any pack cites it: a passage of its own,
-not a reference list or a contents page, and — when the document declares the
-countries it is about — about the country asked. The land-cover pack learned both
-on the sprint corpus (a bibliography page outscored every finding; a Gulf of Nicoya
-report was cited in Gulf of Guayaquil answers); they live here so `Corpus.search`,
-`corpus_search` and every pack's retrieval apply the same rule.
+"""What a retrieved passage must be before a pack cites it: about the country asked
+when the document declares its countries, and — for a caller that opts in
+(`skip_references`) — a passage of its own, not a reference list or a contents page.
+The land-cover pack learned both on the sprint corpus (a bibliography page outscored
+every finding; a Gulf of Nicoya report was cited in Gulf of Guayaquil answers). The
+reference test is opt-in because a heuristic that misreads one dated table drops
+evidence silently; land cover and `corpus_search` (which says what it passed over)
+opt in.
 """
 from __future__ import annotations
 
 import re
 
 # A reference list, a bibliography or a table of contents matches many queries and
-# says nothing about the place. Headings in the languages hubs publish in.
-_REF_HEADING = re.compile(
-    r"^\W*(?:\d+(?:\.\d+)*\.?\s*)?(?:references?|bibliography|literature cited|works cited|"
-    r"bibliograf[ií]a(?:\s+(?:citada|consultada))?|literatura\s+(?:citada|consultada)|"
-    r"referencias(?:\s+bibliogr[aá]ficas)?|refer[eê]ncias(?:\s+bibliogr[aá]ficas)?|bibliographie|"
-    r"r[ée]f[ée]rences(?:\s+bibliographiques)?|(?:table\s+of\s+)?contents|"
-    r"[ií]ndice(?:\s+general)?|contenidos?|tabla\s+de\s+contenidos?|sum[aá]rio)\W*$", re.I | re.M)
+# says nothing about the place. Headings in the languages hubs publish in; one counts
+# only at the top of a passage (a 'Contents' link in a page footer does not).
+_REFS_WORDS = (r"references?(?:\s+and\s+data\s+sources)?|bibliography|literature cited|works cited|"
+               r"bibliograf[ií]a(?:\s+(?:citada|consultada))?|literatura\s+(?:citada|consultada)|"
+               r"referencias(?:\s+bibliogr[aá]ficas)?|refer[eê]ncias(?:\s+bibliogr[aá]ficas)?|"
+               r"bibliographie|r[ée]f[ée]rences(?:\s+bibliographiques)?")
+_TOC_WORDS = (r"(?:table\s+of\s+)?contents|[ií]ndice(?:\s+general)?|contenidos?|"
+              r"tabla\s+de\s+contenidos?|sum[aá]rio|table\s+des\s+mati[eè]res")
+_HEAD = r"^\W*(?:\d+(?:\.\d+)*\.?\s*)?(?:{})\W*$"
+_REF_HEADING = re.compile(_HEAD.format(_REFS_WORDS), re.I)
+_TOC_HEADING = re.compile(_HEAD.format(_TOC_WORDS), re.I)
 # "Surname, A." / "Surname, A. B." — a surname and initials, in any Latin script.
 _AUTHOR = re.compile(r"\b[A-ZÁÉÍÓÚÑÜÇ][a-záéíóúñüçãõ'’\-]+,\s(?:[A-ZÁÉÍÓÚÑ]\.\s?-?){1,3}")
-_IMPRINT = re.compile(r"(?:^|\s)(?:In|En|Em|Dans):\s|\b[A-Z][a-zé]+(?:,\s?[A-Z]{2,})?:\s+[A-Z][\w&.\-]*")
+_ETAL = re.compile(r"\bet\s+al\b", re.I)
+_LINK = re.compile(r"(?:https?://|\bwww\.)\S+|\bdoi\s*:\s*\S+", re.I)     # one per link
+_YEAR = re.compile(r"\b(?:19|20)\d\d[a-z]?\b")
+_PAREN = re.compile(r"\([^()]*\)")
+# The fragments a reference list is cut into: 'In: …', 'Paris: Food and Agriculture …'.
+_IN = re.compile(r"(?:^|\s)(?:In|En|Em|Dans):\s")
+_IMPRINT = re.compile(r"\b[A-Z][a-zé]+(?:,\s?[A-Z]{2,})?:\s+[A-Z][\w&.\-]*")
 _PAGES = re.compile(r"\b\d+\s?(?:p|pp|págs?|pages?)\.(?=\s|$)|\bpp?\.\s?\d+", re.I)
-_LEADER = re.compile(r"(?:\.\s?){4,}\s*\d{1,4}\b|…\s*\d{1,4}\b")
+# Dotted leaders to ONE page number: a table row's '…… 1,234', '…… 5.8' or '…… 12 34'
+# is not a contents line.
+_LEADER = re.compile(r"(?:(?:\.\s?){4,}|…+)\s*\d{1,4}(?![\d.,]|[ \t]+\d)")
+# A contents line: a title then its page number (after dotted leaders, or alone).
+_TOC_LINE = re.compile(r"(?:(?:\.\s?){4,}|…+|\s)\s*(?:\d{1,4}|[ivxlc]{1,6})\s*$", re.I)
 
 
 def looks_like_references(text: str) -> bool:
-    """A bibliography page matches many queries and says nothing about the place:
-    many author-year citations, few sentences of its own — in any language
-    ('Bibliografía', 'Literatura citada', 'Referencias'), and the fragments a
-    reference list is cut into ('In: Paris: Food and Agriculture Organization'). A
-    contents page is the same kind of noise: dotted leaders to page numbers."""
-    years = len(re.findall(r"\b(?:19|20)\d\d[a-z]?\b", text))
-    etal = text.lower().count("et al")
-    dois = text.lower().count("doi")
-    words = max(1, len(text.split()))
-    authors = len(_AUTHOR.findall(text))
-    imprint = len(_IMPRINT.findall(text))
+    """A bibliography page or a contents page — never a passage with findings of its
+    own. Years alone prove nothing (a dated report, a statistical table); it takes
+    citations dense enough to BE the text (authors with initials, 'et al.', DOIs,
+    links), a references heading opening the passage, or contents entries making
+    up most of it. A short imprint fragment ('In: Paris: FAO') counts too."""
+    words = max(1, sum(1 for w in text.split() if any(ch.isalnum() for ch in w)))  # not leaders
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    head = lines[:3]                                  # a running page header may come first
+    years = len(_YEAR.findall(text))
+    # '(Hoang et al., 2019; Lauri et al., 2012)' is prose citing its sources; only
+    # citations outside parentheses are entries of a list
+    bare = _PAREN.sub(" ", text)
+    links = len(_LINK.findall(bare))
+    cites = len(_AUTHOR.findall(bare)) + len(_ETAL.findall(bare)) + links
     pages = len(_PAGES.findall(text))
     leaders = len(_LEADER.findall(text))
-    return ((years >= 12 and years / words > 0.04) or etal >= 6 or dois >= 4
-            or (authors >= 4 and authors / words > 0.02)
-            or leaders >= 3
-            or (bool(_REF_HEADING.search(text)) and authors + years + leaders + pages >= 3)
-            or (words < 40 and imprint > 0 and (years + pages + authors + imprint) >= 2))
+    toc_lines = sum(1 for ln in lines if _TOC_LINE.search(ln))
+    if cites >= 5 and years >= 3 and (cites * 20 >= words or links * 30 >= words):
+        return True                                   # citations (or links) are the text
+    if any(_REF_HEADING.match(ln) for ln in head) and cites + years + pages >= 3:
+        return True                                   # 'References' heads the passage
+    if leaders >= 3 and leaders * 20 >= words:
+        return True                                   # dotted leaders to page numbers, little else
+    if any(_TOC_HEADING.match(ln) for ln in head) and toc_lines >= 3 and 2 * toc_lines >= len(lines) - 1:
+        return True                                   # 'Contents' heads a list of page numbers
+    # a short tail of a reference list; 'Synopsis: El Niño …' or 'Source: FAO, 2024'
+    # is a label, not an imprint, unless pages or a citation come with it
+    return words < 40 and (bool(_IN.search(text))
+                           or (bool(_IMPRINT.search(text)) and pages + cites >= 1))
 
 
 def declared_countries(metadata: dict) -> list[str]:
@@ -61,17 +88,17 @@ def speaks_to(declared, countries) -> bool:
     return any(country_matches(declared, c) for c in countries)
 
 
-def sift(hits, where=(), skipped: dict | None = None, references: bool = False) -> list:
-    """The hits a pack may cite, in their order: a reference-list or contents passage
-    is passed over (unless `references`), and so is a document about another country
-    than `where` (the countries of the area asked about). When `skipped` is a dict,
-    what was passed over is recorded in it — {"references": [title], "elsewhere":
-    {countries: [title]}} — so the caller can say so in its trace or its gaps."""
+def sift(hits, where=(), skipped: dict | None = None, skip_references: bool = False) -> list:
+    """The hits a pack may cite, in their order: a document about another country than
+    `where` (the countries of the area asked about) is passed over, and so — only when
+    `skip_references` — is a reference-list or contents passage. When `skipped` is a
+    dict, what was passed over is recorded in it — {"references": [title],
+    "elsewhere": {countries: [title]}} — so the caller can say so in its trace or gaps."""
     kept = []
     for h in hits or []:
         m = h.get("metadata") or {}
         title = str(m.get("title") or h.get("doc_id") or "a document")
-        if not references and looks_like_references(h.get("text") or ""):
+        if skip_references and looks_like_references(h.get("text") or ""):
             if skipped is not None:
                 skipped.setdefault("references", []).append(title)
             continue

@@ -395,13 +395,13 @@ def library(tmp_path, monkeypatch):
 def test_the_library_passes_over_reference_lists_and_documents_about_other_countries(library, log):
     c = library("land-cover")
     skipped = {}
-    hits = c.search("mangrove carbon Nicoya flood", k=3, skipped=skipped)
+    hits = c.search("mangrove carbon Nicoya flood", k=3, skipped=skipped, skip_references=True)
     titles = [h["metadata"]["title"] for h in hits]
     log("OUTPUT", titles)
     assert len(hits) == 3 and "Nicoya report, references" not in titles        # k stays k
     assert skipped["references"] == ["Nicoya report, references"]
     assert "Nicoya report, references" in [h["metadata"]["title"] for h in
-                                           c.search("mangrove carbon Nicoya flood", k=5, references=True)]
+                                           c.search("mangrove carbon Nicoya flood", k=5)]
     skipped = {}
     here = [h["metadata"]["title"] for h in c.search("mangrove carbon flood", k=5, where=["Costa Rica"],
                                                      skipped=skipped)]
@@ -431,12 +431,13 @@ def test_a_shelf_holding_only_a_bibliography_declines_in_words(library):
     assert "Nicoya report, references" in out["note"]
 
 
-def test_the_risk_pack_cites_no_bibliography_either(library, log):
-    """Another pack, no code of its own changed: its library reads through the same search."""
+def test_a_pack_that_does_not_opt_in_loses_no_passage(library, log):
+    """Passing over reference lists is opt-in (land cover, corpus_search): a heuristic that
+    misreads a dated table must not silently drop another pack's evidence."""
     from app.risk import synthesis as risk
     library(risk.RISK_CORPUS)
     trace, gaps = [], []
     _corpus, hits = risk._document_hits("Nicoya", "hazard_flood", "mangrove carbon Nicoya flood", trace, gaps)
     titles = [h["metadata"]["title"] for h in hits]
     log("OUTPUT", titles)
-    assert hits and "Nicoya report, references" not in titles
+    assert "Nicoya report, references" in titles and "Nicoya report" in titles

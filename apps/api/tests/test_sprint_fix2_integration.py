@@ -652,12 +652,12 @@ class _Library:
     def raw_path(self, doc_id):
         return None
 
-    def search(self, q, k=5, min_relevance=None, *, where=None, skipped=None, references=False,
+    def search(self, q, k=5, min_relevance=None, *, where=None, skipped=None, skip_references=False,
                **filters):
         self.calls.append({"where": where, "temporal": filters.get("temporal")})
         got = [h for h in self.hits if not filters.get("temporal")
                or h["metadata"].get("temporal") == filters["temporal"]]
-        return rag_filters.sift(got, where=where, skipped=skipped, references=references)[:k]
+        return rag_filters.sift(got, where=where, skipped=skipped, skip_references=skip_references)[:k]
 
 
 def _hit(doc, countries=None, temporal="forecast", score=0.9, **meta):

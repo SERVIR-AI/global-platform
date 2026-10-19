@@ -1039,13 +1039,15 @@ def _library_hits(name, focus, labels, trace, gaps, k=3, countries=()):
     for q in queries:
         try:
             # The area's own countries first, so its documents are not crowded out by a
-            # better-scored library about somewhere else; then the rest. The library
-            # passes over reference lists and documents about other countries
-            # (rag.filters) and says which in `skipped`; sifted again here, whatever
-            # the library did, so the rule holds for any corpus.
-            got = (corpus.search(q, k=k, countries=list(countries), skipped=skipped)
-                   if countries else []) \
-                + corpus.search(q, k=3 * k, where=list(countries), skipped=skipped)
+            # better-scored library about somewhere else; then the rest. Land cover
+            # opts in to passing over reference lists (a bibliography page outscored
+            # every finding on its corpus) as well as documents about other countries
+            # (rag.filters), said in `skipped`; sifted again here, whatever the
+            # library did, so the rule holds for any corpus.
+            got = (corpus.search(q, k=k, countries=list(countries), skipped=skipped,
+                                 skip_references=True) if countries else []) \
+                + corpus.search(q, k=3 * k, where=list(countries), skipped=skipped,
+                                skip_references=True)
         except (CorpusError, MissingAPIKey) as exc:
             gaps.append(f"document retrieval failed ({exc})")
             return corpus, hits
@@ -1055,7 +1057,8 @@ def _library_hits(name, focus, labels, trace, gaps, k=3, countries=()):
             if h.get("id") not in seen:
                 seen.add(h.get("id"))
                 fresh.append(h)
-        hits.extend(_rag_filters.sift(fresh, where=countries, skipped=skipped)[:k])
+        hits.extend(_rag_filters.sift(fresh, where=countries, skipped=skipped,
+                                      skip_references=True)[:k])
     for title in sorted(set(skipped.get("references") or [])):
         trace.append(f"retrieve: skipped a reference-list passage of {title[:50]}")
     elsewhere = {where: set(t) for where, t in (skipped.get("elsewhere") or {}).items()}
