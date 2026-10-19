@@ -1061,8 +1061,12 @@ def _read_raster(m, path, kind, box, where, member, cap, folder, found=None):
             names = rc.remote_names(found, quoted)
         else:
             import zipfile
-            with zipfile.ZipFile(path) as z:
-                names = [i.filename for i in z.infolist() if not i.is_dir()]
+            try:
+                with zipfile.ZipFile(path) as z:
+                    names = [i.filename for i in z.infolist() if not i.is_dir()]
+            except (zipfile.BadZipFile, OSError):    # a download cut short, a partial upload
+                raise rc.ClipRefused(f"the zip at {quoted} cannot be read (it is truncated or "
+                                     "damaged); re-upload it and resubmit") from None
         member, said = rc.pick_member(names, member, quoted)
         if said:
             notes.append(said)

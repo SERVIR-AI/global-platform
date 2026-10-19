@@ -309,3 +309,19 @@ def test_a_given_clip_from_a_host_that_streams_without_a_size_is_declined_in_wor
     sized = _submit(_measure("measure_sized", host.put("sized.tif", _tif(_noise()), mode="whole"), clip=GULF))
     assert "sends it only whole (it does not answer range requests)" in sized["problems"][0]
     assert _no_strays(env)
+
+
+# ------------------------------------------------------------ 3. a torn zip
+def test_a_truncated_zip_is_declined_not_raised(env, host, log):
+    """A zip cut short under the cap: 're-upload it', not a raw BadZipFile out of the
+    tool — for a raster and for a zipped shapefile alike."""
+    data = _zip({"maps/gulf.tif": _tif(_noise(100))})
+    out = _submit(_measure("measure_cut", host.put("cut.zip", data[: len(data) // 2], mode="whole")))
+    log("OUTPUT", out["problems"])
+    assert out["status"] == "declined"
+    assert "cannot be read (it is truncated or damaged); re-upload it" in out["problems"][0]
+    assert "staged-tmp" not in out["problems"][0] and _no_strays(env)
+    from app.graph.geo import vecio
+    shp = _zip({"rios.shp": b"x" * 400, "rios.dbf": b"x" * 400})
+    with pytest.raises(ValueError, match="re-upload it"):
+        vecio.to_geojson(shp[: len(shp) // 2], "rios.zip")

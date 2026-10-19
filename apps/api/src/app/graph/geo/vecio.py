@@ -574,7 +574,11 @@ def _read_dbf(data: bytes, encoding: str | None):
 
 
 def _read_shapefile_zip(raw: bytes, layer_name: str | None):
-    zf = zipfile.ZipFile(io.BytesIO(raw))
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw))
+    except zipfile.BadZipFile:
+        raise ValueError("the zip cannot be read (it is truncated or damaged); re-upload it "
+                         "and resubmit") from None
     names = [n for n in zf.namelist() if not n.endswith("/")]
     shps = [n for n in names if n.lower().endswith(".shp")]
     if not shps:
