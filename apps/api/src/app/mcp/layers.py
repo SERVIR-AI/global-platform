@@ -6,6 +6,10 @@ own defaults. A gatherer reports its area and its defaults as data — the reser
 stats keys `_area` ({name, how, area_km2, geometry}) and `_layer_defaults`
 ([{layer, why}]); a pack row or extension SPEC may instead declare
 `default_layers` (a list, or a callable of the target). Nothing here names a pack.
+A gatherer whose answer rests on a class map may also hand it over as `_class_grid`
+({path, legend, outside_values, year, stack, label}): every layer read is then also
+summarised per class of that map — mean and total biomass inside mangrove, mangrove
+area per elevation band — for any pack, from the same key.
 Every path that persists gatherer stats strips the reserved keys (`strip_reserved`):
 an area's coordinates left in `stats` would count as evidence to the gate.
 
@@ -30,16 +34,18 @@ def check(layers) -> str | None:
     return layer_values.check_names(layers)
 
 
-RESERVED = ("_area", "_layer_defaults")
+RESERVED = ("_area", "_layer_defaults", "_class_grid")
 
 
 def strip_reserved(stats) -> tuple:
     """(area, defaults) popped from a gatherer's stats — call it on every path that
-    persists them, used or not."""
+    persists them, used or not. The class map (`_class_grid`) goes too: its file path
+    is not evidence."""
     if not isinstance(stats, dict):
         return None, None
     area = stats.pop("_area", None)
     defaults = stats.pop("_layer_defaults", None)
+    stats.pop("_class_grid", None)
     if not (isinstance(area, dict) and area.get("geometry")):
         area = None
     return area, defaults
@@ -84,6 +90,13 @@ def attach(spec: dict, target: dict, stats: dict, citations: list, gaps: list,
     after the last) and gaps. Returns (the `layers` block, the area they were read
     over) — (None, None) when there is nothing to read. Always removes the reserved
     keys from `stats`."""
+    class_grid = stats.get("_class_grid") if isinstance(stats, dict) else None
+    if class_grid is not None and not (
+            isinstance(class_grid, dict) and (class_grid.get("path") or class_grid.get("layer"))
+            and class_grid.get("legend")):
+        gaps.append("this pack handed over a class map without a file or a legend, so the "
+                    "layer values are not split by its classes")
+        class_grid = None
     area, rows = strip_reserved(stats)
     defaults = _defaults(spec, target, rows)
     if layers is not None:
@@ -104,7 +117,7 @@ def attach(spec: dict, target: dict, stats: dict, citations: list, gaps: list,
     name = area.get("name") or target.get("place") or "this area"
     try:
         boundary = shape(area["geometry"])
-        records, lgaps = layer_values.for_area(boundary, wanted, name)
+        records, lgaps = layer_values.for_area(boundary, wanted, name, class_grid=class_grid)
     except Exception as exc:
         gaps.append(f"layer values could not be read for {name}: {type(exc).__name__}: {exc}")
         return None, None

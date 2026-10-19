@@ -427,7 +427,8 @@ def test_coverage_orientation_and_placement_are_said_not_assumed(world, log):
     rec = p["layers"]["vulnerability_toy"]
     gap = next(g for g in p["gaps"] if "covers only" in g)
     log("OUTPUT", gap)
-    assert rec["summary"]["cells_beyond_layer"] > 0 and "50%" in gap
+    # one decimal place: a share just short of 100% must never print as 'only 100%'
+    assert rec["summary"]["cells_beyond_layer"] > 0 and "50.0%" in gap
     up = np.ones((20, 20))
     up[5:15, 5:10] = 2
     up[5:15, 10:15] = 4

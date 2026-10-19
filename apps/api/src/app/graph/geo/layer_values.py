@@ -18,19 +18,30 @@ corner, cells outside the area or without a value empty:
       for class layers and layers with few distinct values;
   encoding "values": `cells` is a list of numbers, null for empty — used when the
       area holds more distinct values than there are symbols.
+
+What a layer's cells hold decides its summary (schema.values_kind): a layer with
+classes (a legend, or a classes role) gets the area of each class, counted on every
+full-resolution cell with each cell's own area on the WGS84 ellipsoid; an amount (a
+measure_* layer: elevation, biomass, carbon) gets its mean and percentiles, and — when
+its units are a density per area — a total over the area, the arithmetic stated. A
+gatherer may hand over a class map (the reserved stats key `_class_grid`, see
+mcp/layers.py); every layer is then also summarised per class of that map.
 """
 
 from __future__ import annotations
 
 import math
 import os
+import re
 
 import numpy as np
 
 GRID_SIDE = 48                 # longest side of one layer's returned grid, in cells
 GRID_TOTAL = 4 * GRID_SIDE ** 2  # all layers in one response share this many cells
 READ_BUDGET = 4_000_000        # source pixels read per layer before an overview is used
+FULL_COUNT_BUDGET = 64_000_000  # cells a class layer is counted on at full resolution
 MAX_LAYERS = 8                 # layers one pack may carry
+FEW_CELLS = 100                # an amount over fewer cells than this is said to be coarse
 _PATCH_LIMIT = 250_000         # cells above which equal-value patches are not traced
 INLINE_CHARS = 16_000          # all grids in one response, serialised — a float grid costs
                                # ~7 characters a cell, and pixels cost a model tokens
@@ -120,7 +131,8 @@ def _no_value(contract: dict, file_nodata, row: dict) -> tuple[list, str]:
         if dropped:
             why = why + [f"{', '.join(str(int(d) if float(d).is_integer() else d) for d in dropped)} "
                          "is a legend class here, so it counts as a value"]
-    vals = [int(v) if float(v).is_integer() else v for v in vals]
+    # a float fill (-3.4e38) stays a float: as an integer it prints 39 digits
+    vals = [int(v) if float(v).is_integer() and abs(float(v)) < 1e15 else v for v in vals]
     rule = ("; ".join(f"{v} — {r}" for v, r in zip(vals, why[:len(vals)]))
             + ("; " + "; ".join(why[len(vals):]) if len(why) > len(vals) else "")
             if (vals or len(why) > len(vals))
@@ -131,15 +143,164 @@ def _no_value(contract: dict, file_nodata, row: dict) -> tuple[list, str]:
 
 
 def _cell_km2(dx: float, dy: float, lat: float, geographic: bool) -> float:
+    """One cell's area at `lat`: exact on the WGS84 ellipsoid for a geographic grid,
+    planar in the file's own units (metres) for a projected one."""
     if not geographic:
         return abs(dx * dy) / 1e6
-    return abs(dx) * 111.32 * math.cos(math.radians(lat)) * abs(dy) * 110.57
+    from rasterio import Affine
+
+    from .stacks import row_pixel_areas_km2
+    return float(row_pixel_areas_km2(Affine(abs(dx), 0, 0, 0, -abs(dy), lat + abs(dy) / 2), 1)[0])
+
+
+def _row_km2(transform, height: int, geographic: bool):
+    """Each row's cell area, km² — per row on the ellipsoid, constant when projected."""
+    if not geographic:
+        return np.full(height, abs(transform.a * transform.e) / 1e6)
+    from .stacks import row_pixel_areas_km2
+    return row_pixel_areas_km2(transform, height)
 
 
 def _num(v, integer: bool):
     if v is None:
         return None
     return int(v) if integer else float(f"{float(v):.4g}")
+
+
+def _r4(x) -> float:
+    """A figure as it is stated: whole above 1,000, else four significant digits."""
+    x = float(x)
+    return float(round(x)) if abs(x) >= 1000 else float(f"{x:.4g}")
+
+
+def _fig(x) -> str:
+    x = float(x)
+    if abs(x) >= 1000:
+        return f"{x:,.0f}"
+    return f"{x:g}"
+
+
+def _nth(n: int) -> str:
+    """2nd, 4th, 8th — a read level as words say it."""
+    n = int(n)
+    return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+# ------------------------------------------------------------------ amounts per area
+_AREA_UNIT_KM2 = {"ha": 0.01, "km2": 1.0, "m2": 1e-6, "ac": 0.00404685642}
+_PER = re.compile(r"^(?P<num>.*?)\s*(?:/|\bper\s+)\s*(?P<den>hectares?|ha|km2|km²|km\^2|"
+                  r"sq\.?\s*km|square\s+kilomet(?:re|er)s?|m2|m²|m\^2|square\s+met(?:re|er)s?|"
+                  r"acres?|ac)\.?$", re.I)
+_PER_EXP = re.compile(r"^(?P<num>.*?)\s+(?P<den>ha|km|m)\s*\^?\s*(?P<exp>-\s*[12]|⁻[¹²])$", re.I)
+
+
+def density(units) -> dict | None:
+    """{numerator, per, km2_per_unit} when `units` is an amount per area — 'Mg/ha',
+    't C/ha', 'Mg C ha-1', 'people per km2', 'kg/m2' — else None ('m', 'degC', 'mm',
+    'people per pixel' are not totalled over an area)."""
+    u = " ".join(str(units or "").split())
+    m = _PER.match(u)
+    if m:
+        den = re.sub(r"[\s.]", "", m["den"].lower())
+        den = ("ha" if den.startswith("hectare") or den == "ha" else
+               "km2" if "km" in den or "kilomet" in den else
+               "ac" if den.startswith("ac") else "m2")
+    else:
+        m = _PER_EXP.match(u)
+        if not m:
+            return None
+        exp = 1 if m["exp"].replace(" ", "") in ("-1", "⁻¹") else 2
+        den = {("ha", 1): "ha", ("km", 2): "km2", ("m", 2): "m2"}.get((m["den"].lower(), exp))
+        if not den:
+            return None
+    num = m["num"].strip() or "units"
+    return {"numerator": num, "per": den, "km2_per_unit": _AREA_UNIT_KM2[den]}
+
+
+def _scaling(contract: dict):
+    """(scale_factor, offset) when the contract says the file stores scaled values."""
+    sf, off = contract.get("scale_factor"), contract.get("offset")
+    if sf is None and off is None:
+        return None
+    return float(1 if sf is None else sf), float(0 if off is None else off)
+
+
+def _kind(contract: dict, legend: dict, nominal: bool) -> str:
+    """'classes' when the cells name classes (a legend, or a role whose values are
+    classes), else what the role says — 'count' or 'amount' (the default)."""
+    from . import schema
+    if legend or nominal:
+        return "classes"
+    return schema.values_kind(contract.get("role")) or "amount"
+
+
+def _amount_summary(v, w_km2, units) -> dict:
+    """Percentiles of an amount over the cells with a value, and — for a density per
+    area — the total: Σ value × cell area, in the numerator's unit."""
+    out = {"p10": _r4(np.percentile(v, 10)), "p50": _r4(np.percentile(v, 50)),
+           "p90": _r4(np.percentile(v, 90))}
+    d = density(units)
+    if d and v.size:
+        area_u = float(w_km2.sum()) / d["km2_per_unit"]
+        total = float((v * w_km2).sum()) / d["km2_per_unit"]
+        out["total"] = {"value": _r4(total), "unit": d["numerator"], "area": _r4(area_u),
+                        "area_unit": d["per"],
+                        "mean_area_weighted": _r4(total / area_u) if area_u else None,
+                        "cells": int(v.size)}
+    return out
+
+
+def _class_counts(values, w_km2, legend: dict) -> dict:
+    """{code: {label, cells, km2, share_pct}} over the cells with a value — shares are of
+    the area that holds a value, the way the land-cover pack states class shares."""
+    if not values.size:
+        return {}
+    u, inv = np.unique(values, return_inverse=True)
+    km2 = np.bincount(inv, weights=w_km2)
+    n = np.bincount(inv)
+    total = float(km2.sum())
+    out = {}
+    for val, k, c in zip(u.tolist(), km2.tolist(), n.tolist()):
+        code = _num(val, float(val).is_integer())
+        out[str(code)] = {"label": legend.get(str(code)), "cells": int(c), "km2": _r4(k),
+                          "share_pct": round(100.0 * k / total, 1) if total else 0.0}
+    return out
+
+
+def _class_counts_full(path, area, win, nod_vals, geographic: bool, legend: dict) -> dict:
+    """The area of every value inside `area`, read block by block over the window at
+    full resolution — never a decimated read: a thin class is exactly what decimation
+    loses."""
+    import rasterio
+    from rasterio.features import geometry_mask
+    from rasterio.windows import Window
+    acc_km2, acc_n = {}, {}
+    rows_per = max(1, int(1_048_576 // max(1, int(win.width))))
+    with rasterio.open(path, OVERVIEW_LEVEL="NONE") as src:
+        for r0 in range(0, int(win.height), rows_per):
+            w = Window(win.col_off, win.row_off + r0, win.width, min(rows_per, int(win.height) - r0))
+            blk = src.read(1, window=w).astype("float64")
+            t = src.window_transform(w)
+            ok = geometry_mask([area.__geo_interface__], out_shape=blk.shape, transform=t,
+                               invert=True) & np.isfinite(blk)
+            if nod_vals:
+                ok &= ~np.isin(blk, np.array(nod_vals, dtype="float64"))
+            if not ok.any():
+                continue
+            wk = np.broadcast_to(_row_km2(t, blk.shape[0], geographic)[:, None], blk.shape)[ok]
+            u, inv = np.unique(blk[ok], return_inverse=True)
+            for val, k, c in zip(u.tolist(), np.bincount(inv, weights=wk).tolist(),
+                                 np.bincount(inv).tolist()):
+                acc_km2[val] = acc_km2.get(val, 0.0) + k
+                acc_n[val] = acc_n.get(val, 0) + c
+    total = sum(acc_km2.values())
+    out = {}
+    for val in sorted(acc_km2):
+        code = _num(val, float(val).is_integer())
+        out[str(code)] = {"label": legend.get(str(code)), "cells": int(acc_n[val]),
+                          "km2": _r4(acc_km2[val]),
+                          "share_pct": round(100.0 * acc_km2[val] / total, 1) if total else 0.0}
+    return out
 
 
 def _patches(arr, valid) -> int | None:
@@ -215,9 +376,142 @@ def _window(src, boundary):
     return clipped, whole
 
 
+def _in_crs(boundary, crs):
+    """`boundary` (EPSG:4326) in a file's CRS."""
+    if crs.to_epsg() == 4326:
+        return boundary
+    from rasterio.warp import transform_geom
+    from shapely.geometry import shape as _shape
+    return _shape(transform_geom("EPSG:4326", crs, boundary.__geo_interface__))
+
+
+def _north_up(arr, transform):
+    """A south-up read flipped to north-up rows, its transform with it."""
+    from rasterio import Affine
+    if transform.e <= 0:
+        return arr, transform
+    return arr[::-1], Affine(transform.a, transform.b, transform.c, transform.d,
+                             -transform.e, transform.f + transform.e * arr.shape[0])
+
+
+def _class_map(cg: dict, boundary, read_budget: int):
+    """The class map a gatherer handed over (`_class_grid`), read over the area like a
+    layer — budgeted, nearest, never the file's own overviews. Returns (values as
+    float64, transform, crs, read level)."""
+    import rasterio
+    from rasterio import Affine
+    path = cg.get("path")
+    if not path and cg.get("layer"):
+        from . import ingest
+        path = ingest.source_raster(str(cg["layer"]))
+    with rasterio.open(path, OVERVIEW_LEVEL="NONE") as src:
+        if src.crs is None:
+            raise ValueError("the class map declares no coordinate reference system")
+        crs = src.crs
+        win, _ = _window(src, _in_crs(boundary, crs))
+        if win is None:
+            raise ValueError("the class map does not extend over this area")
+        level = 1
+        n_px = float(win.width) * float(win.height)
+        if n_px > read_budget:
+            level = int(2 ** math.ceil(math.log2(math.sqrt(n_px / read_budget))))
+        shape_ = (max(1, math.ceil(win.height / level)), max(1, math.ceil(win.width / level)))
+        arr = src.read(1, window=win, out_shape=shape_) if level > 1 else src.read(1, window=win)
+        transform = src.window_transform(win) * Affine.scale(win.width / arr.shape[1],
+                                                             win.height / arr.shape[0])
+    arr, transform = _north_up(arr.astype("float64"), transform)
+    return arr, transform, crs, level
+
+
+def _same_map(cg: dict, layer: str, path: str) -> bool:
+    """Is the class map this layer's own file? A year map read as a layer is not
+    cross-tabulated with itself."""
+    if cg.get("layer") == layer:
+        return True
+    try:
+        return bool(cg.get("path")) and os.path.realpath(str(cg["path"])) == os.path.realpath(str(path))
+    except (TypeError, ValueError):
+        return False
+
+
+def _cross(cg: dict, boundary, vals, transform, crs, mode: str, units, legend: dict,
+           read_budget: int, layer_level: int) -> dict:
+    """`vals` (the layer's values over its read window, NaN where it has none) per class
+    of the class map, inside `boundary`. The coarser grid is placed on the finer by
+    nearest neighbour, and the method says which. mode 'amount': area, mean, median and
+    — for a density — total per class; mode 'classes': the area of each of the layer's
+    classes within each class of the map (a cross-tab)."""
+    from rasterio.features import geometry_mask
+    from rasterio.warp import Resampling, reproject
+    c_arr, c_tr, c_crs, c_level = _class_map(cg, boundary, read_budget)
+    lat = boundary.centroid.y
+    m_cell = _cell_km2(transform.a, transform.e, lat, bool(crs.is_geographic))
+    c_cell = _cell_km2(c_tr.a, c_tr.e, lat, bool(c_crs.is_geographic))
+    m_m, c_m = round(math.sqrt(m_cell) * 1000), round(math.sqrt(c_cell) * 1000)
+    if c_cell < m_cell * 0.999:            # the class map is finer: the layer goes onto it
+        L = np.full(c_arr.shape, np.nan)
+        reproject(vals, L, src_transform=transform, src_crs=crs, dst_transform=c_tr,
+                  dst_crs=c_crs, src_nodata=np.nan, dst_nodata=np.nan,
+                  resampling=Resampling.nearest)
+        C, tr, tcrs = c_arr, c_tr, c_crs
+        method = (f"the layer's cells (about {m_m} m) were placed on the class map's finer grid "
+                  f"(about {c_m} m) by nearest neighbour: each class-map cell takes the value of "
+                  "the layer cell it falls in, and is counted with its own area")
+    else:                                  # the layer is finer (or the same): the map goes onto it
+        C = np.full(vals.shape, np.nan)
+        reproject(c_arr, C, src_transform=c_tr, src_crs=c_crs, dst_transform=transform,
+                  dst_crs=crs, src_nodata=np.nan, dst_nodata=np.nan,
+                  resampling=Resampling.nearest)
+        L, tr, tcrs = vals, transform, crs
+        method = (f"the class map (about {c_m} m) was placed on the layer's grid (about {m_m} m) "
+                  "by nearest neighbour: each layer cell takes the class at its centre")
+    if c_level > 1 or layer_level > 1:
+        method += ("; read at every " + " / ".join(
+            f"{_nth(lv)} cell of the {what}" for lv, what in ((layer_level, "layer"), (c_level, "class map"))
+            if lv > 1) + " because the area exceeds the read budget")
+    inside = geometry_mask([_in_crs(boundary, tcrs).__geo_interface__], out_shape=C.shape,
+                           transform=tr, invert=True)
+    W = np.broadcast_to(_row_km2(tr, C.shape[0], bool(tcrs.is_geographic))[:, None], C.shape)
+    leg = {}
+    for k, v in (cg.get("legend") or {}).items():
+        try:
+            leg[int(k)] = str(v).strip()
+        except (TypeError, ValueError):
+            continue
+    outside = {float(v) for v in cg.get("outside_values") or []}
+    d = density(units) if mode == "amount" else None
+    classes = {}
+    for code, label in sorted(leg.items()):
+        if float(code) in outside:
+            continue
+        sel = inside & (C == code)
+        km2 = float(W[sel].sum())
+        cov = sel & np.isfinite(L)
+        row = {"km2": _r4(km2), "km2_with_value": _r4(W[cov].sum())}
+        if mode == "amount":
+            if cov.any():
+                lv, lw = L[cov], W[cov]
+                row.update({"mean": _r4((lv * lw).sum() / lw.sum()), "p50": _r4(np.median(lv))})
+                if d:
+                    row["total"] = _r4(float((lv * lw).sum()) / d["km2_per_unit"])
+        else:
+            u, inv = np.unique(L[cov], return_inverse=True) if cov.any() else (np.array([]), None)
+            row["by_value"] = ({} if inv is None else {
+                legend.get(str(_num(val, True)), str(_num(val, True))): _r4(k)
+                for val, k in zip(u.tolist(), np.bincount(inv, weights=W[cov]).tolist())})
+        classes[label] = row
+    known = np.isin(C, np.array([c for c in leg if float(c) not in outside], dtype="float64"))
+    return {"map": cg.get("label") or cg.get("stack") or "the class map",
+            "stack": cg.get("stack"), "year": cg.get("year"), "method": method,
+            **({"total_unit": d["numerator"]} if d else {}),
+            "classes": classes, "km2_outside_map": _r4(W[inside & ~known].sum())}
+
+
 def read(layer: str, boundary, *, side: int | None = None,
-         read_budget: int | None = None) -> dict:
-    """One layer's values inside `boundary` (a shapely geometry, EPSG:4326).
+         read_budget: int | None = None, class_grid: dict | None = None) -> dict:
+    """One layer's values inside `boundary` (a shapely geometry, EPSG:4326); with a
+    `class_grid` ({path, legend, outside_values, year, stack, label}), also per class of
+    that map.
 
     Raises ValueError when the layer does not reach the area or cannot be placed; the
     caller turns that into a declared gap, never a zero."""
@@ -268,6 +562,7 @@ def read(layer: str, boundary, *, side: int | None = None,
         native = abs(src.transform.a)
         geographic = bool(src.crs.is_geographic)
         crs_epsg = src.crs.to_epsg()
+        crs_obj = src.crs
     if transform.e > 0:                        # south-up: flip to north-up rows
         arr = arr[::-1]
         transform = Affine(transform.a, transform.b, transform.c, transform.d,
@@ -289,25 +584,37 @@ def read(layer: str, boundary, *, side: int | None = None,
         raise ValueError(f"{layer} does not extend over this area")
     beyond = max(0, in_total - int(inside.sum()))
     nod_vals, nod_rule = _no_value(contract, file_nodata, row)
-    a = arr.astype("float64")
-    finite = np.isfinite(a)
+    stored = arr.astype("float64")
+    finite = np.isfinite(stored)
     n_nan = int((inside & ~finite).sum())
     if n_nan:
         nod_rule += f"; {n_nan} cell(s) here are NaN"
-    valid = inside & finite
+    has_value = finite
     if nod_vals:
-        valid &= ~np.isin(a, np.array(nod_vals, dtype="float64"))
-    integer = np.issubdtype(arr.dtype, np.integer) or bool(
+        has_value = finite & ~np.isin(stored, np.array(nod_vals, dtype="float64"))
+    valid = inside & has_value
+    # A file storing scaled integers (biomass x10 in int16) is read in its units; the
+    # contract's range stays a range of what is stored.
+    scaling = _scaling(contract)
+    a = stored * scaling[0] + scaling[1] if scaling else stored
+    integer = (np.issubdtype(arr.dtype, np.integer) and not scaling) or bool(
         valid.any() and np.all(np.mod(a[valid], 1) == 0))
     v = a[valid]
     lat = boundary.centroid.y
     cell_km2 = _cell_km2(transform.a, transform.e, lat, geographic)
     legend = {str(k): val for k, val in sorted(tiffs.legend(layer).items())}
+    units = contract.get("units") or row.get("units") or row.get("unit")
+    kind = _kind(contract, legend, nominal)
+    classed = kind == "classes" and integer
+    w_all = np.broadcast_to(_row_km2(transform, arr.shape[0], geographic)[:, None], arr.shape)
 
     summary = {"cells_in_area": int(inside.sum()), "cells_with_value": int(v.size),
                "cells_without_value": int(inside.sum() - v.size),
                "cells_beyond_layer": beyond,
-               "cell_km2": round(cell_km2, 5)}
+               "cell_km2": round(cell_km2, 5),
+               "km2_in_area": _r4(w_all[inside].sum()),
+               "km2_with_value": _r4(w_all[valid].sum()),
+               "coverage_pct": round(100.0 * v.size / max(1, int(inside.sum())), 1)}
     if v.size:
         vals, counts = np.unique(v, return_counts=True)
         top = int(np.argmax(counts))
@@ -322,11 +629,27 @@ def read(layer: str, boundary, *, side: int | None = None,
             "by_part": (_by_part(a, valid, integer, nominal, legend) if vals.size > 1 else None),
             "patches": patches,
             "mean_patch_km2": (round(v.size * cell_km2 / patches, 3) if patches else None)})
+        if classed:
+            # The area of each class on EVERY full-resolution cell, each with its own
+            # area — a decimated read loses exactly the thin classes a question is about.
+            full = level == 1
+            if not full and float(win.width) * float(win.height) <= FULL_COUNT_BUDGET:
+                summary["classes"] = _class_counts_full(path, area, win, nod_vals, geographic,
+                                                        legend)
+                full = True
+            else:
+                summary["classes"] = _class_counts(v, w_all[valid], legend)
+            summary["classes_counted"] = (
+                "on every cell at full resolution, each with its own area" if full else
+                f"on every {_nth(level)} cell (the area holds more than {FULL_COUNT_BUDGET:,} "
+                "cells), each standing for the cells around it")
+        else:
+            summary.update(_amount_summary(v, w_all[valid], units))
 
     obs = {"dtype": dtype, "nodata": file_nodata, "crs_epsg": crs_epsg,
            "pixel_size_deg": native,           # the FILE's grid, not the read level's
-           "sampled_min": float(v.min()) if v.size else None,
-           "sampled_max": float(v.max()) if v.size else None}
+           "sampled_min": float(stored[valid].min()) if v.size else None,
+           "sampled_max": float(stored[valid].max()) if v.size else None}
     if contract:
         mism = _check(contract, obs)
         validation = "structural-contract-FAILED" if mism else "structural-contract-checked"
@@ -349,18 +672,34 @@ def read(layer: str, boundary, *, side: int | None = None,
     left, top_ = transform.c, transform.f
     right = left + transform.a * arr.shape[1]
     bottom = top_ + transform.e * arr.shape[0]
-    units = contract.get("units") or row.get("units") or row.get("unit")
     rng = ([contract.get("valid_min"), contract.get("valid_max")]
            if contract.get("valid_min") is not None or contract.get("valid_max") is not None
            else None)
     unit_word = "deg" if geographic else "m"
+    by_class_of = None
+    if class_grid and v.size and not _same_map(class_grid, layer, path):
+        try:
+            by_class_of = _cross(class_grid, boundary, np.where(has_value, a, np.nan), transform,
+                                 crs_obj, "classes" if classed else "amount", units, legend,
+                                 read_budget, level)
+        except Exception as exc:
+            by_class_of = {"error": f"{type(exc).__name__}: {exc}",
+                           "map": class_grid.get("label") or class_grid.get("stack")}
+    if by_class_of is not None:
+        summary["by_class_of"] = by_class_of
     rec = {
         "title": row.get("title") or layer,
         "unit": units,
         "unit_note": (str(units) if units else "units not declared")
-                     + (f"; declared range {rng[0]}–{rng[1]}" if rng else "")
+                     + (f"; declared range {rng[0]}–{rng[1]}"
+                        + (" as stored" if scaling else "") if rng else "")
+                     + (f"; stored values x {scaling[0]:g}"
+                        + (f" + {scaling[1]:g}" if scaling[1] else "")
+                        + f" give {units or 'the values'}" if scaling else "")
                      + ("; class codes are names, not amounts" if nominal else ""),
         "declared_range": rng,
+        # what the summary was computed as: a classes role holding fractions is an amount
+        "values": "classes" if classed else ("amount" if kind == "classes" else kind),
         "scale": "nominal" if nominal else None,
         "role": contract.get("role") or row.get("role"),
         "source": row.get("source"), "licence": row.get("license"),
@@ -382,13 +721,16 @@ def read(layer: str, boundary, *, side: int | None = None,
                       "the summary is computed on every cell read"}),
         "read_level": (None if level == 1 else {
             "overview_level": level,
-            "note": f"the area is larger than the read budget, so every {level}th cell of the "
+            "note": f"the area is larger than the read budget, so every {_nth(level)} cell of the "
                     f"full-resolution file was read (nearest, never the file's own overviews) "
-                    "and the summary is computed on those cells"}),
+                    "and the summary is computed on those cells"
+                    + ("; the class areas are counted on every full-resolution cell"
+                       if classed and summary.get("classes_counted", "").startswith("on every cell")
+                       else "")}),
         "area_smaller_than_a_cell": touched,
     }
     for k in ("usage_notes", "review", "staged_by", "contribution_id", "description",
-              "granularity", "colors"):
+              "granularity", "colors", "prepared"):
         if row.get(k):
             rec[k] = row[k]
     if row.get("amended"):
@@ -431,9 +773,19 @@ def area_sha256(boundary) -> str:
                                      default=str).encode()).hexdigest()
 
 
-def for_area(boundary, wanted: list[dict], area_name: str) -> tuple[dict, list]:
+def _coverage_words(share: float) -> str:
+    """'only 99.8%' — one decimal, and never 'only 100%' for a sliver short of it."""
+    pct = share * 100
+    if pct >= 99.95:
+        return "all but a sliver (more than 99.9%)"
+    return f"only {pct:.1f}%"
+
+
+def for_area(boundary, wanted: list[dict], area_name: str,
+             class_grid: dict | None = None) -> tuple[dict, list]:
     """Read every wanted layer ({layer, why}) over one area, sharing GRID_TOTAL
-    cells between them. Returns ({layer: record}, gaps)."""
+    cells between them; with a `class_grid`, each also per class of that map. Returns
+    ({layer: record}, gaps)."""
     import json
     gaps, out = [], {}
     a_sha = area_sha256(boundary)
@@ -441,7 +793,7 @@ def for_area(boundary, wanted: list[dict], area_name: str) -> tuple[dict, list]:
     for w in wanted:
         layer = w["layer"]
         try:
-            rec = read(layer, boundary, side=side)
+            rec = read(layer, boundary, side=side, class_grid=class_grid)
         except Exception as exc:
             gaps.append(f"values of {layer} could not be read for {area_name}: {exc}. "
                         "Not a zero: the layer was not read here.")
@@ -451,9 +803,26 @@ def for_area(boundary, wanted: list[dict], area_name: str) -> tuple[dict, list]:
         s = rec["summary"]
         if s["cells_beyond_layer"]:
             share = s["cells_in_area"] / (s["cells_in_area"] + s["cells_beyond_layer"])
-            gaps.append(f"{layer} covers only {share * 100:.0f}% of {area_name}: "
+            gaps.append(f"{layer} covers {_coverage_words(share)} of {area_name}: "
                         f"{s['cells_beyond_layer']:,} of its cells lie beyond the layer's "
                         "extent and are not counted anywhere in its values")
+        if (s.get("by_class_of") or {}).get("error"):
+            gaps.append(f"values of {layer} per class of {s['by_class_of']['map']} could not be "
+                        f"computed for {area_name}: {s['by_class_of']['error']}")
+        if rec.get("values") != "classes" and s["cells_with_value"]:
+            # An amount says what it covers and how coarse it is next to the place.
+            if s["cells_without_value"]:
+                gaps.append(f"{layer} has a value on {s['coverage_pct']:.1f}% of the cells of "
+                            f"{area_name} ({s['cells_without_value']:,} of "
+                            f"{s['cells_in_area']:,} are no-data: {rec['nodata']['rule']}): its "
+                            "mean, percentiles and any total are of the covered part only — "
+                            "the rest is not a zero")
+            if s["cells_in_area"] < FEW_CELLS:
+                gaps.append(f"{layer}'s cells are about {round(math.sqrt(s['cell_km2']) * 1000):,} m "
+                            f"across ({_fig(_r4(s['cell_km2']))} km² each) and {area_name} holds "
+                            f"{s['cells_in_area']:,} of them: each figure averages over cells "
+                            "that straddle the boundary and over anything smaller than a cell, "
+                            "so read it as indicative of the place, not measured within it")
         if not s["cells_with_value"]:
             gaps.append(f"{layer} has no value anywhere in {area_name}: every cell inside is "
                         f"no-data ({rec['nodata']['rule']})")
@@ -489,6 +858,75 @@ def for_area(boundary, wanted: list[dict], area_name: str) -> tuple[dict, list]:
     for layer, rec in out.items():
         rec["values_sha256"] = values_sha256(layer, rec, a_sha)
     return out, gaps
+
+
+def _class_bits(s: dict, leg: dict) -> list[str]:
+    """The area of each class, as counted."""
+    cl = s.get("classes") or {}
+    if not cl:
+        return []
+
+    def name(code, r):
+        if r.get("label"):
+            return f"{code} ({r['label']})"
+        return f"{code} (not in the legend)" if leg else str(code)
+    total = sum(r["km2"] for r in cl.values())
+    return [f"Area by class, counted {s.get('classes_counted')}: "
+            + "; ".join(f"{name(k, r)} {_fig(r['km2'])} km² ({r['share_pct']:.1f}%)"
+                        for k, r in cl.items())
+            + f" — shares of the {_fig(_r4(total))} km² that carry a value."]
+
+
+def _amount_bits(s: dict, rec: dict) -> list[str]:
+    """Percentiles, coverage and — for a density per area — the total, with its sums."""
+    if s.get("p50") is None:
+        return []
+    u = rec.get("unit") or ""
+    us = f" {u}" if u else ""
+    out = [f"Over the {s['cells_with_value']:,} cells with a value: p10 {_fig(s['p10'])}{us}, "
+           f"median {_fig(s['p50'])}{us}, p90 {_fig(s['p90'])}{us}; a value on "
+           f"{s['coverage_pct']:.1f}% of the area's cells ({_fig(s['km2_with_value'])} of "
+           f"{_fig(s['km2_in_area'])} km²)."]
+    t = s.get("total")
+    if t:
+        how = ("its own area on the WGS84 ellipsoid" if "source_cell_deg" in rec["resolution"]
+               else "its planar area in the file's projection")
+        out.append(f"Total over the area: the sum of value × cell area over the {t['cells']:,} "
+                   f"cells with a value, each with {how}, is {_fig(t['value'])} {t['unit']} — "
+                   f"an area-weighted mean of {_fig(t['mean_area_weighted'])}{us} × "
+                   f"{_fig(t['area'])} {t['area_unit']}"
+                   + ("; estimated from the cells read" if rec.get("read_level") else "") + ".")
+    return out
+
+
+def _by_class_of_text(b: dict, rec: dict) -> str:
+    """The layer per class of the gatherer's class map, every figure stated."""
+    u = rec.get("unit") or ""
+    us = f" {u}" if u else ""
+    parts = []
+    for label, r in b["classes"].items():
+        if "by_value" in r:
+            inner = ", ".join(f"{k} {_fig(v)} km²" for k, v in r["by_value"].items())
+            parts.append(f"{label} {_fig(r['km2'])} km² — " + (inner or "no value of the layer"))
+        elif not r["km2"]:
+            parts.append(f"{label} absent (0 km²)")
+        elif r.get("mean") is None:
+            parts.append(f"{label} {_fig(r['km2'])} km², no value of the layer there")
+        else:
+            pct = 100.0 * r["km2_with_value"] / r["km2"] if r["km2"] else 0.0
+            parts.append(f"{label} {_fig(r['km2'])} km² ({_fig(_r4(r['km2'] * 100))} ha), "
+                         f"{pct:.1f}% with a value, mean {_fig(r['mean'])}{us}, median "
+                         f"{_fig(r['p50'])}{us}"
+                         + (f", total {_fig(r['total'])} {b['total_unit']}"
+                            if r.get("total") is not None else ""))
+    what = ("the area of each of the layer's classes" if b["classes"] and all(
+        "by_value" in r for r in b["classes"].values()) else
+            "area-weighted mean, median" + (" and total (the sum of value × cell area)"
+                                            if b.get("total_unit") else ""))
+    return (f"Per class of {b['map']}" + (f" in {b['year']}" if b.get("year") else "")
+            + f" inside the area, {what}: " + "; ".join(parts)
+            + f". Outside that map or unclassified: {_fig(b['km2_outside_map'])} km². "
+            f"Method: {b['method']}.")
 
 
 def citation_text(layer: str, rec: dict, area_name: str) -> str:
@@ -528,6 +966,9 @@ def citation_text(layer: str, rec: dict, area_name: str) -> str:
             elif parts:
                 bits.append("Mean by part of the area: "
                             + "; ".join(f"{k} {v}" for k, v in parts.items()) + ".")
+        bits += _class_bits(s, leg) if rec.get("values") == "classes" else _amount_bits(s, rec)
+        if s.get("by_class_of") and not s["by_class_of"].get("error"):
+            bits.append(_by_class_of_text(s["by_class_of"], rec))
     else:
         bits.append("No cell inside the area carries a value.")
     if s.get("cells_beyond_layer"):
@@ -550,6 +991,8 @@ def citation_text(layer: str, rec: dict, area_name: str) -> str:
         bits.append(f"To keep the response proportionate it is returned at {t[0]}x{t[1]} cells.")
     if rec.get("read_level"):
         bits.append(rec["read_level"]["note"][0].upper() + rec["read_level"]["note"][1:] + ".")
+    if rec.get("prepared"):
+        bits.append("At ingest: " + "; ".join(str(n).rstrip(".") for n in rec["prepared"]) + ".")
     if rec.get("amended"):
         last = rec["amended"]["last"]
         bits.append(f"This layer's record was corrected ({rec['amended']['times']} time(s); "
