@@ -361,3 +361,50 @@ def test_an_upstream_refusal_names_the_site_and_what_to_do(monkeypatch):
         fetch_policy.fetch("https://www.mdpi.com/2072-4292/14/15/3657/pdf", max_bytes=1000)
     msg = str(exc.value)
     assert "www.mdpi.com" in msg and "23.62.46.184" not in msg and "Google Drive" in msg
+
+
+def test_binary_stack_values_count_both_classes_and_gaps_derive_from_the_stack(binary_stack, log):
+    """The nodata tag (0) is also the legend class 'Not mangrove': the values block
+    reads both classes, no false 'one value' gap; the standing gaps state the
+    declared accuracy and the real cell size instead of typed sentences."""
+    p = assemble.assemble(pack="land-cover", place="Test bay", year="2020",
+                          geometry=binary_stack["poly"], classes=["Mangrove"])
+    assert p["status"] == "ok", p.get("note")
+    rec = p["layers"]["landcover_bin_2020"]
+    log("OUTPUT", f"distinct={rec['summary'].get('distinct')} nodata rule={rec['nodata']['rule'][:120]}")
+    assert rec["summary"]["distinct"] == 2 and not rec["summary"].get("uniform")
+    assert "legend class" in rec["nodata"]["rule"]
+    gaps = " | ".join(p["gaps"])
+    assert "holds ONE value" not in gaps
+    assert "not documented" in gaps                 # the fixture declares accuracy 'unstated'
+    assert "111 m pixel" in gaps and "30 m pixel" not in gaps
+
+
+def test_the_stack_that_has_the_year_is_read_when_several_cover_the_area(binary_stack, tmp_path, monkeypatch, log):
+    """Two stacks cover the same bay; the first registered holds only 2014. A 1996
+    question reads the second, names the first as an alternative, and a year no
+    stack holds declines naming each stack's years."""
+    s = get_settings()
+    conf = tmp_path / "conf"
+    data = tmp_path / "data"
+    PX, LEFT, TOP = binary_stack["PX"], binary_stack["LEFT"], binary_stack["TOP"]
+    _write(data / "other-2014.tif", np.ones((10, 10), dtype="uint8"), "EPSG:4326", from_origin(LEFT, TOP, PX, PX), nodata=0)
+    cat = json.loads((conf / "tiffs.yml").read_text())
+    cat = {"landcover_first": {**cat["landcover_bin"], "title": "First stack (synthetic, 2014 only)",
+                               "years": [2014], "layer_pattern": "landcover_first_{year}",
+                               "file_pattern": "other-{year}.tif", "accuracy": "90% (synthetic)"}, **cat}
+    (conf / "tiffs.yml").write_text(json.dumps(cat))
+    sch = json.loads((conf / "raster_schema.yml").read_text())
+    sch["stacks"]["landcover_first"] = sch["stacks"]["landcover_bin"]
+    (conf / "raster_schema.yml").write_text(json.dumps(sch))
+    p = assemble.assemble(pack="land-cover", place="Test bay", year="1996", year_to="2020",
+                          geometry=binary_stack["poly"], classes=["Mangrove"])
+    assert p["status"] == "ok", p.get("note")
+    assert p["stats"]["stack"] == "landcover_bin"
+    assert any("First stack" in g for g in p["gaps"])
+    q = assemble.assemble(pack="land-cover", place="Test bay", year="2014", geometry=binary_stack["poly"])
+    assert q["status"] == "ok" and q["stats"]["stack"] == "landcover_first"
+    assert any("accuracy as declared" in g and "90%" in g for g in q["gaps"])
+    r = assemble.assemble(pack="land-cover", place="Test bay", year="1999", geometry=binary_stack["poly"])
+    log("OUTPUT", r.get("note"))
+    assert r["status"] == "declined" and "has 2014" in r["note"] and "has 1996, 2020" in r["note"]

@@ -315,6 +315,8 @@ def _land_stack_year(cat, layer, manifest, dest):
         "title": manifest.get("stack_title") or f"{sid} land cover",
         "description": manifest["description"], "source": manifest["source"],
         "license": manifest["license"], "legend": manifest.get("legend") or {},
+        "vintage": manifest.get("vintage"),
+        **({"url": manifest["url"]} if manifest.get("url") else {}),
         # [] is a declaration ("the whole grid is mapped"), not an omission
         "outside_values": ([0] if manifest.get("outside_values") is None
                            else [int(v) for v in manifest["outside_values"]]),

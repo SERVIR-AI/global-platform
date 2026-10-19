@@ -85,13 +85,15 @@ def landcover_stacks():
     return {k: v for k, v in stacks.rows().items() if v.get("role") == ROLE}
 
 
-def _pick_stack(boundary, wanted=None):
+def _pick_stack(boundary, wanted=None, years=()):
     """(stack_id, row, others): the registered land-cover stack to read for this
-    area, and every OTHER registered stack that also covers it. The first
-    registered covering stack is read unless the caller names one (`stack`); the
-    others are declared as a gap, never silently ignored. It used to return the
-    first match and say nothing: a hub's national 10 m stack over Nepal would have
-    sat unread beside the 30 m regional one, with no answer ever mentioning it."""
+    area, and every OTHER registered stack that also covers it. Unless the caller
+    names one (`stack`), the first covering stack that HAS the requested years is
+    read; the others are declared as a gap, never silently ignored. It used to
+    return the first match and say nothing: a hub's national 10 m stack over Nepal
+    would have sat unread beside the 30 m regional one, with no answer ever
+    mentioning it — and a 1996 question declined because the first stack over the
+    Gulf of Nicoya held only 2014 while the second held 1996."""
     rows = landcover_stacks()
     if not rows:
         raise ValueError("no land-cover stack is registered on this platform — a hub "
@@ -122,8 +124,20 @@ def _pick_stack(boundary, wanted=None):
         raise ValueError(
             f"this area lies outside every registered land-cover stack — {row.get('title', sid)} "
             f"covers lon {ext.get('lon')} and lat {ext.get('lat')}; nothing can be counted there")
-    sid, row = covering[0]
-    return sid, row, covering[1:]
+    want = [int(y) for y in years if y]
+    able = [(sid, row) for sid, row in covering
+            if all(y in stacks.years(row) for y in want)] if want else covering
+    if not able and len(covering) == 1:
+        # One stack, missing year: let layer_for say WHY it is missing ("no map
+        # published by the producer") rather than a bare list of years.
+        able = covering
+    if not able:
+        raise ValueError(
+            f"no registered land-cover stack covering this area has {', '.join(map(str, want))} — "
+            + "; ".join(f"{row.get('title', sid)} ({sid}) has {stacks._span(stacks.years(row)) or 'no years'}"
+                        for sid, row in covering))
+    sid, row = able[0]
+    return sid, row, [(s, r) for s, r in covering if s != sid]
 
 
 _BOUNDARY_OK = ("admin boundary", "protected-area boundary", "contributed boundary",
@@ -139,10 +153,20 @@ def _resolve_aoi(place, extras, trace):
         aoi = ingest.ensure_aoi(place=place, layers=(), area_cap_km2=AREA_CAP_KM2)
     how = str(aoi.get("how") or "")
     if not how.startswith(_BOUNDARY_OK):
+        from ..graph.geo import vectors as _vectors
+        try:
+            named = _vectors.names(limit=6)
+        except Exception:
+            named = {}
+        hint = ""
+        if named:
+            sample = "; ".join(f"{layer}: {', '.join(n[:4])}" for layer, n in named.items())
+            hint = f", or name a contributed area ({sample})"
         raise ValueError(
             f"{place!r} did not resolve to a boundary but to {how}. Land-cover figures "
             "are only computed for a real boundary: name a district, province, park or "
-            f"country under {AREA_CAP_KM2:,.0f} km², or pass `geometry` with the boundary you hold")
+            f"country under {AREA_CAP_KM2:,.0f} km², pass `geometry` with the boundary you hold"
+            f"{hint}")
     trace.append(f"aoi[{aoi.get('name', place)}] {aoi.get('area_km2')} km2 via {how}")
     boundary = shape(json.load(open(aoi["admin"]))["features"][0]["geometry"])
     return aoi, boundary, how
@@ -410,11 +434,28 @@ def _method_citation(n, outside_values, two_years, level):
             "title": "land-cover counting method", "validation": "documented-method", "text": text}
 
 
+def _standing_gaps(row, pixel_size_deg):
+    """The gaps every land-cover answer declares, read from the stack it answers
+    from: the accuracy the producer states (or that none is recorded), the cell
+    size the map actually has. These were two typed sentences — '30 m', 'no
+    accuracy' — that stayed true only for the first stack ever registered."""
+    acc = str(row.get("accuracy") or "").strip()
+    metres = round(float(pixel_size_deg or 0) * 111_320)
+    cell = f"{metres} m" if metres else "one cell"
+    out = []
+    if not acc or acc.lower() in ("unstated", "unknown", "none", "n/a"):
+        out.append("accuracy of the land-cover maps is not documented in this platform's "
+                   "registry, so no accuracy figure is cited — the producer's method "
+                   "publication has not been archived here")
+    else:
+        out.append(f"accuracy as declared by the producer, not assessed for this area: {acc}")
+    out.append(f"a land-cover class is the producer's label for a {cell} pixel at the equator; "
+               "features narrower than one cell are not resolved")
+    out.extend(STANDING_GAPS)
+    return out
+
+
 STANDING_GAPS = (
-    "accuracy of the land-cover maps is not documented in this platform's registry, so no "
-    "accuracy figure is cited — the producer's method publication has not been archived here",
-    "a land-cover class is the producer's label for a 30 m pixel; features narrower than one "
-    "cell are not resolved",
     "the boundary comes from OpenStreetMap at pack time (or the caller's polygon); the hub's "
     "official boundary may differ",
     "no degradation, canopy, biomass, carbon, NDVI or building figures: this pack counts "
@@ -451,7 +492,8 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
 
     aoi, boundary, how = _resolve_aoi(place, extras, trace)
     name = aoi.get("name", place)
-    sid, row, other_stacks = _pick_stack(boundary, wanted=target.get("stack"))
+    sid, row, other_stacks = _pick_stack(boundary, wanted=target.get("stack"),
+                                         years=tuple(y for y in (year, year_to) if y))
     legend, outside, colors = _legend(row), _outside(row), None
     colors = _colors(row, legend)
     source = f"{row.get('source', sid)} (platform computation)"
@@ -477,7 +519,7 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
             f"lat {ext.get('lat')}) but every one of its {st['pixels_inside']:,} pixels is outside "
             "the mapped footprint — this product does not cover it, so no class area exists to report")
 
-    citations, gaps = [], list(STANDING_GAPS)
+    citations, gaps = [], _standing_gaps(row, st["pixel_size_deg"])
     if other_stacks:
         gaps.append(f"{len(other_stacks)} other registered land-cover stack(s) also cover "
                     f"{name}: " + "; ".join(f"{r.get('title', s)} ({s})" for s, r in other_stacks)

@@ -104,9 +104,27 @@ def _no_value(contract: dict, file_nodata, row: dict) -> tuple[list, str]:
     if row.get("outside_values") is None and \
             str(_role_rule(contract).get("zero", "")).strip().lower() == "nodata":
         add(0, f"0 means no value for a {contract.get('role')} layer")
+    # A value the row's LEGEND names is a class, never no-data: a binary extent map
+    # tags 0 as nodata and calls it "Not mangrove" in the same breath; the legend
+    # wins, or every answer reports the map as one uniform value.
+    legend_keys = set()
+    for k in (row.get("legend") or {}):
+        try:
+            legend_keys.add(float(k))
+        except (TypeError, ValueError):
+            pass
+    if legend_keys:
+        kept = [(v, r) for v, r in zip(vals, why) if float(v) not in legend_keys]
+        dropped = [v for v in vals if float(v) in legend_keys]
+        vals, why = [v for v, _ in kept], [r for _, r in kept]
+        if dropped:
+            why = why + [f"{', '.join(str(int(d) if float(d).is_integer() else d) for d in dropped)} "
+                         "is a legend class here, so it counts as a value"]
     vals = [int(v) if float(v).is_integer() else v for v in vals]
-    rule = ("; ".join(f"{v} — {r}" for v, r in zip(vals, why))
-            if vals else "no no-data value is declared, so every value read is counted")
+    rule = ("; ".join(f"{v} — {r}" for v, r in zip(vals, why[:len(vals)]))
+            + ("; " + "; ".join(why[len(vals):]) if len(why) > len(vals) else "")
+            if (vals or len(why) > len(vals))
+            else "no no-data value is declared, so every value read is counted")
     if _isnan(contract.get("nodata")) or _isnan(file_nodata):
         rule += "; NaN marks no value"
     return vals, rule

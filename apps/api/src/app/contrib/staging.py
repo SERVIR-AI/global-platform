@@ -839,6 +839,7 @@ def _stage_stack_row(entry: dict, staged_by: str, cid: str) -> None:
                          "title": entry.get("stack_title") or f"{sid} land cover",
                          "description": entry.get("description", ""), "source": entry.get("source"),
                          "license": entry.get("license"), "legend": entry.get("legend") or {},
+                         "vintage": entry.get("vintage"),
                          "outside_values": ([0] if entry.get("outside_values") is None
                                             else [int(v) for v in entry["outside_values"]]),
                          **({"countries": list(entry["countries"])} if entry.get("countries") else {}),
