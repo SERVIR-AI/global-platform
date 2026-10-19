@@ -5,15 +5,28 @@ anonymous caller owns nothing; GDAL reads contributed bytes with one driver chos
 their magic bytes and no network; a recipe marker anywhere in the header is refused; a
 take-down removes only its own landing. All on synthetic data, never presented as real."""
 import hashlib
+import io
 import re
+import threading
+import zipfile
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import numpy as np
 import pytest
+import yaml
+from rasterio.io import MemoryFile
+from rasterio.transform import from_bounds
 
 from app.config import get_settings
+from app.contrib import identity, staging
 from app.mcp import fetch
 from app.rag import filters as rag_filters
 from app.rag.store import Corpus
+
+OWNER = identity.Caller("user_owner", "gis@hub.test", False, "bound")
+CAP = 256 * 1024                       # small, so a synthetic file is "national"
+WORLD = (-86.0, 9.0, -84.0, 11.0)
+GULF = [-85.2, 10.0, -85.0, 10.2]
 
 
 # ------------------------------------------------------------ 1. retrieval, opt-in skip
@@ -139,3 +152,160 @@ def test_corpus_search_opts_in_and_keeps_a_freshly_contributed_dated_report(libr
     assert "Contributed update" in titles and "Drought impact update" in titles
     assert "Carbon paper, references" not in titles
     assert "1 reference-list or contents passage(s)" in out["passed_over"]
+
+
+# ------------------------------------------------------------ a local host, no network
+class _Host:
+    """Files by path, each served one way: 'ranges' (answers Range, sends a size),
+    'whole' (ignores Range, sends a size) or 'streamed' (ignores Range, chunked, no size)."""
+
+    def __init__(self):
+        self.files, self.mode, self.port = {}, {}, None
+
+    def put(self, name, data, mode="ranges"):
+        self.files["/" + name], self.mode["/" + name] = data, mode
+        return f"http://127.0.0.1:{self.port}/{name}"
+
+
+def _handler(host):
+    class H(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *a):
+            pass
+
+        def _send(self, body):
+            path = self.path.split("?")[0]
+            data, mode = host.files.get(path), host.mode.get(path)
+            if data is None:
+                self.send_response(404)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            rng = self.headers.get("Range") if mode == "ranges" else None
+            if rng:
+                m = re.match(r"bytes=(\d+)-(\d*)", rng)
+                a = int(m.group(1))
+                b = min(int(m.group(2)) if m.group(2) else len(data) - 1, len(data) - 1)
+                part = data[a:b + 1]
+                self.send_response(206)
+                self.send_header("Content-Range", f"bytes {a}-{b}/{len(data)}")
+            else:
+                part = data
+                self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            if mode == "streamed":
+                self.send_header("Transfer-Encoding", "chunked")
+            else:
+                self.send_header("Content-Length", str(len(part)))
+            self.end_headers()
+            if not body:
+                return
+            try:
+                for i in range(0, len(part), 65536):
+                    chunk = part[i:i + 65536]
+                    self.wfile.write(f"{len(chunk):x}\r\n".encode() + chunk + b"\r\n"
+                                     if mode == "streamed" else chunk)
+                if mode == "streamed":
+                    self.wfile.write(b"0\r\n\r\n")
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+        def do_GET(self):
+            self._send(True)
+
+        def do_HEAD(self):
+            self._send(False)
+    return H
+
+
+@pytest.fixture
+def host():
+    h = _Host()
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), _handler(h))
+    h.port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield h
+    srv.shutdown()
+    srv.server_close()
+
+
+@pytest.fixture
+def env(monkeypatch, tmp_path):
+    """A hermetic catalog and store; the real fetch policy with loopback allowed."""
+    s = get_settings()
+    cat = tmp_path / "tiffs.yml"
+    cat.write_text(yaml.safe_dump({}))
+    sch = tmp_path / "raster_schema.yml"
+    sch.write_text(yaml.safe_dump({"defaults": {"crs": "EPSG:4326", "float_tol": 0.0001}, "layers": {}}))
+    for k, v in {"cache_dir": tmp_path, "tiffs_dir": tmp_path / "tiffs",
+                 "tiffs_config_path": cat, "raster_schema_path": sch,
+                 "tiffs_contrib_path": tmp_path / "tiffs.contrib.yml",
+                 "raster_schema_contrib_path": tmp_path / "raster_schema.contrib.yml",
+                 "grp_mattermost_webhook": "", "grp_contrib_allow_private_hosts": True,
+                 "grp_contrib_max_bytes": CAP, "grp_contrib_hourly_cap": 0}.items():
+        monkeypatch.setattr(s, k, v)
+    monkeypatch.setattr(staging, "STAGED_RASTERS", {})
+    monkeypatch.setattr(staging, "_STAGED_LOADED", False)
+    return tmp_path
+
+
+def _tif(arr, bounds=WORLD):
+    h, w = arr.shape
+    with MemoryFile() as mf:
+        with mf.open(driver="GTiff", width=w, height=h, count=1, dtype=arr.dtype.name, crs="EPSG:4326",
+                     transform=from_bounds(*bounds, w, h), tiled=True, blockxsize=256, blockysize=256,
+                     compress="deflate") as d:
+            d.write(arr, 1)
+        return mf.read()
+
+
+def _noise(n=1000, seed=0):
+    return np.random.default_rng(seed).uniform(0, 1800, (n, n)).astype("float32")
+
+
+def _zip(members):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, data in members.items():
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+def _measure(layer, url, **over):
+    return {"layer": layer, "url": url, "title": f"{layer} (synthetic)", "description": "synthetic test layer",
+            "source": "test fixture", "license": "CC0-1.0", "vintage": "2026-10", "countries": ["Testland"],
+            "declared": {"dtype": "float32", "valid_min": 0, "valid_max": 1800, "units": "m"}, **over}
+
+
+def _submit(m):
+    tok = identity.bind(OWNER)
+    try:
+        return staging.submit("raster", m, OWNER)
+    finally:
+        identity.unbind(tok)
+
+
+def _no_strays(env):
+    return not list((env / "tiffs").glob("staged-tmp-*")) if (env / "tiffs").exists() else True
+
+
+# ------------------------------------------------------------ 2. a clip the host cannot honour
+def test_a_given_clip_from_a_host_that_streams_without_a_size_is_declined_in_words(env, host, log):
+    """The host neither answers range requests nor says the size: with the clip already
+    given, the decline says why it cannot be read remotely and what to do — it never asks
+    for the clip again (the agent would loop)."""
+    url = host.put("big.tif", _tif(_noise()), mode="streamed")
+    out = _submit(_measure("measure_streamed", url, clip=GULF))
+    said = out["problems"][0]
+    log("OUTPUT", said)
+    assert out["status"] == "declined" and not said.startswith("missing required field 'clip'")
+    assert "sends it only whole" in said and "or say the file's size" in said
+    assert "download it, clip it" in said and "Google Drive" in said
+    # no clip yet: the same host still gets the clip asked for, as a missing field
+    ask = _submit(_measure("measure_streamed", url))
+    assert ask["problems"][0].startswith("missing required field 'clip'")
+    # a host that says the size but sends only whole files keeps its sized wording
+    sized = _submit(_measure("measure_sized", host.put("sized.tif", _tif(_noise()), mode="whole"), clip=GULF))
+    assert "sends it only whole (it does not answer range requests)" in sized["problems"][0]
+    assert _no_strays(env)

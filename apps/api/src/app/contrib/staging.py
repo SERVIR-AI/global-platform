@@ -1021,6 +1021,8 @@ def _raster_source(m: dict, cap: int, folder) -> tuple[str, list, dict | None]:
     try:
         raw, _ = fetch_policy.fetch(url)
     except fetch_policy.TooLarge as exc:
+        if box is not None:     # the clip is given; the host would not send a part of it
+            raise Declined(rc.whole_only(m["url"], {**found, "size": exc.size}, cap)) from None
         raise Declined(rc.ask_for_clip(m["url"], cap, member, size=exc.size)) from None
     except fetch_policy.FetchRefused as exc:
         raise Declined(str(exc)) from None

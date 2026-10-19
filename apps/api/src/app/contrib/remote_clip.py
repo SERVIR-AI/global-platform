@@ -540,13 +540,19 @@ def ask_text(what: str) -> str:
 
 
 def whole_only(url: str, found: dict, cap: int) -> str:
-    """A file over the cap from a host that will not send a part of it."""
+    """A file over the cap from a host that will not send a part of it. `found["size"]`
+    None: the host did not say how big it is either (a streamed reply), so the clip
+    already given cannot be read remotely — asking for it again would loop."""
     host = urlparse(found["final"]).hostname
-    return (f"{str(url).strip()} is {size_text(found['size'])}, over the {size_text(cap)} cap, "
-            f"and {host} sends it only whole (it does not answer range requests), so the "
-            "platform cannot read just a part of it — clip it to the area yourself "
-            "(gdal_translate -projwin, or QGIS: Raster -> Extraction -> Clip) and give that "
-            "file's link, e.g. shared from Google Drive (Anyone with the link)")
+    size = found.get("size")
+    big = (f"is {size_text(size)}, over the {size_text(cap)} cap" if size
+           else f"is over the {size_text(cap)} cap")
+    why = ("it does not answer range requests" if size
+           else "it does not answer range requests or say the file's size")
+    return (f"{str(url).strip()} {big}, and {host} sends it only whole ({why}), so the "
+            "platform cannot read just a part of it — download it, clip it to the area "
+            "yourself (gdal_translate -projwin, or QGIS: Raster -> Extraction -> Clip) and give "
+            "the clip's link, e.g. shared from Google Drive (Anyone with the link)")
 
 
 def text_problem(head: bytes, url: str) -> str | None:
