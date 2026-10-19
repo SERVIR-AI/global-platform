@@ -30,6 +30,7 @@ from ..config import get_settings
 DEV_HEADER = "x-grp-dev-identity"
 LOCAL_DEV = "local-dev"
 CLI_OPERATOR = "cli-operator"
+ANONYMOUS = "anonymous"
 
 
 @dataclass(frozen=True)
@@ -40,7 +41,12 @@ class Caller:
     source: str  # token | dev-header | local-dev | anonymous | cli | bound
 
     def owns(self, contributor_id: str | None) -> bool:
-        return bool(contributor_id) and self.id == contributor_id
+        """Is this caller the contributor? `anonymous` is every caller of an open
+        deployment at once, so it owns nothing — not even what it submitted: one stranger
+        must not withdraw another's live layer. `local-dev` is the one operator of a
+        local box and owns what it submitted."""
+        return (bool(contributor_id) and contributor_id != ANONYMOUS
+                and self.source != "anonymous" and self.id == contributor_id)
 
     def may_see(self, staged_by: str | None) -> bool:
         """The visibility rule: a staged artefact is visible to its contributor
@@ -80,6 +86,8 @@ def _from_dev_header() -> str | None:
 
 
 def _is_reviewer(cid: str, label: str, source: str) -> bool:
+    if source == "anonymous" or cid == ANONYMOUS:
+        return False                      # nobody in particular, whatever the list says
     listed = {r.strip().lower() for r in get_settings().grp_reviewers if r.strip()}
     if listed:
         return cid.lower() in listed or label.lower() in listed
@@ -101,7 +109,7 @@ def resolve() -> Caller:
     else:
         # OAuth on and no token (REST paths, background work), or an OPEN
         # deployment: nobody in particular. Never a reviewer, never an owner.
-        cid = label = "anonymous"
+        cid = label = ANONYMOUS
         source = "anonymous"
     return Caller(cid, label, _is_reviewer(cid, label, source), source)
 

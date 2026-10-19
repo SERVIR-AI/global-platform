@@ -325,3 +325,77 @@ def test_a_truncated_zip_is_declined_not_raised(env, host, log):
     shp = _zip({"rios.shp": b"x" * 400, "rios.dbf": b"x" * 400})
     with pytest.raises(ValueError, match="re-upload it"):
         vecio.to_geojson(shp[: len(shp) // 2], "rios.zip")
+
+
+# ------------------------------------------------------------ 4. who may take a layer down
+LINES = {"type": "FeatureCollection", "features": [
+    {"type": "Feature", "properties": {"NOMBRE": "Río Uno"},
+     "geometry": {"type": "LineString", "coordinates": [[-85.2, 10.1], [-85.0, 10.2]]}}]}
+
+
+@pytest.fixture
+def vec_env(tmp_path, monkeypatch):
+    """Vector contributions land at once (auto-approve), fetched from a fixed body."""
+    import json
+    from app.contrib import fetch_policy
+    from app.mcp import store
+    s = get_settings()
+    for k, v in {"cache_dir": tmp_path / "cache", "tiffs_dir": tmp_path / "cache" / "tiffs",
+                 "grp_mattermost_webhook": "", "grp_auto_approve": True, "grp_contrib_hourly_cap": 0,
+                 "grp_oauth_enabled": False, "grp_allow_anonymous": False, "grp_reviewers": []}.items():
+        monkeypatch.setattr(s, k, v)
+    monkeypatch.setattr(store, "_db_path", lambda: tmp_path / "store.sqlite")
+    monkeypatch.setattr(fetch_policy, "check_url", lambda url: [])
+    monkeypatch.setattr(fetch_policy, "fetch", lambda url, max_bytes=None: (json.dumps(LINES).encode(), "l.geojson"))
+    monkeypatch.setenv("GRP_AUTO_APPROVE", "1")
+    staging.STAGED_VECTORS.clear()
+    monkeypatch.setattr(staging, "_STAGED_VECTORS_LOADED", True)
+    yield s
+    staging.STAGED_VECTORS.clear()
+
+
+def _land_lines(layer, caller):
+    out = staging.submit("vector", {"layer": layer, "url": f"https://x.test/{layer}.geojson",
+                                    "title": f"{layer} (synthetic)", "description": "synthetic lines",
+                                    "source": "test fixture", "license": "CC0-1.0", "vintage": "2026-10"}, caller)
+    assert out["status"] == "approved", out
+    return out["contribution_id"]
+
+
+def test_an_anonymous_caller_owns_nothing_and_takes_nothing_down(vec_env, monkeypatch, log):
+    """An open deployment: every caller is 'anonymous', so none owns a contribution — one
+    stranger cannot withdraw another's live layer, nor review it whatever GRP_REVIEWERS says."""
+    from app.graph.geo import vectors
+    monkeypatch.setattr(vec_env, "grp_allow_anonymous", True)
+    a = identity.resolve()
+    assert a.source == "anonymous" and not a.owns("anonymous") and not a.owns(None)
+    assert not identity.Caller("anonymous", "anonymous", False, "bound").owns("anonymous")
+    cid = _land_lines("anon_lines", a)
+    b = identity.resolve()                           # another participant, the same id
+    out = staging.withdraw(cid, caller=b)
+    log("OUTPUT", out["note"])
+    assert out["status"] == "declined" and "anonymous caller" in out["note"]
+    assert staging.status(cid, caller=b)["status"] == "declined"
+    assert staging.status(caller=b)["contributions"] == []
+    assert "anon_lines" in vectors.landed()
+    from app.mcp import store
+    assert store.load_contribution(cid)["status"] == "approved"
+    monkeypatch.setattr(vec_env, "grp_reviewers", ["anonymous"])
+    assert not identity.resolve().is_reviewer
+
+
+def test_the_local_operator_and_a_signed_in_contributor_still_withdraw_their_own(vec_env, log):
+    """A dev box's one operator (local-dev) withdraws what it landed; under OAuth only the
+    contributor may — another signed-in caller is told nothing of it."""
+    from app.graph.geo import vectors
+    me = identity.resolve()
+    assert me.source == "local-dev" and me.owns("local-dev")
+    cid = _land_lines("dev_lines", me)
+    out = staging.withdraw(cid, caller=me)
+    log("OUTPUT", out.get("unlanded"))
+    assert out["status"] == "withdrawn" and "dev_lines" not in vectors.landed()
+    alice = identity.Caller("user_alice", "alice@hub.test", False, "token")
+    bob = identity.Caller("user_bob", "bob@hub.test", False, "token")
+    cid = _land_lines("alice_lines", alice)
+    assert staging.withdraw(cid, caller=bob) == {"status": "declined", "note": f"unknown contribution {cid!r}"}
+    assert staging.withdraw(cid, caller=alice)["status"] == "withdrawn"

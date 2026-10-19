@@ -2709,7 +2709,8 @@ def status(contribution_id: str | None = None, caller: identity.Caller | None = 
         if rec is None or not (caller.is_reviewer or caller.owns(rec["contributor_id"])):
             return {"status": "declined", "note": f"unknown contribution {contribution_id!r}"}
         return {"status": "ok", "contribution": _public(rec)}
-    mine = [_public(r) for r in store.list_contributions(contributor_id=caller.id)]
+    mine = [_public(r) for r in store.list_contributions(contributor_id=caller.id)
+            if caller.owns(r["contributor_id"])]
     out = {"status": "ok", "you": caller.label, "reviewer": caller.is_reviewer,
            "contributions": mine}
     if caller.is_reviewer:
@@ -2737,6 +2738,12 @@ def withdraw(contribution_id: str, caller: identity.Caller | None = None) -> dic
                 "note": (f"contribution {contribution_id} is not yours to withdraw — as a reviewer, "
                          f"take it down with contribute_review(action='reject', contribution_id="
                          f"{contribution_id!r}, note=<why, in words its contributor can act on>)")}
+    if rec is not None and caller.source == "anonymous":
+        return {"status": "declined",
+                "note": (f"contribution {contribution_id} cannot be withdrawn by an anonymous "
+                         "caller — on an open deployment every caller is 'anonymous', so none "
+                         "owns a contribution; sign in to withdraw your own, or ask a reviewer "
+                         "to take it down")}
     if rec is None or not caller.owns(rec["contributor_id"]):
         return {"status": "declined", "note": f"unknown contribution {contribution_id!r}"}
     if rec["status"] == "approved":
