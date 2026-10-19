@@ -1260,11 +1260,13 @@ VECTOR_FIELDS = {
                  "A POINT layer becomes a countable asset beside hospitals/schools in every risk "
                  "answer; a LINE or POLYGON layer is measured inside any pack's area with "
                  "assemble_pack(..., vectors=[<layer>]) — km of line, km² (ha) of polygon",
-        "url": "where the platform can fetch the layer: a GeoJSON FeatureCollection in EPSG:4326 "
-               "(lon, lat), a ZIPPED SHAPEFILE (.shp/.shx/.dbf/.prj in one .zip) or a GEOPACKAGE "
-               "(.gpkg) — shapefiles and GeoPackages in any CRS are reprojected to EPSG:4326 at "
-               "ingest; Point, LineString or Polygon features (or their Multi forms; one family "
-               "per layer); a Google Drive share link works; public host, up to the size cap",
+        "url": "where the platform can fetch the layer: a GeoJSON FeatureCollection (EPSG:4326 "
+               "lon/lat, or the CRS its `crs` member names), a ZIPPED SHAPEFILE (.shp/.shx/.dbf/.prj "
+               "in one .zip) or a GEOPACKAGE (.gpkg) — any CRS is reprojected to EPSG:4326 at ingest; "
+               "Point, LineString or Polygon features (or their Multi forms; one family per layer; "
+               "features without geometry are dropped and counted); the COMPLETE file — a server "
+               "export cut at its record limit (exceededTransferLimit) is declined; a Google Drive "
+               "share link works; public host, up to the size cap",
         "title": "what the features are",
         "description": "what one feature represents, how the layer was compiled, what it excludes",
         "source": "who maintains the layer (agency), derived from what",
