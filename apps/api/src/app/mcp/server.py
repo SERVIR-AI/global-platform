@@ -238,8 +238,16 @@ class _LiveText(Middleware):
     async def on_initialize(self, context, call_next):
         self._fresh()
         if self._instr:
-            mcp.instructions = self._instr
-        return await call_next(context)
+            mcp.instructions = self._instr          # sessions created from now on
+        result = await call_next(context)
+        # This session's options were built before the request reached us: put the
+        # fresh text into the reply itself.
+        if self._instr and result is not None and hasattr(result, "instructions"):
+            try:
+                result = result.model_copy(update={"instructions": self._instr})
+            except Exception:
+                pass
+        return result
 
     async def on_list_tools(self, context, call_next):
         tools = await call_next(context)
