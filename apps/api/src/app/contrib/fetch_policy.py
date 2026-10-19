@@ -364,6 +364,12 @@ def _fetch(url: str, cap: int, started: float, agent: str) -> tuple[bytes, str]:
     for _ in range(MAX_REDIRECTS + 2):
         if time.monotonic() - started > DEADLINE:
             raise FetchRefused(f"fetch exceeded the {DEADLINE}s deadline")
+        article = figshare_article(current)
+        if article:                 # the page is a bot challenge; its API names the file
+            picked = [f for f in parse_qs(urlparse(current).query).get("file") or [] if f.isdigit()]
+            current = (_FIGSHARE_FILE.format(id=picked[0]) if picked     # ?file=<id>: chosen
+                       else _figshare_file(article, url, cap, started))
+            continue
         problems = check_url(current)
         if problems:
             raise FetchRefused("; ".join(problems))
@@ -453,6 +459,77 @@ def _fetch(url: str, cap: int, started: float, agent: str) -> tuple[bytes, str]:
 _TOO_BIG = ("contribute one layer per file (an archive of several is fetched whole), or clip "
             "it to your area, and give that file's link")
 
+# figshare: an article page — and a DOI that resolves to one, on figshare.com or on an
+# institution's portal (smithsonian.figshare.com) — answers a server with a bot
+# challenge, never the file, and the decline used to say only "download it yourself".
+# Its public API lists the article's files, each with a link that does hand over the
+# bytes (ndownloader.figshare.com/files/<id>): one file is fetched from there, several
+# are listed so the contributor names the one they mean.
+_FIGSHARE_API = "https://api.figshare.com/v2/articles/{id}"
+_FIGSHARE_FILE = "https://ndownloader.figshare.com/files/{id}"
+_FIGSHARE_NOT_ARTICLES = ("api.figshare.com", "ndownloader.figshare.com")
+_FIGSHARE_LISTED = 15
+
+
+def figshare_article(url: str) -> tuple[str, str | None] | None:
+    """(article id, version or None) for a figshare article page, else None."""
+    try:
+        parts = urlparse(str(url or "").strip())
+    except ValueError:
+        return None
+    host = (parts.hostname or "").lower()
+    if not (host == "figshare.com" or host.endswith(".figshare.com")) \
+            or host in _FIGSHARE_NOT_ARTICLES:
+        return None
+    segs = [s for s in (parts.path or "").split("/") if s]
+    if len(segs) < 2 or segs[0] != "articles" or not segs[-1].isdigit():
+        return None
+    if len(segs) >= 3 and segs[-2].isdigit():
+        return segs[-2], segs[-1]
+    return segs[-1], None
+
+
+def _megabytes(size) -> str:
+    try:
+        n = int(size)
+    except (TypeError, ValueError):
+        return "size unstated"
+    return f"{n / 1e6:.1f} MB" if n >= 1_000_000 else f"{max(1, round(n / 1e3))} KB"
+
+
+def _figshare_file(article: tuple[str, str | None], url: str, cap: int, started: float) -> str:
+    """The download link of the article's one file, or FetchRefused naming its files."""
+    aid, version = article
+    api = _FIGSHARE_API.format(id=aid) + (f"/versions/{version}" if version else "")
+    given = str(url).strip()
+    try:
+        raw, _ = _fetch(api, min(cap, 5_000_000), started, USER_AGENT)
+        doc = json.loads(raw.decode("utf-8"))
+        if not isinstance(doc, dict):
+            raise ValueError("the article record is not a JSON object")
+    except (FetchRefused, ValueError) as exc:
+        raise FetchRefused(
+            f"{given} is a figshare article page, which figshare does not hand to a server, and "
+            f"its file list could not be read ({exc}) — give the file's own link instead: on the "
+            "article page, each file's download button links to "
+            "https://ndownloader.figshare.com/files/<file id>") from None
+    files = [f for f in doc.get("files") or []
+             if isinstance(f, dict) and f.get("id") and not f.get("is_link_only")]
+    if len(files) == 1:
+        return files[0].get("download_url") or _FIGSHARE_FILE.format(id=files[0]["id"])
+    title = f" ({doc['title']})" if doc.get("title") else ""
+    if not files:
+        raise FetchRefused(f"{given} is figshare article {aid}{title}, and it holds no file "
+                           "figshare serves — its files are links to another site; give that "
+                           "site's link to the file itself")
+    listed = "; ".join(f"{f.get('name') or 'unnamed'} ({_megabytes(f.get('size'))}) "
+                       + _FIGSHARE_FILE.format(id=f["id"]) for f in files[:_FIGSHARE_LISTED])
+    more = (f"; and {len(files) - _FIGSHARE_LISTED} more on the article page"
+            if len(files) > _FIGSHARE_LISTED else "")
+    raise FetchRefused(f"{given} is figshare article {aid}{title}, which holds {len(files)} files, "
+                       f"and a contribution is one file — give the link of the one you mean: "
+                       f"{listed}{more}")
+
 
 def _refuse_page(status, headers, body, hops, url, quoted, drive_id, is_doc, html=True) -> None:
     """Refuse an answer that is a login wall or a bot challenge rather than the
@@ -471,6 +548,12 @@ def _refuse_page(status, headers, body, hops, url, quoted, drive_id, is_doc, htm
                            f"and {_SHARE}, then give that link (you gave {url})")
     why = _challenge(status, headers, body, html)
     if why:
+        hosts = [(urlparse(h).hostname or "").lower() for h in hops]
+        on_figshare = any(h == "figshare.com" or h.endswith(".figshare.com") for h in hosts)
         raise _Retryable(f"{quoted} answered with a bot challenge ({why}), not the file — the "
-                         f"site will not hand it to a server. Download it yourself and {_SHARE}, "
-                         "then give that link")
+                         "site will not hand it to a server. "
+                         + ("On figshare, give the file's own link instead: each file's download "
+                            "button on the article page links to "
+                            "https://ndownloader.figshare.com/files/<file id>. Or download "
+                            if on_figshare else "Download ")
+                         + f"it yourself and {_SHARE}, then give that link")

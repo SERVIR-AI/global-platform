@@ -65,13 +65,12 @@ def _corpus_for(pack_id: str):
 
 
 def _fetch(url: str) -> tuple[bytes, str]:
-    """Bytes + filename for a URL. Browser UA: several upstreams 403 plain clients."""
-    import requests
-    r = requests.get(url, timeout=60, headers={
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                      "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"})
-    r.raise_for_status()
-    return r.content, url.rstrip("/").rsplit("/", 1)[-1] or "document"
+    """Bytes + filename for a URL, through the fetch policy every MCP contribution
+    uses: an honest User-Agent first (zenodo answers a browser string from a server
+    403), one browser retry, Drive links and figshare articles resolved, a login wall
+    or a bot challenge refused in words, and the filename the host gives the file."""
+    from . import fetch_policy
+    return fetch_policy.fetch(url)
 
 
 def contribute(entries: list[dict], dry_run: bool = False) -> dict:
@@ -80,6 +79,7 @@ def contribute(entries: list[dict], dry_run: bool = False) -> dict:
     Returns {results: [...], ingested, declined, dry_run}. One bad entry never
     blocks a good one — each result names its entry and outcome."""
     from ..rag import docloader
+    from . import fetch_policy
 
     results = []
     for i, e in enumerate(entries):
@@ -102,6 +102,10 @@ def contribute(entries: list[dict], dry_run: bool = False) -> dict:
             else:
                 raw, fname = _fetch(e["url"])
                 fname = e.get("filename") or fname
+                if docloader.is_web_page(raw):
+                    raise fetch_policy.FetchRefused(
+                        f"{e['url']} returned a web page, not a document — give the file's own "
+                        "link (the PDF, not the page about it)")
             text = docloader.extract_text(raw, fname)
             meta = {k: e[k] for k in
                     ("source", "title", "pub_date", "temporal", "validation", "url")}
@@ -112,6 +116,8 @@ def contribute(entries: list[dict], dry_run: bool = False) -> dict:
                             "doc_id": out["doc_id"], "chunks": out["chunks"],
                             "already_ingested": out.get("already_ingested", False),
                             "passport": meta})
+        except fetch_policy.FetchRefused as exc:       # already said in the contributor's words
+            results.append({"entry": label, "status": "declined", "failures": [str(exc)]})
         except Exception as exc:                       # one entry, one failure line
             results.append({"entry": label, "status": "declined",
                             "failures": [f"{type(exc).__name__}: {exc}"]})
