@@ -363,22 +363,6 @@ def _has_evidence(citations: list, country: str | None = None) -> bool:
     return False
 
 
-def _source_speaks_to(spec: dict, country: str | None) -> bool:
-    """Is this pack-bound source about the country being asked about?
-
-    Added the moment the path existed: a cold contributor watched a Battambang
-    rainfall table get cited into a KENYA maize brief. A citation list is a claim
-    about what the answer rests on, and an unrelated source dilutes the ones that
-    matter — the same failure as a flood brief citing global earthquakes, made on
-    the food-security side by giving it the path without the filter.
-
-    A source that declares its countries (or a box) is filtered on them, by the rule
-    every pack applies (mcp.feeds.scope_miss). One that declares neither is global.
-    """
-    from ..mcp import feeds
-    return feeds.scope_miss(spec, [country] if country else [], None) is None
-
-
 def _pack_bound_sources(trace, gaps, country=None):
     """Feeds and tables bound to this pack that are NOT seasonal drivers.
 
@@ -402,9 +386,10 @@ def _pack_bound_sources(trace, gaps, country=None):
         pass
     out, elsewhere = [], {}
     for ds in sorted(rows):
-        # countries and a box, the rule every pack applies (mcp.feeds.scope_miss). This
-        # pack answers for a whole country: a box is placed through the countries the
-        # source also declares, and a box alone is said, never guessed.
+        # Is this source about the country asked about? A Battambang rainfall table was
+        # cited into a KENYA maize brief. Countries and a box, the rule every pack
+        # applies (mcp.feeds.scope_miss); this pack answers for a whole country, so a
+        # box is placed through the countries the source also declares, never guessed.
         miss = feeds.scope_miss(rows[ds], [country] if country else [], None)
         if miss:
             elsewhere[ds] = miss
