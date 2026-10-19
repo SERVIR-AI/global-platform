@@ -199,6 +199,16 @@ def _landed_table(recorded: str) -> _Path:
     return root / "tables" / p.name
 
 
+def _cache_key(spec: dict) -> str:
+    """A declarative row's fetch cache: by its name AND what it fetches. By name alone,
+    a feed withdrawn and resubmitted under the same name with a corrected URL or field
+    map was answered from the old one's rows for the cache's six hours."""
+    import hashlib
+    import json
+    what = json.dumps(spec.get("fetch") or {}, sort_keys=True, default=str)
+    return f"declarative:{spec['declarative']}:{hashlib.sha256(what.encode()).hexdigest()[:12]}"
+
+
 def _adapt_generic_table(params: dict, spec: dict) -> dict:
     """Declarative adapter for the NOAA text-series family: one row per year,
     12 monthly values, sentinel for not-yet-published. ONI/DMI/SOI all share it —
@@ -241,7 +251,7 @@ def _adapt_generic_table(params: dict, spec: dict) -> dict:
         return {"rows": rows}
 
     try:
-        res = climate_indices.cached(f"declarative:{spec['declarative']}", build)
+        res = climate_indices.cached(_cache_key(spec), build)
     except climate_indices.IndexUnavailable as exc:
         raise FeedDecline(f"feed unavailable: {exc}") from exc
     except OSError as exc:
@@ -295,16 +305,25 @@ def _upstream_total(doc) -> int | None:
 
 def _adapt_generic_json(params: dict, spec: dict) -> dict:
     """Declarative adapter for JSON APIs: records_path finds the list, fields maps
-    record keys ({out_name: in_path}). No params passthrough in v1 — a URL is a
-    provenance statement and stays exactly what the spec declared."""
+    record keys ({out_name: in_path}). The URL is never rewritten — it is a
+    provenance statement and stays exactly what the spec declared — so `params`
+    filter the records it answered: `limit`, an equality filter per output field,
+    and `bbox` when the feed maps latitude/longitude fields. Anything else is
+    declined with the accepted list: a species filter silently ignored answered
+    all 300 records of a GBIF page, status ok."""
     from . import climate_indices
     fetch = spec["fetch"]
+    params = dict(params or {})
     limit = 12
     if params.get("limit") is not None:
         try:
             limit = max(1, int(params["limit"]))
         except (TypeError, ValueError) as exc:
             raise FeedDecline("'limit' must be a whole number") from exc
+    fields = list((fetch.get("fields") or {}))
+    lat_f, lon_f = _coord_columns(fields)
+    filters, box = _filters(params, {_fold(f): f for f in fields}, lat_f, lon_f, fields,
+                            "this feed", "output field")
 
     def build() -> dict:
         import requests
@@ -325,13 +344,17 @@ def _adapt_generic_json(params: dict, spec: dict) -> dict:
         return {"rows": rows, "total": _upstream_total(doc)}
 
     try:
-        res = climate_indices.cached(f"declarative:{spec['declarative']}", build)
+        res = climate_indices.cached(_cache_key(spec), build)
     except climate_indices.IndexUnavailable as exc:
         raise FeedDecline(f"feed unavailable: {exc}") from exc
     except (OSError, ValueError) as exc:
         raise FeedDecline(f"feed unavailable: {type(exc).__name__}: {exc}") from exc
     rows = list(res["rows"])
     total = res.get("total") if isinstance(res.get("total"), int) and res["total"] > len(rows) else None
+    read = len(rows)
+    asked = _asked(filters, box)
+    if asked:
+        rows = [r for r in rows if _keeps(r, filters, box, lat_f, lon_f)]
     # WHICH END IS RECENT? The tail is only the newest if the upstream happens to
     # publish oldest-first. USGS publishes newest-first, so "the latest M4.5+
     # earthquakes" were the OLDEST twelve of the past month — month-old events
@@ -356,21 +379,29 @@ def _adapt_generic_json(params: dict, spec: dict) -> dict:
                              "records in publication order, which is NOT necessarily "
                              "the most recent"),
             # A paged API answers one page of what it matched: "300 records from GBIF"
-            # read as the whole, while GBIF had matched 1,984. Say first N of M.
-            "summary": (f"first {len(rows):,} of {total:,} records the upstream matched, from "
+            # read as the whole, while GBIF had matched 1,984. Say first N of M — and
+            # a filter searches that page, never what the upstream did not send.
+            "summary": ((f"{len(rows):,} of the {read:,} records read match {asked}, from "
+                         f"{spec.get('title')}"
+                         + (f" (the upstream matched {total:,}; the feed reads one page and "
+                            "filters only what it read)" if total else "")) if asked else
+                        f"first {read:,} of {total:,} records the upstream matched, from "
                         f"{spec.get('title')} (the feed reads one page)" if total else
-                        f"{len(rows)} records from {spec.get('title')}")
+                        f"{read} records from {spec.get('title')}")
                        + (f", latest {as_of}" if as_of else
+                          "" if not tail else
                           " (no timestamp field declared, so recency is unverified)"),
             **({"upstream_total": total} if total else {}),
-            "query_receipt": f"{fetch['records_path']} via {fetch['url']}",
+            "query_receipt": f"{fetch['records_path']} via {fetch['url']}"
+                             + (f" where {asked}" if asked else ""),
             "url": fetch["url"],
             "stale_data": {"cadence": spec.get("cadence"),
                            "retrieved_at": res.get("retrieved_at"),
                            "served_from_cache": res.get("cached"),
                            "served_stale": res.get("served_stale"),
                            "reason": res.get("stale_reason")},
-            "note": spec.get("usage_notes") or spec.get("note")}
+            "note": ((spec.get("usage_notes") or spec.get("note")) if rows or not asked else
+                     f"no record matches {asked} (the feed read {read:,} records)")}
 
 
 def _fold(v) -> str:
@@ -403,6 +434,72 @@ def _coord_columns(names) -> tuple[str | None, str | None]:
         elif lon is None and re.fullmatch(r"(?:\w*longitude|lon|lng|long)(?:[_ ].*)?", f):
             lon = n
     return lat, lon
+
+
+def _filters(params: dict, by_key: dict, lat, lon, names, noun: str, unit: str):
+    """([(asked name, column, wanted)], bbox) for a query's `params` — one rule for
+    every source that is filtered by its own columns, a landed table or a JSON feed.
+    `by_key` maps a folded name to the column it filters. A name it does not hold,
+    or a bbox with no latitude/longitude to test, is declined with what is accepted."""
+    wanted = {k: v for k, v in params.items() if k not in ("limit", "bbox")}
+    unknown = sorted(k for k in wanted if _fold(k) not in by_key)
+    if unknown or (params.get("bbox") is not None and not (lat and lon)):
+        accepted = ["limit"] + (["bbox"] if lat and lon else [])
+        article = "an" if unit[:1] in "aeiou" else "a"
+        raise FeedDecline(
+            (f"{noun} does not take {unknown}" if unknown else
+             f"{noun} has no latitude/longitude {unit}s, so it cannot be filtered by bbox")
+            + f" — accepted: {', '.join(accepted)}, or an equality filter on {article} {unit}: "
+            + ", ".join(dict.fromkeys(str(n) for n in names)))
+    box = None
+    if params.get("bbox") is not None:
+        from ..contrib import tables as _tables
+        box = _tables.bbox_of(params["bbox"])
+        if box is None:
+            raise FeedDecline("'bbox' must be [minLon, minLat, maxLon, maxLat], e.g. "
+                              f"[-85.4, 9.6, -84.6, 10.4] — got {params['bbox']!r}")
+    return [(k, by_key[_fold(k)], v) for k, v in wanted.items()], box
+
+
+def _keeps(rec: dict, filters, box, lat, lon) -> bool:
+    for _, col, v in filters:
+        if not _same(rec.get(col), v):
+            return False
+    if box:
+        try:
+            y, x = float(rec.get(lat)), float(rec.get(lon))
+        except (TypeError, ValueError):
+            return False
+        return box[0] <= x <= box[2] and box[1] <= y <= box[3]
+    return True
+
+
+def _asked(filters, box) -> str:
+    """The filters as the caller wrote them, for a summary and a receipt."""
+    return ", ".join([f"{k} = {v!r}" for k, _, v in filters]
+                     + ([f"inside bbox {box}"] if box else []))
+
+
+def params_doc(spec: dict) -> dict:
+    """What feeds_query takes on a declarative row, derived from the row itself — a
+    feed's filters are its own output fields, so the text can never drift from them."""
+    adapter = spec.get("adapter")
+    if adapter == "generic_csv":
+        from ..contrib import tables as _tables
+        return _tables.params_doc()
+    if adapter == "generic_json":
+        fields = list(((spec.get("fetch") or {}).get("fields") or {}))
+        lat, lon = _coord_columns(fields)
+        return {"limit": "records to return, from the end (default 12)",
+                "<field>": ("equality filter on an output field (" + ", ".join(fields)
+                            + "), matched case- and accent-insensitively; a list matches any "
+                              "of its values. It filters the records the feed read; the "
+                              "upstream query itself never changes"),
+                **({"bbox": f"[minLon, minLat, maxLon, maxLat] — records whose {lat}/{lon} "
+                            "fall inside"} if lat and lon else {})}
+    if adapter == "generic_table":
+        return {"limit": "months of series to return (default 12)"}
+    return dict(spec.get("params") or {})
 
 
 def _adapt_generic_csv(params: dict, spec: dict) -> dict:
@@ -456,39 +553,13 @@ def _adapt_generic_csv(params: dict, spec: dict) -> dict:
     for col in header:
         by_key.setdefault(_fold(col), col)
     lat_col, lon_col = _coord_columns([*cols.values(), *header])
-    filters = {k: v for k, v in params.items() if k not in ("limit", "bbox")}
-    unknown = sorted(k for k in filters if _fold(k) not in by_key)
-    if unknown or (params.get("bbox") is not None and not (lat_col and lon_col)):
-        accepted = ["limit"] + (["bbox"] if lat_col and lon_col else [])
-        names = list(dict.fromkeys([*cols, *header]))
-        raise FeedDecline(
-            (f"this table does not take {unknown}" if unknown else
-             "this table has no latitude/longitude columns, so it cannot be filtered by bbox")
-            + f" — accepted: {', '.join(accepted)}, or an equality filter on a column: "
-            + ", ".join(names))
-    box = None
-    if params.get("bbox") is not None:
-        box = _tables.bbox_of(params["bbox"])
-        if box is None:
-            raise FeedDecline("'bbox' must be [minLon, minLat, maxLon, maxLat], e.g. "
-                              f"[-85.4, 9.6, -84.6, 10.4] — got {params['bbox']!r}")
-
-    def keep(rec) -> bool:
-        for k, v in filters.items():
-            if not _same(rec.get(by_key[_fold(k)]), v):
-                return False
-        if box:
-            try:
-                y, x = float(rec.get(lat_col)), float(rec.get(lon_col))
-            except (TypeError, ValueError):
-                return False
-            return box[0] <= x <= box[2] and box[1] <= y <= box[3]
-        return True
+    filters, box = _filters(params, by_key, lat_col, lon_col, [*cols, *header],
+                            "this table", "column")
 
     rows, total = [], 0
     for rec in reader:
         total += 1
-        if not keep(rec):
+        if not _keeps(rec, filters, box, lat_col, lon_col):
             continue
         out = {name: rec.get(col) for name, col in cols.items()}
         for k, v in out.items():
@@ -500,8 +571,7 @@ def _adapt_generic_csv(params: dict, spec: dict) -> dict:
         rows.append(out)
     if not total:
         raise FeedDecline("the landed table has a header but no rows")
-    asked = ", ".join([f"{k} = {v!r}" for k, v in filters.items()]
-                      + ([f"inside bbox {box}"] if box else []))
+    asked = _asked(filters, box)
     as_of = fetch.get("as_of_field") and rows and rows[-1].get(fetch["as_of_field"])
     tail = rows[-limit:]
     return {"as_of": as_of or spec.get("vintage"),
@@ -529,6 +599,25 @@ ADAPTERS = {"cropmonitor_conditions": _adapt_cropmonitor,
             "generic_table": _adapt_generic_table,
             "generic_json": _adapt_generic_json,
             "generic_csv": _adapt_generic_csv}
+# Adapters that filter by the source's own columns decline an unknown name
+# themselves, naming those columns; every other one takes what its row declares.
+_FILTERS_ITS_OWN = ("generic_csv", "generic_json")
+
+
+def _undeclared_params(params: dict, spec: dict) -> str | None:
+    """Why `params` holds a name this feed does not take, or None. A parameter an
+    adapter never reads used to be dropped without a word, so the answer looked
+    filtered and was not. `limit` passes everywhere: every pack hands it to every
+    source it reads, and an index series takes it without declaring it."""
+    if spec.get("adapter") in _FILTERS_ITS_OWN:
+        return None
+    declared = list(params_doc(spec) if spec.get("adapter") == "generic_table"
+                    else spec.get("params") or {})
+    unknown = sorted(str(k) for k in (params or {}) if k != "limit" and k not in declared)
+    if not unknown:
+        return None
+    return (f"this feed does not accept those params: {', '.join(unknown)} — accepted: "
+            + (", ".join(declared) or "none (call it with no params)"))
 
 
 def describe() -> str:
@@ -536,7 +625,7 @@ def describe() -> str:
     from what is actually registered, and no feed name is hardcoded in prose."""
     avail, pending = [], []
     for name, spec in sorted(registry.FEEDS.items()):
-        params = ", ".join(f"{k}: {v}" for k, v in (spec.get("params") or {}).items())
+        params = ", ".join(f"{k}: {v}" for k, v in (spec.get("params") or params_doc(spec)).items())
         if spec.get("status") == "available":
             avail.append(f"  - `{name}` ({spec.get('source')}) — {spec.get('description','')}"
                          f" params: {{{params}}}")
@@ -583,6 +672,9 @@ def query(dataset: str, params: dict | None = None) -> dict:
     if adapter is None:
         return {"status": "declined", "dataset": dataset,
                 "note": f"{dataset} is registered but has no adapter (not implemented)"}
+    undeclared = _undeclared_params(params, spec)
+    if undeclared:
+        return {"status": "declined", "dataset": dataset, "note": undeclared}
     if spec.get("contributed") or spec.get("staged_by"):
         # A contributed upstream is re-checked on every read: the address the
         # contributor named must still be a public one (contrib/fetch_policy.py).
