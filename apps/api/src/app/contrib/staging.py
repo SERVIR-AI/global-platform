@@ -1850,7 +1850,7 @@ def _prepare_vector(m: dict) -> dict:
     try:
         raw, prep_notes = vecio.to_geojson(raw, fname, m.get("layer_name"))
     except ValueError as exc:
-        raise Declined(f"{m['url']}: {exc}") from None
+        raise Declined(prepare.declined("vector", m, f"{m['url']}: {exc}", "vector_unreadable", url=m["url"], error=str(exc))) from None
     except Exception as exc:
         raise Declined(f"{m['url']}: could not be read as a vector file: {type(exc).__name__}: {exc}") from None
     try:

@@ -58,8 +58,9 @@ ORDER = {"assemble": 10, "mosaic": 20, "convert": 30, "recode": 40, "clip": 50}
 #   class_range            + classes ([lo, hi], the namespace's class contract), declared
 #   url_refused            + url, problems (fetch_policy.check_url's words)
 #   shapefile_part         + url, part (which part it is)
+#   vector_unreadable      + url, error (graph/geo/vecio's words: a truncated export, ...)
 SITUATIONS = ("stack_legend_mismatch", "duplicate_labels", "class_range", "url_refused",
-              "shapefile_part")
+              "shapefile_part", "vector_unreadable")
 
 ZIP_MEMBERS = 10_000         # files one zip may hold to be extracted
 ZIP_RATIO = 200              # uncompressed / compressed, for a member over ZIP_RATIO_FROM
@@ -146,6 +147,8 @@ def validate(kind: str, manifest) -> list:
     problems = []
     for op in ops():
         given = _given(op, manifest)
+        if given and kind not in op.KINDS:
+            given = [f for f in given if f not in _own_fields(kind)]
         if not given:
             continue
         if kind not in op.KINDS:
@@ -155,6 +158,23 @@ def validate(kind: str, manifest) -> list:
             continue
         problems += list(op.validate(manifest) or [])
     return problems
+
+
+def _own_fields(kind: str) -> set:
+    """The fields `kind`'s own form lists: a field an op of another kind shares with it
+    (a raster's own clip, the vector clip op's) is that kind's, not the op's."""
+    try:
+        from .. import staging
+        form = (staging._KINDS.get(kind) or {}).get("fields") or {}
+        return set(form.get("required") or {}) | set(form.get("optional") or {})
+    except Exception:
+        return set()
+
+
+def declined(kind: str, manifest, text: str, event: str, **situation) -> str:
+    """A decline's `text`, with what the registered ops propose for its situation."""
+    s = suggest({"event": event, "kind": kind, "manifest": manifest, **situation})
+    return f"{text} — {s}" if s else text
 
 
 def suggest(situation: dict) -> str | None:
