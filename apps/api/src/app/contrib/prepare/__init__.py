@@ -58,8 +58,9 @@ ORDER = {"assemble": 10, "mosaic": 20, "convert": 30, "recode": 40, "clip": 50}
 #   class_range            + classes ([lo, hi], the namespace's class contract), declared
 #   url_refused            + url, problems (fetch_policy.check_url's words)
 #   shapefile_part         + url, part (which part it is)
+#   not_features           + url, problem (vectors.inspect's words), raw (the bytes fetched)
 SITUATIONS = ("stack_legend_mismatch", "duplicate_labels", "class_range", "url_refused",
-              "shapefile_part")
+              "shapefile_part", "not_features")
 
 ZIP_MEMBERS = 10_000         # files one zip may hold to be extracted
 ZIP_RATIO = 200              # uncompressed / compressed, for a member over ZIP_RATIO_FROM

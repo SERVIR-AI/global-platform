@@ -1856,7 +1856,7 @@ def _prepare_vector(m: dict) -> dict:
     try:
         observed = vectors.inspect(raw)
     except ValueError as exc:
-        raise Declined(f"{m['url']}: {exc}") from None
+        raise Declined(f"{m['url']}: {exc}" + "".join(f" — {s}" for s in [prepare.suggest({"event": "not_features", "kind": "vector", "manifest": m, "url": m["url"], "problem": str(exc), "raw": raw})] if s)) from None
     if made is not None:
         # What the server did to the file rides the record, as a raster's does: each step's
         # inputs and sha256, and the stored GeoJSON's; the cap is on what is stored.
