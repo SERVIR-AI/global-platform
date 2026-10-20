@@ -64,8 +64,9 @@ ORDER = {"assemble": 10, "mosaic": 20, "convert": 30, "recode": 40, "clip": 50}
 #   zip_of_rasters         + url, rasters (the zip's raster members), raised in remote_clip
 #   vector_unreadable      + url, error (graph/geo/vecio's words: a truncated export, ...)
 #   not_features           + url, problem (vectors.inspect's words), raw (the bytes fetched)
+#   declined               + problem (the words of any decline after the fetch, every kind)
 SITUATIONS = ("stack_legend_mismatch", "duplicate_labels", "class_range", "url_refused",
-              "shapefile_part", "zip_of_rasters", "vector_unreadable", "not_features")
+              "shapefile_part", "zip_of_rasters", "vector_unreadable", "not_features", "declined")
 
 ZIP_MEMBERS = 10_000         # files one zip may hold to be extracted
 ZIP_RATIO = 200              # uncompressed / compressed, for a member over ZIP_RATIO_FROM

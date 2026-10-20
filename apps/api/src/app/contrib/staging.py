@@ -24,7 +24,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from ..mcp import store
-from . import catalog_io, fetch_policy, identity, sources
+from . import catalog_io, fetch_policy, identity, prepare, sources
 
 KINDS = ("document", "table", "feed", "raster", "vector", "weights", "amend")
 STATUSES = ("pending", "approved", "rejected", "withdrawn", "failed")
@@ -2760,7 +2760,7 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
         try:
             prepared = spec["prepare"](manifest)      # fetches and checks; stores nothing
         except Declined as exc:
-            return {"status": "declined", "kind": kind, "problems": [str(exc)]}
+            return {"status": "declined", "kind": kind, "problems": [" — ".join(filter(None, [str(exc), prepare.suggest({"event": "declined", "kind": kind, "manifest": manifest, "problem": str(exc)})]))]}
         # Known before anything is staged, so the preview's own marker can say why it
         # waits for a person (the licence, the e-mail addresses).
         hold = _needs_a_human(kind, manifest, prepared)
