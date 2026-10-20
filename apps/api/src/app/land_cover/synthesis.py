@@ -574,6 +574,34 @@ def declared_accuracy(layer, row):
     return None
 
 
+_YEAR_PASSPORT = ("source", "license", "vintage", "pub_date", "url", "authority")
+
+
+def _year_row(row, layer):
+    """The stack row with one year's own passport over it (source, licence, vintage, ...),
+    read from that year's catalog row. A stack whose years are different maps (WorldCover
+    2020 v100, 2021 v200) cited the first year's map for every year."""
+    try:
+        meta = tiffs.entry(layer) if layer else {}
+    except Exception:
+        meta = {}
+    own = {k: meta[k] for k in _YEAR_PASSPORT if meta.get(k)}
+    if own.get("source", row.get("source")) != row.get("source"):
+        own = {"url": None, "pub_date": None, **own}     # never the other map's link or date
+    return {**row, **own}
+
+
+def _sources(sid, *rows):
+    """'<source> (platform computation)' for a figure read from these years' maps: each
+    distinct source once, in year order."""
+    seen = []
+    for r in rows:
+        s = str(r.get("source") or sid)
+        if s not in seen:
+            seen.append(s)
+    return "; ".join(seen) + " (platform computation)"
+
+
 def _standing_gaps(row, pixel_size_deg, accuracy=None):
     """The gaps every land-cover answer declares, read from the stack it answers
     from: the accuracy the producer states for each year read (or that none is
@@ -757,6 +785,7 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
 
     colors = _colors(row, legend)
     source = f"{row.get('source', sid)} (platform computation)"
+    yrow = {y: _year_row(row, ly) for y, ly in ((year, layer), (year_to, layer_to)) if ly}
     hits, unknown = _match_classes(wanted, legend)
     # A one-class map (mangrove, with everything else outside it) shows each year's
     # area; it cannot show loss or gain, and its own values hold one number.
@@ -773,7 +802,7 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
                     + (f", {why}" if why != "named by the caller" else "")
                     + "; pass stack=<id> to read another.")
     n = 1
-    citations.append(_class_area_citation(n, name, year, row, st, level, source))
+    citations.append(_class_area_citation(n, name, year, row, st, level, _sources(sid, yrow[year])))
     legend_entries = {str(k): {"label": v, "color": colors[k]} for k, v in legend.items()}
     headline = next((d for d in sorted(st["by_class"].values(), key=lambda d: -d["km2"])), None)
     viz = _viz(aoi, name, layer, clip, legend_entries,
@@ -792,7 +821,8 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
         st_to = stacks.class_areas(clip_to, boundary, legend, outside)
         if one_class:
             n += 1
-            citations.append(_class_area_citation(n, name, year_to, row, st_to, level_to, source))
+            citations.append(_class_area_citation(n, name, year_to, row, st_to, level_to,
+                                                  _sources(sid, yrow[year_to])))
             gaps.append(_one_class_gap(row, sid, legend))
             trace.append(f"change[{layer}->{layer_to}] not computed: one-class map")
         else:
@@ -806,13 +836,15 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
                                focus_class=focus_cls, out_path=change_path)
             trace.append(f"change[{layer}->{layer_to}] {ch['pixels_common']} px common")
             n += 1
-            citations.append(_class_area_citation(n, name, year_to, row, st_to, level_to, source))
+            citations.append(_class_area_citation(n, name, year_to, row, st_to, level_to,
+                                                  _sources(sid, yrow[year_to])))
+            both = _sources(sid, yrow[year], yrow[year_to])
             n += 1
-            citations.append(_change_citation(n, name, year, year_to, ch, source))
+            citations.append(_change_citation(n, name, year, year_to, ch, both))
             for cls in detail:
                 n += 1
                 citations.append(_transition_citation(n, name, year, year_to, cls,
-                                                      ch["by_class"][cls], source))
+                                                      ch["by_class"][cls], both))
             change_stats = {"km2_common": ch["km2_common"], "km2_changed": ch["km2_changed"],
                             "km2_one_year_only": ch["km2_one_year_only"],
                             "by_class": {d["label"]: {"km2_from": d["km2_a"], "km2_to": d["km2_b"],
@@ -849,11 +881,13 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
                 c_y, _ = _clip(aoi, ly, trace)
                 per_year[y] = stacks.class_areas(c_y, boundary, legend, outside)
             missing = sorted(int(y) for y in (row.get("missing_years") or {}))
+            series_src = _sources(sid, *(_year_row(row, stacks.layer_for(sid, y))
+                                         for y in years_in))
             for cls in series_cls:
                 pts = [(y, per_year[y]["by_class"][cls]["km2"]) for y in years_in]
                 n += 1
                 citations.append(_series_citation(n, name, cls, legend[cls], pts, missing,
-                                                  level, st["pixel_size_deg"], source))
+                                                  level, st["pixel_size_deg"], series_src))
             trace.append(f"series[{','.join(legend[c] for c in series_cls)}] {len(years_in)} years")
 
     # Fire detections registered on this stack, when the derived file has been built.
@@ -910,7 +944,7 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
     for yr, ly, cl, lv in ((year, layer, clip, level),
                            *(((year_to, layer_to, aoi[layer_to], level_to),) if layer_to else ())):
         n += 1
-        citations.append(_passport_citation(n, sid, row, ly, yr, cl, lv, legend, gaps))
+        citations.append(_passport_citation(n, sid, yrow[yr], ly, yr, cl, lv, legend, gaps))
     n += 1
     citations.append(_method_citation(n, outside, bool(layer_to), level, how, one_class=one_class))
 

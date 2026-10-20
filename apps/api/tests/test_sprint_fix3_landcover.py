@@ -147,3 +147,37 @@ def test_the_risk_pack_reads_a_hazard_outside_value_the_way_the_gate_does(gate, 
     assert hz["validation"] == "structural-contract-checked"
     assert "range 1-3" in hz["text"] and "CONTRACT MISMATCH" not in hz["text"]
     assert not [g for g in p["gaps"] if "failed its structural contract" in g]
+
+
+# ------------------------------------------------- B. each year cites its own map
+def test_each_year_cites_its_own_source_and_vintage_and_a_change_names_both(env, log):
+    """MGV-020: WorldCover 2020 v100 and 2021 v200 in one stack; the 2021 lines cited
+    v100's DOI and date."""
+    def wc(year):
+        a = np.full((H, W), 10, "uint8")
+        a[:, :3] = 95
+        a[:, 8:] = 80
+        if year == 2021:
+            a[:, 3] = 95
+        return a
+    _land(env, "landcover_wcv", WC_LEGEND,
+          {"dtype": "uint8", "valid_min": 10, "valid_max": 100, "nodata": 0, "units": "class"},
+          [0], wc, (2020, 2021),
+          {2020: {"source": V100, "vintage": "2021-10", "license": "CC-BY-4.0"},
+           2021: {"source": V200, "vintage": "2022-10", "license": "CC-BY-4.0 (v200)"}})
+    p = assemble.assemble(pack="land-cover", place="Test bay", geometry=POLY, year="2020",
+                          year_to="2021", stack="landcover_wcv", classes=["Mangroves"])
+    assert p["status"] == "ok", p.get("note")
+    by_title = {c["title"]: c for c in p["citations"]}
+    pp = {y: next(c for c in p["citations"] if c["kind"] == "landcover_layer"
+                  and c["title"].endswith(f", {y}")) for y in (2020, 2021)}
+    log("OUTPUT", pp[2021]["text"][pp[2021]["text"].find("Source:"):][:200])
+    assert f"Source: {V200} — licence CC-BY-4.0 (v200), published 2022-10." in pp[2021]["text"]
+    assert pp[2021]["source"] == V200 and "v100" not in pp[2021]["text"].split("Legend:")[0]
+    assert f"Source: {V100} — licence CC-BY-4.0, published 2021-10." in pp[2020]["text"]
+    area = {y: by_title[f"land cover by class, Test bay, {y}"] for y in (2020, 2021)}
+    assert area[2020]["source"] == f"{V100} (platform computation)"
+    assert area[2021]["source"] == f"{V200} (platform computation)"
+    for c in p["citations"]:
+        if c["kind"] in ("class_change", "class_transitions"):
+            assert V100 in c["source"] and V200 in c["source"], c["source"]
