@@ -75,6 +75,13 @@ def _num(v):
     return int(f) if f.is_integer() else f
 
 
+def _isnan(v) -> bool:
+    try:
+        return math.isnan(float(v))
+    except (TypeError, ValueError):
+        return False
+
+
 def outside_values(m: dict) -> list | None:
     """The values that mean 'no value' in this layer, as the gate stores them: the
     declared list; for a year of a land-cover stack that declares none, 0 and the
@@ -658,6 +665,14 @@ def validate_manifest(m: dict) -> list[str]:
         fails.append("legend must map class number -> label")
     decl = m.get("declared")
     if isinstance(decl, dict):
+        # Normalised in place, so the stored manifest, the staged contract and the landed
+        # one say the same: null is an omitted nodata (the file's own tag is used) — a
+        # standard MCP client sends a float NaN as null — and NaN in any form ("nan",
+        # "NaN", a JSON NaN) is kept as the string "nan", which JSON carries.
+        if "nodata" in decl and decl["nodata"] is None:
+            del decl["nodata"]
+        elif _isnan(decl.get("nodata")):
+            decl["nodata"] = "nan"
         for k in _DECLARED_REQUIRED:
             if decl.get(k) is None:
                 fails.append(f"declared.{k} is required — the contract is what the "
@@ -711,7 +726,7 @@ def validate_manifest(m: dict) -> list[str]:
     return fails
 
 
-def _explain(mismatch: str, decl: dict) -> str:
+def _explain(mismatch: str, decl: dict, obs: dict | None = None) -> str:
     """A contract mismatch, with what to do about the usual causes."""
     if mismatch.startswith(("max ", "min ")):
         if decl.get("scale_factor") is not None or decl.get("offset") is not None:
@@ -723,6 +738,8 @@ def _explain(mismatch: str, decl: dict) -> str:
     elif mismatch.startswith("nodata "):
         mismatch += (" — declare the nodata the file is tagged with, or list other no-data "
                      "values under outside_values")
+        if _isnan(decl.get("nodata")) or _isnan((obs or {}).get("nodata")):
+            mismatch += '; for a NaN fill, send the string "nan"'
     return mismatch
 
 
@@ -788,6 +805,8 @@ def _verify_and_land(manifest, dry_run, review, keep_prepared, prepared_before, 
     # the one it wrote — read with that one driver from here on
     obs = verify.windowed_stats(str(manifest["file"]), keep_values=legend_keys,
                                 skip_values=tuple(skip), driver="GTiff")
+    if _isnan(obs.get("nodata")):
+        obs["nodata"] = "nan"           # a NaN number reaches the reply as null: 'no tag'
     tag = obs.get("nodata")
     if (manifest.get("outside_values") is None and outside is not None and _isnum(tag)
             and not math.isnan(float(tag)) and _num(tag) not in outside
@@ -816,7 +835,7 @@ def _verify_and_land(manifest, dry_run, review, keep_prepared, prepared_before, 
     if mismatches:
         _drop_prepared()
         return {"status": "declined", "verified": False,
-                "failures": [f"file does not satisfy the DECLARED contract: {_explain(m, decl)}"
+                "failures": [f"file does not satisfy the DECLARED contract: {_explain(m, decl, obs)}"
                              for m in mismatches],
                 "observed": obs}
     if legend_keys and namespace(layer).get("values") == "classes":
