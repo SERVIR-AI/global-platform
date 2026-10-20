@@ -23,6 +23,9 @@ and optionally
     CELLWISE     True when the op changes each cell on its own (a recode): the result is the
                  same before or after a clip, so a raster with a `clip` is cut at the source
                  first (range reads, nothing else downloaded) and the op runs on the clip
+    answers(manifest, problem) -> bool
+                 True for a refusal of the manifest's url that the op answers for when it
+                 is asked for (from_folder lists a Drive FOLDER link itself)
 
 Opt-in: a manifest with none of the fields takes the existing path unchanged.
 
@@ -159,6 +162,8 @@ def validate(kind: str, manifest) -> list:
 
 def suggest(situation: dict) -> str | None:
     """What the registered ops propose for a decline's situation, or None."""
+    if "problems" in situation and not situation["problems"]:
+        return None                          # every refusal answered: nothing to propose
     said = []
     for op in ops(situation.get("kind")):
         try:
@@ -168,6 +173,13 @@ def suggest(situation: dict) -> str | None:
         if s:
             said.append(s)
     return "; ".join(said) or None
+
+
+def answered(kind: str, manifest, problems: list) -> list:
+    """fetch_policy's refusals of a manifest's url, less those an op it asks for answers
+    for (op.answers)."""
+    ans = [op for op in requested(kind, manifest) if callable(getattr(op, "answers", None))]
+    return [p for p in problems if not any(op.answers(manifest, p) for op in ans)]
 
 
 # --------------------------------------------------------------------------- context

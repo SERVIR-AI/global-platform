@@ -882,6 +882,7 @@ def _url_problems(kind: str, m: dict) -> list[str]:
     problems = fetch_policy.check_url(m["url"])
     if problems:
         from . import prepare
+        problems = prepare.answered(kind, m, problems)      # an op asked for may answer one
         said = prepare.suggest({"event": "url_refused", "kind": kind, "manifest": m,
                                 "url": m["url"], "problems": problems})
         if said:
