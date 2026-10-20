@@ -22,6 +22,7 @@ import re
 from shapely.geometry import shape
 
 from ..graph.geo import ingest, layer_values, rasterstats, schema, stacks, tiffs, verify
+from ..graph.geo import vectors as geovectors
 from ..rag import filters as _rag_filters
 
 SECTIONS = (
@@ -307,16 +308,43 @@ def _clip(aoi, layer, trace):
 
 # ---------------------------------------------------------------- citations
 
-def _class_area_citation(n, name, year, row, st, level, source):
+def _coverage(boundary, clip, st):
+    """(km² of the boundary on this year's map, km² of the whole boundary) when the map
+    reaches less than 99% of it, else None. A map over part of the area called that
+    part the boundary: 'classified of 42,971 km² inside the boundary' for Costa Rica's
+    80,562 km². Decided on the map's extent, so a small boundary's cell edges never
+    read as a gap."""
+    from shapely.geometry import box
+    asked = geovectors.area_km2(boundary)
+    if asked <= 0:
+        return None
+    try:
+        reached = geovectors.area_km2(boundary.intersection(box(*stacks.header(clip)["bounds"])))
+    except Exception:
+        reached = st["km2_inside"]
+    return (st["km2_inside"], asked) if reached < 0.99 * asked else None
+
+
+def _coverage_phrase(name, cover):
+    mapped, asked = cover
+    return (f"the map covers {_km2(mapped)} km² ({_pct(100.0 * mapped / asked)}%) of {name}'s "
+            f"{_km2(asked)} km²; the other {_km2(max(0.0, asked - mapped))} km² lies beyond the "
+            "map and is not counted in any figure here")
+
+
+def _class_area_citation(n, name, year, row, st, level, source, cover=None):
     ordered = sorted(st["by_class"].items(), key=lambda kv: -kv[1]["km2"])
     parts = [f"{d['label']} {_km2(d['km2'])} km² ({_pct(d['share_pct'])}%)"
              for _, d in ordered if d["pixels"] > 0]
     absent = st["classes_absent"]
     text = (f"Land cover of {name} in {year} ({row.get('title', '')}; "
-            f"{_res_phrase(level, st['pixel_size_deg'])}): {_km2(st['km2_classified'])} km² "
+            f"{_res_phrase(level, st['pixel_size_deg'])}): "
+            + (_coverage_phrase(name, cover) + ". " if cover else "")
+            + f"{_km2(st['km2_classified'])} km² "
             f"({_ha(st['km2_classified'])} ha) classified of {_km2(st['km2_inside'])} km² inside the "
-            f"boundary; {_km2(st['km2_outside'])} km² is outside the product footprint or "
-            f"unclassified and is excluded from every share below. By class: "
+            f"boundary{' on the map' if cover else ''}; {_km2(st['km2_outside'])} km² is outside "
+            "the product footprint or unclassified and is excluded from every share below. "
+            "By class: "
             + "; ".join(parts) + "."
             + (f" Classes absent from this area: {', '.join(absent)}." if absent else "")
             + f" Pixels: {st['pixels_classified']:,} classified of {st['pixels_inside']:,} inside "
@@ -802,7 +830,9 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
                     + (f", {why}" if why != "named by the caller" else "")
                     + "; pass stack=<id> to read another.")
     n = 1
-    citations.append(_class_area_citation(n, name, year, row, st, level, _sources(sid, yrow[year])))
+    cover = {year: _coverage(boundary, clip, st)}
+    citations.append(_class_area_citation(n, name, year, row, st, level, _sources(sid, yrow[year]),
+                                          cover[year]))
     legend_entries = {str(k): {"label": v, "color": colors[k]} for k, v in legend.items()}
     headline = next((d for d in sorted(st["by_class"].values(), key=lambda d: -d["km2"])), None)
     viz = _viz(aoi, name, layer, clip, legend_entries,
@@ -819,10 +849,11 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
     if layer_to:
         clip_to, level_to = _clip(aoi, layer_to, trace)
         st_to = stacks.class_areas(clip_to, boundary, legend, outside)
+        cover[year_to] = _coverage(boundary, clip_to, st_to)
         if one_class:
             n += 1
             citations.append(_class_area_citation(n, name, year_to, row, st_to, level_to,
-                                                  _sources(sid, yrow[year_to])))
+                                                  _sources(sid, yrow[year_to]), cover[year_to]))
             gaps.append(_one_class_gap(row, sid, legend))
             trace.append(f"change[{layer}->{layer_to}] not computed: one-class map")
         else:
@@ -837,7 +868,7 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
             trace.append(f"change[{layer}->{layer_to}] {ch['pixels_common']} px common")
             n += 1
             citations.append(_class_area_citation(n, name, year_to, row, st_to, level_to,
-                                                  _sources(sid, yrow[year_to])))
+                                                  _sources(sid, yrow[year_to]), cover[year_to]))
             both = _sources(sid, yrow[year], yrow[year_to])
             n += 1
             citations.append(_change_citation(n, name, year, year_to, ch, both))
@@ -951,6 +982,13 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
     if unknown:
         gaps.append(f"classes not in this stack's legend and not detailed: {', '.join(unknown)} "
                     f"(legend: {', '.join(legend.values())})")
+    partial = {}
+    for y, c in cover.items():
+        if c:
+            partial.setdefault(_coverage_phrase(name, c), []).append(str(y))
+    for phrase, ys in partial.items():
+        gaps.append(f"{row.get('title', sid)}, {' and '.join(ys)}: {phrase} — a figure for "
+                    f"{name} here is a figure for the mapped part only")
     if st["km2_outside"] > 0:
         gaps.append(f"{_km2(st['km2_outside'])} km² of the boundary is outside the product "
                     "footprint or unclassified and is excluded from every share")

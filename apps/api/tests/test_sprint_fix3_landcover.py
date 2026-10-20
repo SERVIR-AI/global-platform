@@ -181,3 +181,41 @@ def test_each_year_cites_its_own_source_and_vintage_and_a_change_names_both(env,
     for c in p["citations"]:
         if c["kind"] in ("class_change", "class_transitions"):
             assert V100 in c["source"] and V200 in c["source"], c["source"]
+
+
+# ------------------------------------------------- C. a partial map says how partial
+WIDE = mapping(box(LEFT + 1 * PX, TOP - 9 * PX, LEFT + 19 * PX, TOP - 1 * PX))   # half beyond the map
+
+
+@pytest.mark.parametrize("extra", [{}, {"layers": []}])
+def test_a_stack_over_part_of_the_boundary_says_how_much_it_maps(env, log, extra):
+    """MGV-019: 'classified of 42,971 km² inside the boundary' for Costa Rica's 80,562 km²
+    on one WorldCover tile, silent when layers=[]."""
+    _land(env, "landcover_part", GWL_LEGEND,
+          {"dtype": "uint8", "valid_min": 0, "valid_max": 187, "units": "class"},
+          [255], _gwl, (2020, 2022))
+    p = assemble.assemble(pack="land-cover", place="Test coast", geometry=WIDE, year="2020",
+                          year_to="2022", stack="landcover_part", classes=["Mangrove forest"], **extra)
+    assert p["status"] == "ok", p.get("note")
+    asked = vectors.area_km2(shape(WIDE))
+    areas = [c for c in p["citations"] if c["kind"] == "class_area"]
+    log("OUTPUT", areas[0]["text"][:420])
+    for c in areas:
+        assert f"of Test coast's {asked:,.1f} km²" in c["text"]
+        assert "lies beyond the map and is not counted in any figure here" in c["text"]
+        assert "(5" in c["text"].split("the map covers", 1)[1][:30]           # ~50%
+    gap = [g for g in p["gaps"] if "the map covers" in g]
+    log("OUTPUT", gap)
+    assert len(gap) == 1 and "2020 and 2022" in gap[0] and "the mapped part only" in gap[0]
+
+
+def test_a_boundary_the_map_covers_carries_no_coverage_line(env, log):
+    _land(env, "landcover_full", GWL_LEGEND,
+          {"dtype": "uint8", "valid_min": 0, "valid_max": 187, "units": "class"},
+          [255], _gwl, (2020, 2022))
+    p = assemble.assemble(pack="land-cover", place="Test bay", geometry=POLY, year="2020",
+                          year_to="2022", stack="landcover_full")
+    assert p["status"] == "ok", p.get("note")
+    assert not [c for c in p["citations"] if "the map covers" in c["text"]]
+    assert not [g for g in p["gaps"] if "the map covers" in g]
+    log("OUTPUT", json.dumps([c["text"][:160] for c in p["citations"] if c["kind"] == "class_area"]))
