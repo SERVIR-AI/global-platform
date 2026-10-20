@@ -441,6 +441,18 @@ def test_a_slow_table_goes_the_same_way(env, monkeypatch):
 
 
 # --------------------------------------------------------------------------- 3. who sees a job
+def test_a_status_call_for_an_unknown_id_changes_nothing(env):
+    """The existing path: an unknown id is declined as before, and no table is made."""
+    assert _status("0123456789abcdef") == {"status": "declined",
+                                           "note": "unknown contribution '0123456789abcdef'"}
+    con = store._connect()
+    try:
+        names = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    finally:
+        con.close()
+    assert "contribution_jobs" not in names
+
+
 def test_only_the_submitter_sees_a_job(env, monkeypatch):
     monkeypatch.setattr(get_settings(), "grp_prep_wait_seconds", 0.2)
     url = env["host"].put("mine.tif", _coded(), gate=True)

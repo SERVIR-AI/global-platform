@@ -148,10 +148,15 @@ def _write(sql: str, args=(), tries: int = 1) -> None:
 
 
 def _row(ident: str) -> dict | None:
-    con = _connect()
+    """The job's row, or None — read only: a status call never creates the table."""
+    con = store._connect()
     try:
         r = con.execute(f"SELECT {', '.join(_COLUMNS)} FROM contribution_jobs WHERE id = ?",
                         (ident,)).fetchone()
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc):
+            return None
+        raise
     finally:
         con.close()
     return dict(zip(_COLUMNS, r)) if r else None
