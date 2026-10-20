@@ -833,3 +833,61 @@ def test_a_range_the_host_drops_is_asked_again_and_one_it_keeps_dropping_is_decl
     assert out["status"] == "declined"
     assert "did not answer (ConnectionError) while a tile was read — try again" in out["problems"][0]
     assert _no_leftovers(env)
+
+
+# --------------------------------------------------------------------------- 9. not tiles
+def _map_and_quality():
+    """A zip shaped like ETH canopy height or ALOS PALSAR: at each tile position the map
+    (classes 1, 2 with a 400-cell nodata hole) AND a quality raster of the same footprint."""
+    members = {}
+    for left in (-85, -84):
+        a = np.full((60, 60), 1, "uint8")
+        a[:, 30:] = 2
+        a[:20, :20] = 0
+        members[f"X_N10W{abs(left):03d}_Map.tif"] = _gtiff(a, "uint8", 0, bounds=(left, 9, left + 1, 10))
+        members[f"X_N10W{abs(left):03d}_Quality.tif"] = _gtiff(
+            np.full((60, 60), 2, "uint8"), "uint8", 0, bounds=(left, 9, left + 1, 10))
+    return members
+
+
+def _x_year(url, **over):
+    return {"layer": "landcover_crx_2020", "stack": "landcover_crx", "year": 2020, "url": url,
+            "title": "X 2020 (synthetic)", "description": "1 mangrove, 2 other",
+            "source": "test fixture", "license": "CC-BY-4.0", "vintage": "2020",
+            "legend": {1: "Mangrove", 2: "Other"}, "outside_values": [0], "stack_title": "X",
+            "declared": {"dtype": "uint8", "valid_min": 1, "valid_max": 2, "nodata": 0,
+                         "units": "class"},
+            "clip": [-85.0, 9.0, -83.0, 10.0], **over}
+
+
+def test_a_map_beside_its_quality_layer_is_never_joined_by_itself(env, monkeypatch, log):
+    """Two rasters at every tile position (a map and its quality layer) with a clip and no
+    mosaic field: the platform does not join them by itself — it stays a question naming
+    the members; asked to (mosaic: 'auto', or a list naming both rasters of one place), the
+    join is refused, never one's no-data filled from the other. The maps alone join, their
+    holes still no data."""
+    monkeypatch.setattr(get_settings(), "grp_prep_auto", True)
+    members = _map_and_quality()
+    url = env["host"].put("x_tiles.zip", _zip(members))
+    out = _submit("raster", _x_year(url))
+    p = out["problems"][0]
+    log("OUTPUT", p)
+    assert out["status"] == "declined" and "prepared_automatically" not in out
+    assert "name the one to contribute with clip_member" in p
+    assert "mosaic: [<member>, <member>, ...]" in p and "mosaic: 'auto'" not in p
+    maps = [n for n in members if n.endswith("_Map.tif")]
+    seen = {"event": "zip_of_rasters", "kind": "raster", "manifest": _x_year(url)}
+    assert mosaic.auto({**seen, "rasters": list(members)}) is None
+    assert mosaic.auto({**seen, "rasters": maps})["fields"] == {"mosaic": "auto"}
+    for asked in ("auto", ["X_N10W085_Map.tif", "X_N10W085_Quality.tif"]):
+        out = _submit("raster", _x_year(url, mosaic=asked))
+        assert out["status"] == "declined", out
+        assert "cover the same ground: they are two rasters of one place" in out["problems"][0]
+        assert "the platform never joins them" in out["problems"][0]
+    assert "landcover_crx_2020" not in tiffs.catalog()
+    out = _submit("raster", _x_year(url, mosaic=maps))
+    assert out["status"] == "approved", out
+    _, a, prof, _ = _stored("landcover_crx_2020")
+    assert prof["nodata"] == 0
+    assert dict(zip(*[x.tolist() for x in np.unique(a, return_counts=True)])) == {0: 800, 1: 2800, 2: 3600}
+    assert _no_leftovers(env)
