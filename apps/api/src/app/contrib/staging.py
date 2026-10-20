@@ -3404,9 +3404,10 @@ def describe_submit() -> str:
                "then shows status pending in contribute_status until a reviewer decides) or ")
               + "{status: declined, problems: [...]} naming every problem at once — fix them all "
               "and resubmit. Work that outlasts the call (a big download, a preparation) answers "
-              "{status: preparing, contribution_id, message}: it goes on on the server — call "
-              "contribute_status with that contribution_id in about a minute for the result "
-              "above; never resubmit it. "
+              "{status: preparing, contribution_id, message}: it goes on on the server — keep "
+              "checking with contribute_status and that contribution_id until it finishes (each "
+              "check waits a while for the result), tell the person it is still being prepared, "
+              "don't end your answer while it is; never resubmit it. "
               "A url must answer with the FILE: a login page, a bot challenge or "
               "a web page about the file is declined in words, with what to do (usually: "
               "download it and share it from Google Drive, Anyone with the link). Each "
