@@ -126,6 +126,37 @@ def _sorted(kind: str, manifest) -> tuple[str, str]:
         return str(kind or ""), "plain"
 
 
+def _fails_checks(kind: str, manifest) -> bool:
+    """True when the submission fails staging's fetch-free checks even with the fields the
+    platform applies by itself — staging.submit then declines it before fetching anything,
+    so it answers at once instead of waiting for a preparation slot behind others."""
+    from ..config import get_settings
+    try:
+        m = manifest
+        if isinstance(m, str):
+            m, why = staging._manifest_from_text(m)
+            if why:
+                return True
+        if not isinstance(m, dict):
+            return True
+        k = str(kind or m.get("kind") or "")
+        spec = staging._KINDS.get(k)
+        if spec is None:
+            return True
+        m = {f: v for f, v in m.items() if f not in ("kind", "preview")}
+        auto = prepare.Auto(k, m, on=get_settings().grp_prep_auto)
+        for _ in range(prepare.MAX_ROUNDS + 2):
+            with auto.attempt() as seen:
+                problems = spec["validate"](auto.manifest)
+            if not problems:
+                return False
+            if not auto.again(seen):
+                return True
+        return False
+    except Exception:
+        return False                        # unsure: the job path, as before
+
+
 # --------------------------------------------------------------------------- the store
 
 _COLUMNS = ("id", "owner_id", "kind", "lane", "digest", "state", "step", "created",
@@ -276,6 +307,11 @@ def _position(row: dict) -> int:
     return int(ahead) + 1
 
 
+def _status_wait() -> float:
+    from ..config import get_settings
+    return max(0.0, float(get_settings().grp_prep_status_wait_seconds))
+
+
 def _reply(row: dict) -> dict:
     """What the submitter is told about the job in `row`."""
     if row["state"] == "done":
@@ -294,8 +330,8 @@ def _reply(row: dict) -> dict:
         step = _step_words(row["step"])
     out.update({"step": step, "elapsed_s": elapsed,
                 "message": f"the platform is still preparing this ({step}, {elapsed} s so far); "
-                           f"call contribute_status with contribution_id {row['id']} in about a "
-                           "minute — do not resubmit"})
+                           f"call contribute_status with contribution_id {row['id']} (it waits up "
+                           f"to {_status_wait():g} s for the result) — do not resubmit"})
     return out
 
 
@@ -369,6 +405,8 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
         if fut is not None:                    # the same submission, still working
             return _wait(same[0], fut)
         said, lane = _sorted(kind, manifest)
+        if lane == "prepare" and _fails_checks(kind, manifest):
+            return staging.submit(kind, manifest, caller)   # declined before any fetch
         ident = os.urandom(8).hex()
         now = time.time()
         _write("INSERT INTO contribution_jobs (id, owner_id, kind, lane, digest, state, step, "
@@ -404,6 +442,14 @@ def lookup(ident: str | None, caller: identity.Caller | None = None) -> dict | N
         return None
     if row is None or caller.id != row["owner_id"]:
         return None
+    with _lock:
+        fut = _live.get(row["id"])
+    if fut is not None and row["state"] in UNFINISHED:
+        try:
+            fut.result(timeout=_status_wait())
+        except BaseException:                 # still working, or failed: the row says which
+            pass
+        row = _row(str(ident)) or row
     if row["state"] in UNFINISHED and _gone(row):
         row = _interrupt(row)
     return _reply(row)

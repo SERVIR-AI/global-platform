@@ -242,6 +242,9 @@ class Settings(BaseSettings):
     # at about a minute).
     grp_prep_max_jobs: int = 2
     grp_prep_wait_seconds: float = 40
+    # contribute_status on a job still working waits up to this long for it to finish, so
+    # an agent asking again gets the result instead of polling every few seconds.
+    grp_prep_status_wait_seconds: float = 20
     # DEVELOPMENT ONLY: let contributions fetch from private/loopback addresses, so a
     # local dry run can serve test files from a local http server. Never set on a
     # deployed host — the fetch policy exists because the server sits on a shared

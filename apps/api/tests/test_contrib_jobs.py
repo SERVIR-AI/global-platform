@@ -228,7 +228,8 @@ def env(tmp_path, monkeypatch, host):
                  "feeds_conf_dir": fdir, "cache_dir": cache, "tiffs_dir": tdir,
                  "grp_mattermost_webhook": "", "grp_auto_approve": True,
                  "grp_contrib_allow_private_hosts": True, "grp_contrib_hourly_cap": 0,
-                 "grp_prep_max_jobs": 2, "grp_prep_wait_seconds": 40}.items():
+                 "grp_prep_max_jobs": 2, "grp_prep_wait_seconds": 40,
+                 "grp_prep_status_wait_seconds": 0}.items():
         monkeypatch.setattr(s, k, v)
     monkeypatch.setattr(store, "_db_path", lambda: tmp_path / "store.sqlite")
     monkeypatch.setattr(ingest, "_fetch_layer", lambda layer, bbox, boundary: [])
@@ -369,8 +370,8 @@ def test_a_slow_preparation_answers_preparing_then_status_gives_the_final_result
     assert re.fullmatch(r"[0-9a-f]{16}", jid) and store.load_contribution(jid) is None
     assert out["step"] == "fetching the source"         # the prepare Context's own step
     assert re.fullmatch(r"the platform is still preparing this \(fetching the source, \d+ s so "
-                        rf"far\); call contribute_status with contribution_id {jid} in about a "
-                        r"minute — do not resubmit", out["message"])
+                        rf"far\); call contribute_status with contribution_id {jid} \(it waits up to "
+                        r"0 s for the result\) — do not resubmit", out["message"])
     mid = _call("contribute_status", {"contribution_id": jid})
     assert mid["status"] == "preparing" and mid["step"] == "fetching the source"
     assert "queue_position" not in mid and mid["elapsed_s"] >= 0
