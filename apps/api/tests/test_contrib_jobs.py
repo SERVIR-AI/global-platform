@@ -475,6 +475,7 @@ def test_a_restart_marks_an_unfinished_job_interrupted(env, monkeypatch):
     out = _call("contribute_submit", {"kind": "raster", "manifest": _vuln(url)})
     jid = out["contribution_id"]
     # the process restarts: a new instance, nothing of the old one's in memory
+    running = jobs._live                      # still this process's own, finished before teardown
     monkeypatch.setattr(jobs, "INSTANCE", "0" * 16)
     monkeypatch.setattr(jobs, "_live", {})
     got = _status(jid)
@@ -496,7 +497,9 @@ def test_a_restart_marks_an_unfinished_job_interrupted(env, monkeypatch):
                 "instance, pid) VALUES (?, ?, 'raster', 'plain', 'running', ?, ?, ?, ?)",
                 ("cd" * 8, OWNER.id, now, now, "e" * 16, 1))
     assert jobs.recover() == 0 and _status("cd" * 8)["status"] == "preparing"
+    monkeypatch.setattr(jobs, "_live", running)
     env["host"].open("cut.tif")
+    _drain()                                  # into the hermetic store, never the real one
 
 
 def test_finished_jobs_are_kept_a_day(env, monkeypatch):
