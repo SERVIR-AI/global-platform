@@ -18,7 +18,8 @@ from __future__ import annotations
 import os
 import re
 
-from ..graph.geo import combine, ingest, rasterstats, schema, store as geostore, tiffs, viz
+from ..graph.geo import (combine, ingest, layer_values, rasterstats, schema,
+                         store as geostore, tiffs, viz)
 
 SECTIONS = (
     "## What the numbers show",
@@ -810,7 +811,12 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
         check_notes.append(f"declared contract unreadable ({type(exc).__name__})")
         gaps.append(f"{hz}: raster contract could not be read — layer unvalidated")
     try:
-        obs = rasterstats.windowed_stats(aoi[hz])
+        # The range is of READINGS, by the rule the gate and the layer-values block use:
+        # the outside values and the declared nodata are skipped.
+        role = (contract or {}).get("role") or meta.get("role") or schema.role_for(hz)
+        skip, _ = layer_values._no_value({**(contract or {}), **({"role": role} if role else {})},
+                                         None, meta)
+        obs = rasterstats.windowed_stats(aoi[hz], skip_values=tuple(skip))
     except Exception as exc:
         check_notes.append(f"clip stats unreadable ({type(exc).__name__})")
         gaps.append(f"{hz}: clip statistics could not be read — layer unvalidated")

@@ -21,7 +21,7 @@ import re
 
 from shapely.geometry import shape
 
-from ..graph.geo import ingest, rasterstats, schema, stacks, tiffs, verify
+from ..graph.geo import ingest, layer_values, rasterstats, schema, stacks, tiffs, verify
 from ..rag import filters as _rag_filters
 
 SECTIONS = (
@@ -438,13 +438,18 @@ def _passport_citation(n, sid, row, layer, year, clip, level, legend, gaps):
     """Declared contract vs the clip actually read — 'checked' means compared."""
     meta = tiffs.entry(layer)
     path = meta.get("path") or ""
-    contract, obs, hdr, notes = None, None, None, []
+    contract, obs, hdr, notes, skip, skip_why = None, None, None, [], [], ""
     try:
         contract = schema.schema_for(layer)
     except Exception as exc:
         notes.append(f"declared contract unreadable ({type(exc).__name__})")
     try:
-        obs = rasterstats.windowed_stats(clip, keep_values=tuple(legend))
+        # The range is of READINGS, by the rule the gate and the layer-values block use:
+        # the outside values and the declared nodata (255 over open sea) are skipped.
+        role = (contract or {}).get("role") or meta.get("role") or schema.role_for(layer)
+        skip, skip_why = layer_values._no_value(
+            {**(contract or {}), **({"role": role} if role else {})}, None, meta)
+        obs = rasterstats.windowed_stats(clip, keep_values=tuple(legend), skip_values=tuple(skip))
     except Exception as exc:
         notes.append(f"clip statistics unreadable ({type(exc).__name__})")
     try:
@@ -470,7 +475,8 @@ def _passport_citation(n, sid, row, layer, year, clip, level, legend, gaps):
     if obs and obs.get("sampled_min") is not None:
         bits.append(f"Observed on this clip: dtype {obs['dtype']}, range {obs['sampled_min']:g}-"
                     f"{obs['sampled_max']:g} across {obs.get('sampled_distinct')} distinct values "
-                    "(sampled).")
+                    "(sampled" + (f"; no-data, not counted as readings: {skip_why}" if skip else "")
+                    + ").")
     if hdr:
         b = hdr["bounds"]
         bits.append(f"Grid: {hdr['width']}×{hdr['height']} px, lon {b[0]}..{b[2]}, "
