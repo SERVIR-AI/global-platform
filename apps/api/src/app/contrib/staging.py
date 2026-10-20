@@ -3116,6 +3116,11 @@ def status(contribution_id: str | None = None, caller: identity.Caller | None = 
     caller = caller or identity.current()
     if contribution_id:
         rec = store.load_contribution(contribution_id)
+        if rec is None:                      # a submission still working in the background
+            from . import jobs
+            job = jobs.lookup(contribution_id, caller)
+            if job is not None:
+                return job
         if rec is None or not (caller.is_reviewer or caller.owns(rec["contributor_id"])):
             return {"status": "declined", "note": f"unknown contribution {contribution_id!r}"}
         return {"status": "ok", "contribution": _public(rec)}
@@ -3305,7 +3310,11 @@ def describe_submit() -> str:
                "Returns {status: staged, contribution_id, preview{doc_id,...}, next} (the record "
                "then shows status pending in contribute_status until a reviewer decides) or ")
               + "{status: declined, problems: [...]} naming every problem at once — fix them all "
-              "and resubmit. A url must answer with the FILE: a login page, a bot challenge or "
+              "and resubmit. Work that outlasts the call (a big download, a preparation) answers "
+              "{status: preparing, contribution_id, message}: it goes on on the server — call "
+              "contribute_status with that contribution_id in about a minute for the result "
+              "above; never resubmit it. "
+              "A url must answer with the FILE: a login page, a bot challenge or "
               "a web page about the file is declined in words, with what to do (usually: "
               "download it and share it from Google Drive, Anyone with the link). Each "
               "contributor may submit "

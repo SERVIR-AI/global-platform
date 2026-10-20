@@ -99,6 +99,18 @@ ZIP_RATIO = 200              # uncompressed / compressed, for a member over ZIP_
 ZIP_RATIO_FROM = 1 << 20
 DISK_RESERVE = 1 << 30       # free disk a preparation never eats into
 STALE_SECONDS = 6 * 3600     # a directory a crashed worker left behind
+# Who hears the step a preparation is on: a callable taking the step's name, set by
+# contrib/jobs.py for the thread running a submission (None: nobody asks).
+PROGRESS: contextvars.ContextVar = contextvars.ContextVar("grp_prep_progress", default=None)
+
+
+def _tell(step: str) -> None:
+    hook = PROGRESS.get()
+    if hook is not None:
+        try:
+            hook(step)
+        except Exception:                    # a progress report never breaks a step
+            pass
 
 
 class PrepRefused(ValueError):
@@ -420,6 +432,7 @@ class Context:
     # ----------------------------------------------------------------- time, size
     def begin(self, name: str) -> None:
         self.step_name, self.deadline = name, time.monotonic() + self.op_seconds
+        _tell(name)
 
     def remaining(self) -> float:
         return max(0.0, self.deadline - time.monotonic())
@@ -651,6 +664,7 @@ def run(kind: str, manifest: dict, *, cap: int, folder, source=None, finish=None
         # the last step's (its extension says what the file now is)
         name = ctx.filename if (ctx.filename and Path(ctx.filename).suffix.lower()
                                 == final.suffix.lower()) else final.name
+        _tell("checking the prepared file")
         return Prepared(path=kept, filename=name, notes=ctx.notes, fetched=fetched)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)

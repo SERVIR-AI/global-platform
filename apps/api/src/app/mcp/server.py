@@ -527,7 +527,8 @@ from ..contrib import staging as _staging  # noqa: E402  (after mcp exists)
 
 @mcp.tool(description=_staging.describe_submit())
 def contribute_submit(kind: str = "", manifest: dict | str | None = None) -> dict:
-    return _staging.submit(kind, manifest)
+    from ..contrib import jobs
+    return jobs.submit(kind, manifest)
 
 
 @mcp.tool(description=weights_ui.describe(),
@@ -541,7 +542,11 @@ def contribute_status(contribution_id: str | None = None, action: str = "show") 
     """Your contributions and their review state.
 
     No arguments: everything you submitted, newest first (reviewers also get
-    `pending_review`, the queue). With a contribution_id: that record.
+    `pending_review`, the queue). With a contribution_id: that record. With the
+    contribution_id of a submission that answered `preparing`: {status: preparing,
+    step, elapsed_s, queue_position, message} while the server works on it, then the
+    submission's own result (staged/approved/declined, with its real contribution_id);
+    `interrupted` if the server restarted first — resubmit then, never before.
     action="withdraw" with a contribution_id: take back your own contribution. A
     pending one's preview is removed; an APPROVED one (auto-approved included) stops
     being served to every caller — its layer, table, feed, document, recipe or

@@ -6,6 +6,7 @@ import ipaddress
 import pytest
 from requests.structures import CaseInsensitiveDict
 
+from app.config import get_settings
 from app.contrib import fetch_policy
 
 PUBLIC = {"example.org": ["93.184.216.34"], "cdn.example.org": ["93.184.216.35"],
@@ -119,3 +120,16 @@ def test_check_url_refuses_private_bad_schemes_and_credentials(log):
     assert fetch_policy.check_url("http://10.1.30.110/x")
     assert fetch_policy.check_url("http://[::1]/x")
     log("OUTPUT", "loopback v4/v6, private, ftp and embedded credentials all refused")
+
+
+def test_a_name_that_turns_private_between_check_and_connect_is_refused(monkeypatch):
+    """The address connected to is the one checked: a rebinding answer gets no request."""
+    answers = iter([[ipaddress.ip_address("93.184.216.34")]])
+    monkeypatch.setattr(fetch_policy, "_addresses",
+                        lambda h: next(answers, [ipaddress.ip_address("10.0.0.7")]))
+    monkeypatch.setattr(get_settings(), "grp_contrib_allow_private_hosts", False)
+    asked = []
+    monkeypatch.setattr(fetch_policy, "_session", lambda *a: asked.append(a))
+    with pytest.raises(fetch_policy.FetchRefused, match="resolves to 10.0.0.7, a private"):
+        fetch_policy.fetch("https://rebind.hub.test/file.tif")
+    assert asked == []
