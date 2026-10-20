@@ -2787,8 +2787,11 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
             if problems:
                 if auto.again(seen):
                     continue
-                return auto.said({"status": "declined", "kind": kind, "problems": problems,
-                                  "fields": spec["fields"]})
+                out = auto.said({"status": "declined", "kind": kind, "problems": problems,
+                                 "fields": spec["fields"]})
+                if auto.fall_back(out):
+                    continue
+                return auto.declined(out)
             if slot is None:
                 caps, slot = _caps(caller)
                 if caps:
@@ -2801,8 +2804,11 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
                     said = str(exc) if preview else " — ".join(filter(None, [str(exc), prepare.suggest({"event": "declined", "kind": kind, "manifest": manifest, "problem": str(exc)})]))
             if auto.again(seen):
                 continue
-            return auto.said({"status": "declined", "kind": kind,
-                              **({"preview": True} if preview else {}), "problems": [said]})
+            out = auto.said({"status": "declined", "kind": kind,
+                             **({"preview": True} if preview else {}), "problems": [said]})
+            if auto.fall_back(out):
+                continue
+            return auto.declined(out)
         if preview:
             return auto.said(_preview(kind, spec, manifest, prepared))
         # Known before anything is staged, so the preview's own marker can say why it

@@ -43,7 +43,8 @@ an op's detect or auto applies one, which the platform does BY ITSELF only when 
 in it is a person's choice: the reply says what it applied and why, the stored manifest
 holds the fields (a receipt replays exactly) and the record marks them as the platform's
 (Auto; settings.grp_prep_auto turns it off). A field the contributor gave is never
-overridden.
+overridden. What detect applied, refused before it made its file (a service that will
+not page), falls back to the manifest as given: the path it took before.
 
 Budgets: an input downloaded whole is STREAMED TO DISK into a per-contribution directory
 under the cache, removed when the preparation ends whatever happens; inputs total at
@@ -261,19 +262,22 @@ def answered(kind: str, manifest, problems: list) -> list:
 # (threads, tasks) never share them.
 _SEEN: contextvars.ContextVar = contextvars.ContextVar("grp_prepare_seen", default=None)
 _APPLIED: contextvars.ContextVar = contextvars.ContextVar("grp_prepare_applied", default=())
+_MADE: contextvars.ContextVar = contextvars.ContextVar("grp_prepare_made", default=None)
 
 
 @contextmanager
-def attempt(applied=()):
+def attempt(applied=(), made=None):
     """One attempt at a submission: yields the list its declines' situations go into;
-    `applied` (the platform's own proposals) is what run() records."""
+    `applied` (the platform's own proposals) is what run() records; `made`, a list, gets
+    an entry when run() made its file (the preparation itself worked)."""
     seen: list = []
-    t1, t2 = _SEEN.set(seen), _APPLIED.set(tuple(applied))
+    t1, t2, t3 = _SEEN.set(seen), _APPLIED.set(tuple(applied)), _MADE.set(made)
     try:
         yield seen
     finally:
         _SEEN.reset(t1)
         _APPLIED.reset(t2)
+        _MADE.reset(t3)
 
 
 def _proposal(op, p) -> dict | None:
@@ -333,7 +337,12 @@ class Auto:
     the first attempt; after a decline, again() merges what auto() proposes for the
     situations THAT attempt raised and says whether to try once more — at most
     MAX_ROUNDS times, never the same fields twice. A proposal touching a field the
-    contributor gave is dropped, unless it restates it (and the given value is kept)."""
+    contributor gave is dropped, unless it restates it (and the given value is kept).
+    What detect() applied never costs the path the manifest took before it: refused
+    before it made its file, with nothing more to propose, the manifest as given is tried
+    once (fall_back) — what that lands is the answer; declined too, the first decline is
+    (declined). A file it made and the gate declined (over the cap: an area to ask for)
+    stands: the url as given could only land less of the layer."""
 
     def __init__(self, kind: str, manifest, on: bool = True):
         self.kind, self.given, self.manifest = kind, manifest, manifest
@@ -342,6 +351,10 @@ class Auto:
         self.on = bool(on) and isinstance(manifest, dict) and bool(ops(kind))
         if self.on:
             self._take(detect(kind, manifest))
+        self.detected = bool(self.applied)
+        self.made: list = []                 # the attempt under way made its file
+        self.first: dict | None = None       # the decline fall_back() set aside
+        self.refused: list = []              # what detect() applied, before it fell back
         self.tried = {self._key()}
 
     def _key(self) -> str:
@@ -367,7 +380,8 @@ class Auto:
         return took
 
     def attempt(self):
-        return attempt(self.applied)
+        self.made = []
+        return attempt(self.applied, self.made)
 
     def again(self, seen) -> bool:
         """After a declined attempt: True when what auto() proposes for its situations
@@ -382,9 +396,26 @@ class Auto:
         self.rounds += 1
         return True
 
-    def shown(self) -> list:
+    def fall_back(self, result: dict) -> bool:
+        """After a declined attempt carrying what detect() applied, refused before its
+        file was made, with nothing more to propose: True, once — the manifest is the
+        contributor's own again, for the path it took before the platform prepared
+        anything by itself; `result` is set aside."""
+        if not self.detected or self.first is not None or self.made:
+            return False
+        self.first, self.refused = result, list(self.applied)
+        self.manifest, self.applied, self.on = self.given, [], False
+        return True
+
+    def declined(self, result: dict) -> dict:
+        """The decline to answer: the one set aside when the manifest as given was declined
+        too (it says what the platform's own preparation met), else `result`."""
+        return self.first if self.first is not None else result
+
+    def shown(self, applied=None) -> list:
         return [{"fields": p["fields"], "why": p["why"],
-                 **({"given": p["given"]} if p.get("given") else {})} for p in self.applied]
+                 **({"given": p["given"]} if p.get("given") else {})}
+                for p in (self.applied if applied is None else applied)]
 
     def record(self) -> dict:
         """What the stored record keeps: the fields the platform applied, marked as its own."""
@@ -392,16 +423,29 @@ class Auto:
 
     def said(self, result: dict) -> dict:
         """`result` with what the platform applied by itself, in words its client relays."""
+        ok = result.get("status") in ("staged", "approved", "preview")
         if not self.applied:
-            return result
+            if not (self.refused and ok):
+                return result
+            words = "; ".join(f"{p['why']}: {fields_text(p['fields'])}" for p in self.refused)
+            why = "; ".join(str(x) for x in (self.first or {}).get("problems") or [])[:600]
+            return {**result, "prepared_automatically_refused": [
+                        {**p, "problems": list((self.first or {}).get("problems") or [])}
+                        for p in self.shown(self.refused)],
+                    "message": (f"The platform first prepared this by itself — {words} — and "
+                                f"that was refused ({why}); it then read the url exactly as "
+                                "given, as it did before it prepared anything by itself, and "
+                                "this is what that gave. Nothing was prepared; tell the "
+                                "contributor")}
         words = "; ".join(f"{p['why']}: {fields_text(p['fields'])}" for p in self.applied)
-        if result.get("status") in ("staged", "approved", "preview"):
+        if ok:
             msg = (f"The platform prepared this contribution by itself — {words}. No choice "
                    "of the contributor's was involved; tell them what was done. The stored "
                    "manifest holds these fields, marked as the platform's")
         else:
             msg = (f"The platform applied by itself — {words} — and the contribution was "
-                   "still declined: the problems say what the contributor must decide")
+                   "still declined: the problems say why, and ask for any choice that is the "
+                   "contributor's")
         return {**result, "prepared_automatically": self.shown(), "message": msg}
 
 
@@ -672,6 +716,9 @@ def run(kind: str, manifest: dict, *, cap: int, folder, source=None, finish=None
         name = ctx.filename if (ctx.filename and Path(ctx.filename).suffix.lower()
                                 == final.suffix.lower()) else final.name
         _tell("checking the prepared file")
+        made = _MADE.get()
+        if made is not None:
+            made.append(kept)
         return Prepared(path=kept, filename=name, notes=ctx.notes, fetched=fetched)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
