@@ -392,6 +392,36 @@ def _forget(ident: str) -> None:
         _live.pop(ident, None)
 
 
+WORKING_SHOWN = 20
+
+
+def working(caller: identity.Caller | None = None) -> list[dict]:
+    """The caller's submissions still preparing in the background, or interrupted before
+    they finished, newest first, a line each — read only: no jobs table, no jobs."""
+    caller = caller or identity.current()
+    try:
+        con = store._connect()
+        try:
+            rows = [dict(zip(_COLUMNS, r)) for r in con.execute(
+                f"SELECT {', '.join(_COLUMNS)} FROM contribution_jobs WHERE owner_id = ? AND "
+                "state IN ('queued', 'running', 'interrupted') ORDER BY created DESC LIMIT ?",
+                (caller.id, WORKING_SHOWN))]
+        finally:
+            con.close()
+    except sqlite3.Error:                     # "no such table": nothing was ever prepared
+        return []
+    out = []
+    for row in rows:
+        if not caller.owns(row["owner_id"]):
+            continue
+        if row["state"] in UNFINISHED and _gone(row):
+            row = _interrupt(row)
+        said = _reply(row)
+        out.append({k: said[k] for k in ("contribution_id", "kind", "status", "step", "elapsed_s")
+                    if k in said})
+    return out
+
+
 def lookup(ident: str | None, caller: identity.Caller | None = None) -> dict | None:
     """The job `ident` as its submitter sees it — preparing, interrupted, or the
     submission's final result — or None: no such job, or the caller did not submit it."""

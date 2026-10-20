@@ -3110,9 +3110,54 @@ def reconcile(caller: identity.Caller | None = None) -> dict:
                                 "" if unknown else " — every approved contribution is being served"))}
 
 
-def status(contribution_id: str | None = None, caller: identity.Caller | None = None) -> dict:
-    """No id: the caller's own contributions (reviewers: everything pending).
-    With an id: that record, if the caller may see it."""
+# What the no-argument listing may weigh, as JSON: a chat client cuts a tool result near
+# 8K characters, and every contribution in full (fetched steps, previews) ran 61K-168K.
+STATUS_CHARS = 6000
+
+
+def _short(text, n: int) -> str | None:
+    s = " ".join(str(text).split()) if text is not None else ""
+    return (s if len(s) <= n else s[:n - 1].rstrip() + "…") or None
+
+
+def _line(rec: dict) -> dict:
+    """One contribution as the listing shows it: who it is, and one line of what was
+    prepared — the full record is contribute_status(contribution_id=<id>)."""
+    m = rec.get("manifest") if isinstance(rec.get("manifest"), dict) else {}
+    pv = rec.get("preview") if isinstance(rec.get("preview"), dict) else {}
+    notes = ((pv.get("entry") or {}).get("prepared") or (pv.get("observed") or {}).get("prepared")
+             or pv.get("prepared") or [])
+    auto = [f for p in rec.get("prepared_automatically") or [] for f in p.get("fields") or {}]
+    out = {"contribution_id": rec.get("contribution_id"), "kind": rec.get("kind"),
+           "name": m.get("layer") or m.get("dataset") or pv.get("doc_id") or m.get("hazard"),
+           "title": _short(rec.get("title"), 80), "status": rec.get("status"),
+           "when": rec.get("updated_at") or rec.get("created_at"),
+           "prepared": (_short(notes[0], 160) if isinstance(notes, list) and notes else
+                        "the platform applied " + ", ".join(dict.fromkeys(auto)) if auto else None),
+           "held_for_review": _short(rec.get("held_for_review"), 120),
+           "problem": _short((rec.get("problems") or [None])[0], 160)}
+    return {k: v for k, v in out.items() if v is not None}
+
+
+def _page(rows: list, offset: int, budget: int) -> tuple[list, int]:
+    """(the lines of rows[offset:] that fit `budget` characters, how many are left)."""
+    import json
+    shown, used = [], 0
+    for rec in rows[offset:]:
+        line = _line(rec)
+        n = len(json.dumps(line, default=str)) + 2
+        if shown and used + n > budget:
+            break
+        shown.append(line)
+        used += n
+    return shown, max(0, len(rows) - offset - len(shown))
+
+
+def status(contribution_id: str | None = None, caller: identity.Caller | None = None,
+           offset: int = 0) -> dict:
+    """No id: one line per contribution of the caller's, newest first, within
+    STATUS_CHARS (`offset` pages on), and the submissions still preparing (reviewers:
+    the pending queue too). With an id: that record in full, if the caller may see it."""
     caller = caller or identity.current()
     if contribution_id:
         rec = store.load_contribution(contribution_id)
@@ -3124,12 +3169,39 @@ def status(contribution_id: str | None = None, caller: identity.Caller | None = 
         if rec is None or not (caller.is_reviewer or caller.owns(rec["contributor_id"])):
             return {"status": "declined", "note": f"unknown contribution {contribution_id!r}"}
         return {"status": "ok", "contribution": _public(rec)}
-    mine = [_public(r) for r in store.list_contributions(contributor_id=caller.id)
+    import json
+    from . import jobs
+    try:
+        offset = max(0, int(offset or 0))
+    except (TypeError, ValueError):
+        offset = 0
+    rows = [r for r in store.list_contributions(contributor_id=caller.id)
             if caller.owns(r["contributor_id"])]
+    working = jobs.working(caller)
+    budget = (STATUS_CHARS // 2 if caller.is_reviewer else STATUS_CHARS) \
+        - len(json.dumps(working, default=str))
+    mine, more = _page(rows, offset, max(500, budget))
     out = {"status": "ok", "you": caller.label, "reviewer": caller.is_reviewer,
+           "total": len(rows), **({"preparing": working} if working else {}),
            "contributions": mine}
+    whole = "contribute_status(contribution_id=<id>) gives one record in full"
+    if more:
+        out["more"] = more
+        out["note"] = (f"{more} older contribution(s) not shown — contribute_status(offset="
+                       f"{offset + len(mine)}) for the next page; {whole}")
+    else:
+        out["note"] = f"one line each, newest first; {whole} (its preview and every step)"
+    if working:
+        out["note"] += ("; `preparing`: submissions the server is still working on — ask for "
+                        "each by its contribution_id, never resubmit one (an `interrupted` one, "
+                        "resubmit)")
     if caller.is_reviewer:
-        out["pending_review"] = [_public(r) for r in store.list_contributions(status="pending")]
+        queue = store.list_contributions(status="pending")
+        out["pending_review"], waiting = _page(queue, 0, STATUS_CHARS // 2)
+        if waiting:
+            out["pending_more"] = waiting
+            out["note"] += (f"; {waiting} more pending — contribute_review(action='list') "
+                            "for the queue")
     return out
 
 
