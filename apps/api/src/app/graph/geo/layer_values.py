@@ -117,6 +117,8 @@ def _no_value(contract: dict, file_nodata, row: dict) -> tuple[list, str]:
     outside of the footprint 0, and both are in the row's `outside_values`."""
     from .schema import same_nodata
     vals, why = [], []
+    nan_why = ("declared in the contract" if _isnan(contract.get("nodata")) else
+               "the file's nodata tag" if _isnan(file_nodata) else None)
 
     def add(v, reason):
         if v is None or _isnan(v):
@@ -158,11 +160,10 @@ def _no_value(contract: dict, file_nodata, row: dict) -> tuple[list, str]:
     vals = [int(v) if float(v).is_integer() and abs(float(v)) < 1e15 else v for v in vals]
     rule = ("; ".join(f"{v} — {r}" for v, r in zip(vals, why[:len(vals)]))
             + ("; " + "; ".join(why[len(vals):]) if len(why) > len(vals) else "")
-            if (vals or len(why) > len(vals))
-            else "no no-data value is declared, so every value read is counted")
-    if _isnan(contract.get("nodata")) or _isnan(file_nodata):
-        rule += "; NaN marks no value"
-    return vals, rule
+            if (vals or len(why) > len(vals)) else "")
+    if nan_why:
+        rule += ("; " if rule else "") + f"NaN — {nan_why}"
+    return vals, rule or "no no-data value is declared, so every value read is counted"
 
 
 def _no_value_mask(stored, nod_vals, dtype) -> np.ndarray:
@@ -627,7 +628,7 @@ def read(layer: str, boundary, *, side: int | None = None,
     finite = np.isfinite(stored)
     n_nan = int((inside & ~finite).sum())
     if n_nan:
-        nod_rule += f"; {n_nan} cell(s) here are NaN"
+        nod_rule += f"; {n_nan} cell(s) here are NaN and are not counted"
     has_value = finite & ~_no_value_mask(stored, nod_vals, dtype)
     valid = inside & has_value
     # A file storing scaled integers (biomass x10 in int16) is read in its units; the
@@ -742,7 +743,9 @@ def read(layer: str, boundary, *, side: int | None = None,
         "source": row.get("source"), "licence": row.get("license"),
         "vintage": row.get("vintage"),
         "validation": validation, "validation_note": vnote,
-        "nodata": {"value": (nod_vals[0] if nod_vals else None), "values": nod_vals,
+        "nodata": {"value": (nod_vals[0] if nod_vals else None),
+                   "values": nod_vals + (["NaN"] if _isnan(roled.get("nodata"))
+                                         or _isnan(file_nodata) else []),
                    "rule": nod_rule},
         "resolution": {f"source_cell_{unit_word}": round(native, 9),
                        f"grid_cell_{unit_word}": round(abs(transform.a) * f, 9),
