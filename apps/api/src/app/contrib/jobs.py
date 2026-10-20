@@ -16,7 +16,9 @@ peak near 3 GB), the rest queued in order with their position; any other in the 
 lane (PLAIN_WORKERS at once), so a document never waits behind a rasterise. A preparation
 the platform applies by itself only after a decline (prepare.auto: an archive over the
 cap read whole, tiles joined) starts in the plain lane: it waits for one of the same
-grp_prep_max_jobs slots first (prepare.GATE), so at most that many prepare at once.
+grp_prep_max_jobs slots first (prepare.GATE), so at most that many prepare at once —
+and from then on its worker is lent out of the plain lane, which starts another in its
+place, so PLAIN_WORKERS always take what prepares nothing.
 Workers are daemon threads outside the tool call's own thread pool: the call returning,
 or its client going away, stops nothing. The job runs in a copy of the calling context
 with the submitter bound, as the call itself would have.
@@ -66,28 +68,50 @@ _started = {"beat": False}
 # --------------------------------------------------------------------------- lanes
 
 class _Lane:
-    """`size` daemon workers taking jobs in the order they came."""
+    """`size` daemon workers taking jobs in the order they came. A worker lent out (its
+    job became a preparation: lend) does not count: another starts in its place, and
+    the first to find the lane over its size once its job is done stops."""
 
     def __init__(self, name: str, size: int):
         self.name, self.size = name, max(1, int(size))
         self.q: queue.Queue = queue.Queue()
         self.workers: list = []
+        self.lent = 0
         self.lock = threading.Lock()
         self.slots = threading.Semaphore(self.size)   # preparations at once, any lane
 
     def put(self, fn) -> Future:
         fut: Future = Future()
         self.q.put((fut, fn))
+        self._fill()
+        return fut
+
+    def _fill(self) -> None:
         with self.lock:
             self.workers = [t for t in self.workers if t.is_alive()]
-            if len(self.workers) < self.size:
+            if len(self.workers) - self.lent < self.size:
                 t = threading.Thread(target=self._work, name=f"grp-{self.name}", daemon=True)
                 t.start()
                 self.workers.append(t)
-        return fut
+
+    def lend(self) -> None:
+        """The calling worker's job now prepares: it stops counting, another takes its place."""
+        with self.lock:
+            self.lent += 1
+        self._fill()
+
+    def back(self) -> None:
+        with self.lock:
+            self.lent -= 1
 
     def _work(self) -> None:
+        me = threading.current_thread()
         while True:
+            with self.lock:
+                alive = [t for t in self.workers if t.is_alive()]
+                if len(alive) - self.lent > self.size and me in self.workers:
+                    self.workers.remove(me)      # one too many since a lent worker came back
+                    return
             fut, fn = self.q.get()
             if not fut.set_running_or_notify_cancel():
                 continue
@@ -301,7 +325,7 @@ def _reply(row: dict) -> dict:
 
 # --------------------------------------------------------------------------- the API
 
-def _run(ident: str, kind: str, manifest, caller: identity.Caller):
+def _run(ident: str, kind: str, manifest, caller: identity.Caller, lane: _Lane | None = None):
     """The submission itself, in a lane worker, inside a copy of the caller's context."""
     try:
         _write("UPDATE contribution_jobs SET state = 'running', started = ?, beat = ?, step = ? "
@@ -310,12 +334,17 @@ def _run(ident: str, kind: str, manifest, caller: identity.Caller):
         pass
     prepare.PROGRESS.set(lambda step: _set_step(ident, step))
     held: list = []
+    lent: list = []
 
     def gate() -> None:
         """One of the preparation slots, this job's own from its first preparation until
-        it ends (the prepared file is still read and checked after the steps)."""
+        it ends (the prepared file is still read and checked after the steps). A plain
+        lane's worker is lent out first: what prepares nothing never waits behind it."""
         if held:
             return
+        if lane is not None and lane.name != "prepare" and not lent:
+            lane.lend()
+            lent.append(lane)
         slots = _lane("prepare").slots
         if not slots.acquire(blocking=False):
             _set_step(ident, SLOT_STEP)
@@ -335,6 +364,8 @@ def _run(ident: str, kind: str, manifest, caller: identity.Caller):
         identity.unbind(token)
         for slots in held:
             slots.release()
+        for x in lent:
+            x.back()
     _finish(ident, out)
     return out
 
@@ -380,7 +411,8 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
         return staging.submit(kind, manifest, caller)
     _start_beating()
     ctx = contextvars.copy_context()
-    fut = _lane(lane).put(lambda: ctx.run(_run, ident, kind, manifest, caller))
+    worked = _lane(lane)
+    fut = worked.put(lambda: ctx.run(_run, ident, kind, manifest, caller, worked))
     with _lock:
         _live[ident] = fut
     fut.add_done_callback(lambda _f: _forget(ident))
