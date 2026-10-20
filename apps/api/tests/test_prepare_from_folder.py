@@ -665,3 +665,31 @@ def test_the_listing_page_is_read_as_drive_writes_it():
         assert _drive.folder_id(link) == "18PDQMN2EoOqZKceZGx894uSIv5vGoG4l"
     assert _drive.folder_id("https://drive.google.com/file/d/1SESDZp_7wceoUkfcvHNbHexcQfN_DBBT/view") is None
     assert _drive.folder_id("https://example.org/drive/folders/18PDQMN2EoOqZKceZGx894uSIv5vGoG4l") is None
+
+
+
+def test_the_listing_connects_only_to_an_address_checked_for_it(env, drive, monkeypatch):
+    """DNS rebinding: the listing host answers a public address to the check and loopback
+    to every other lookup; the listing resolves it again and checks it before it connects
+    (fetch_policy._pin) — refused in words, nothing reaches the loopback Drive."""
+    import ipaddress
+    import sys
+    from types import SimpleNamespace
+    monkeypatch.setattr(get_settings(), "grp_contrib_allow_private_hosts", False)
+    url = drive.folder({"rios.geojson": b"{}"})
+    listing = f"http://drive.rebind.test:{drive.port}/listing/{_drive.folder_id(url)}"
+    real = fetch_policy._addresses
+
+    def rebinding(name):
+        if name != "drive.rebind.test":
+            return real(name)
+        if sys._getframe(1).f_code.co_name == "check_url":
+            return [ipaddress.ip_address("93.184.216.34")]
+        return [ipaddress.ip_address("127.0.0.1")]
+    monkeypatch.setattr(fetch_policy, "_addresses", rebinding)
+    with pytest.raises(prepare.PrepRefused) as exc:
+        _drive.page(listing, url, SimpleNamespace(check_time=lambda: None))
+    assert str(exc.value) == (f"the platform cannot list {url}: host 'drive.rebind.test' "
+                              "resolves to 127.0.0.1, a private, loopback or link-local address "
+                              "— the platform never fetches inside its own network")
+    assert drive.log == []

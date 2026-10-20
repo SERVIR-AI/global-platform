@@ -105,9 +105,11 @@ def probe(url: str) -> dict:
 
 
 def _get(current: str, agent: str, first: int, last: int):
-    """One pinned ranged GET of `current` (already checked); the caller closes both."""
+    """One pinned ranged GET of `current` (already checked); the caller closes both. The
+    name is resolved and checked again here (fetch_policy._pin): the address connected to
+    is the one checked, never one a later answer (DNS rebinding) put in its place."""
     parts = urlparse(current)
-    addr = fetch_policy._addresses(parts.hostname)[0]
+    addr = fetch_policy._pin(parts.hostname)
     session = fetch_policy._session(parts.hostname, parts.scheme)
     host = parts.hostname + (f":{parts.port}" if parts.port else "")
     r = session.get(fetch_policy._pinned_url(parts, addr), timeout=fetch_policy.TIMEOUT,

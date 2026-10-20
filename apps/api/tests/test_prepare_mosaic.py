@@ -891,3 +891,34 @@ def test_a_map_beside_its_quality_layer_is_never_joined_by_itself(env, monkeypat
     assert prof["nodata"] == 0
     assert dict(zip(*[x.tolist() for x in np.unique(a, return_counts=True)])) == {0: 800, 1: 2800, 2: 3600}
     assert _no_leftovers(env)
+
+
+def test_every_range_read_connects_only_to_an_address_checked_for_it(env, monkeypatch):
+    """DNS rebinding: a name answering a public address to the check and loopback to every
+    other lookup. Each connect resolves the name again AND checks it (fetch_policy._pin):
+    neither a mosaic's range reads nor a plain clip's reach the loopback host, and the
+    decline says why."""
+    import ipaddress
+    import sys
+    from app.contrib import fetch_policy
+    monkeypatch.setattr(get_settings(), "grp_contrib_allow_private_hosts", False)
+    raw, _ = _gmw()
+    url = env["host"].put("gmw.zip", raw).replace("127.0.0.1", "tiles.rebind.test")
+    real = fetch_policy._addresses
+
+    def rebinding(name):
+        if name != "tiles.rebind.test":
+            return real(name)
+        if sys._getframe(1).f_code.co_name == "check_url":
+            return [ipaddress.ip_address("93.184.216.34")]       # what the check sees
+        return [ipaddress.ip_address("127.0.0.1")]               # what a connect would get
+    monkeypatch.setattr(fetch_policy, "_addresses", rebinding)
+    assert fetch_policy.check_url(url) == []
+    for m in (_gmw_year("landcover_crgmw_2020", url, clip=GMW_BOX, mosaic="auto"),
+              _gmw_year("landcover_crgmw_2021", url + "#" + _gmw_name(10, -84), clip=GMW_BOX)):
+        out = _submit("raster", m)
+        assert out["status"] == "declined", out
+        assert ("host 'tiles.rebind.test' resolves to 127.0.0.1, a private, loopback or "
+                "link-local address") in out["problems"][0]
+    assert env["host"].log == []
+    assert _no_leftovers(env)
