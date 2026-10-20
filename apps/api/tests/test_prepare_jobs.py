@@ -245,3 +245,64 @@ def test_status_waits_for_a_job_that_finishes_within_its_wait(jenv, monkeypatch)
     t0 = time.monotonic()
     final = _call("contribute_status", {"contribution_id": out["contribution_id"]})
     assert final["status"] == "approved" and 0.5 < time.monotonic() - t0 < 25
+
+def test_plain_submissions_never_wait_behind_preparations_the_platform_applies_itself(
+        jenv, monkeypatch, log):
+    """One preparation slot, held by a declared recode; then as many plain-lane
+    submissions as the lane has workers, each an archive over the cap that gets whole:
+    true by itself and waits for the slot. Their workers are lent out of the plain lane,
+    so a table preparing nothing still lands at once; once the slot frees, each lands and
+    the lane is back to its size."""
+    s = get_settings()
+    monkeypatch.setattr(s, "grp_prep_max_jobs", 1)
+    monkeypatch.setattr(jobs, "PLAIN_WORKERS", 2)
+    host = jenv["host"]
+    app, gate = _gated(jenv, lambda path, q: (200, "application/octet-stream", _coded()))
+    first = _call("contribute_submit", {"kind": "raster",
+                                        "manifest": _vuln(host.app("/slow_coded.tif", app))})
+    assert first["status"] == "preparing"
+    _until_step(first["contribution_id"], "fetching the source")
+    levels = _admin()
+    members = {}
+    for stem, (g, p) in levels.items():
+        members.update({f"cri_admin_boundaries/{k}": v for k, v in _shapefile(stem, g, p).items()})
+    members["cri_admin_boundaries/cod-ab-cri.pdf"] = np.random.default_rng(1).bytes(300_000)
+    arch = host.put("cri_admin_boundaries.shp.zip", _zip(members))
+    monkeypatch.setattr(s, "grp_contrib_max_bytes", 100_000)
+    waiting = []
+    for n in range(jobs.PLAIN_WORKERS):
+        m = _layer(f"cr_admin2_{n}", arch, layer_name="cri_admin2")
+        assert jobs._sorted("vector", m) == ("vector", "plain")
+        out = _call("contribute_submit", {"kind": "vector", "manifest": m})
+        assert out["status"] == "preparing"
+        waiting.append(out["contribution_id"])
+    for jid in waiting:
+        _until_step(jid, jobs.SLOT_STEP)
+    lane = jobs._lane("plain")
+    assert lane.lent == jobs.PLAIN_WORKERS
+    csv = "Month,Stage_m\n2026-06,3.9\n2026-07,4.8\n"
+    table = {"dataset": "jobs_river_stage", "title": "River stage (SYNTHETIC)",
+             "description": "SYNTHETIC series.", "source": "test fixture",
+             "validation": "unvalidated", "license": "CC0-1.0", "vintage": "2026-09",
+             "cadence": "monthly", "columns": {"month": "Month", "stage_m": "Stage_m"},
+             "units": "metres", "as_of_field": "month", "csv_text": csv}
+    monkeypatch.setattr(s, "grp_prep_wait_seconds", 20)
+    t0 = time.monotonic()
+    out = _call("contribute_submit", {"kind": "table", "manifest": table})
+    log("OUTPUT", f"{out['status']} after {time.monotonic() - t0:.1f} s")
+    assert out["status"] == "approved", out
+    assert time.monotonic() - t0 < 10
+    gate.set()
+    assert _until(first["contribution_id"])["status"] == "approved"
+    for n, jid in enumerate(waiting):
+        final = _until(jid)
+        assert final["status"] == "approved", final
+        assert _fields(final) == [{"whole": True}]
+        assert vectors.landed()[f"cr_admin2_{n}"]["features"] == 24
+    end = time.monotonic() + 10
+    while time.monotonic() < end and (lane.lent or len([t for t in lane.workers
+                                                        if t.is_alive()]) > lane.size):
+        time.sleep(0.05)
+    assert lane.lent == 0
+    assert len([t for t in lane.workers if t.is_alive()]) <= lane.size
+    assert _no_leftovers(jenv)

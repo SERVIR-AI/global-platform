@@ -130,7 +130,10 @@ def page(listing: str, url: str, ctx) -> str:
         if fp._login_host([current]):
             raise PrepRefused(NOT_SHARED.format(url=url))
         parts = urlparse(current)
-        addr = fp._addresses(parts.hostname)[0]           # already verified global
+        try:
+            addr = fp._pin(parts.hostname)                # resolved and checked again
+        except fp.FetchRefused as exc:
+            raise PrepRefused(f"the platform cannot list {url}: {exc}") from None
         session = fp._session(parts.hostname, parts.scheme)
         host = parts.hostname + (f":{parts.port}" if parts.port else "")
         for attempt in (1, 2):                    # once more if Drive stalls or answers 5xx

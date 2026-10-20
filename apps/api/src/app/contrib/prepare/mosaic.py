@@ -755,6 +755,23 @@ def _plan(tiles: list[_Tile], box):
     return ref, grid, W, H
 
 
+def _one_place_each(tiles: list[_Tile]) -> None:
+    """Refused: two rasters covering the same ground (within half a cell) — a map and
+    its mask or quality layer, or one tile twice — are not tiles of one layer, and
+    joining them would fill one's no-data cells from the other."""
+    for i, a in enumerate(tiles):
+        for b in tiles[i + 1:]:
+            tol = max((a.lonlat[2] - a.lonlat[0]) / max(1, a.width),
+                      (b.lonlat[2] - b.lonlat[0]) / max(1, b.width)) / 2
+            if all(abs(x - y) <= tol for x, y in zip(a.lonlat, b.lonlat)):
+                raise _refuse(f"{a.label} and {b.label} cover the same ground: they are two "
+                              "rasters of one place (a map and its mask or quality layer, or "
+                              "one tile twice), not tiles of one layer, and the platform never "
+                              "joins them — resubmit with mosaic: [<member>, <member>, ...], the "
+                              "tiles of the ONE layer to join (ASK the contributor which; never "
+                              "guess)")
+
+
 def _bounds(t: _Tile) -> tuple:
     a = t.transform
     return (a.c, a.f + a.e * t.height, a.c + a.a * t.width, a.f)
@@ -786,6 +803,7 @@ def run(ctx):
     m = ctx.manifest
     box, where = (rc.box_of(m["clip"]) if m.get("clip") is not None else (None, ""))
     tiles, picked, notes = _tiles(ctx, box)
+    _one_place_each(tiles)
     ref, grid, W, H = _plan(tiles, box)
     skipped = [t for t in tiles if t.foot[2] <= t.foot[0] or t.foot[3] <= t.foot[1]]
     tiles = [t for t in tiles if t not in skipped]
@@ -1104,7 +1122,8 @@ def auto(situation: dict) -> dict | None:
         return None
     tiles = list(situation.get("rasters") or [])
     places = [position(t) for t in tiles]
-    if len(tiles) < 2 or any(p is None for p in places) or len(set(places)) < 2:
+    if (len(tiles) < 2 or any(p is None for p in places) or len(set(places)) < 2
+            or len(set(places)) != len(places)):     # two rasters at one place: a question
         return None
     return {"fields": {"mosaic": "auto"},
             "why": f"the url is a zip of {len(tiles):,} raster tiles named by where they lie "
@@ -1123,7 +1142,7 @@ def suggest(situation: dict) -> str | None:
     if len(tiles) < 2:
         return None
     placed = [t for t in tiles if position(t)]
-    if len(placed) >= 2:
+    if len(placed) >= 2 and len({position(t) for t in placed}) == len(placed):
         return ("if the area needs more than one of its tiles, resubmit the same link with "
                 "mosaic: 'auto' and clip: the area (ASK the contributor for it; never guess "
                 "one) — the platform reads each tile's header, takes every tile the clip "

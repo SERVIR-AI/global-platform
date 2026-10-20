@@ -839,3 +839,180 @@ def test_plain_paths_take_exactly_the_path_they_took_before(env, monkeypatch, tm
         on = _submit(kind, m)
         monkeypatch.setattr(get_settings(), "grp_prep_auto", False)
         assert on == _submit(kind, m) and on["status"] == "declined"
+
+
+# --------------------------------------------------------------------------- 5. never worse
+class _NoKeyGeoServer:
+    """A GeoServer layer without a primary key (gis.asc-aqua.org's certified farms): it
+    counts (resultType=hits) and answers the url as given, but any startIndex without a
+    sortBy is HTTP 400 ("Cannot do natural order without a primary key"); `broken`: it
+    answers nothing but the count."""
+
+    def __init__(self, feats, broken=False):
+        self.feats, self.broken = feats, broken
+
+    def __call__(self, path, q):
+        q = {k.lower(): v for k, v in q.items()}
+        if q.get("resulttype") == "hits":
+            return 200, "text/xml", (f'<wfs:FeatureCollection numberMatched="{len(self.feats)}" '
+                                     'numberReturned="0"/>').encode()
+        if self.broken or ("startindex" in q and "sortby" not in q):
+            return 400, "application/xml", (
+                b'<?xml version="1.0"?><ows:ExceptionReport><ows:Exception><ows:ExceptionText>'
+                b'Cannot do natural order without a primary key, please add it or specify a '
+                b'manual sort</ows:ExceptionText></ows:Exception></ows:ExceptionReport>')
+        n = len(self.feats)
+        return 200, "application/json", json.dumps({
+            "type": "FeatureCollection", "features": self.feats, "totalFeatures": n,
+            "numberMatched": n, "numberReturned": n}).encode()
+
+
+def _farms(n=50):
+    return [{"type": "Feature", "id": f"farms.fid--{i:04x}",
+             "properties": {"farm_name": f"Farm {i}", "species__c": "Shrimp" if i % 3 else "Tilapia"},
+             "geometry": {"type": "Point", "coordinates": [-85.0 + i * 0.01, 10.0 + i * 0.005]}}
+            for i in range(n)]
+
+
+def test_a_wfs_the_platform_cannot_page_lands_as_given_exactly_as_before(env, monkeypatch, log):
+    """The ASC farms case: a WFS 1.0 GetFeature url that landed before the platform paged
+    anything by itself. Its server refuses paging (no primary key); what detect applied
+    (whole) is set aside and the url as given lands — byte for byte what it lands with the
+    platform's own preparation off, the stored manifest the contributor's own, and the
+    reply saying what was tried and why it was refused. Refused both ways, the answer is
+    the platform's own attempt, as before."""
+    host = env["host"]
+    base = host.app("/geoserver/asc/wfs", _NoKeyGeoServer(_farms()))
+    url = (base + "?service=WFS&version=1.0.0&request=GetFeature&typeName=asc:farms"
+           "&outputFormat=application/json&CQL_FILTER=status%3D%27Certified%27")
+    m = _layer("global_farms", url, name_field="farm_name", group_field="species__c")
+    monkeypatch.setattr(get_settings(), "grp_prep_auto", False)
+    off = _submit("vector", {**m, "preview": True})
+    before = _submit("vector", {**m, "layer": "global_farms_before"})
+    monkeypatch.setattr(get_settings(), "grp_prep_auto", True)
+    assert before["status"] == "approved", before
+    on = _submit("vector", {**m, "preview": True})
+    assert {k: v for k, v in on.items()
+            if k not in ("message", "prepared_automatically_refused")} == off
+    n0 = len(host.log)
+    out = _submit("vector", m)
+    log("OUTPUT", out.get("message"))
+    assert out["status"] == "approved", out
+    assert "prepared_automatically" not in out
+    why = clip._WHOLE_SERVICE.format(what="a WFS GetFeature request")
+    refused = out["prepared_automatically_refused"]
+    assert [{k: v for k, v in r.items() if k != "problems"} for r in refused] == [
+        {"fields": {"whole": True}, "why": why}]
+    assert "startIndex=0" in refused[0]["problems"][0]
+    assert "answered HTTP 400" in refused[0]["problems"][0]
+    assert out["message"].startswith(f"The platform first prepared this by itself — {why}: "
+                                     "whole: true — and that was refused (")
+    assert "it then read the url exactly as given" in out["message"]
+    asked = [q for _, q in host.log[n0:]]
+    assert [asked[0].get("resultType"), asked[1].get("startIndex")] == ["hits", "0"]
+    assert len(asked) == 3 and asked[-1] == dict(parse_qsl(urlparse(url).query))   # as given
+    rec = _record(out)
+    assert rec["manifest"] == json.loads(json.dumps(m)) and "prepared_automatically" not in rec
+    assert _raw("global_farms") == _raw("global_farms_before")
+    assert vectors.landed()["global_farms"]["features"] == 50
+    assert "fetched" not in vectors.landed()["global_farms"]           # nothing was prepared
+
+    # refused both ways: the platform's own attempt is the answer, as it was
+    base = host.app("/geoserver/down/wfs", _NoKeyGeoServer(_farms(), broken=True))
+    url = base + "?service=WFS&version=1.0.0&request=GetFeature&typeName=asc:farms"
+    out = _submit("vector", _layer("global_farms_down", url))
+    assert out["status"] == "declined" and _fields(out) == [{"whole": True}]
+    assert "startIndex=0" in out["problems"][0] and "answered HTTP 400" in out["problems"][0]
+    assert "still declined" in out["message"] and "must decide" not in out["message"]
+    assert "prepared_automatically_refused" not in out
+    assert _no_leftovers(env)
+
+
+def test_a_service_that_will_not_count_lands_as_given_and_the_risk_pack_counts_it(env, log):
+    """Beyond the asking pack: a hub's shelters behind a FeatureServer that will not count
+    its features (so a paged read could never be checked complete) land from the query
+    url as given, as they did before — and the risk pack counts the fresh layer."""
+    fs = _FeatureServer([{"type": "Feature", "id": i + 1,
+                          "properties": {"OBJECTID": i + 1, "name": f"Shelter {i}"},
+                          "geometry": {"type": "Point",
+                                       "coordinates": [103.006 + 0.0007 * i, 13.01]}}
+                         for i in range(12)])
+
+    def no_count(path, q):
+        if q.get("returnCountOnly") == "true":
+            return 200, "application/json", json.dumps(
+                {"error": {"code": 400, "message": "Unable to complete operation."}}).encode()
+        return fs(path, q)
+    url = env["host"].app("/arcgis/rest/services/Refugios/FeatureServer/0", no_count) + \
+        "/query?where=1%3D1&outFields=*&f=geojson"
+    out = _submit("vector", _layer("toy_refugios", url, name_field="name", countries=["Toyland"]))
+    log("OUTPUT", out.get("message"))
+    assert out["status"] == "approved", out
+    refused = out["prepared_automatically_refused"]
+    assert refused[0]["fields"] == {"whole": True}
+    assert "answered an error for its feature count" in refused[0]["problems"][0]
+    assert vectors.landed()["toy_refugios"]["features"] == 12
+    assert _record(out)["manifest"].get("whole") is None
+    p = assemble.assemble(pack="risk", place="Toyville", hazard="toyflood", geometry=RISK_POLY)
+    assert p["status"] == "ok", p.get("note")
+    exp = next(c for c in p["citations"]
+               if c.get("title", "").startswith("toy_refugios (synthetic) vs"))
+    assert "contributed layer" in exp["text"]
+    assert _no_leftovers(env)
+
+
+def test_a_prepared_layer_over_the_cap_is_declined_before_it_is_parsed(env, monkeypatch, tmp_path):
+    """A GeoPackage over the cap as a download is read whole by itself. Its table, over
+    1.5x the cap, is declined from its size — never read into memory; under that but
+    over the cap as GeoJSON, declined before it is parsed again (inspect), the geometry
+    family read from the text (no raster proposed for points). Read whole, the vertex
+    budget counts every feature, of a GeoPackage and of a shapefile."""
+    from shapely.geometry import Point
+    polys = [Point(-85.0 + i * 0.003, 10.0).buffer(0.001, quad_segs=16) for i in range(400)]
+    path = tmp_path / "parcels.gpkg"
+    _gpkg(str(path), "parcels", polys, [{"cntry_iso3": "CRI", "area_ha": float(i)} for i in range(len(polys))])
+    data = path.read_bytes()
+    url = env["host"].put("parcels.gpkg", data)
+    monkeypatch.setattr(get_settings(), "grp_contrib_max_bytes", len(data) // 3)
+    real_read, real_inspect = vecio.to_geojson, vectors.inspect
+    monkeypatch.setattr(vecio, "to_geojson", lambda *a, **k: pytest.fail("parsed"))
+    out = _submit("vector", _layer("cr_parcels", url))
+    p = out["problems"][0]
+    assert out["status"] == "declined" and _fields(out) == [{"whole": True}], out
+    assert p.startswith(f"missing required field 'clip': the layer prepared from {url} is ")
+    assert "as GeoJSON" not in p and "ask the contributor which area to keep" in p
+
+    monkeypatch.setattr(vecio, "to_geojson", real_read)
+    monkeypatch.setattr(vectors, "inspect", lambda *a, **k: pytest.fail("inspected"))
+    monkeypatch.setattr(get_settings(), "grp_contrib_max_bytes", int(len(data) * 0.9))
+    out = _submit("vector", _layer("cr_parcels", url))
+    p = out["problems"][0]
+    assert out["status"] == "declined" and _fields(out) == [{"whole": True}], out
+    assert "as GeoJSON, over the" in p and "contribute it as kind 'raster'" in p
+    pts = [Point(-85.0 + i * 1e-4, 10.0) for i in range(3000)]
+    _gpkg(str(tmp_path / "wells.gpkg"), "wells", pts,
+          [{"cntry_iso3": "CRI", "area_ha": float(i)} for i in range(len(pts))])
+    wells = (tmp_path / "wells.gpkg").read_bytes()
+    monkeypatch.setattr(get_settings(), "grp_contrib_max_bytes", int(len(wells) * 0.9))
+    out = _submit("vector", _layer("cr_wells", env["host"].put("wells.gpkg", wells)))
+    assert "as GeoJSON, over the" in out["problems"][0], out
+    assert "contribute it as kind 'raster'" not in out["problems"][0]   # points: no raster
+    monkeypatch.setattr(vectors, "inspect", real_inspect)
+
+    monkeypatch.setattr(get_settings(), "grp_contrib_max_bytes", 50 << 20)
+    monkeypatch.setattr(get_settings(), "grp_prep_max_vertices", 1000)
+    verts = sum(len(g.exterior.coords) for g in polys)
+    out = _submit("vector", _layer("cr_parcels_v", url, whole=True))
+    assert out["problems"][0] == (
+        f"the layer has {verts:,} vertices, over the 1,000 one clip step may touch — ask the "
+        "contributor for the area that matters (clip) and resubmit with it, never guess one; "
+        "or give a smaller or simplified layer")
+    shp = env["host"].put("parcels.zip", _zip(_shapefile(
+        "parcels", polys, [{"n": i} for i in range(len(polys))])))
+    out = _submit("vector", _layer("cr_parcels_s", shp, whole=True))
+    assert out["problems"][0].startswith(f"the layer has {verts:,} vertices, over the 1,000 one")
+    monkeypatch.setattr(get_settings(), "grp_prep_max_vertices", 50_000_000)
+    out = _submit("vector", _layer("cr_parcels_s", shp, whole=True))
+    assert out["status"] == "approved", out
+    assert vectors.landed()["cr_parcels_s"]["features"] == len(polys)
+    assert _no_leftovers(env)
