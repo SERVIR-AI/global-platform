@@ -406,23 +406,32 @@ def _adapt_generic_json(params: dict, spec: dict) -> dict:
     # served as current values, to a risk platform. Sort by the timestamp when the
     # feed names one, and the question stops depending on a publisher's house
     # style. Without one, say which end was taken instead of implying recency.
+    # Sorted by the PARSED time, not the raw value: OBIS mixes offsets, 'Z', bare
+    # dates and missing dates, and one undated record made the old all-or-nothing sort
+    # give up — "latest 2021-08-22" over records reaching 2026-07-08. An unreadable
+    # date keeps its record, at the old end, and never sets as_of.
     af = fetch.get("as_of_field")
-    ordered_by_time = False
-    if af and all(r.get(af) is not None for r in rows):
-        try:
-            rows.sort(key=lambda r: (isinstance(r[af], str), r[af]))
-            ordered_by_time = True
-        except TypeError:
-            pass
+    order = ""
+    if af:
+        when = {id(r): _when(r.get(af)) for r in rows}
+        undated = [r for r in rows if when[id(r)] is None]
+        rows = undated + sorted((r for r in rows if when[id(r)] is not None),
+                                key=lambda r: when[id(r)])
+        if len(undated) < len(rows):
+            order = (f"; ordered by {af}, oldest first"
+                     + (f" — these {limit:,} are the most recent" if limit < len(rows) else "")
+                     + (f"; {len(undated):,} record(s) with no readable {af} are kept "
+                        "before the dated ones and never count as latest" if undated else ""))
     tail = rows[-limit:]
-    as_of = (tail[-1].get(af) if af and tail else None)
+    as_of = (tail[-1].get(af) if af and tail and when[id(tail[-1])] is not None else None)
     return {"as_of": as_of, "count": len(tail), "records": tail,
-            "record_order": ("sorted newest-last by the feed's own timestamp field "
-                             f"({af})" if ordered_by_time else
-                             "as published by the upstream, unsorted — this feed "
-                             "declares no timestamp field, so these are the last "
-                             "records in publication order, which is NOT necessarily "
-                             "the most recent"),
+            "record_order": (f"sorted newest-last by {af}; undated records first"
+                             if as_of is not None else
+                             "as published by the upstream, unsorted — "
+                             + (f"no record carries a readable {af}" if af else
+                                "this feed declares no timestamp field")
+                             + ", so these are the last records in publication order, "
+                               "which is NOT necessarily the most recent"),
             # A paged API answers one page of what it matched: "300 records from GBIF"
             # read as the whole, while GBIF had matched 1,984. Say first N of M — and
             # a filter searches that page, never what the upstream did not send.
@@ -433,8 +442,10 @@ def _adapt_generic_json(params: dict, spec: dict) -> dict:
                         f"first {read:,} of {total:,} records the upstream matched, from "
                         f"{spec.get('title')} (the feed reads one page)" if total else
                         f"{read} records from {spec.get('title')}")
-                       + (f", latest {as_of}" if as_of else
+                       + (f", latest {af} {as_of}{order}" if as_of is not None else
                           "" if not tail else
+                          f" (no record carries a readable {af}, so recency is unverified)"
+                          if af else
                           " (no timestamp field declared, so recency is unverified)"),
             **({"upstream_total": total} if total else {}),
             "query_receipt": f"{fetch['records_path']} via {fetch['url']}"
@@ -447,6 +458,28 @@ def _adapt_generic_json(params: dict, spec: dict) -> dict:
                            "reason": res.get("stale_reason")},
             "note": ((spec.get("usage_notes") or spec.get("note")) if rows or not asked else
                      f"no record matches {asked} (the feed read {read:,} records)")}
+
+
+def _when(v):
+    """A record's timestamp as an aware datetime (naive read as UTC), or None when
+    unreadable: ISO date/datetime, YYYY-MM, YYYY, a 'start/end' range by its end,
+    epoch seconds or milliseconds."""
+    import re
+    from datetime import datetime, timezone
+    if v is None or isinstance(v, bool):
+        return None
+    try:
+        if isinstance(v, (int, float)):
+            return datetime.fromtimestamp(v / 1000 if abs(v) > 1e11 else v, timezone.utc)
+        s = str(v).strip()
+        if s.count("/") == 1:
+            s = s.split("/")[1]
+        if re.fullmatch(r"\d{4}(-\d{2})?", s):
+            s += "-01" * (2 - s.count("-"))
+        t = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+    except (ValueError, OverflowError, OSError):
+        return None
 
 
 def _fold(v) -> str:
