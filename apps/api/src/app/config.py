@@ -220,6 +220,16 @@ class Settings(BaseSettings):
     # OAuth off everyone on the box is one (local-dev) and shares this budget — a
     # workshop dry run on one box raises it rather than wait out the hour.
     grp_contrib_hourly_cap: int = 30
+    # Preparing a contribution on the server (contrib/prepare: recode, assemble, ...):
+    # what its inputs may total, streamed to disk under the cache, never held in
+    # memory (GRP_PREP_MAX_INPUT_BYTES). The contribution cap above still applies to
+    # what is STORED. Each preparation step's wall-clock budget, in seconds
+    # (GRP_PREP_OP_SECONDS); the cells a raster step and the vertices a vector step
+    # may touch.
+    grp_prep_max_input_bytes: int = 3 * 1024 ** 3
+    grp_prep_op_seconds: int = 600
+    grp_prep_max_cells: int = 4_000_000_000
+    grp_prep_max_vertices: int = 50_000_000
     # DEVELOPMENT ONLY: let contributions fetch from private/loopback addresses, so a
     # local dry run can serve test files from a local http server. Never set on a
     # deployed host — the fetch policy exists because the server sits on a shared

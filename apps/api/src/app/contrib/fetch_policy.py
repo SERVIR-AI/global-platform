@@ -364,16 +364,52 @@ def fetch(url: str, max_bytes: int | None = None) -> tuple[bytes, str]:
             raise FetchRefused(str(first)) from None
 
 
-def _fetch(url: str, cap: int, started: float, agent: str) -> tuple[bytes, str]:
+def fetch_to_file(url: str, dest, max_bytes: int | None = None,
+                  deadline: float | None = None) -> tuple[int, str]:
+    """(bytes written, filename) for an allowed URL streamed to the file `dest` — never
+    held in memory. The same per-hop checks, pinning, page and challenge refusals as
+    fetch(); `max_bytes` defaults to grp_prep_max_input_bytes and `deadline` (seconds,
+    the whole fetch) to grp_prep_op_seconds. Over the cap: TooLarge with the declared
+    size when the host gave one. A refused or failed fetch leaves no file behind."""
+    import os
+    s = get_settings()
+    cap = int(max_bytes or s.grp_prep_max_input_bytes)
+    limit = float(deadline or s.grp_prep_op_seconds)
+    started = time.monotonic()
+    try:
+        try:
+            return _fetch(url, cap, started, USER_AGENT, dest=str(dest), deadline=limit)
+        except _Retryable as first:
+            try:
+                return _fetch(url, cap, started, BROWSER_AGENT, dest=str(dest), deadline=limit)
+            except FetchRefused:
+                raise FetchRefused(str(first)) from None
+    except BaseException:
+        try:
+            os.unlink(dest)
+        except OSError:
+            pass
+        raise
+
+
+# A page check reads the head of an answer; a file streamed to disk keeps only this much
+# of itself in memory (a Drive confirm page is ~2 KB, a challenge page under 100 KB).
+_HEAD = 200_000
+
+
+def _fetch(url: str, cap: int, started: float, agent: str, dest: str | None = None,
+           deadline: float | None = None):
+    """bytes + filename, or with `dest` (bytes written, filename) with the body on disk."""
     import requests
+    deadline = deadline or DEADLINE
     current = direct_url(url)
     drive_id = drive_file_id(url)
     is_doc = bool(docs_document_id(url))
     confirmed = False
     hops: list[str] = []
     for _ in range(MAX_REDIRECTS + 2):
-        if time.monotonic() - started > DEADLINE:
-            raise FetchRefused(f"fetch exceeded the {DEADLINE}s deadline")
+        if time.monotonic() - started > deadline:
+            raise FetchRefused(f"fetch exceeded the {deadline:g}s deadline")
         article = figshare_article(current)
         if article:                 # the page is a bot challenge; its API names the file
             picked = [f for f in parse_qs(urlparse(current).query).get("file") or [] if f.isdigit()]
@@ -430,14 +466,26 @@ def _fetch(url: str, cap: int, started: float, agent: str) -> tuple[bytes, str]:
             if declared and str(declared).isdigit() and int(declared) > cap:
                 raise TooLarge(f"{str(url).strip()} declares {int(declared):,} bytes; the cap "
                                f"is {cap:,} — " + _TOO_BIG, size=int(declared), cap=cap)
-            buf = bytearray()
-            for chunk in r.iter_content(chunk_size=65536):
-                buf.extend(chunk)
-                if len(buf) > cap:
-                    raise TooLarge(f"{str(url).strip()} exceeds the {cap:,}-byte cap — "
-                                   + _TOO_BIG, cap=cap)
-                if time.monotonic() - started > DEADLINE:
-                    raise FetchRefused(f"fetch exceeded the {DEADLINE}s deadline")
+            buf = bytearray()           # the body, or its head when it streams to `dest`
+            total = 0
+            out = open(dest, "wb") if dest else None
+            try:
+                for chunk in r.iter_content(chunk_size=(1 << 20) if dest else 65536):
+                    total += len(chunk)
+                    if total > cap:
+                        raise TooLarge(f"{str(url).strip()} exceeds the {cap:,}-byte cap — "
+                                       + _TOO_BIG, cap=cap)
+                    if out is None:
+                        buf.extend(chunk)
+                    else:
+                        out.write(chunk)
+                        if len(buf) < _HEAD:
+                            buf.extend(chunk[:_HEAD - len(buf)])
+                    if time.monotonic() - started > deadline:
+                        raise FetchRefused(f"fetch exceeded the {deadline:g}s deadline")
+            finally:
+                if out is not None:
+                    out.close()
             # A Drive link that ends on ANY web page — the confirm page, or a redirect to
             # accounts.google.com because the file is not shared — never passes as the file.
             if drive_id and ctype.startswith("text/html"):
@@ -459,6 +507,8 @@ def _fetch(url: str, cap: int, started: float, agent: str) -> tuple[bytes, str]:
                     or bytes(buf[:256]).lstrip().lower().startswith((b"<!doctype html", b"<html")))
             _refuse_page(r.status_code, r.headers, bytes(buf), hops, url, quoted, drive_id,
                          is_doc, html=page)
+            if dest:
+                return total, _filename(r.headers, parts.path)
             return bytes(buf), _filename(r.headers, parts.path)
         finally:
             r.close()
