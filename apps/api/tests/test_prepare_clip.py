@@ -18,7 +18,6 @@ import gzip
 import hashlib
 import io
 import json
-import re
 import sqlite3
 import struct
 import threading
@@ -29,7 +28,6 @@ from urllib.parse import parse_qsl, urlparse
 
 import numpy as np
 import pytest
-import rasterio
 import yaml
 from rasterio.crs import CRS
 from rasterio.io import MemoryFile
@@ -509,6 +507,14 @@ def test_a_gzip_bomb_and_an_input_over_the_budget_are_declined(env, monkeypatch)
     assert out["problems"] == [f"{url} is {prepare.size_text(len(bomb))}, over the 1000 bytes the "
                                "platform downloads to prepare one contribution — give a smaller "
                                "file (one tile, one year, one area)"]
+    from app.contrib import fetch_policy               # a host too slow for the fetch's time
+
+    def slow(*a, **k):
+        raise fetch_policy.FetchRefused("fetch exceeded the 600s deadline")
+    monkeypatch.setattr(fetch_policy, "fetch_to_file", slow)
+    out = _submit("vector", _manifest("test_slow", url, clip=GULF))
+    assert out["problems"][0].startswith(f"{url} did not finish downloading in the 600 s")
+    assert "Google Drive" in out["problems"][0]
     assert _no_leftovers(env)
 
 

@@ -136,10 +136,25 @@ def run(ctx):
         if svc is not None:
             return _paged(ctx, svc, box, where)
         ctx.begin("fetch")                        # the download is a step of its own
-        ctx.path = ctx.fetch(str(m["url"]).split("#", 1)[0])
+        ctx.path = _download(ctx, str(m["url"]).split("#", 1)[0])
         ctx.filename = ctx.steps[-1]["inputs"].get("filename")
         ctx.begin(NAME)
     return _from_file(ctx, box, where, own)
+
+
+def _download(ctx, url: str) -> str:
+    """ctx.fetch, with a host too slow for the step's time said in words to act on."""
+    from .. import fetch_policy
+    from . import PrepRefused
+    try:
+        return ctx.fetch(url)
+    except fetch_policy.FetchRefused as exc:
+        if not str(exc).startswith("fetch exceeded"):
+            raise
+        raise PrepRefused(f"{url} did not finish downloading in the {ctx.op_seconds:g} s the "
+                          "platform gives one download — the host is sending it slowly (Zenodo "
+                          "can throttle); try again later, or put the file on Google Drive "
+                          "(Anyone with the link) and give that link") from None
 
 
 def _box_text(box) -> str:
@@ -151,7 +166,7 @@ def _quoted(ctx) -> str:
 
 
 def _from_file(ctx, box, where, own=True):
-    from . import PrepRefused, PreparedFile, _features, size_text
+    from . import PrepRefused, _features, size_text
     m = ctx.manifest
     quoted = _quoted(ctx)
     path = ctx.path
