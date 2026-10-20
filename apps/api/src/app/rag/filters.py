@@ -38,6 +38,25 @@ _PAGES = re.compile(r"\b\d+\s?(?:p|pp|págs?|pages?)\.(?=\s|$)|\bpp?\.\s?\d+", r
 _LEADER = re.compile(r"(?:(?:\.\s?){4,}|…+)\s*\d{1,4}(?![\d.,]|[ \t]+\d)")
 # A contents line: a title then its page number (after dotted leaders, or alone).
 _TOC_LINE = re.compile(r"(?:(?:\.\s?){4,}|…+|\s)\s*(?:\d{1,4}|[ivxlc]{1,6})\s*$", re.I)
+# A table: a caption opening a line ('TABLE 4.3', 'Cuadro 2'), or rows mostly of numbers.
+_CAPTION = re.compile(r"^\W*(?:table|tabla|tableau|tabela|cuadro|quadro)\s+[a-z]?\d+[a-z]?(?:\.\d+)*\b",
+                      re.I | re.M)
+_NUM = re.compile(r"[(\[]?[-+−–]?\d[\d.,\-–−/]*%?[)\]]?[,;:]?")
+_PLAIN = re.compile(r"[(\[]?[-+−]?\d[\d.,]*%?[)\]]?[,;:]?")
+
+
+def _is_table(text: str) -> bool:
+    """A captioned table, or three rows of three or more plain numbers (a year, a
+    page range or a line with a link is not one: those are what reference lines hold)."""
+    if _CAPTION.search(text):
+        return True
+    rows = 0
+    for ln in text.splitlines():
+        toks = ln.split()
+        nums = [t for t in toks if _NUM.fullmatch(t)]
+        plain = [t for t in nums if _PLAIN.fullmatch(t) and not _YEAR.search(t)]
+        rows += len(plain) >= 3 and 2 * len(nums) >= len(toks) and not _LINK.search(ln)
+    return rows >= 3
 
 
 def looks_like_references(text: str) -> bool:
@@ -58,7 +77,8 @@ def looks_like_references(text: str) -> bool:
     pages = len(_PAGES.findall(text))
     leaders = len(_LEADER.findall(text))
     toc_lines = sum(1 for ln in lines if _TOC_LINE.search(ln))
-    if cites >= 5 and years >= 3 and (cites * 20 >= words or links * 30 >= words):
+    if (cites >= 5 and years >= 3 and (cites * 20 >= words or links * 30 >= words)
+            and not _is_table(text)):                 # a table's 'Sources: …' footnote is not a list
         return True                                   # citations (or links) are the text
     if any(_REF_HEADING.match(ln) for ln in head) and cites + years + pages >= 3:
         return True                                   # 'References' heads the passage
