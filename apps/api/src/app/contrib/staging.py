@@ -850,6 +850,45 @@ def _raster_layer_text() -> str:
         return "namespaced name (see the namespaces table in conf/raster_schema.yml)"
 
 
+PREVIEW_TEXT = ("true to see what WOULD land — the file is fetched, prepared and checked "
+                "exactly as for a submission, and the reply states its classes (cells, km²), "
+                "features, extent and stored bytes — with nothing staged, stored or counted "
+                "as a contribution. Submit again without it to contribute")
+
+
+def _prep_fields(kind: str) -> dict:
+    """The preparation fields of `kind` (contrib/prepare's registry) and `preview`."""
+    try:
+        from . import prepare
+        return {**prepare.fields(kind), "preview": PREVIEW_TEXT}
+    except Exception:                             # the form text never fails an import
+        return {"preview": PREVIEW_TEXT}
+
+
+def _prep_problems(kind: str, m: dict) -> list[str]:
+    from . import prepare
+    return prepare.validate(kind, m)
+
+
+def _unknown(m: dict, known: set) -> set:
+    """Fields no form lists; a preparation field of another kind is not one — the
+    preparation check says what it is for."""
+    from . import prepare
+    return set(m) - known - prepare.all_fields()
+
+
+def _url_problems(kind: str, m: dict) -> list[str]:
+    """fetch_policy's refusals of the url, each with what preparation could do about it."""
+    problems = fetch_policy.check_url(m["url"])
+    if problems:
+        from . import prepare
+        said = prepare.suggest({"event": "url_refused", "kind": kind, "manifest": m,
+                                "url": m["url"], "problems": problems})
+        if said:
+            problems = [*problems[:-1], f"{problems[-1]} — {said}"]
+    return problems
+
+
 def _raster_namespace_fields() -> dict:
     try:
         from ..graph.geo import layer_values
@@ -922,6 +961,8 @@ RASTER_FIELDS = {
         # what a namespace lets its layers declare (a change map's from_year, to_year and
         # compares): the schema's `namespaces.<role>.fields`, never typed here
         **_raster_namespace_fields(),
+        # what the server can prepare (contrib/prepare: one module per op), never typed here
+        **_prep_fields("raster"),
     },
 }
 _RASTER_KNOWN = set(RASTER_FIELDS["required"]) | set(RASTER_FIELDS["optional"])
@@ -946,7 +987,7 @@ def _validate_raster(manifest) -> list[str]:
     base = {k: v for k, v in m.items() if k != "url"}
     problems += [f for f in rasters.validate_manifest({**base, "file": "-"})
                  if not f.startswith("file ")]
-    unknown = set(m) - _RASTER_KNOWN
+    unknown = _unknown(m, _RASTER_KNOWN)
     if unknown:
         problems.append(f"unknown fields {sorted(unknown)} — every field is provenance")
     if m.get("clip") is not None:
@@ -956,8 +997,9 @@ def _validate_raster(manifest) -> list[str]:
                                                  and m["clip_member"].strip()):
         problems.append(f"clip_member must be a file name inside the zip, e.g. "
                         f"'folder/name.tif' — got {m['clip_member']!r}")
+    problems += _prep_problems("raster", m)
     if m.get("url"):
-        problems += fetch_policy.check_url(m["url"])
+        problems += _url_problems("raster", m)
     return problems
 
 
@@ -1057,6 +1099,87 @@ _NOT_A_ZIP = ("clip_member names a raster inside a zip, but the file at {url} is
               "drop clip_member")
 
 
+# --------------------------------------------------------------------------- preparation
+
+def _prepared_source(kind: str, m: dict, cap: int, folder):
+    """THE seam where declared preparation runs (contrib/prepare), for every kind whose
+    prepare step calls it: None when the manifest declares none — the existing path then
+    runs unchanged — else the prepared local file (prepare.Prepared), handed to the
+    kind's own checks exactly as if it had been fetched. The kind's own way of reading
+    its url and its last step come from its row in _KINDS ("prep")."""
+    from . import prepare
+    if not prepare.requested(kind, m):
+        return None
+    hooks = _KINDS[kind].get("prep") or {}
+    return prepare.run(kind, m, cap=cap, folder=folder, **hooks)
+
+
+def _raster_prep_source(ctx, cellwise: bool) -> None:
+    """A raster's input to its preparation: with a `clip` and only cell-by-cell ops,
+    the clip read at the source as today (range reads where the host answers them);
+    else the file downloaded whole (streamed to disk), a zip's raster unpacked."""
+    from . import rasters, remote_clip as rc
+    m = ctx.manifest
+    url, frag = rc.split_member(m["url"])
+    ranged = False
+    if m.get("clip") is not None and cellwise:
+        # a host that answers range requests sends only the window; one that does not
+        # sends the file whole, under the preparation budget, and the clip is cut last
+        try:
+            ranged = bool(rc.probe(url)["ranges"])
+        except fetch_policy.FetchRefused as exc:
+            raise Declined(str(exc)) from None
+    if ranged:
+        tmp, notes, fetched = _raster_source(m, ctx.cap, ctx.workdir)
+        ctx.record.update({k: v for k, v in (fetched or {}).items() if k != "url"})
+        ctx.clipped = True
+        ctx.adopt(tmp, notes, {"op": "clip", "inputs": {
+            k: v for k, v in (fetched or {"url": m["url"]}).items()
+            if k in ("url", "clip", "clip_place", "member", "window", "of", "read")}})
+        return
+    member = m.get("clip_member") or frag
+    path = ctx.fetch(url)
+    ctx.filename = ctx.steps[-1]["inputs"].get("filename")
+    with open(path, "rb") as f:
+        head = f.read(4096)
+    _raster_page(head, m["url"])
+    if rasters.sniff(head) == "zip":
+        names = ctx.unzip(path)
+        member, said = rc.pick_member(sorted(names), member, m["url"])
+        ctx.steps[-1]["inputs"]["member"] = member
+        ctx.path = names[member]
+        if said:
+            ctx.notes.append(said)
+        return
+    if m.get("clip_member"):
+        raise Declined(_NOT_A_ZIP.format(url=m["url"]))
+    ctx.path = path
+
+
+def _raster_prep_finish(ctx) -> None:
+    """The clip, last, when it was not read at the source: cut from the prepared file,
+    cells unchanged (remote_clip.cut, as every clip)."""
+    from . import rasters, remote_clip as rc
+    m = ctx.manifest
+    if m.get("clip") is None or ctx.clipped:
+        return
+    box, where = rc.box_of(m["clip"])
+    dest = ctx.tmp(".tif", "clip")
+    try:
+        driver = rasters.driver_for(ctx.path)
+    except ValueError as exc:
+        raise rc.ClipRefused(str(exc)) from None
+    made = rc.cut(ctx.path, box, dest, ctx.cap, quoted=m["url"], driver=driver,
+                  layer_name=m.get("layer_name"))
+    ctx.clipped = True
+    ctx.record.update({"clip": [round(v, 6) for v in box], "window": made["window"],
+                       "of": made["of"],
+                       **({"clip_place": m["clip"]} if isinstance(m["clip"], str) else {})})
+    ctx.adopt(dest, [rc.note(m["url"], box, where, made, None, remote=False), *made["notes"]],
+              {"op": "clip", "inputs": {"clip": [round(v, 6) for v in box],
+                                        "window": made["window"], "of": made["of"]}})
+
+
 def _read_raster(m, path, kind, box, where, member, cap, folder, found=None):
     """The cells under `box` (all of them when None) of `path` — a local file, or a
     /vsicurl? path when `found` holds the probe — written to a staged-tmp GeoTIFF."""
@@ -1128,9 +1251,12 @@ def _prepare_raster(m: dict) -> dict:
     tiffs_dir = get_settings().tiffs_dir
     tiffs_dir.mkdir(parents=True, exist_ok=True)
     cap = int(get_settings().grp_contrib_max_bytes)
+    from . import prepare
     try:
-        tmp, notes, fetched = _raster_source(m, cap, tiffs_dir)
-    except (remote_clip.ClipRefused, fetch_policy.FetchRefused) as exc:
+        made = _prepared_source("raster", m, cap, tiffs_dir)
+        tmp, notes, fetched = ((made.path, list(made.notes), made.fetched) if made
+                               else _raster_source(m, cap, tiffs_dir))
+    except (remote_clip.ClipRefused, fetch_policy.FetchRefused, prepare.PrepRefused) as exc:
         raise Declined(str(exc)) from None
     base = {k: v for k, v in m.items() if k != "url"}
     out = rasters.add({**base, "file": tmp}, dry_run=True, keep_prepared=True)
@@ -1157,13 +1283,17 @@ def _prepare_raster(m: dict) -> dict:
             if fetched.get("clip"):
                 raise Declined(f"the clip of {m['url']} is {big} stored (compressed), over the "
                                f"{limit} cap — give a smaller box")
+            if fetched.get("steps"):
+                raise Declined(remote_clip.ask_text(
+                    f"the raster prepared from {m['url']} is {big} stored, over the {limit} cap"))
             raise Declined(remote_clip.ask_text(
                 f"the raster {fetched.get('member')!r} inside {m['url']} is {big} stored, over "
                 f"the {limit} cap"))
         with open(keep, "rb") as f:
             sha = hashlib.file_digest(f, "sha256").hexdigest()
         fetched = {**fetched, "sha256": sha, "bytes": size}
-        notes[0] += f"; the stored file's sha256 is {sha}"
+        if notes:
+            notes[0] += f"; the stored file's sha256 is {sha}"
         observed = {**observed, "prepared": [*notes, *(n for n in observed.get("prepared") or []
                                                        if n not in notes)]}
     return {"tmp": keep, "observed": observed, **({"fetched": fetched} if fetched else {})}
@@ -1555,6 +1685,8 @@ VECTOR_FIELDS = {
         "layer_name": "for a GeoPackage with several feature layers, or a zip with several "
                       "shapefiles: which one to read",
         "usage_notes": "a few lines the consuming analyst reads (max 500 chars)",
+        # what the server can prepare (contrib/prepare: one module per op), never typed here
+        **_prep_fields("vector"),
     },
 }
 _VECTOR_KNOWN = set(VECTOR_FIELDS["required"]) | set(VECTOR_FIELDS["optional"])
@@ -1663,13 +1795,14 @@ def _validate_vector(manifest) -> list[str]:
     taken = _vector_taken(str(m.get("layer") or ""))
     if taken and m.get("layer"):
         problems.append(taken)
-    unknown = set(m) - _VECTOR_KNOWN
+    unknown = _unknown(m, _VECTOR_KNOWN)
     if unknown:
         problems.append(f"unknown fields {sorted(unknown)} — every field is provenance")
     from . import notes
     problems += notes.validate(m.get("usage_notes"))
+    problems += _prep_problems("vector", m)
     if m.get("url"):
-        problems += fetch_policy.check_url(m["url"])
+        problems += _url_problems("vector", m)
     return problems
 
 
@@ -1677,13 +1810,23 @@ def _prepare_vector(m: dict) -> dict:
     import os
     import tempfile
     from ..graph.geo import vectors
+    from . import prepare
     taken = _vector_taken(m["layer"])
     if taken:
         raise Declined(taken)
+    from ..config import get_settings
+    cap = int(get_settings().grp_contrib_max_bytes)
+    made = None
     try:
-        raw, fname = fetch_policy.fetch(m["url"])
-    except fetch_policy.FetchRefused as exc:
+        made = _prepared_source("vector", m, cap, vectors._dir())
+        if made is not None:
+            raw, fname = _read_prepared(made, m["url"], cap)
+        else:
+            raw, fname = fetch_policy.fetch(m["url"])
+    except (fetch_policy.FetchRefused, prepare.PrepRefused) as exc:
         raise Declined(str(exc)) from None
+    except Declined:
+        raise
     except Exception as exc:
         raise Declined(f"could not fetch {m['url']}: {type(exc).__name__}: {exc}") from None
     if _is_web_page(raw):
@@ -1693,11 +1836,14 @@ def _prepare_vector(m: dict) -> dict:
         raise Declined(service)
     part = _shapefile_part(raw, fname)
     if part:
+        said = prepare.suggest({"event": "shapefile_part", "kind": "vector", "manifest": m,
+                                "url": m["url"], "part": part})
         raise Declined(f"{m['url']} is {part} — one part of a shapefile, which is several files "
                        "that only work together. Put the .shp, .shx, .dbf and .prj (and the .cpg, "
                        "if there is one) of the layer in ONE .zip, share that .zip (Google Drive: "
                        "Anyone with the link) and give its link. If the folder also holds the "
-                       "layer as a GeoPackage (.gpkg) or GeoJSON, that one file goes in as it is")
+                       "layer as a GeoPackage (.gpkg) or GeoJSON, that one file goes in as it is"
+                       + (f" — {said}" if said else ""))
     # A zipped shapefile or a GeoPackage is read into GeoJSON on EPSG:4326 here;
     # what lands is always GeoJSON, and the record says what ingest did.
     from ..graph.geo import vecio
@@ -1711,6 +1857,20 @@ def _prepare_vector(m: dict) -> dict:
         observed = vectors.inspect(raw)
     except ValueError as exc:
         raise Declined(f"{m['url']}: {exc}") from None
+    if made is not None:
+        # What the server did to the file rides the record, as a raster's does: each step's
+        # inputs and sha256, and the stored GeoJSON's; the cap is on what is stored.
+        import hashlib
+        if len(raw) > cap:
+            from . import remote_clip
+            raise Declined(f"the layer prepared from {m['url']} is "
+                           f"{remote_clip.size_text(len(raw))} as GeoJSON, over the "
+                           f"{remote_clip.size_text(cap)} cap — give a smaller area or layer")
+        sha = hashlib.sha256(raw).hexdigest()
+        prep_notes = [*made.notes, *(prep_notes or [])]
+        prep_notes = ([f"{prep_notes[0]}; the stored file's sha256 is {sha}", *prep_notes[1:]]
+                      if prep_notes else [f"prepared on the server; the stored file's sha256 is {sha}"])
+        observed["fetched"] = {**made.fetched, "sha256": sha, "bytes": len(raw)}
     if prep_notes:
         observed["prepared"] = prep_notes
     vdir = vectors._dir()
@@ -1718,6 +1878,27 @@ def _prepare_vector(m: dict) -> dict:
     with os.fdopen(fd, "wb") as f:
         f.write(raw)
     return {"tmp": tmp, "observed": observed}
+
+
+def _read_prepared(made, url: str, cap: int) -> tuple[bytes, str]:
+    """The bytes of a prepared vector file (removed once read) and its name, which says
+    to the reader what it is. Read into memory only when it can still fit the cap as
+    stored (a zipped shapefile or GeoPackage grows as GeoJSON, rarely 8-fold)."""
+    import os
+    from . import remote_clip
+    try:
+        size = os.path.getsize(made.path)
+        if size > remote_clip.RAW_FACTOR * cap:
+            raise Declined(f"the layer prepared from {url} is {remote_clip.size_text(size)}, far "
+                           f"over the {remote_clip.size_text(cap)} cap — give a smaller area or layer")
+        with open(made.path, "rb") as f:
+            raw = f.read()
+    finally:
+        try:
+            os.unlink(made.path)
+        except OSError:
+            pass
+    return raw, made.filename
 
 
 def _stage_vector(rec: dict, prepared: dict) -> dict:
@@ -1738,6 +1919,8 @@ def _stage_vector(rec: dict, prepared: dict) -> dict:
              **({"group_field": m["group_field"]} if m.get("group_field") else {}),
              **({"prepared": prepared["observed"]["prepared"]}
                 if prepared["observed"].get("prepared") else {}),
+             **({"fetched": prepared["observed"]["fetched"]}
+                if prepared["observed"].get("fetched") else {}),
              **({"usage_notes": m["usage_notes"]} if m.get("usage_notes") else {}),
              "contributed": True, "staged_by": rec["contributor_id"], "contribution_id": cid,
              "contributor_label": rec["contributor_label"], "review": _preview_review(rec)}
@@ -2312,10 +2495,13 @@ _KINDS = {
     "raster": {"validate": _validate_raster, "prepare": _prepare_raster,
                "stage": _stage_raster, "land": _land_raster, "retire": _retire_raster,
                "unland": _unland_raster, "fields": RASTER_FIELDS,
+               "prep": {"source": _raster_prep_source, "finish": _raster_prep_finish},
+               "preview": lambda m, p: _preview_raster(m, p),
                "title": lambda m: f"{m.get('title') or 'untitled layer'} ({m.get('layer')})"},
     "vector": {"validate": _validate_vector, "prepare": _prepare_vector,
                "stage": _stage_vector, "land": _land_vector, "retire": _retire_vector,
                "unland": _unland_vector, "fields": VECTOR_FIELDS,
+               "preview": lambda m, p: _preview_vector(m, p),
                "title": lambda m: f"{m.get('title') or 'untitled point layer'} ({m.get('layer')})"},
     "weights": {"validate": _validate_weights, "prepare": _prepare_weights,
                 "stage": _stage_weights, "land": _land_weights, "retire": _retire_weights,
@@ -2542,6 +2728,19 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
                              + " (feeds, tables and rasters are coming; packs stay on the "
                              "developer path)"]}
     spec = _KINDS[kind]
+    preview = False
+    if isinstance(manifest, dict) and "preview" in manifest:
+        manifest = dict(manifest)
+        preview = manifest.pop("preview")
+        if preview not in (True, False, None):
+            return {"status": "declined", "kind": kind,
+                    "problems": [f"preview must be true or false — got {preview!r}"]}
+        if preview and "preview" not in spec:
+            able = [k for k, v in _KINDS.items() if "preview" in v]
+            return {"status": "declined", "kind": kind,
+                    "problems": [f"preview shows what a {' or '.join(able)} contribution would "
+                                 f"land; a {kind} has no preview yet — drop preview and submit "
+                                 "it (contribute_status(action='withdraw') takes it back)"]}
     vtok = identity.bind(caller)       # a kind that checks WHO may submit sees the submitter
     try:
         problems = spec["validate"](manifest)
@@ -2553,6 +2752,8 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
     caps, slot = _caps(caller)
     if caps:
         return {"status": "declined", "kind": kind, "problems": caps}
+    if preview:
+        return _preview(kind, spec, manifest, caller, slot)
     token = identity.bind(caller)
     try:
         try:
@@ -2625,6 +2826,120 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
     return {**_public(rec), "status": "staged",
             "next": ("test it now — only you and reviewers can see it; a reviewer "
                      "approves or rejects it, and contribute_status shows the decision")}
+
+
+def _preview(kind: str, spec: dict, manifest: dict, caller, slot) -> dict:
+    """preview: true — fetched, prepared and checked as a submission is, and what WOULD
+    land described; nothing staged, stored or recorded. The slot is held while it runs."""
+    import os
+    token = identity.bind(caller)
+    try:
+        try:
+            prepared = spec["prepare"](manifest)
+        except Declined as exc:
+            return {"status": "declined", "kind": kind, "preview": True, "problems": [str(exc)]}
+        try:
+            shown = spec["preview"](manifest, prepared)
+        finally:
+            tmp = (prepared or {}).get("tmp")
+            for stray in (tmp, f"{tmp}.norm.tif") if tmp else ():
+                try:
+                    os.unlink(stray)
+                except OSError:
+                    pass
+    finally:
+        identity.unbind(token)
+        _release(slot)
+    return {"status": "preview", "kind": kind, "would_land": shown,
+            "next": ("nothing was staged, stored or counted — submit the same manifest without "
+                     "preview to contribute it")}
+
+
+def _preview_raster(m: dict, prepared: dict) -> dict:
+    """What a raster would land as: the stored file's bytes, grid and extent, and for a
+    class map every legend class's cells and km² (on the ellipsoid, as every pack counts)."""
+    import os
+    import numpy as np
+    import rasterio
+    from rasterio.windows import Window
+    from ..graph.geo import stacks
+    from . import rasters
+    path = prepared["tmp"]
+    obs = prepared.get("observed") or {}
+    out = {"layer": m["layer"], "bytes": os.path.getsize(path), "stored_as": "GeoTIFF"}
+    try:
+        legend = rasters._norm_legend(m.get("legend")) if isinstance(m.get("legend"), dict) else {}
+    except (TypeError, ValueError):
+        legend = {}
+    outside = obs.get("outside_values") if "outside_values" in obs else rasters.outside_values(m)
+    skip = [*(outside or []), *([obs["nodata"]] if rasters._isnum(obs.get("nodata")) else [])]
+    with rasterio.Env(**rasters.gdal_env()), rasterio.open(path, driver="GTiff") as src:
+        b = src.bounds
+        out.update({"crs": src.crs.to_string() if src.crs else None, "dtype": src.dtypes[0],
+                    "nodata": rasters._num(src.nodata) if src.nodata is not None else None,
+                    "cells": [src.width, src.height], "cell_size_deg": abs(src.transform.a),
+                    "extent": [round(b.left, 6), round(b.bottom, 6), round(b.right, 6),
+                               round(b.top, 6)]})
+        if legend and rasters.namespace(m["layer"]).get("values") == "classes":
+            px = {c: 0 for c in legend}
+            km2 = {c: 0.0 for c in legend}
+            other, out_px, out_km2 = {}, 0, 0.0
+            for r in range(0, src.height, 1024):
+                win = Window(0, r, src.width, min(1024, src.height - r))
+                st = stacks._count_classes(src.read(1, window=win), src.window_transform(win),
+                                           np.ones((win.height, win.width), dtype=bool),
+                                           legend, skip)
+                for c, row in st["by_class"].items():
+                    px[c] += row["pixels"]
+                    km2[c] += row["km2"]
+                out_px += st["pixels_inside"] - st["pixels_classified"]
+                out_km2 += st["km2_outside"]
+                for v in st["values_not_in_legend"]:
+                    other[v] = True
+            out["classes"] = {legend[c]: {"code": c, "cells": px[c], "km2": round(km2[c], 3)}
+                              for c in sorted(legend)}
+            out["outside_the_map"] = {"cells": out_px, "km2": round(out_km2, 3),
+                                      "values": sorted({rasters._num(v) for v in skip}, key=str)}
+            if other:
+                out["values_not_in_legend"] = sorted(other)
+    for k in ("sampled_min", "sampled_max", "prepared", "hints", "granularity"):
+        if obs.get(k) is not None:
+            out[k] = obs[k]
+    if prepared.get("fetched"):
+        out["fetched"] = prepared["fetched"]
+    return out
+
+
+def _preview_vector(m: dict, prepared: dict) -> dict:
+    """What a vector layer would land as: features, family, extent, stored bytes, and its
+    km of line or km² of polygon on the ellipsoid (as every pack measures)."""
+    import json
+    import os
+    from shapely.geometry import shape
+    from ..graph.geo import vectors
+    obs = prepared["observed"]
+    out = {"layer": m["layer"], "bytes": os.path.getsize(prepared["tmp"]), "stored_as": "GeoJSON",
+           "features": obs["features"], "geometry": obs.get("geometry"), "extent": obs["bbox"],
+           "properties": obs.get("properties") or []}
+    fam = obs.get("geometry")
+    if fam in ("lines", "polygons"):
+        with open(prepared["tmp"], "rb") as f:
+            fc = json.loads(f.read().decode("utf-8-sig"))
+        total = 0.0
+        for ft in fc.get("features") or []:
+            g = ft.get("geometry")
+            if not g or not g.get("coordinates"):
+                continue
+            try:
+                geom = shape(g)
+            except Exception:
+                continue
+            total += vectors.length_km(geom) if fam == "lines" else vectors.area_km2(geom)
+        out["km" if fam == "lines" else "km2"] = round(total, 3)
+    for k in ("without_geometry", "prepared", "fetched"):
+        if obs.get(k):
+            out[k] = obs[k]
+    return out
 
 
 def _landed_state(rec: dict) -> dict:
@@ -2973,4 +3288,23 @@ def describe_submit() -> str:
                  "A staged table or feed is queried with feeds_query(dataset) like any feed and "
                  "appears under `staged_feeds` in platform_capabilities for its owner; staged, a "
                  "raster is a layer the packs read for its owner.")]
+    lines.append(_prep_words())
     return "\n".join(lines)
+
+
+def _prep_words() -> str:
+    """What the server prepares and how to preview it, from contrib/prepare's registry."""
+    try:
+        from . import prepare
+        by_kind = {k: sorted(prepare.fields(k)) for k in KINDS if prepare.fields(k)}
+    except Exception:
+        by_kind = {}
+    able = [k for k in KINDS if "preview" in _KINDS[k]]
+    said = ("PREPARATION is the server's: when a file is not yet in shape ("
+            + "; ".join(f"{k}: {', '.join(f)}" for k, f in by_kind.items())
+            + "), fill the field — ask the contributor only for a real choice (an area, what a "
+              "code means) — and the platform does the work at ingest and records each step; "
+              "a decline that this can resolve names the field and its value. "
+            if by_kind else "")
+    return ("\n" + said + f"preview: true ({' and '.join(able)}) returns {{status: preview, "
+            "would_land} — classes, features, extent and stored bytes — and stores nothing.")

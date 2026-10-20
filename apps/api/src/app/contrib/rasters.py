@@ -505,7 +505,8 @@ def _legend_problem(m: dict) -> list[str]:
         from ..graph.geo import stacks
         dup = stacks.duplicate_labels_text(legend)
         if dup:
-            fails.append(dup)
+            said = _suggested({"event": "duplicate_labels", "manifest": m, "legend": legend})
+            fails.append(f"{dup} — {said}" if said else dup)
     return fails
 
 
@@ -598,16 +599,25 @@ def stack_legend_problem(m: dict, cat: dict | None = None) -> str | None:
         return None
     if have == want:
         return None
-    return _legend_mismatch(sid, have, want)
+    return _legend_mismatch(sid, have, want, m)
 
 
 def _legend_text(leg: dict) -> str:
     return "{" + ", ".join(f"{k}: {v}" for k, v in sorted(leg.items())) + "}"
 
 
-def _legend_mismatch(sid: str, have: dict, want: dict) -> str:
+def _suggested(situation: dict) -> str | None:
+    """What the server's preparation ops (contrib/prepare) propose for a decline."""
+    try:
+        from . import prepare
+        return prepare.suggest({"kind": "raster", **situation})
+    except Exception:                       # a suggestion never breaks a decline
+        return None
+
+
+def _legend_mismatch(sid: str, have: dict, want: dict, manifest: dict | None = None) -> str:
     """Why a year's legend cannot join its stack, and how to make it — when the labels
-    are the stack's under other codes, the exact recode."""
+    are the stack's under other codes, the exact recode, which the server can apply."""
     norm = lambda s: " ".join(str(s).lower().split())
     code_of = {norm(v): k for k, v in have.items()}
     recode = {k: code_of.get(norm(v)) for k, v in want.items()}
@@ -615,8 +625,12 @@ def _legend_mismatch(sid: str, have: dict, want: dict) -> str:
             f"year declares {_legend_text(want)} — one legend per stack")
     new_stack = ("or name a new stack (stack: landcover_<another name>; a new stack cannot be "
                  "compared with this one year to year)")
+    said = _suggested({"event": "stack_legend_mismatch", "manifest": manifest or {},
+                       "stack": sid, "have": have, "want": want})
     if (all(c is not None for c in recode.values()) and len(set(recode.values())) == len(recode)
             and len(recode) == len(have)):
+        if said:
+            return (f"{head}. The labels are the stack's under other codes: {said}; {new_stack}")
         pairs = ", ".join(f"{a} -> {b}" for a, b in sorted(recode.items()) if a != b)
         return (f"{head}. The labels are the stack's under other codes: recode {pairs} to match "
                 f"the stack's legend {_legend_text(have)}, {new_stack}")
@@ -626,7 +640,7 @@ def _legend_mismatch(sid: str, have: dict, want: dict) -> str:
         f"not in the stack's legend: {', '.join(unknown)}" if unknown else "",
         f"in the stack's legend but not this year's: {', '.join(missing)}" if missing else "") if x)
     return (f"{head} ({detail}). Recode the file to the stack's classes and codes "
-            f"{_legend_text(have)}, {new_stack}")
+            f"{_legend_text(have)}{f' — {said} —' if said else ','} {new_stack}")
 
 
 def validate_manifest(m: dict) -> list[str]:
@@ -710,11 +724,14 @@ def validate_manifest(m: dict) -> list[str]:
             vmin = vmax = None
         if vmax is not None and (vmax > hi or vmin < 0):
             amounts = _prefixes("amount")
+            said = _suggested({"event": "class_range", "manifest": m, "classes": [lo, hi],
+                               "declared": decl})
             fails.append(f"declared valid range {vmin:g}..{vmax:g}: a {prefix}* layer carries "
                          f"integer classes {lo}..{hi} (0 = nodata) — reclassify a continuous "
                          "raster into those classes before contributing it"
                          + (f", or contribute the continuous values themselves as {amounts} "
-                            "with their units" if amounts else ""))
+                            "with their units" if amounts else "")
+                         + (f"; {said}" if said else ""))
     fails += _legend_problem(m)
     fails += _field_problems(m, rule)
     if rule.get("stack") and m.get("stack") and isinstance(m.get("legend"), dict):
@@ -928,7 +945,7 @@ def _stack_conflict(cat, manifest):
         return None
     have, want = _norm_legend(st.get("legend")), _norm_legend(manifest.get("legend"))
     if have != want:
-        return _legend_mismatch(str(manifest["stack"]), have, want)
+        return _legend_mismatch(str(manifest["stack"]), have, want, manifest)
     if int(manifest["year"]) in [int(y) for y in st.get("years") or []]:
         return (f"stack {manifest['stack']!r} already has a {manifest['year']} map — "
                 "contributions add years, they do not overwrite them")

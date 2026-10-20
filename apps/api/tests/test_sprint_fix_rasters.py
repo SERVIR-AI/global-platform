@@ -318,7 +318,10 @@ def test_a_year_whose_legend_differs_from_its_stack_is_declined_before_fetching(
     log("OUTPUT", out["problems"])
     assert out["status"] == "declined"
     msg = " ".join(out["problems"])
-    assert "recode 10 -> 1, 20 -> 2 to match the stack's legend {1: Mangrove, 2: Non-mangrove}" in msg
+    # the decline proposes the preparation that resolves it, with the exact mapping
+    assert ("resubmit the same link with recode: {10: 1, 20: 2}, legend: {1: Mangrove, 2: "
+            "Non-mangrove} and declared valid_min 1, valid_max 2") in msg
+    assert "the platform rewrites the cells at ingest" in msg
     assert "name a new stack" in msg and "cannot be compared with this one year to year" in msg
     other = _submit("landcover_toycatie_2014", "https://hub.test/y14.tif", stack="landcover_toycatie",
                     year=2014, legend={1: "Forest", 2: "Non-mangrove"},

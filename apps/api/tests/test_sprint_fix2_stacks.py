@@ -350,7 +350,9 @@ def test_a_legend_giving_one_label_to_two_codes_is_declined_before_fetching(env,
                   "license": "CC0-1.0", "vintage": "2026-10", "legend": {1: "Mangrove", 10: "Mangrove"},
                   "declared": {"dtype": "uint8", "valid_min": 1, "valid_max": 10}})
     assert chg == ["labels must be unique: codes 1 and 10 are both 'Mangrove' — recode the file so "
-                   "one code means one class"]
+                   "one code means one class — or resubmit the same link with recode: {10: 1} and "
+                   "legend {1: Mangrove} — the platform rewrites the cells at ingest, so one code "
+                   "means one class"]
 
 
 def test_a_stack_that_landed_with_repeated_labels_declines_change_in_words(env, log):
