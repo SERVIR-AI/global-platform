@@ -1092,11 +1092,32 @@ def _same(a, b) -> bool:
 
 # --------------------------------------------------------------------------- suggestions
 
+def auto(situation: dict) -> dict | None:
+    """A zip of rasters given with a clip, every raster in it a TILE named by where it lies
+    (GMW_N09W083, GWL_..._W85N10): join the tiles the clip touches — which they are, each
+    header says. A zip of other rasters (19 climate variables, a map and its mask) is the
+    contributor's to pick from: a question, never a mosaic."""
+    m = situation.get("manifest") or {}
+    if (situation.get("kind") not in KINDS or situation.get("event") != "zip_of_rasters"
+            or m.get("clip") is None or m.get("mosaic") is not None
+            or m.get("clip_member") is not None):
+        return None
+    tiles = list(situation.get("rasters") or [])
+    places = [position(t) for t in tiles]
+    if len(tiles) < 2 or any(p is None for p in places) or len(set(places)) < 2:
+        return None
+    return {"fields": {"mosaic": "auto"},
+            "why": f"the url is a zip of {len(tiles):,} raster tiles named by where they lie "
+                   "and a clip is given, so the platform reads each candidate tile's header, "
+                   "takes every tile the clip touches and joins them into one layer"}
+
+
 def suggest(situation: dict) -> str | None:
     """For a zip of several rasters: join the tiles the area needs — 'auto' when their
     names place them (each header is still read), else the members to list."""
     m = situation.get("manifest") or {}
-    if m.get("mosaic") is not None or situation.get("event") != "zip_of_rasters":
+    if (situation.get("kind") not in KINDS or m.get("mosaic") is not None
+            or situation.get("event") != "zip_of_rasters"):
         return None
     tiles = list(situation.get("rasters") or [])
     if len(tiles) < 2:

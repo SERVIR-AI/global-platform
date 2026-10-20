@@ -341,9 +341,12 @@ def test_the_op_is_derived_from_its_module_and_its_fields_reach_the_vector_form(
 
 
 # --------------------------------------------------------------------------- 2. the decline
-def test_a_folder_link_as_delivered_proposes_from_folder_and_fetches_nothing(env, log):
-    """The sheet's folder link as a participant gives it: declined before any fetch, with
-    the field that resolves it. A raster folder hears from_folder is for vectors."""
+def test_a_folder_link_as_delivered_proposes_from_folder_and_fetches_nothing(env, monkeypatch, log):
+    """The sheet's folder link as a participant gives it, with the platform's own
+    preparation off (GRP_PREP_AUTO=0; on, it applies from_folder itself — test_prepare_auto):
+    declined before any fetch, with the field that resolves it. A raster folder hears
+    from_folder is for vectors."""
+    monkeypatch.setattr(get_settings(), "grp_prep_auto", False)
     tree, _, _ = _hydrosheds_folder()
     url = env["drive"].folder(tree)
     out = _submit("vector", _layer("cr_cuencas_costeras", url))
@@ -469,8 +472,9 @@ def test_a_shapefile_without_its_prj_is_declined_with_its_neighbours_crs_then_la
     log("OUTPUT", out["problems"][0])
     assert out["status"] == "declined"
     p = out["problems"][0]
-    assert p.startswith("capas/MANGLE_NICOYA_CI/c8514_copy.shp came without a .prj, so its "
-                        "coordinate system is unknown — ASK the contributor")
+    assert p.startswith("missing required field 'shapefile_crs': capas/MANGLE_NICOYA_CI/"
+                        "c8514_copy.shp came without a .prj, so its coordinate system is "
+                        "unknown — ASK the contributor")
     assert ("(the folder's other .prj files: capas/MANGLE_NICOYA_CI/cambios_8514.prj names WGS 84 / "
             "UTM zone 16N (EPSG:32616) — if this layer is in the same, that is its code)") in p
     assert _no_leftovers(env)
@@ -567,7 +571,8 @@ def test_shapefile_parts_assemble_loose_part_links_on_any_host(env, log):
     assert "holds CR_rios.shp but no CR_rios.dbf" in out["problems"][0]
     out = _submit("vector", _layer("cr_rios_2", link["CR_rios.shp"],
                                    shapefile_parts=[link["CR_rios.shx"], link["CR_rios.dbf"]]))
-    assert out["problems"][0].startswith("CR_rios.shp came without a .prj")
+    assert out["problems"][0].startswith("missing required field 'shapefile_crs': CR_rios.shp "
+                                         "came without a .prj")
     assert out["problems"][0].endswith("Or add the link of the layer's .prj to shapefile_parts")
     assert _no_leftovers(env)
 

@@ -317,11 +317,13 @@ def test_a_tile_name_places_it_only_as_a_guide(name, where):
 
 
 # --------------------------------------------------------------------------- 2. GMW
-def test_the_gmw_zip_lands_as_one_costa_rica_mosaic_from_its_own_link(env, log):
-    """The zip of tiles as delivered is declined with the mosaic proposal; the manifest
-    with mosaic: 'auto' and the clip lands; only the headers named near the box and the
-    tiles under it are read; the stored file equals the hand mosaic cell for cell, the
-    pack's mangrove km² are the hand layer's, and every step is on the record."""
+def test_the_gmw_zip_lands_as_one_costa_rica_mosaic_from_its_own_link(env, monkeypatch, log):
+    """The zip of tiles as delivered is declined with the mosaic proposal (the platform's
+    own preparation off, GRP_PREP_AUTO=0 — on, it applies mosaic itself: test_prepare_auto);
+    the manifest with mosaic: 'auto' and the clip lands; only the headers named near the
+    box and the tiles under it are read; the stored file equals the hand mosaic cell for
+    cell, the pack's mangrove km² are the hand layer's, and every step is on the record."""
+    monkeypatch.setattr(get_settings(), "grp_prep_auto", False)
     host = env["host"]
     raw, hand = _gmw()
     url = host.put("gmw_v3_2020_gtiff.zip", raw)

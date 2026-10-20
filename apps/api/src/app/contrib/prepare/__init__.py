@@ -26,8 +26,24 @@ and optionally
     answers(manifest, problem) -> bool
                  True for a refusal of the manifest's url that the op answers for when it
                  is asked for (from_folder lists a Drive FOLDER link itself)
+    detect(kind, manifest) -> {"fields": {...}, "why": "<words>"} | None
+                 what the url's SHAPE alone says this op should do, before anything is
+                 fetched, when no person's choice is involved (a Drive FOLDER link for a
+                 vector: from_folder: true)
+    auto(situation) -> {"fields": {...}, "why": "<words>"} | None
+                 after a decline: the fields that resolve its situation when no person's
+                 choice is involved (the zip's rasters are named tiles and a clip is given:
+                 mosaic: 'auto'); a choice that is a person's stays a question (suggest).
+                 A proposal may name `restates`: fields the contributor gave that it states
+                 again as the prepared file lands (the stack's legend after a recode, the
+                 API's own query url); their given values are kept on the record
 
-Opt-in: a manifest with none of the fields takes the existing path unchanged.
+Opt-in: a manifest with none of the fields takes the existing path unchanged — unless
+an op's detect or auto applies one, which the platform does BY ITSELF only when nothing
+in it is a person's choice: the reply says what it applied and why, the stored manifest
+holds the fields (a receipt replays exactly) and the record marks them as the platform's
+(Auto; settings.grp_prep_auto turns it off). A field the contributor gave is never
+overridden.
 
 Budgets: an input downloaded whole is STREAMED TO DISK into a per-contribution directory
 under the cache, removed when the preparation ends whatever happens; inputs total at
@@ -42,14 +58,17 @@ traversal, links and zip bombs.
 
 from __future__ import annotations
 
+import contextvars
 import functools
 import hashlib
 import importlib
+import json
 import pkgutil
 import re
 import shutil
 import tempfile
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
@@ -62,11 +81,18 @@ ORDER = {"assemble": 10, "mosaic": 20, "convert": 30, "recode": 40, "clip": 50}
 #   url_refused            + url, problems (fetch_policy.check_url's words)
 #   shapefile_part         + url, part (which part it is)
 #   zip_of_rasters         + url, rasters (the zip's raster members), raised in remote_clip
-#   vector_unreadable      + url, error (graph/geo/vecio's words: a truncated export, ...)
+#   vector_unreadable      + url, error (graph/geo/vecio's words: a truncated export, ...),
+#                            head (the file's first bytes)
 #   not_features           + url, problem (vectors.inspect's words), raw (the bytes fetched)
+#   vector_file_too_large  + url, bytes (the file's declared size, or None), cap: a vector
+#                            file over the cap as a download, before any preparation
+#   vector_too_large       + url, bytes (the prepared layer's size), cap, geometry (its
+#                            family when it was read: points, lines, polygons)
 #   declined               + problem (the words of any decline after the fetch, every kind)
 SITUATIONS = ("stack_legend_mismatch", "duplicate_labels", "class_range", "url_refused",
-              "shapefile_part", "zip_of_rasters", "vector_unreadable", "not_features", "declined")
+              "shapefile_part", "zip_of_rasters", "vector_unreadable", "vector_file_too_large",
+              "vector_too_large", "not_features", "declined")
+MAX_ROUNDS = 3               # attempts made again with what auto() proposes, at most
 
 ZIP_MEMBERS = 10_000         # files one zip may hold to be extracted
 ZIP_RATIO = 200              # uncompressed / compressed, for a member over ZIP_RATIO_FROM
@@ -184,11 +210,18 @@ def declined(kind: str, manifest, text: str, event: str, **situation) -> str:
 
 
 def suggest(situation: dict) -> str | None:
-    """What the registered ops propose for a decline's situation, or None."""
+    """What the registered ops propose for a decline's situation, or None. Every op is
+    asked and each says whether the situation is its own — the ops of the decline's kind
+    first, then the others (a vector over the cap may go in as a raster: rasterise). The
+    situation is recorded for the attempt under way (attempt), for auto() to read."""
     if "problems" in situation and not situation["problems"]:
         return None                          # every refusal answered: nothing to propose
+    seen = _SEEN.get()
+    if seen is not None:
+        seen.append(situation)
     said = []
-    for op in ops(situation.get("kind")):
+    kind = situation.get("kind")
+    for op in sorted(ops(), key=lambda op: kind not in op.KINDS):
         try:
             s = op.suggest(situation)
         except Exception:                    # a suggestion never breaks a decline
@@ -203,6 +236,157 @@ def answered(kind: str, manifest, problems: list) -> list:
     for (op.answers)."""
     ans = [op for op in requested(kind, manifest) if callable(getattr(op, "answers", None))]
     return [p for p in problems if not any(op.answers(manifest, p) for op in ans)]
+
+
+# --------------------------------------------------------------------------- by itself
+
+# The situations the declines of ONE attempt raise (suggest records them) and what the
+# platform applied to it by itself: context variables, so submissions running at once
+# (threads, tasks) never share them.
+_SEEN: contextvars.ContextVar = contextvars.ContextVar("grp_prepare_seen", default=None)
+_APPLIED: contextvars.ContextVar = contextvars.ContextVar("grp_prepare_applied", default=())
+
+
+@contextmanager
+def attempt(applied=()):
+    """One attempt at a submission: yields the list its declines' situations go into;
+    `applied` (the platform's own proposals) is what run() records."""
+    seen: list = []
+    t1, t2 = _SEEN.set(seen), _APPLIED.set(tuple(applied))
+    try:
+        yield seen
+    finally:
+        _SEEN.reset(t1)
+        _APPLIED.reset(t2)
+
+
+def _proposal(op, p) -> dict | None:
+    if not isinstance(p, dict) or not isinstance(p.get("fields"), dict) or not p["fields"]:
+        return None
+    why = " ".join(str(p.get("why") or "").split())
+    if not why:
+        return None
+    return {"op": op.NAME, "fields": dict(p["fields"]), "why": why,
+            **({"restates": sorted(p["restates"])} if p.get("restates") else {})}
+
+
+def _asked(op, name: str, manifest, *args) -> dict | None:
+    """The op's proposal — never when the manifest asks for the op already (its own checks
+    speak), nor one the op itself would decline before fetching (a WFS bbox in another
+    version's terms): what it would say is not the contributor's to hear unasked."""
+    fn = getattr(op, name, None)
+    if not callable(fn) or _given(op, manifest):
+        return None
+    try:
+        p = _proposal(op, fn(*args))
+        if p and list(op.validate({**manifest, **p["fields"]}) or []):
+            return None
+        return p
+    except Exception:                        # a proposal never breaks a submission
+        return None
+
+
+def detect(kind: str, manifest) -> list:
+    """What the url's shape alone says to prepare, before anything is fetched: each
+    detect() of the ops preparing `kind` that the manifest does not ask for already."""
+    if not isinstance(manifest, dict):
+        return []
+    return [p for op in ops(kind) if (p := _asked(op, "detect", manifest, kind, manifest))]
+
+
+def auto(kind: str, manifest, situations) -> list:
+    """What resolves the situations an attempt raised with no person's choice involved:
+    each auto() of the ops preparing `kind` that the manifest does not ask for already."""
+    out = []
+    for s in situations:
+        s = {**s, "kind": s.get("kind") or kind, "manifest": s.get("manifest") or manifest}
+        for op in ops(kind):
+            p = _asked(op, "auto", manifest, s)
+            if p and p not in out:
+                out.append(p)
+    return out
+
+
+def fields_text(fields: dict) -> str:
+    return ", ".join(f"{k}: {json.dumps(v, ensure_ascii=False, default=str)}"
+                     for k, v in fields.items())
+
+
+class Auto:
+    """What the platform prepares by itself for one submission: detect()'s fields before
+    the first attempt; after a decline, again() merges what auto() proposes for the
+    situations THAT attempt raised and says whether to try once more — at most
+    MAX_ROUNDS times, never the same fields twice. A proposal touching a field the
+    contributor gave is dropped, unless it restates it (and the given value is kept)."""
+
+    def __init__(self, kind: str, manifest, on: bool = True):
+        self.kind, self.given, self.manifest = kind, manifest, manifest
+        self.applied: list = []
+        self.rounds = 0
+        self.on = bool(on) and isinstance(manifest, dict) and bool(ops(kind))
+        if self.on:
+            self._take(detect(kind, manifest))
+        self.tried = {self._key()}
+
+    def _key(self) -> str:
+        return json.dumps({k: v for p in self.applied for k, v in p["fields"].items()},
+                          sort_keys=True, default=str)
+
+    def _take(self, proposals) -> bool:
+        took = False
+        for p in proposals:
+            own = set(p.get("restates") or ())
+            f = p["fields"]
+            if any(k in self.given and k not in own and self.given[k] != v for k, v in f.items()):
+                continue                     # the contributor's own field stands
+            if any(k in self.manifest and k not in self.given and self.manifest[k] != v
+                   for k, v in f.items()):
+                continue                     # another proposal of the platform's set it
+            if all(k in self.manifest and self.manifest[k] == v for k, v in f.items()):
+                continue                     # nothing new
+            given = {k: self.given[k] for k in f if k in self.given}
+            self.manifest = {**self.manifest, **f}
+            self.applied.append({**p, **({"given": given} if given else {})})
+            took = True
+        return took
+
+    def attempt(self):
+        return attempt(self.applied)
+
+    def again(self, seen) -> bool:
+        """After a declined attempt: True when what auto() proposes for its situations
+        is new — the manifest then holds it, for one more attempt."""
+        if not self.on or not seen or self.rounds >= MAX_ROUNDS:
+            return False
+        before = (self.manifest, list(self.applied))
+        if not self._take(auto(self.kind, self.manifest, seen)) or self._key() in self.tried:
+            self.manifest, self.applied = before
+            return False
+        self.tried.add(self._key())
+        self.rounds += 1
+        return True
+
+    def shown(self) -> list:
+        return [{"fields": p["fields"], "why": p["why"],
+                 **({"given": p["given"]} if p.get("given") else {})} for p in self.applied]
+
+    def record(self) -> dict:
+        """What the stored record keeps: the fields the platform applied, marked as its own."""
+        return {"prepared_automatically": self.shown()} if self.applied else {}
+
+    def said(self, result: dict) -> dict:
+        """`result` with what the platform applied by itself, in words its client relays."""
+        if not self.applied:
+            return result
+        words = "; ".join(f"{p['why']}: {fields_text(p['fields'])}" for p in self.applied)
+        if result.get("status") in ("staged", "approved", "preview"):
+            msg = (f"The platform prepared this contribution by itself — {words}. No choice "
+                   "of the contributor's was involved; tell them what was done. The stored "
+                   "manifest holds these fields, marked as the platform's")
+        else:
+            msg = (f"The platform applied by itself — {words} — and the contribution was "
+                   "still declined: the problems say what the contributor must decide")
+        return {**result, "prepared_automatically": self.shown(), "message": msg}
 
 
 # --------------------------------------------------------------------------- context
@@ -255,8 +439,9 @@ class Context:
     def check_vertices(self, n: int, what: str = "the layer") -> None:
         if int(n) > self.max_vertices:
             raise PrepRefused(f"{what} has {int(n):,} vertices, over the {self.max_vertices:,} "
-                              f"one {self.step_name} step may touch — give a smaller or "
-                              "simplified layer")
+                              f"one {self.step_name} step may touch — ask the contributor for "
+                              "the area that matters (clip) and resubmit with it, never guess "
+                              "one; or give a smaller or simplified layer")
 
     # ----------------------------------------------------------------- files
     def tmp(self, suffix: str = ".tif", stem: str = "step") -> str:
@@ -454,6 +639,12 @@ def run(kind: str, manifest: dict, *, cap: int, folder, source=None, finish=None
         names = " -> ".join(st["op"] for st in ctx.steps)
         fetched = {"url": manifest.get("url"), **ctx.record,
                    "prepared": f"on the server: {names}", "steps": ctx.steps}
+        applied = [{"fields": p["fields"], "why": p["why"]} for p in _APPLIED.get()]
+        if applied:
+            fetched["prepared_automatically"] = applied
+            ctx.notes.append("prepared by the platform itself, no person's choice involved — "
+                             + "; ".join(f"{p['why']}: {fields_text(p['fields'])}"
+                                         for p in applied))
         if "read" not in fetched:
             fetched["read"] = "downloaded whole"
         # the host's name for the source while the file is still that kind of file, else

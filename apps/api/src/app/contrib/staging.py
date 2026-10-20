@@ -1821,9 +1821,13 @@ def _prepare_vector(m: dict) -> dict:
     try:
         made = _prepared_source("vector", m, cap, vectors._dir())
         if made is not None:
-            raw, fname = _read_prepared(made, m["url"], cap)
+            raw, fname = _read_prepared(made, m["url"], cap, m)
         else:
-            raw, fname = fetch_policy.fetch(m["url"])
+            try:
+                raw, fname = fetch_policy.fetch(m["url"])
+            except fetch_policy.TooLarge as exc:
+                raise Declined(prepare.declined("vector", m, str(exc), "vector_file_too_large",
+                                                url=m["url"], bytes=exc.size, cap=cap)) from None
     except (fetch_policy.FetchRefused, prepare.PrepRefused) as exc:
         raise Declined(str(exc)) from None
     except Declined:
@@ -1851,7 +1855,7 @@ def _prepare_vector(m: dict) -> dict:
     try:
         raw, prep_notes = vecio.to_geojson(raw, fname, m.get("layer_name"))
     except ValueError as exc:
-        raise Declined(prepare.declined("vector", m, f"{m['url']}: {exc}", "vector_unreadable", url=m["url"], error=str(exc))) from None
+        raise Declined(prepare.declined("vector", m, f"{m['url']}: {exc}", "vector_unreadable", url=m["url"], error=str(exc), head=bytes(raw[:16]))) from None
     except Exception as exc:
         raise Declined(f"{m['url']}: could not be read as a vector file: {type(exc).__name__}: {exc}") from None
     try:
@@ -1863,10 +1867,8 @@ def _prepare_vector(m: dict) -> dict:
         # inputs and sha256, and the stored GeoJSON's; the cap is on what is stored.
         import hashlib
         if len(raw) > cap:
-            from . import remote_clip
-            raise Declined(f"the layer prepared from {m['url']} is "
-                           f"{remote_clip.size_text(len(raw))} as GeoJSON, over the "
-                           f"{remote_clip.size_text(cap)} cap — give a smaller area or layer")
+            raise Declined(_vector_too_large(m, f"{_size(len(raw))} as GeoJSON", len(raw), cap,
+                                             observed.get("geometry")))
         sha = hashlib.sha256(raw).hexdigest()
         prep_notes = [*made.notes, *(prep_notes or [])]
         prep_notes = ([f"{prep_notes[0]}; the stored file's sha256 is {sha}", *prep_notes[1:]]
@@ -1881,17 +1883,45 @@ def _prepare_vector(m: dict) -> dict:
     return {"tmp": tmp, "observed": observed}
 
 
-def _read_prepared(made, url: str, cap: int) -> tuple[bytes, str]:
+GEOJSON_FACTOR = 3             # a prepared GeoJSON this many times the cap is not parsed
+
+
+def _size(n: int) -> str:
+    from . import remote_clip
+    return remote_clip.size_text(n)
+
+
+def _vector_too_large(m: dict, size: str, n: int, cap: int, geometry=None) -> str:
+    """A prepared layer over the stored cap, as the question it is: which area (clip) —
+    and what the preparation ops propose (cut at its edge, a raster instead)."""
+    what = f"the layer prepared from {m['url']} is {size}, over the {_size(cap)} cap"
+    if m.get("clip") is None:
+        text = (f"missing required field 'clip': {what} — ask the contributor which area to "
+                "keep (clip: a bbox [minLon, minLat, maxLon, maxLat] in degrees, or a place or "
+                "contributed area name) and resubmit with it; never guess one")
+    else:
+        text = (f"{what} even clipped to {m['clip']!r} — ask the contributor for a smaller "
+                "area (clip) and resubmit with it; never guess one")
+    from . import prepare
+    return prepare.declined("vector", m, text, "vector_too_large", url=m["url"], bytes=n,
+                            cap=cap, geometry=geometry)
+
+
+def _read_prepared(made, url: str, cap: int, m: dict | None = None) -> tuple[bytes, str]:
     """The bytes of a prepared vector file (removed once read) and its name, which says
     to the reader what it is. Read into memory only when it can still fit the cap as
-    stored (a zipped shapefile or GeoPackage grows as GeoJSON, rarely 8-fold)."""
+    stored (a zipped shapefile or GeoPackage grows as GeoJSON, rarely 8-fold; a GeoJSON
+    shrinks by its rounding and spacing, rarely 3-fold)."""
     import os
+    from ..graph.geo import vecio
     from . import remote_clip
     try:
         size = os.path.getsize(made.path)
-        if size > remote_clip.RAW_FACTOR * cap:
-            raise Declined(f"the layer prepared from {url} is {remote_clip.size_text(size)}, far "
-                           f"over the {remote_clip.size_text(cap)} cap — give a smaller area or layer")
+        with open(made.path, "rb") as f:
+            text = vecio.kind_of(f.read(4096), made.filename or "") == "geojson"
+        if size > (GEOJSON_FACTOR if text else remote_clip.RAW_FACTOR) * cap:
+            raise Declined(_vector_too_large({**(m or {}), "url": url},
+                                             remote_clip.size_text(size), size, cap))
         with open(made.path, "rb") as f:
             raw = f.read()
     finally:
@@ -2519,7 +2549,8 @@ _KINDS = {
 
 _PUBLIC = ("contribution_id", "kind", "status", "title", "contributor_label",
            "created_at", "updated_at", "preview", "landing", "decision_note",
-           "reviewer_label", "problems", "held_for_review", "unlanded")
+           "reviewer_label", "problems", "held_for_review", "unlanded",
+           "prepared_automatically")
 
 
 # A licence that keeps the platform from serving the data on: the platform hosts a
@@ -2742,32 +2773,45 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
                     "problems": [f"preview shows what a {' or '.join(able)} contribution would "
                                  f"land; a {kind} has no preview yet — drop preview and submit "
                                  "it (contribute_status(action='withdraw') takes it back)"]}
-    vtok = identity.bind(caller)       # a kind that checks WHO may submit sees the submitter
+    # What the platform prepares by itself, no person's choice involved (contrib/prepare:
+    # detect before the first attempt, auto after a decline), applied and said.
+    from ..config import get_settings
+    auto = prepare.Auto(kind, manifest, on=get_settings().grp_prep_auto)
+    slot = None
+    token = identity.bind(caller)      # a kind that checks WHO may submit sees the submitter
     try:
-        problems = spec["validate"](manifest)
-    finally:
-        identity.unbind(vtok)
-    if problems:
-        return {"status": "declined", "kind": kind, "problems": problems,
-                "fields": spec["fields"]}
-    caps, slot = _caps(caller)
-    if caps:
-        return {"status": "declined", "kind": kind, "problems": caps}
-    if preview:
-        return _preview(kind, spec, manifest, caller, slot)
-    token = identity.bind(caller)
-    try:
-        try:
-            prepared = spec["prepare"](manifest)      # fetches and checks; stores nothing
-        except Declined as exc:
-            return {"status": "declined", "kind": kind, "problems": [" — ".join(filter(None, [str(exc), prepare.suggest({"event": "declined", "kind": kind, "manifest": manifest, "problem": str(exc)})]))]}
+        while True:
+            manifest = auto.manifest
+            with auto.attempt() as seen:
+                problems = spec["validate"](manifest)
+            if problems:
+                if auto.again(seen):
+                    continue
+                return auto.said({"status": "declined", "kind": kind, "problems": problems,
+                                  "fields": spec["fields"]})
+            if slot is None:
+                caps, slot = _caps(caller)
+                if caps:
+                    return auto.said({"status": "declined", "kind": kind, "problems": caps})
+            with auto.attempt() as seen:
+                try:
+                    prepared = spec["prepare"](manifest)      # fetches and checks; stores nothing
+                    break
+                except Declined as exc:
+                    said = str(exc) if preview else " — ".join(filter(None, [str(exc), prepare.suggest({"event": "declined", "kind": kind, "manifest": manifest, "problem": str(exc)})]))
+            if auto.again(seen):
+                continue
+            return auto.said({"status": "declined", "kind": kind,
+                              **({"preview": True} if preview else {}), "problems": [said]})
+        if preview:
+            return auto.said(_preview(kind, spec, manifest, prepared))
         # Known before anything is staged, so the preview's own marker can say why it
         # waits for a person (the licence, the e-mail addresses).
         hold = _needs_a_human(kind, manifest, prepared)
         rec = {"kind": kind, "status": "pending", "manifest": dict(manifest),
                "title": spec["title"](manifest),
                "contributor_id": caller.id, "contributor_label": caller.label,
-               **({"held_for_review": hold} if hold else {})}
+               **({"held_for_review": hold} if hold else {}), **auto.record()}
         ident = store.save_contribution(rec)
         _release(slot)                                # the record counts from here
         slot = None
@@ -2782,16 +2826,16 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
         identity.unbind(token)
         _release(slot)
     rec = store.update_contribution(ident, {"preview": preview})
-    from ..config import get_settings
     if get_settings().grp_auto_approve and hold:
         # Auto-approve lands what a machine can vouch for. A licence that forbids
         # redistribution, or personal data in a document, needs a person to say yes.
         _notify(f"New {kind} contribution HELD for review despite auto-approve, from "
                 f"{caller.label}: {rec['title']} (id {ident}) — {hold}")
-        return {**_public(rec), "status": "staged",
-                "review": f"HELD FOR A HUMAN REVIEWER — {hold}",
-                "next": ("test it now — only you and reviewers can see it; it goes live when a "
-                         "reviewer approves it, and contribute_status shows the decision")}
+        return auto.said({**_public(rec), "status": "staged",
+                          "review": f"HELD FOR A HUMAN REVIEWER — {hold}",
+                          "next": ("test it now — only you and reviewers can see it; it goes "
+                                   "live when a reviewer approves it, and contribute_status "
+                                   "shows the decision")})
     if get_settings().grp_auto_approve:
         # A live session: land it now, and let the record, the reply and the
         # citation all say that no human reviewed it. Landing failure leaves it
@@ -2800,9 +2844,9 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
             landing = spec["land"]({**rec, "auto_approved": True})
         except Exception as exc:
             _notify(f"Auto-approve could not land {kind} {ident}: {exc}")
-            return {**_public(rec), "status": "staged",
-                    "auto_approve": f"staging succeeded but landing failed ({exc}); "
-                                    "left staged for a reviewer"}
+            return auto.said({**_public(rec), "status": "staged",
+                              "auto_approve": f"staging succeeded but landing failed ({exc}); "
+                                              "left staged for a reviewer"})
         rec = store.update_contribution(ident, {
             "status": "approved", "landing": landing, "reviewer_id": "auto-approve",
             "reviewer_label": "auto-approve (GRP_AUTO_APPROVE on — no human reviewed this)",
@@ -2816,41 +2860,33 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
             preview["how_to_test"] = re.sub(
                 r"\s*[;—-]\s*only you and reviewers[^.;]*?approved[^.;]*", "", preview["how_to_test"])
         rec = {**rec, "preview": preview}
-        return {**_public(rec), "status": "approved",
-                "review": "AUTO-APPROVED — this deployment is configured to land "
-                          "contributions without human review; the record says so",
-                "next": ("it is live for every caller now — ask a question that uses it. If it "
-                         "is wrong, take it down: contribute_status(contribution_id="
-                         f"{ident!r}, action='withdraw')")}
+        return auto.said({**_public(rec), "status": "approved",
+                          "review": "AUTO-APPROVED — this deployment is configured to land "
+                                    "contributions without human review; the record says so",
+                          "next": ("it is live for every caller now — ask a question that uses "
+                                   "it. If it is wrong, take it down: contribute_status("
+                                   f"contribution_id={ident!r}, action='withdraw')")})
     _notify(f"New {kind} contribution staged by {caller.label}: "
             f"{rec['title']} (id {ident}) — awaiting review")
-    return {**_public(rec), "status": "staged",
-            "next": ("test it now — only you and reviewers can see it; a reviewer "
-                     "approves or rejects it, and contribute_status shows the decision")}
+    return auto.said({**_public(rec), "status": "staged",
+                      "next": ("test it now — only you and reviewers can see it; a reviewer "
+                               "approves or rejects it, and contribute_status shows the "
+                               "decision")})
 
 
-def _preview(kind: str, spec: dict, manifest: dict, caller, slot) -> dict:
-    """preview: true — fetched, prepared and checked as a submission is, and what WOULD
-    land described; nothing staged, stored or recorded. The slot is held while it runs."""
+def _preview(kind: str, spec: dict, manifest: dict, prepared: dict) -> dict:
+    """preview: true — fetched, prepared and checked as a submission is (submit), and what
+    WOULD land described; nothing staged, stored or recorded."""
     import os
-    token = identity.bind(caller)
     try:
-        try:
-            prepared = spec["prepare"](manifest)
-        except Declined as exc:
-            return {"status": "declined", "kind": kind, "preview": True, "problems": [str(exc)]}
-        try:
-            shown = spec["preview"](manifest, prepared)
-        finally:
-            tmp = (prepared or {}).get("tmp")
-            for stray in (tmp, f"{tmp}.norm.tif") if tmp else ():
-                try:
-                    os.unlink(stray)
-                except OSError:
-                    pass
+        shown = spec["preview"](manifest, prepared)
     finally:
-        identity.unbind(token)
-        _release(slot)
+        tmp = (prepared or {}).get("tmp")
+        for stray in (tmp, f"{tmp}.norm.tif") if tmp else ():
+            try:
+                os.unlink(stray)
+            except OSError:
+                pass
     return {"status": "preview", "kind": kind, "would_land": shown,
             "next": ("nothing was staged, stored or counted — submit the same manifest without "
                      "preview to contribute it")}
@@ -3298,8 +3334,10 @@ def _prep_words() -> str:
     try:
         from . import prepare
         by_kind = {k: sorted(prepare.fields(k)) for k in KINDS if prepare.fields(k)}
+        itself = [op.NAME for op in prepare.ops()
+                  if callable(getattr(op, "detect", None)) or callable(getattr(op, "auto", None))]
     except Exception:
-        by_kind = {}
+        by_kind, itself = {}, []
     able = [k for k in KINDS if "preview" in _KINDS[k]]
     said = ("PREPARATION is the server's: when a file is not yet in shape ("
             + "; ".join(f"{k}: {', '.join(f)}" for k, f in by_kind.items())
@@ -3307,5 +3345,11 @@ def _prep_words() -> str:
               "code means) — and the platform does the work at ingest and records each step; "
               "a decline that this can resolve names the field and its value. "
             if by_kind else "")
+    if itself:
+        said += ("When nothing in it is a person's choice (" + ", ".join(itself) + ": a Drive "
+                 "FOLDER link for a vector, a service's query read whole, ...), the platform "
+                 "applies the field BY ITSELF and the reply says so: prepared_automatically "
+                 "[{fields, why}] and a `message` — tell the contributor what was done in its "
+                 "words; the stored manifest keeps the fields. ")
     return ("\n" + said + f"preview: true ({' and '.join(able)}) returns {{status: preview, "
             "would_land} — classes, features, extent and stored bytes — and stores nothing.")

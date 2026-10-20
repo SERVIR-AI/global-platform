@@ -301,6 +301,9 @@ def _year(gate, name, arr, nodata=None, dtype="uint8"):
 
 
 def test_a_year_whose_legend_differs_from_its_stack_is_declined_before_fetching(gate, monkeypatch, log):
+    # the platform's own preparation off (GRP_PREP_AUTO=0): on, it applies the recode
+    # the labels make certain by itself (test_prepare_auto)
+    monkeypatch.setattr(get_settings(), "grp_prep_auto", False)
     a = np.ones((20, 20), dtype="uint8")
     a[:, 10:] = 2
     first = _submit("landcover_toycatie_1956", _year(gate, "y56.tif", a, nodata=3),

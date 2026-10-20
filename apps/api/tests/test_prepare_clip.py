@@ -396,9 +396,12 @@ def _hdx(env):
 
 
 def test_the_hdx_all_levels_zip_lands_one_level_whole_and_one_clipped(env, monkeypatch, log):
-    """Over the cap as delivered (an archive is fetched whole); with whole: true and
-    layer_name the level lands as the hand-split zip of that level would; with clip the
-    districts intersecting the box land, whole, and the record says how."""
+    """Over the cap as delivered (an archive is fetched whole; with the platform's own
+    preparation off, GRP_PREP_AUTO=0 — on, it reads it whole by itself: test_prepare_auto);
+    with whole: true and layer_name the level lands as the hand-split zip of that level
+    would; with clip the districts intersecting the box land, whole, and the record says
+    how."""
+    monkeypatch.setattr(get_settings(), "grp_prep_auto", False)
     levels, raw, url = _hdx(env)
     monkeypatch.setattr(get_settings(), "grp_contrib_max_bytes", len(raw) // 2)
     host = env["host"]
@@ -566,10 +569,14 @@ class _FeatureServer:
         return js(doc)
 
 
-def test_a_truncated_featureserver_export_proposes_whole_and_pages_to_every_feature(env, log):
-    """As delivered the query stops at 1,000 of 1,088 (exceededTransferLimit) and is
-    declined; the decline proposes whole: true; the resubmission pages the query in two
-    requests ordered by OBJECTID and lands all 1,088, each page's sha256 on the record."""
+def test_a_truncated_featureserver_export_proposes_whole_and_pages_to_every_feature(
+        env, monkeypatch, log):
+    """As delivered the query stops at 1,000 of 1,088 (exceededTransferLimit) and, with
+    the platform's own preparation off (GRP_PREP_AUTO=0; on, it pages it by itself —
+    test_prepare_auto), is declined; the decline proposes whole: true; the resubmission
+    pages the query in two requests ordered by OBJECTID and lands all 1,088, each page's
+    sha256 on the record."""
+    monkeypatch.setattr(get_settings(), "grp_prep_auto", False)
     feats = _soils()
     host = env["host"]
     layer_url = host.app("/arcgis/rest/services/Suelos_de_Costa_Rica_2015/FeatureServer/0",

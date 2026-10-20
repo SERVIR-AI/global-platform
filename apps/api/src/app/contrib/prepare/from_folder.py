@@ -297,10 +297,10 @@ def _pick(m, files, url):
                           "document goes in as its own kind, from its file's link")
     shown = [f"{e.path[:-4]} (shapefile)" if k == "shapefile" else e.path for k, e in found]
     eg = next((e.name[:-4] for k, e in found if k == "shapefile"), None)
-    raise PrepRefused(f"the folder {url}{said} holds {len(found)} layers: "
-                      f"{', '.join(shown[:_SHOWN])}"
+    raise PrepRefused(f"missing required field 'layer_name': the folder {url}{said} holds "
+                      f"{len(found)} layers: {', '.join(shown[:_SHOWN])}"
                       + (f" and {len(shown) - _SHOWN} more" if len(shown) > _SHOWN else "")
-                      + " — ASK the contributor which one, and name it: "
+                      + " — ASK the contributor which one (never guess), and name it: "
                       + (f"layer_name: {eg!r} (a shapefile's name without .shp), or " if eg else "")
                       + "from_folder: '<its path in the folder>'; each layer is its own "
                       "contribution")
@@ -343,7 +343,8 @@ def _hints(files, picked, ctx) -> list[str]:
 
 
 def _no_prj(shp: str, fix: str, hints: list[str]) -> str:
-    text = (f"{shp} came without a .prj, so its coordinate system is unknown — ASK the "
+    text = (f"missing required field 'shapefile_crs': {shp} came without a .prj, so its "
+            "coordinate system is unknown — ASK the "
             "contributor which it is (never guess) and resubmit with shapefile_crs: "
             "'EPSG:<code>'")
     if hints:
@@ -505,6 +506,20 @@ def _count(path, shown, ctx) -> tuple[int, int]:
     return records, vertices
 
 
+# --------------------------------------------------------------------------- by itself
+
+def detect(kind: str, manifest) -> dict | None:
+    """A vector's url that is a Google Drive FOLDER link: the folder is listed and the
+    layer assembled from it — nothing in that is a person's choice (a folder of several
+    layers is declined by the listing itself, asking which)."""
+    if kind not in KINDS or not _drive.folder_id(manifest.get("url")):
+        return None
+    return {"fields": {"from_folder": True},
+            "why": "the url is a Google Drive FOLDER, so the platform lists it and assembles "
+                   "the layer from the folder's own files (a shapefile's parts zipped on the "
+                   "server)"}
+
+
 # --------------------------------------------------------------------------- suggestions
 
 def suggest(situation: dict) -> str | None:
@@ -512,7 +527,7 @@ def suggest(situation: dict) -> str | None:
     every part's link."""
     from .. import fetch_policy
     m = situation.get("manifest") or {}
-    if any(m.get(f) is not None for f in FIELDS):
+    if situation.get("kind") not in KINDS or any(m.get(f) is not None for f in FIELDS):
         return None                       # declared already: its own checks say what is wrong
     event, url = situation.get("event"), situation.get("url")
     if event == "url_refused" and _drive.folder_id(url):

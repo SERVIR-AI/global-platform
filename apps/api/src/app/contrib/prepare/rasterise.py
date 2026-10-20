@@ -524,9 +524,10 @@ def _burn(ctx, spool, offsets, lengths, codes, bounds, dest, x0, y0, deg, width,
 
 def _no_field(field: str, attributes: set, url: str) -> str:
     have = sorted(attributes)
-    return (f"no feature of the layer at {url} has an attribute {field!r} — its attributes are "
-            f"{', '.join(have[:40]) or 'none'}; set rasterise.field to the one naming each "
-            "polygon's class (ASK the contributor which it is)")
+    return (f"missing required field 'rasterise.field': no feature of the layer at {url} has an "
+            f"attribute {field!r} — its attributes are {', '.join(have[:40]) or 'none'}; set "
+            "rasterise.field to the one naming each polygon's class (ASK the contributor which "
+            "it is; never guess)")
 
 
 def _unmapped(sp: dict, seen: _Values, unmapped: set, legend: dict, fill, m: dict) -> str:
@@ -545,7 +546,8 @@ def _unmapped(sp: dict, seen: _Values, unmapped: set, legend: dict, fill, m: dic
             + f" ({seen.n[k]:,} polygon(s), {seen.km2[k]:,.2f} km²)" for k in keys[:_SHOWN]]
     more = f" and {len(keys) - _SHOWN} more" if len(keys) > _SHOWN else ""
     skeleton = ", ".join(f"{shown(k)}: <code>" for k in keys[:_SHOWN])
-    head = (f"rasterise needs a code for every value of {field}; "
+    head = (f"missing required field 'rasterise.classes': rasterise needs a code for every "
+            f"value of {field}; "
             f"{len(keys)} of the {len(seen.n)} value(s) the polygons hold "
             f"{'have none' if sp['classes'] is not None else 'are no label or code of the legend'}"
             f": {'; '.join(rows)}{more}")
@@ -593,8 +595,20 @@ def _features_link(url: str) -> bool:
 
 def suggest(situation: dict) -> str | None:
     """On a raster declined for holding features rather than cells: the rasterise that
-    makes the class raster on the server — every choice in it the contributor's."""
+    makes the class raster on the server — every choice in it the contributor's. On a
+    POLYGON layer too big to land as a vector: the same, as a raster contribution."""
     m = situation.get("manifest") or {}
+    if (situation.get("event") == "vector_too_large" and situation.get("kind") == "vector"
+            and situation.get("geometry") in (None, "polygons")):
+        return ("or, if it is a POLYGON map of classes (land use, soils, zoning, a hazard map "
+                "drawn as polygons), it can land as a CLASS RASTER instead, which is far smaller "
+                "than its polygons: contribute it as kind 'raster' — a namespaced layer (e.g. "
+                "landcover_<name>_<year>), with legend and declared — from the same link with "
+                "rasterise: {field: '<the attribute naming each polygon's class>', resolution: "
+                "'<the cell size, e.g. 30 m>', classes: {<value>: <legend code>, ...}} — ASK the "
+                "contributor which attribute holds the class, how its values group into the "
+                "legend's classes and the cell size (never guess); the platform rasterises it on "
+                "the server, and preview: true shows the classes and km² before anything lands")
     if (m.get("rasterise") is not None or situation.get("event") != "declined"
             or situation.get("kind") != "raster"):
         return None
