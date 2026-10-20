@@ -31,6 +31,15 @@ SCHEMES = ("http", "https")
 MAX_REDIRECTS = 5
 TIMEOUT = (10, 30)      # connect, per-read (seconds)
 DEADLINE = 120          # whole fetch, seconds
+# A file of PIECES_FROM bytes or more, from a host that answers range requests, is
+# downloaded in pieces at once (at most MAX_PIECES, none under PIECE_MIN): a host that
+# throttles each connection — Zenodo, ~25 KB/s a connection, measured 2026-10-19 — is
+# that many times faster. 16, not 8: Zenodo's 168 MB GMW GeoPackage would need ~840 s
+# on 8 connections, over a preparation step's 600 s; on 16 it took 431 s.
+PIECES_FROM = 32 << 20
+PIECE_MIN = 4 << 20
+MAX_PIECES = 16
+PIECE_CHUNK = 1 << 18      # read at a time: a dropped piece resumes from the last one
 # Say who is asking. Measured 2026-10-19: zenodo.org answers a browser string from
 # a server 403, figshare's WAF answers it a 202 challenge, Springer a challenge
 # page — and all three hand the file to an honest product string. Some hosts still
@@ -408,8 +417,10 @@ _HEAD = 200_000
 
 
 def _fetch(url: str, cap: int, started: float, agent: str, dest: str | None = None,
-           deadline: float | None = None):
-    """bytes + filename, or with `dest` (bytes written, filename) with the body on disk."""
+           deadline: float | None = None, whole: bool = False):
+    """bytes + filename, or with `dest` (bytes written, filename) with the body on disk
+    — in pieces at once when it is big and the host answers range requests, unless
+    `whole` (a piece failed twice: one stream, from the contributor's link again)."""
     import requests
     deadline = deadline or DEADLINE
     current = direct_url(url)
@@ -476,6 +487,21 @@ def _fetch(url: str, cap: int, started: float, agent: str, dest: str | None = No
             if declared and str(declared).isdigit() and int(declared) > cap:
                 raise TooLarge(f"{str(url).strip()} declares {int(declared):,} bytes; the cap "
                                f"is {cap:,} — " + _TOO_BIG, size=int(declared), cap=cap)
+            if dest and not whole and _rangeable(r, ctype, declared):
+                try:
+                    total = _in_pieces(r, current, parts, addr, host_header, agent, dest,
+                                       int(declared), started, deadline)
+                except _PieceFailed:
+                    r.close()
+                    session.close()
+                    return _fetch(url, cap, started, agent, dest=dest, deadline=deadline,
+                                  whole=True)
+                with open(dest, "rb") as f:
+                    head = f.read(_HEAD)
+                page = head[:256].lstrip().lower().startswith((b"<!doctype html", b"<html"))
+                _refuse_page(r.status_code, r.headers, head, hops, url, quoted, drive_id,
+                             is_doc, html=page)
+                return total, _filename(r.headers, parts.path)
             buf = bytearray()           # the body, or its head when it streams to `dest`
             total = 0
             out = open(dest, "wb") if dest else None
@@ -524,6 +550,107 @@ def _fetch(url: str, cap: int, started: float, agent: str, dest: str | None = No
             r.close()
             session.close()
     raise FetchRefused(f"{url} redirected more than {MAX_REDIRECTS} times")
+
+
+class _PieceFailed(Exception):
+    """A piece that failed twice: the fetch goes back to one stream."""
+
+
+class _Stopped(Exception):
+    """Another piece failed; this one stops."""
+
+
+def _rangeable(r, ctype: str, declared) -> bool:
+    """A whole answer big enough to download in pieces, from a host that says it answers
+    range requests, its bytes as stored (no content-encoding) and not a web page."""
+    return (r.status_code == 200 and bool(declared) and str(declared).isdigit()
+            and int(declared) >= PIECES_FROM
+            and "bytes" in str(r.headers.get("accept-ranges") or "").lower()
+            and str(r.headers.get("content-encoding") or "identity").lower() == "identity"
+            and not ctype.startswith("text/html"))
+
+
+def _in_pieces(first, current: str, parts, addr, host_header: str, agent: str, dest: str,
+               size: int, started: float, deadline: float) -> int:
+    """`size` bytes of `current` written to `dest` in pieces at once: the answer already
+    open (`first`) is the first piece, every other piece a range request to the SAME
+    pinned address after the same checks, written into place and its length verified. A
+    piece is tried twice, resuming where it stopped; failing twice raises _PieceFailed.
+    The deadline and a refused check are final, as for one stream."""
+    import os
+    import threading
+    from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
+
+    n = min(MAX_PIECES, max(2, size // PIECE_MIN))
+    step = -(-size // n)
+    spans = [(a, min(size, a + step) - 1) for a in range(0, size, step)]
+    stop = threading.Event()
+    fd = os.open(dest, os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o600)
+
+    def piece(i: int, a: int, b: int) -> None:
+        pos = a
+        for attempt in (1, 2):
+            sess = resp = None
+            try:
+                if attempt == 1 and i == 0:
+                    resp = first
+                else:
+                    problems = check_url(current)
+                    if problems:
+                        raise FetchRefused("; ".join(problems))
+                    sess = _session(parts.hostname, parts.scheme)
+                    resp = sess.get(_pinned_url(parts, addr), timeout=TIMEOUT, stream=True,
+                                    allow_redirects=False,
+                                    headers={"User-Agent": agent, "Host": host_header,
+                                             "Range": f"bytes={pos}-{b}",
+                                             "Accept-Encoding": "identity"})
+                    said = " ".join(str(resp.headers.get("content-range") or "").split())
+                    if resp.status_code != 206 or said != f"bytes {pos}-{b}/{size}":
+                        raise OSError(f"piece {i}: HTTP {resp.status_code} {said!r}")
+                for chunk in resp.iter_content(chunk_size=PIECE_CHUNK):
+                    if stop.is_set():
+                        raise _Stopped()
+                    if time.monotonic() - started > deadline:
+                        raise FetchRefused(f"fetch exceeded the {deadline:g}s deadline")
+                    chunk = chunk[:b + 1 - pos]
+                    while chunk:
+                        k = os.pwrite(fd, chunk, pos)
+                        pos += k
+                        chunk = chunk[k:]
+                    if pos > b:
+                        break
+                if pos != b + 1:
+                    raise OSError(f"piece {i}: {b + 1 - pos:,} bytes short")
+                return
+            except (FetchRefused, _Stopped):
+                raise
+            except Exception:
+                if attempt == 2:
+                    raise _PieceFailed() from None
+            finally:
+                if resp is not None and resp is not first:
+                    resp.close()
+                if sess is not None:
+                    sess.close()
+
+    try:
+        os.ftruncate(fd, size)
+        with ThreadPoolExecutor(len(spans), thread_name_prefix="grp-piece") as pool:
+            futs = [pool.submit(piece, i, a, b) for i, (a, b) in enumerate(spans)]
+            wait(futs, return_when=FIRST_EXCEPTION)
+            stop.set()                  # every piece is done, or one failed: stop the rest
+            wait(futs)
+            errors = [f.exception() for f in futs if f.exception() is not None]
+        final = [e for e in errors if isinstance(e, FetchRefused)]
+        if final:
+            raise final[0]
+        if errors:
+            raise _PieceFailed()
+    finally:
+        os.close(fd)
+    if os.path.getsize(dest) != size:
+        raise _PieceFailed()
+    return size
 
 
 _TOO_BIG = ("contribute one layer per file (an archive of several is fetched whole), or clip "
