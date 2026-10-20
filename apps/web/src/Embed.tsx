@@ -9,6 +9,7 @@
 import { Component, useEffect, useState, type FC, type ReactNode } from 'react';
 import { Graph } from '@/components/Provenance';
 import EmbedMap, { type VizPayload } from '@/components/EmbedMap';
+import AreaMonitor from '@/components/AreaMonitor';
 import { parseProvenance, type ProvenanceData } from '@/lib/provenance';
 import { resolveApiUrl } from '@/lib/api';
 
@@ -83,12 +84,14 @@ const loadVizByReceipt = async (receiptId: string): Promise<VizPayload> => {
   return viz;
 };
 
-const EMBEDDABLE = ['provenance_graph', 'hazard_map'] as const;
+const EMBEDDABLE = ['provenance_graph', 'hazard_map', 'area_monitor'] as const;
 
 const Embed: FC = () => {
   const params = new URLSearchParams(window.location.search);
   const component = params.get('embed');
   const receiptId = params.get('receipt_id');
+  const place = params.get('place');
+  const packName = params.get('pack');
   const [data, setData] = useState<ProvenanceData | null>(null);
   const [viz, setViz] = useState<VizPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -103,6 +106,14 @@ const Embed: FC = () => {
 
   if (!EMBEDDABLE.includes(component as (typeof EMBEDDABLE)[number]))
     return <Notice title="Unknown embed" detail={`No embeddable component named "${component}".`} />;
+  // The area monitor binds a PLACE, not a receipt: it lists what was minted for the
+  // area and resolves the latest receipt itself; with no place it is the living list.
+  if (component === 'area_monitor')
+    return (
+      <FailClosed>
+        <AreaMonitor place={place} pack={packName} />
+      </FailClosed>
+    );
   if (!receiptId)
     return <Notice title="unverified by this platform" detail="No receipt_id supplied — nothing to resolve." />;
   if (error)

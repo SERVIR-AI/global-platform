@@ -529,8 +529,8 @@ def ui_component(name: str, treatment: str | None = None,
 
 
 @mcp.tool(description=ui.describe_embed())
-def ui_embed(component: str, receipt_id: str | None = None) -> dict:
-    return ui.embed(component, receipt_id=receipt_id)
+def ui_embed(component: str, receipt_id: str | None = None, place: str | None = None) -> dict:
+    return ui.embed(component, receipt_id=receipt_id, place=place)
 
 
 # --- the contribute bone: staged, previewable, reviewed -----------------------

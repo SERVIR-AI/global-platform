@@ -64,3 +64,26 @@ def resolve_pack(pack_id: str, response: Response) -> dict:
     if pack is None:
         raise HTTPException(status_code=404, detail=f"unknown pack {pack_id!r}")
     return pack
+
+
+@router.get("/receipts")
+def list_receipts(response: Response, place: str | None = None, pack: str | None = None,
+                  limit: int = 20) -> dict:
+    """Receipts already minted for an area (or a pack), newest first — a living page
+    reads these instead of computing, so showing an area costs the server nothing.
+    Empty is an honest answer: nothing has been asked about that area yet."""
+    _readable_anywhere(response)
+    rows = store.list_receipts(place=place, pack=pack, limit=limit)
+    return {"status": "ok" if rows else "empty", "place": place, "pack": pack,
+            "receipts": rows,
+            **({"note": "no receipt names this area yet — ask about it through the "
+                        "platform and the answer is minted here"} if not rows else {})}
+
+
+@router.get("/places")
+def list_places(response: Response, layer: str | None = None) -> dict:
+    """Every contributed boundary a question can name, with each name's area and size
+    class — the same living list resolve_place_time(list=...) returns, for pages."""
+    _readable_anywhere(response)
+    from ...graph.geo import ingest
+    return ingest.list_boundaries(layer=layer)

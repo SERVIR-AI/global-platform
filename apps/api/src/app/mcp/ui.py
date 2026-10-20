@@ -318,7 +318,7 @@ def describe_component() -> str:
             "resolved from the platform — there is no 'passed' input.")
 
 
-def embed(component: str, receipt_id: str | None = None) -> dict:
+def embed(component: str, receipt_id: str | None = None, place: str | None = None) -> dict:
     """A LIVE embed: a reference to our component, not a copy of it. It resolves its
     own state from the platform at view time, so a verdict can never be frozen into
     the host page — and there is no prop that could assert one."""
@@ -334,8 +334,17 @@ def embed(component: str, receipt_id: str | None = None) -> dict:
                          + (f" — {spec['status']}" if spec.get("status") else "")),
                 "available": sorted(k for k, v in comps.items() if v.get("embeddable"))}
     base = t["product"]["embed_base"]
-    src = base["url"] + base["path"].format(component=component,
-                                            receipt_id=receipt_id or "{receipt_id}")
+    binds = spec.get("binds") or "receipt_id"
+    paths = base.get("path_by_binding") or {}
+    if binds == "place":
+        from urllib.parse import quote
+        path = paths.get("place", "/?embed={component}&place={place}")
+        src = base["url"] + path.format(component=component,
+                                        place=quote(place) if place else "{place}")
+    else:
+        path = paths.get("receipt_id") or base["path"]
+        src = base["url"] + path.format(component=component,
+                                        receipt_id=receipt_id or "{receipt_id}")
     return {"status": "ok", "component": component, "binds": spec.get("binds"),
             "renders": spec.get("renders"), "src": src,
             "html": (f'<iframe src="{src}" title="{component}" '

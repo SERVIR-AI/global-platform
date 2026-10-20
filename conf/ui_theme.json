@@ -163,6 +163,15 @@
       "required": true,
       "purpose": "SERVIR logo + the domain name — REQUIRED on every page built on this platform",
       "data": "domain_name (from the pack manifest's display_name); logo + platform name are substituted for you"
+    },
+    "area_monitor": {
+      "trust_class": "receipt_bound",
+      "delivery": "embed",
+      "embeddable": true,
+      "binds": "place",
+      "renders": "for one named area: the receipts already minted for it (newest first), the latest one's map, class series, transitions and factor arithmetic, and its sources — all resolved from /api/resolve/* at view time; with no place, the living list of areas to pick from",
+      "source": "apps/web AreaMonitor (every pack that takes a place)",
+      "status": "live"
     }
   },
   "typography": {
@@ -197,7 +206,11 @@
     "embed_base": {
       "url": "http://localhost:5173",
       "path": "/?embed={component}&receipt_id={receipt_id}",
-      "note": "The web app renders a single component standalone in embed mode. Point embed_base.url at wherever the platform UI is served; it resolves its data from /api/resolve/* at view time, so the verdict is never frozen."
+      "note": "The web app renders a single component standalone in embed mode. Point embed_base.url at wherever the platform UI is served; it resolves its data from /api/resolve/* at view time, so the verdict is never frozen.",
+      "path_by_binding": {
+        "receipt_id": "/?embed={component}&receipt_id={receipt_id}",
+        "place": "/?embed={component}&place={place}"
+      }
     }
   }
 }
