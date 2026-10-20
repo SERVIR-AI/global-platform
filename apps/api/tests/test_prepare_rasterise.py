@@ -124,6 +124,7 @@ class _Host:
     def __init__(self):
         self.files, self.layers, self.log, self.port = {}, {}, [], None
         self.dupes = self.no_key = False
+        self.crs = "urn:ogc:def:crs:EPSG::4326"
 
     def put(self, name, data):
         self.files["/" + name] = data
@@ -154,7 +155,8 @@ class _Host:
         if "bbox" in q:
             s, w, n, e = (float(v) for v in q["bbox"].split(",")[:4])
             area = sbox(w, s, e, n)
-            feats = [f for f in feats if f["geometry"] and shape(f["geometry"]).intersects(area)]
+            feats = [f for f in feats if f["geometry"] and shape(f.get("lonlat") or f["geometry"])
+                     .intersects(area)]
         start = int(q.get("startindex", 0))
         count = int(q.get("count", 10 ** 9))
         page = feats[start:start + count]
@@ -162,7 +164,7 @@ class _Host:
             page = feats[start - 1:start - 1 + count]
         body = {"type": "FeatureCollection", "features": page, "totalFeatures": len(feats),
                 "numberMatched": len(feats), "numberReturned": len(page),
-                "crs": {"type": "name", "properties": {"name": "urn:ogc:def:crs:EPSG::4326"}}}
+                "crs": {"type": "name", "properties": {"name": self.crs}}}
         return 200, json.dumps(body).encode()
 
 
@@ -542,6 +544,45 @@ def test_a_layer_of_huge_polygons_comes_a_few_at_a_time(env, monkeypatch):
     with rasterio.open(get_settings().cache_dir
                        / tiffs.catalog()["landcover_gtcoast_2025"]["local_path"]) as src:
         assert np.array_equal(src.read(1), _by_hand(feats, _grouped(2025)))
+    assert _no_leftovers(env)
+
+
+@pytest.mark.parametrize("chunk", [5, 64, 1 << 20])
+def test_a_page_is_parsed_from_disk_one_feature_at_a_time(tmp_path, monkeypatch, chunk):
+    """The page reader reads the features of a FeatureCollection in order whatever the
+    read size (numbers and strings cut at a chunk's end), with the members after them."""
+    monkeypatch.setattr(_features, "_CHUNK", chunk)
+    feats = _maga(2025)[:5]
+    body = {"type": "FeatureCollection", "features": feats, "totalFeatures": 123456789,
+            "numberMatched": 5, "crs": {"type": "name", "properties": {"name": "EPSG:32616"}}}
+    p = tmp_path / "page.json"
+    p.write_bytes(b"\xef\xbb\xbf" + json.dumps(body, ensure_ascii=False).encode())
+    members: dict = {}
+    assert list(_features.stream(str(p), members)) == json.loads(json.dumps(feats))
+    assert members == {"type": "FeatureCollection", "features": True, "totalFeatures": 123456789,
+                       "numberMatched": 5, "crs": body["crs"]}
+    p.write_text('{"type": "FeatureCollection", "features": [{"a": 1}, {"b": ')
+    with pytest.raises(ValueError):
+        list(_features.stream(str(p), {}))
+
+
+def test_a_service_on_a_projected_crs_is_read_on_it_and_reprojected(env):
+    """A WFS that answers in UTM names it in a crs member AFTER the features (GeoServer
+    writes it last): the look at one feature learns it, every page is reprojected."""
+    feats = []
+    for f in _maga(2025):
+        g = f["geometry"]
+        feats.append({**f, "lonlat": g,
+                      "geometry": transform_geom("EPSG:4326", "EPSG:32615", g) if g else None})
+    env["host"].crs = "urn:ogc:def:crs:EPSG::32615"
+    url = env["host"].wfs("lc:cobertura_utm", feats) + "&srsName=EPSG:32615"
+    out = _submit("raster", _year(2025, url, clip=CLIP, rasterise=_rasterise(2025)))
+    assert out["status"] == "approved", out
+    row = tiffs.catalog()["landcover_gtcoast_2025"]
+    assert any("reprojected from EPSG:32615 (the service's crs member)" in n for n in row["prepared"])
+    with rasterio.open(get_settings().cache_dir / row["local_path"]) as src:
+        agree = (src.read(1) == _by_hand(_maga(2025), _grouped(2025))).mean()
+    assert agree > 0.999
     assert _no_leftovers(env)
 
 

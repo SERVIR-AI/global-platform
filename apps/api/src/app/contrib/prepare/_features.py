@@ -8,7 +8,8 @@ to disk) and read by graph/geo/vecio, as the vector gate reads it. Invalid polyg
 repaired by vecio's rules, so a layer reads here as it would land as a vector. However
 many pages a WFS takes, the record holds ONE fetch step: the link as asked, every page's
 [startIndex, count] and sha256, and one sha256 over the pages in order — a replay asks the
-same pages.
+same pages. A page is parsed from disk one feature at a time (`stream`), never whole: a
+layer of dissolved national polygons weighs hundreds of MB a page.
 """
 
 from __future__ import annotations
@@ -20,11 +21,93 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 PAGE = 1000            # features a WFS request asks for, at most
 PAGE_BYTES = 16 << 20  # what one page should weigh: fewer features a page when they are big
+PAGE_FIRST = 16        # features the first page asks for; each next page at most 4x the last
 # attributes that name each feature once: a layer with no primary key pages in a stable
 # order only sorted by one (GeoServer: "Cannot do natural order without a primary key")
 _ID_NAMES = ("gid", "fid", "objectid", "ogc_fid", "ogr_fid", "oid", "id")
 WHOLE_FACTOR = 8       # a file read whole is parsed in memory up to 8x the stored cap
 _FILTERS = ("bbox", "cql_filter", "filter", "featureid", "resourceid")
+
+
+_WS = " \t\r\n"
+_CHUNK = 1 << 20
+
+
+def stream(path: str, members: dict):
+    """Each feature of the GeoJSON FeatureCollection in the file at `path`, parsed one at a
+    time; the collection's other members (crs, numberMatched, ...) land in `members` as they
+    are met, "features" there once the list was read. ValueError when it is not one."""
+    dec = json.JSONDecoder()
+    with open(path, "r", encoding="utf-8-sig") as f:
+        buf, pos, eof = "", 0, False
+
+        def more(atleast=_CHUNK):
+            nonlocal buf, pos, eof
+            chunk = f.read(max(atleast, _CHUNK))
+            if not chunk:
+                eof = True
+                return
+            buf, pos = buf[pos:] + chunk, 0
+
+        def peek():
+            nonlocal pos
+            while True:
+                while pos < len(buf) and buf[pos] in _WS:
+                    pos += 1
+                if pos < len(buf) or eof:
+                    return buf[pos] if pos < len(buf) else ""
+                more()
+
+        def take(ch):
+            nonlocal pos
+            if peek() != ch:
+                raise ValueError(f"expected {ch!r}")
+            pos += 1
+
+        def value():
+            nonlocal pos
+            peek()
+            while True:
+                try:
+                    v, end = dec.raw_decode(buf, pos)
+                    if end < len(buf) or eof:          # a number cut at the buffer's end reads short
+                        pos = end
+                        return v
+                except json.JSONDecodeError:
+                    if eof:
+                        raise ValueError("not JSON") from None
+                more(len(buf) - pos)                   # double what is held: linear overall
+
+        take("{")
+        if peek() == "}":
+            return
+        while True:
+            k = value()
+            if not isinstance(k, str):
+                raise ValueError("not a JSON object")
+            take(":")
+            if k == "features":
+                take("[")
+                if peek() == "]":
+                    pos += 1
+                else:
+                    while True:
+                        yield value()
+                        c = peek()
+                        pos += 1
+                        if c == "]":
+                            break
+                        if c != ",":
+                            raise ValueError("a list of features")
+                members["features"] = True
+            else:
+                members[k] = value()
+            c = peek()
+            pos += 1
+            if c == "}":
+                return
+            if c != ",":
+                raise ValueError("a JSON object")
 
 
 def wfs_query(url: str) -> dict | None:
@@ -122,26 +205,48 @@ class Reader:
         return self._shapes(fc["features"], repair=False)
 
     def _look(self, base: str, size_key: str, q: dict, version: str) -> tuple:
-        """(the attribute to page by, the bytes of one feature), from one feature asked for.
+        """(the attribute to page by, the bytes of one feature, the layer's CRS — None for
+        lon/lat), from one feature asked for.
         The attribute keeps every page in the same order: the link's own sortBy (None: it
         stands), else one naming each feature once; None when the layer has none."""
         from . import PrepRefused
         path = self.ctx.fetch(with_params(base, {size_key: 1}))
-        self.ctx.steps.pop()                           # a look at the attributes, no input
-        with open(path, "rb") as f:
-            raw = f.read()
-        os.unlink(path)
-        self._not_features(raw, "the service's answer")
+        size = self.ctx.steps.pop()["bytes"]           # a look at the attributes, no input
+        members: dict = {}
         try:
-            feats = json.loads(raw.decode("utf-8-sig")).get("features") or []
-        except (UnicodeDecodeError, ValueError, AttributeError):
-            raise PrepRefused(f"{self.url} did not answer GeoJSON — ask the service for "
-                              "outputFormat=application/json") from None
+            feats = self._streamed(path, members, "the service's answer")
+        finally:
+            os.unlink(path)
         props = (feats[0].get("properties") or {}) if feats and isinstance(feats[0], dict) else {}
         low = {str(k).lower(): k for k in props}
         sort = (None if "sortby" in q or version.startswith("1.0")
                 else next((low[n] for n in _ID_NAMES if n in low), None))
-        return sort, len(raw)
+        return sort, size, self._crs(members)
+
+    def _streamed(self, path: str, members: dict, what: str, batch: int = 0):
+        """The features of a page on disk — all of them in a list, or with `batch` a
+        generator of lists of that many — after checking it is no web page or XML."""
+        from . import PrepRefused
+        with open(path, "rb") as f:
+            self._not_features(f.read(4096), what)
+
+        def gen():
+            out = []
+            try:
+                for ft in stream(path, members):
+                    out.append(ft)
+                    if batch and len(out) >= batch:
+                        yield out
+                        out = []
+            except (UnicodeDecodeError, ValueError):
+                raise PrepRefused(f"{what} at {self.url} is not GeoJSON — ask the service for "
+                                  "outputFormat=application/json") from None
+            if "features" not in members:
+                raise PrepRefused(f"{what} at {self.url} holds no FeatureCollection")
+            yield out
+        if batch:
+            return gen()
+        return [ft for chunk in gen() for ft in chunk]
 
     def _pages(self, q: dict):
         """A WFS GetFeature read page by page; one fetch step for all of them."""
@@ -166,10 +271,12 @@ class Reader:
                              else f"{s},{w},{n},{e},urn:ogc:def:crs:EPSG::4326")
             self.asked_box = [w, s, e, n]
         base = with_params(self.url, extra)
-        sort, one = self._look(base, size_key, q, version)
+        sort, one, crs = self._look(base, size_key, q, version)
         if sort:
             base = with_params(base, {"sortBy": sort})
-        count = max(1, min(PAGE, PAGE_BYTES // max(1, one)))
+        # one feature's weight says little of the next (a layer of dissolved national
+        # polygons holds both a hamlet and a whole class): start small, grow by the pages' weight
+        count = max(1, min(PAGE, PAGE_FIRST, PAGE_BYTES // max(1, one)))
         digest, shas, asked, nbytes = hashlib.sha256(), [], [], 0
         seen: set = set()
         start = pages = got = 0
@@ -187,47 +294,46 @@ class Reader:
                                   "feature once> to the link, or give the layer as a file") from None
             step = ctx.steps.pop()                     # one step for the pages, below
             with open(path, "rb") as f:
-                raw = f.read()
-            os.unlink(path)
-            digest.update(raw)
+                for chunk in iter(lambda: f.read(_CHUNK), b""):
+                    digest.update(chunk)
             shas.append(step["sha256"])
             asked.append([start, count])
             nbytes += step["bytes"]
             pages += 1
-            self._not_features(raw, f"page {pages} of the service's answer")
+            members: dict = {}
+            n = 0
             try:
-                fc = json.loads(raw.decode("utf-8-sig"))
-            except (UnicodeDecodeError, ValueError):
-                raise PrepRefused(f"page {pages} of {self.url} is not GeoJSON — ask the service "
-                                  "for outputFormat=application/json") from None
-            del raw
-            feats = fc.get("features") if isinstance(fc, dict) else None
-            if not isinstance(feats, list):
-                raise PrepRefused(f"page {pages} of {self.url} holds no FeatureCollection")
-            m = fc.get("numberMatched")
+                for feats in self._streamed(path, members, f"page {pages} of the service's "
+                                            "answer", batch=64):
+                    for ft in feats:
+                        fid = ft.get("id") if isinstance(ft, dict) else None
+                        if fid is not None:
+                            if fid in seen:
+                                raise PrepRefused(
+                                    f"the service sent feature {fid!r} twice while being paged — "
+                                    "it does not page in a stable order, so a read could miss "
+                                    "features; give the layer as a file (GeoJSON, zipped "
+                                    "shapefile, GeoPackage) instead")
+                            seen.add(fid)
+                    n += len(feats)
+                    yield self._chunk(crs, feats)
+            finally:
+                os.unlink(path)
+            self._page_checks(members, crs, n)
+            m = members.get("numberMatched")
             if isinstance(m, int) and not isinstance(m, bool):
                 matched = m
-            for ft in feats:
-                fid = ft.get("id") if isinstance(ft, dict) else None
-                if fid is not None:
-                    if fid in seen:
-                        raise PrepRefused(
-                            f"the service sent feature {fid!r} twice while being paged — it does "
-                            "not page in a stable order, so a read could miss features; give the "
-                            "layer as a file (GeoJSON, zipped shapefile, GeoPackage) instead")
-                    seen.add(fid)
-            got += len(feats)
-            asked_for, weight = count, step["bytes"] / max(1, len(feats))
-            yield self._chunk(fc, feats)
-            if not feats:
+            got += n
+            asked_for, weight = count, step["bytes"] / max(1, n)
+            if not n:
                 break
             if matched is not None:
                 if got >= matched:
                     break
-            elif len(feats) < asked_for and not _next_link(fc):
+            elif n < asked_for and not _next_link(members):
                 break
-            start += len(feats)
-            count = max(1, min(PAGE, int(PAGE_BYTES // max(1.0, weight))))
+            start += n
+            count = max(1, min(PAGE, 4 * asked_for, int(PAGE_BYTES // max(1.0, weight))))
         if matched is not None and got != matched:
             raise PrepRefused(f"the service said {matched:,} features match but sent {got:,} "
                               f"over {pages} page(s) — it does not page completely; give the "
@@ -241,16 +347,29 @@ class Reader:
                      + (", only the clip's box asked for" if self.asked_box else ""))
 
     # ------------------------------------------------------------------ the features
-    def _chunk(self, fc: dict, feats: list) -> list:
+    def _crs(self, members: dict):
         from ...graph.geo import vecio
         from . import PrepRefused
-        if fc.get("exceededTransferLimit") is True \
-                or (fc.get("properties") or {}).get("exceededTransferLimit") is True:
-            raise PrepRefused(f"{self.url}: " + vecio._TRUNCATED.format(n=len(feats)))
         try:
-            crs = vecio._geojson_crs(fc)
+            return vecio._geojson_crs(members)
         except ValueError as exc:
             raise PrepRefused(f"{self.url}: {exc}") from None
+
+    def _page_checks(self, members: dict, crs, n: int) -> None:
+        """A page truncated by the server, or on another CRS than the features it already
+        sent were read in (the crs member comes after them), is refused."""
+        from ...graph.geo import vecio
+        from . import PrepRefused
+        if members.get("exceededTransferLimit") is True \
+                or (members.get("properties") or {}).get("exceededTransferLimit") is True:
+            raise PrepRefused(f"{self.url}: " + vecio._TRUNCATED.format(n=n))
+        mine = self._crs(members)
+        if (mine is None) != (crs is None) or (mine is not None and mine != crs):
+            raise PrepRefused(f"{self.url}: its pages declare different coordinate systems — "
+                              "add srsName=EPSG:4326 to the link")
+
+    def _chunk(self, crs, feats: list) -> list:
+        from ...graph.geo import vecio
         if crs is not None:
             geoms = vecio._reproject([ft.get("geometry") if vecio._located(ft.get("geometry"))
                                       else None for ft in feats], crs)
