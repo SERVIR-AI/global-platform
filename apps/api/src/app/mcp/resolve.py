@@ -32,12 +32,19 @@ def _month(when) -> tuple[int | None, str | None]:
 
 def place_time(country: str | None = None, crop: str | None = None,
                region: str | None = None, when: str | None = None,
-               place: str | None = None) -> dict:
+               place: str | None = None, list: str | bool | None = None) -> dict:
     """Resolve a place and/or a country-crop season into machine terms.
 
     A place is resolved by the platform's own gazetteer — the same one every
     hazard answer uses — so the two halves of "place and time" now both work.
     """
+    # `list` asks what can be named at all: every contributed boundary layer with
+    # its names and their sizes — the menu a question picks an area from.
+    if list:
+        from ..graph.geo import ingest
+        return ingest.list_boundaries(layer=list if isinstance(list, str)
+                                      and list.lower() not in ("all", "true", "*") else None)
+
     month, err = _month(when)
     if err:
         return {"status": "declined", "note": err}

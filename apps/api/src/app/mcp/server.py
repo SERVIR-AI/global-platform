@@ -414,10 +414,16 @@ def verify_groundedness(draft: str, pack_id: str) -> dict:
 @mcp.tool()
 def resolve_place_time(country: str | None = None, crop: str | None = None,
                        region: str | None = None, when: str | None = None,
-                       place: str | None = None) -> dict:
+                       place: str | None = None, list: str | None = None) -> dict:
     """Turn human place-and-time into machine place-and-time. Pass whichever half
     your question has — a `place` ("Battambang, Cambodia", "Bang Sue District,
     Bangkok"), a `country`+`crop` season, or both.
+
+    `list="all"` (or a layer id) LISTS what can be named instead: every contributed
+    boundary layer with its names and each name's area in km² and size class — the
+    menu to pick an area from before asking, so a question never has to carry
+    coordinates. Call it when someone asks what areas, boundaries or study sites
+    the platform knows, or which are small enough to answer quickly.
 
     A `place` (or a `region`, resolved against its country) comes back as the area
     the platform would actually analyse: its canonical name, area in km², bounding
@@ -435,7 +441,7 @@ def resolve_place_time(country: str | None = None, crop: str | None = None,
     country/crop.
     """
     return resolve.place_time(country=country, crop=crop, region=region,
-                              when=when, place=place)
+                              when=when, place=place, list=list)
 
 
 @mcp.tool()

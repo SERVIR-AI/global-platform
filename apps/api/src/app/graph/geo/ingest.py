@@ -285,6 +285,65 @@ def _gazetteer(layer, entry) -> dict:
     return index
 
 
+def list_boundaries(layer: str | None = None, names_cap: int = 80) -> dict:
+    """What a question can name: every contributed polygon layer whose features carry
+    names, each name with its area in km², so a caller can pick an area whose size suits
+    the question before asking. Derived from the live registry, so a layer contributed a
+    minute ago is listed. A layer with more names than `names_cap` lists its count and
+    the smallest and largest areas; pass `layer` to list all of its names."""
+    layers = _gazetteer_layers()
+    if layer and layer not in layers:
+        return {"status": "declined",
+                "note": (f"'{layer}' is not a contributed boundary layer — one of: "
+                         f"{', '.join(sorted(layers)) or 'none yet'}")}
+    out = []
+    for lid, entry in sorted(layers.items()):
+        if layer and lid != layer:
+            continue
+        areas = [a for group in _gazetteer(lid, entry).values() for a in group]
+        rows = []
+        for a in areas:
+            g = _area_shape(a)
+            if g is None:
+                continue
+            km2 = round(_km2(g), 1)
+            rows.append({"name": a["label"], "km2": km2, "size": _size_class(km2),
+                         **({"qualifier": q} if (q := _qualifier_text(a, entry)) else {})})
+        rows.sort(key=lambda r: r["km2"])
+        row = {"layer": lid, "title": entry.get("title") or lid,
+               "source": entry.get("source") or "", "areas": len(rows)}
+        if layer or len(rows) <= names_cap:
+            row["names"] = rows
+        else:
+            row["names"] = rows[:names_cap // 2] + rows[-(names_cap // 2):]
+            row["note"] = (f"{len(rows)} names; the {names_cap // 2} smallest and "
+                           f"{names_cap // 2} largest are listed — pass layer='{lid}' "
+                           f"for all of them")
+        out.append(row)
+    return {"status": "ok" if out else "empty", "layers": out,
+            "sizes": {"small": "up to 150 km² — any question answers in seconds",
+                      "medium": "150 to 600 km² — change between years takes longer",
+                      "large": "600 to 2,500 km² — ask about one year at a time",
+                      "very large": "over 2,500 km² — full-resolution change is slow; "
+                                    "a smaller named area inside it is better"},
+            "how_to_use": ("pass a name exactly as listed as `place` to any pack; when "
+                           "several layers hold the same name, say which: "
+                           "'<name> (<layer>)' or '<name>, <qualifier>'")}
+
+
+def _size_class(km2: float) -> str:
+    return ("small" if km2 <= 150 else "medium" if km2 <= 600
+            else "large" if km2 <= 2500 else "very large")
+
+
+def _qualifier_text(area, entry) -> str:
+    """The attributes that tell one area from another of the same name, as text."""
+    attrs = area.get("attrs") or {}
+    gp = entry.get("group_field")
+    vals = [str(attrs[f]) for f in ([gp] if gp and gp in attrs else [])]
+    return ", ".join(vals)
+
+
 def _area_shape(area):
     """One area's parts as one shapely geometry (repaired, unioned), kept on the area."""
     if "_shape" not in area:
