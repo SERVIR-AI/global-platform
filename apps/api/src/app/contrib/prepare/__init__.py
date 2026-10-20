@@ -254,6 +254,16 @@ def answered(kind: str, manifest, problems: list) -> list:
     return [p for p in problems if not any(op.answers(manifest, p) for op in ans)]
 
 
+def resolves(kind: str, manifest, problem: str) -> bool:
+    """True when an op preparing `kind` answers this refusal of the url once it is asked
+    for (a vector's Drive FOLDER link: from_folder) — its proposal then leads the decline."""
+    try:
+        return any(op.answers(manifest, problem) for op in ops(kind)
+                   if callable(getattr(op, "answers", None)))
+    except Exception:
+        return False
+
+
 # --------------------------------------------------------------------------- by itself
 
 # The situations the declines of ONE attempt raise (suggest records them) and what the

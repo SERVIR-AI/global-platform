@@ -409,7 +409,14 @@ def test_the_hdx_all_levels_zip_lands_one_level_whole_and_one_clipped(env, monke
                           name_field="adm2_name")
     out = _submit("vector", delivered)
     log("OUTPUT", out["problems"][0])
-    assert out["status"] == "declined" and "clip it to your area" in out["problems"][0]
+    said = out["problems"][0]
+    assert out["status"] == "declined" and said.startswith(f"{url} is ")
+    # the platform's own steps lead: the same link with an area and the one layer
+    assert ("cap — resubmit the same link with clip: <the area> — ASK the contributor which "
+            "area, never guess one — and, for one layer of an archive of several, layer_name: "
+            "<that layer>: the platform downloads the file to disk itself") in said
+    assert "or with whole: true" in said
+    assert "contribute one layer per file" not in said and "give that file's link" not in said
     # the stored cap is on the layer, not the archive
     monkeypatch.setattr(get_settings(), "grp_contrib_max_bytes", 2 << 20)
     out = _submit("vector", {**delivered, "whole": True})
@@ -587,8 +594,7 @@ def test_a_truncated_featureserver_export_proposes_whole_and_pages_to_every_feat
     log("OUTPUT", out["problems"][0])
     assert out["status"] == "declined"
     assert out["problems"][0] == (
-        f"{url}: the server truncated this export at 1,000 features (exceededTransferLimit) — use "
-        "the portal's full download (e.g. the Hub 'Download' GeoJSON/shapefile) or page the query"
+        f"{url}: the server truncated this export at 1,000 features (exceededTransferLimit)"
         " — resubmit the same link with whole: true — the platform pages the query "
         "(resultOffset/resultRecordCount; a WFS by startIndex/count) until every feature is in, "
         "nothing to do by hand; or with clip: <the area> to keep only the features in an area "

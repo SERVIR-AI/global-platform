@@ -531,10 +531,12 @@ def suggest(situation: dict) -> str | None:
         return None                       # declared already: its own checks say what is wrong
     event, url = situation.get("event"), situation.get("url")
     if event == "url_refused" and _drive.folder_id(url):
-        return ("or resubmit the same folder link with from_folder: true — the platform lists "
-                "the folder and its subfolders, downloads the layer's parts (.shp, .shx, .dbf, "
-                ".prj, .cpg) and zips them itself, nothing to zip by hand; if the folder holds "
-                "several layers, add layer_name: '<the shapefile's name without .shp>'")
+        # leads the decline in place of the refusal's own advice (prepare.resolves)
+        return ("this is a Google Drive FOLDER link: resubmit the same folder link with "
+                "from_folder: true — the platform lists the folder and its subfolders, "
+                "downloads the layer's parts (.shp, .shx, .dbf, .prj, .cpg) and zips them "
+                "itself, nothing to zip by hand; if the folder holds several layers, add "
+                "layer_name: '<the shapefile's name without .shp>'")
     if event == "shapefile_part":
         drive = fetch_policy.drive_file_id(url)
         return (("or give the link of the shared Google Drive FOLDER that holds the parts with "

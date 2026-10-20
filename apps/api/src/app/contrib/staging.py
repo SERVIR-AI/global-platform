@@ -886,7 +886,9 @@ def _url_problems(kind: str, m: dict) -> list[str]:
         said = prepare.suggest({"event": "url_refused", "kind": kind, "manifest": m,
                                 "url": m["url"], "problems": problems})
         if said:
-            problems = [*problems[:-1], f"{problems[-1]} — {said}"]
+            last = problems[-1]
+            problems = [*problems[:-1],
+                        said if prepare.resolves(kind, m, last) else f"{last} — {said}"]
     return problems
 
 
@@ -1826,7 +1828,11 @@ def _prepare_vector(m: dict) -> dict:
             try:
                 raw, fname = fetch_policy.fetch(m["url"])
             except fetch_policy.TooLarge as exc:
-                raise Declined(prepare.declined("vector", m, str(exc), "vector_file_too_large",
+                # the size as the fact; what the platform does about it comes from the ops
+                big = (f"{m['url']} is {prepare.size_text(exc.size)} as a download, over the "
+                       f"{prepare.size_text(cap)} cap" if exc.size else
+                       f"{m['url']} is over the {prepare.size_text(cap)} cap as a download")
+                raise Declined(prepare.declined("vector", m, big, "vector_file_too_large",
                                                 url=m["url"], bytes=exc.size, cap=cap)) from None
     except (fetch_policy.FetchRefused, prepare.PrepRefused) as exc:
         raise Declined(str(exc)) from None

@@ -749,11 +749,12 @@ def suggest(situation: dict) -> str | None:
     if any(m.get(f) is not None for f in FIELDS):
         return None
     if situation.get("event") == "vector_file_too_large":
-        return ("or resubmit the same link with whole: true — the platform downloads it whole "
-                "under its preparation budget (streamed to disk) and keeps the one layer "
-                "(layer_name names it in an archive of several); the cap applies to the layer "
-                "as stored — or with clip: <the area> to keep only its features there (ASK the "
-                "contributor for the area; never guess one)")
+        return ("resubmit the same link with clip: <the area> — ASK the contributor which "
+                "area, never guess one — and, for one layer of an archive of several, "
+                "layer_name: <that layer>: the platform downloads the file to disk itself "
+                "(streamed, under its preparation budget) and keeps that layer's features in "
+                "the area; or with whole: true to keep the whole layer — the cap applies to "
+                "the layer as stored")
     if situation.get("event") != "vector_unreadable" or not _cut(situation.get("error")):
         return None
     if service(situation.get("url") or m.get("url")):
