@@ -88,6 +88,11 @@ def _audiences_line() -> str:
         "food-security analysts, hub teams and ministry advisors deciding whether to act months ahead"
 
 
+def _as_given() -> str:
+    from ..contrib import staging
+    return staging.AS_GIVEN
+
+
 def _instructions() -> str:
     """The connect-time instructions, built from what the platform holds NOW — the
     packs' summaries, places and target shapes read live. Built once at import they
@@ -110,6 +115,7 @@ as SOURCE FILES IN THE USER'S OWN PROJECT that they can run, version and deploy 
 never a hosted preview on a third-party host. A published static page also FREEZES \
 any verdict into markup that can never be re-resolved.
 - RUN-TIME: the user asks a question. Answer it now via the canonical loop.
+- CONTRIBUTE-TIME: someone offers data — call `contribute_submit`. {_as_given()}
 - INTERACTIVE SURFACES: this platform ships MCP Apps. If someone questions how risk \
 is WEIGHTED, call `risk_weights` — in a host that renders MCP Apps it opens a picker \
 with a slider per vulnerability layer, and proposing from it goes through the \

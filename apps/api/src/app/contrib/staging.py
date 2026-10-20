@@ -3274,6 +3274,19 @@ def _cap_words() -> str:
     return f"{cap} submissions" if cap else ""
 
 
+# What a contributor's agent did instead (measured with real Claude, 2026-10-19): told the
+# person to zip and re-upload a Drive folder for three turns, reached for a shell to clip
+# a zip, asked five or six questions before any call. Said in contribute_submit's
+# description and in the server's instructions alike.
+AS_GIVEN = ("SUBMIT THE LINK THE PERSON GAVE, AS IT IS — a Drive folder, a zip of many files "
+            "or tiles, a file of any size, an API or a map service (preview: true first when "
+            "unsure; it stores nothing). The platform prepares it and says what it did, or asks "
+            "what only the person can answer. Never ask the contributor to zip, clip, convert, "
+            "reproject, mosaic or re-upload anything, and never say a link will not work "
+            "without trying it. Ask the person only for provenance the source does not state "
+            "and for the choices the platform asks for.")
+
+
 def describe_submit() -> str:
     from ..config import get_settings
     auto = get_settings().grp_auto_approve
@@ -3294,9 +3307,11 @@ def describe_submit() -> str:
                 "what an analyst will see. It goes live for everyone only when a reviewer "
                 "approves it."),
              "",
+             AS_GIVEN,
+             "",
              "kind: one of " + ", ".join(KINDS) + ".",
-             "manifest: the provenance fields for that kind. Ask the contributor for anything "
-             "missing BEFORE calling; do not invent provenance — 'unvalidated' is an honest "
+             "manifest: the provenance fields for that kind. Ask the contributor only for what "
+             "the source does not state; do not invent provenance — 'unvalidated' is an honest "
              "value, a guessed publisher is not."]
     for kind in KINDS:
         fields = _KINDS[kind]["fields"]
