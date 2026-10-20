@@ -491,6 +491,28 @@ def test_the_maga_years_go_in_from_their_wfs_links_and_land_as_one_stack(env, lo
     assert _no_leftovers(env)
 
 
+def test_without_classes_the_legend_maps_the_values_or_the_decline_offers_one_code_each(env, log):
+    """No `classes`: values that are the legend's labels land as its codes; values that are
+    not are named, with the two ways on: map them onto the legend, or one code per value."""
+    url = env["host"].wfs("lc:cobertura_2025", _maga(2025))
+    out = _submit("raster", _year(2025, url, clip=CLIP, rasterise={"field": "C_USO",
+                                                                   "resolution": RES}))
+    said = out["problems"][0]
+    log("OUTPUT", said)
+    assert "7 of the 7 value(s) the polygons hold are no label or code of the legend" in said
+    assert "Give each the code it lands as — rasterise.classes: {112: <code>," in said
+    assert ("or, for a new map (a layer of its own, or the first year of a new stack), one code "
+            "per value: classes {112: 1, 232: 2, 314: 3, 521: 4, 522: 5, 1213: 6, 2111: 7} with "
+            "legend {1: Tejido urbano discontinuo, 2: Pasto natural, 3: Bosque manglar") in said
+    out = _submit("raster", _year(2025, url, clip=CLIP, rasterise={"field": "usot", "resolution": RES},
+                                  legend={c: lab for c, (lab, _) in CODES[2025].items()},
+                                  declared={**DECL, "valid_max": 2111, "dtype": "uint16"}))
+    assert out["status"] == "approved", out
+    st = tiffs.catalog()["landcover_gtcoast_2025"]["fetched"]["steps"][-1]["inputs"]
+    assert st["classes"]["Bosque manglar"] == 314 and st["field"] == "usot"
+    assert _no_leftovers(env)
+
+
 def test_a_layer_without_the_field_is_named_with_its_attributes(env):
     url = env["host"].wfs("lc:cobertura_2025", _maga(2025))
     out = _submit("raster", _year(2025, url, clip=CLIP,
