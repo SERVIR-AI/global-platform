@@ -75,7 +75,8 @@ from pathlib import Path, PurePosixPath
 ORDER = {"assemble": 10, "mosaic": 20, "convert": 30, "recode": 40, "clip": 50}
 
 # The situations a decline raises, each a dict with "event", "kind" and "manifest":
-#   stack_legend_mismatch  + stack, have (the stack's {code: label}), want (the manifest's)
+#   stack_legend_mismatch  + stack, have (the stack's {code: label}), want (the manifest's),
+#                            as_lands (the stack's {nodata, dtype, outside_values}, as known)
 #   duplicate_labels       + legend (the manifest's {code: label})
 #   class_range            + classes ([lo, hi], the namespace's class contract), declared
 #   url_refused            + url, problems (fetch_policy.check_url's words)

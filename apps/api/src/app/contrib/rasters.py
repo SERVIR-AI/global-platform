@@ -599,7 +599,7 @@ def stack_legend_problem(m: dict, cat: dict | None = None) -> str | None:
         return None
     if have == want:
         return None
-    return _legend_mismatch(sid, have, want, m)
+    return _legend_mismatch(sid, have, want, m, cat)
 
 
 def _legend_text(leg: dict) -> str:
@@ -615,7 +615,32 @@ def _suggested(situation: dict) -> str | None:
         return None
 
 
-def _legend_mismatch(sid: str, have: dict, want: dict, manifest: dict | None = None) -> str:
+def _stack_as_lands(sid: str, cat: dict | None) -> dict:
+    """What the years of stack `sid` land with: {nodata, dtype} of the first year whose
+    contract names a nodata, and the stack row's outside_values — each only when known."""
+    out = {}
+    st = (cat or {}).get(sid) or {}
+    if isinstance(st.get("outside_values"), list):
+        out["outside_values"] = [_num(v) for v in st["outside_values"] if _isnum(v)]
+    try:
+        from ..graph.geo import schema
+        years = sorted((int(r["year"]), k) for k, r in (cat or {}).items()
+                       if isinstance(r, dict) and k != sid and r.get("stack") == sid
+                       and _isnum(r.get("year")))
+        for _, key in years:
+            c = schema.schema_for(key) or {}
+            if _isnum(c.get("nodata")):
+                out["nodata"] = "nan" if _isnan(c["nodata"]) else _num(c["nodata"])
+                if c.get("dtype"):
+                    out["dtype"] = str(c["dtype"])
+                break
+    except Exception:                       # what the stack says is a proposal's detail
+        pass
+    return out
+
+
+def _legend_mismatch(sid: str, have: dict, want: dict, manifest: dict | None = None,
+                     cat: dict | None = None) -> str:
     """Why a year's legend cannot join its stack, and how to make it — when the labels
     are the stack's under other codes, the exact recode, which the server can apply."""
     norm = lambda s: " ".join(str(s).lower().split())
@@ -626,7 +651,8 @@ def _legend_mismatch(sid: str, have: dict, want: dict, manifest: dict | None = N
     new_stack = ("or name a new stack (stack: landcover_<another name>; a new stack cannot be "
                  "compared with this one year to year)")
     said = _suggested({"event": "stack_legend_mismatch", "manifest": manifest or {},
-                       "stack": sid, "have": have, "want": want})
+                       "stack": sid, "have": have, "want": want,
+                       "as_lands": _stack_as_lands(sid, cat)})
     if (all(c is not None for c in recode.values()) and len(set(recode.values())) == len(recode)
             and len(recode) == len(have)):
         if said:
@@ -945,7 +971,7 @@ def _stack_conflict(cat, manifest):
         return None
     have, want = _norm_legend(st.get("legend")), _norm_legend(manifest.get("legend"))
     if have != want:
-        return _legend_mismatch(str(manifest["stack"]), have, want, manifest)
+        return _legend_mismatch(str(manifest["stack"]), have, want, manifest, cat)
     if int(manifest["year"]) in [int(y) for y in st.get("years") or []]:
         return (f"stack {manifest['stack']!r} already has a {manifest['year']} map — "
                 "contributions add years, they do not overwrite them")
