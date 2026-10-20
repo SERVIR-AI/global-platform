@@ -230,6 +230,12 @@ class Settings(BaseSettings):
     grp_prep_op_seconds: int = 600
     grp_prep_max_cells: int = 4_000_000_000
     grp_prep_max_vertices: int = 50_000_000
+    # Submissions run in the background (contrib/jobs.py): at most GRP_PREP_MAX_JOBS that
+    # declare a preparation at once — a rasterise can peak near 3 GB — the rest queued in
+    # order; one still working after GRP_PREP_WAIT_SECONDS answers 'preparing' with an id
+    # contribute_status follows (MCP clients abandon a call at about a minute).
+    grp_prep_max_jobs: int = 2
+    grp_prep_wait_seconds: float = 40
     # DEVELOPMENT ONLY: let contributions fetch from private/loopback addresses, so a
     # local dry run can serve test files from a local http server. Never set on a
     # deployed host — the fetch policy exists because the server sits on a shared

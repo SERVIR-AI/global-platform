@@ -18,6 +18,7 @@ string cut off: a pre-signed storage URL carries credentials in its query.
 
 from __future__ import annotations
 
+import contextvars
 import ipaddress
 import json
 import re
@@ -31,6 +32,12 @@ SCHEMES = ("http", "https")
 MAX_REDIRECTS = 5
 TIMEOUT = (10, 30)      # connect, per-read (seconds)
 DEADLINE = 120          # whole fetch, seconds
+# A submission running in the background (contrib/jobs.py) has nobody waiting on the
+# connection, so a host that works for a while before its first byte — the IGM Ecuador
+# WCS cutting a 30 m coverage answered after 49 s, measured 2026-10-19 — is waited for
+# up to PATIENT_READ seconds a read, still inside the whole fetch's deadline.
+PATIENT_READ = 120
+PATIENT: contextvars.ContextVar = contextvars.ContextVar("grp_fetch_patient", default=False)
 # A file of PIECES_FROM bytes or more, from a host that answers range requests, is
 # downloaded in pieces at once (at most MAX_PIECES, none under PIECE_MIN): a host that
 # throttles each connection — Zenodo, ~25 KB/s a connection, measured 2026-10-19 — is
@@ -416,6 +423,10 @@ def fetch_to_file(url: str, dest, max_bytes: int | None = None,
 _HEAD = 200_000
 
 
+def _timeout() -> tuple:
+    return (TIMEOUT[0], max(TIMEOUT[1], PATIENT_READ)) if PATIENT.get() else TIMEOUT
+
+
 def _fetch(url: str, cap: int, started: float, agent: str, dest: str | None = None,
            deadline: float | None = None, whole: bool = False):
     """bytes + filename, or with `dest` (bytes written, filename) with the body on disk
@@ -447,7 +458,7 @@ def _fetch(url: str, cap: int, started: float, agent: str, dest: str | None = No
         session = _session(parts.hostname, parts.scheme)
         quoted = _quote(current, url)
         try:
-            r = session.get(_pinned_url(parts, addr), timeout=TIMEOUT, stream=True,
+            r = session.get(_pinned_url(parts, addr), timeout=_timeout(), stream=True,
                             allow_redirects=False,
                             headers={"User-Agent": agent, "Host": host_header})
         except requests.RequestException as exc:
@@ -599,7 +610,7 @@ def _in_pieces(first, current: str, parts, addr, host_header: str, agent: str, d
                     if problems:
                         raise FetchRefused("; ".join(problems))
                     sess = _session(parts.hostname, parts.scheme)
-                    resp = sess.get(_pinned_url(parts, addr), timeout=TIMEOUT, stream=True,
+                    resp = sess.get(_pinned_url(parts, addr), timeout=_timeout(), stream=True,
                                     allow_redirects=False,
                                     headers={"User-Agent": agent, "Host": host_header,
                                              "Range": f"bytes={pos}-{b}",
