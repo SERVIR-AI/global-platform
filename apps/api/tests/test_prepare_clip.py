@@ -367,7 +367,8 @@ def test_clip_is_a_vector_op_whose_fields_reach_the_vector_form_and_spare_the_ra
         "whole prepares a vector contribution (clip); it does not apply to a raster — drop whole"]
     assert prepare.validate("table", {"clip": GULF}) == [
         "clip prepares a vector contribution (clip); it does not apply to a table — drop clip"]
-    assert "vector: clip, whole" in staging.describe_submit()
+    vector_ops = staging.describe_submit().split("vector: ", 1)[1].split(")", 1)[0].split(", ")
+    assert {"clip", "whole"} <= set(vector_ops)
 
 
 def test_a_bad_clip_or_whole_or_wfs_url_is_declined_before_any_fetch(env):
