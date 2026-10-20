@@ -769,7 +769,23 @@ def _dropped_words(asked, found, country="") -> list:
     want, got = _key(str(asked).partition(",")[0]).split(), _key(found).split()
     if not got or not set(got) <= set(want):
         return []
-    return [w for w in want if w not in got and w not in _ADMIN_NOUNS and w not in country.split()]
+    return [w for w in want if w not in got and w not in country.split() and not _generic_word(w)]
+
+
+# Words that say what KIND of settlement, unit or island a name is, not which one:
+# 'Puntarenas City' -> 'Puntarenas', 'Siargao Island' -> 'Siargao' are the same place.
+# Water features are NOT here on purpose: 'Gulf of Nicoya' -> 'Nicoya' (a canton) and
+# 'Lake X' -> 'X' (a town) are other places.
+_GENERIC_WORDS = ("city", "town", "village", "municipality", "canton", "district", "island",
+                  "islands", "isla", "islas", "ciudad", "provincia", "distrito", "municipio")
+
+
+def _generic_word(w: str) -> bool:
+    """An administrative noun or a settlement/island descriptor, or a misspelling of one
+    ('provnce') — never a proper name."""
+    import difflib
+    nouns = (*_ADMIN_NOUNS, *_GENERIC_WORDS)
+    return w in nouns or bool(difflib.get_close_matches(w, nouns, n=1, cutoff=0.85))
 
 
 def _search(place):
@@ -1093,7 +1109,10 @@ def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=N
         legacy_box = (cached is not None and "approximate" not in cached
                       and str(cached.get("how") or "").startswith(f"{RADIUS_KM:.0f} km radius box"))
         # ...and so is a 'correction' that left words of the name out (another place).
-        dropped = cached is not None and any(
+        # (a bundle written after the guard existed carries `correction_checked` and is
+        # never judged again: re-judging without the result's country re-resolved
+        # 'Battambang Cambodia' -> 'Battambang' on every call)
+        dropped = cached is not None and not cached.get("correction_checked") and any(
             _dropped_words(a, b) for a, b in
             re.findall(r"\(corrected '(.*?)' -> '(.*?)'\)", str(cached.get("how") or "")))
         if cached is not None and place is not None \
@@ -1147,7 +1166,8 @@ def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=N
             os.makedirs(adir, exist_ok=True)
             _write(adir, "admin", [_feature(boundary, {"name": name})])
             info = {"name": name, "area_km2": round(km2), "how": how, "counts": {},
-                    "resolver": RESOLVER_VERSION, "measure": vectors.MEASURE, **approximate}
+                    "resolver": RESOLVER_VERSION, "measure": vectors.MEASURE, **approximate,
+                    **({"correction_checked": True} if "(corrected " in str(how) else {})}
             write_json(meta, info, indent=2)
 
     # Over a large area the heavy OSM layers are declined rather than attempted.

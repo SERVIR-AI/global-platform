@@ -419,7 +419,9 @@ def _adapt_generic_json(params: dict, spec: dict) -> dict:
                                 key=lambda r: when[id(r)])
         if len(undated) < len(rows):
             order = (f"; ordered by {af}, oldest first"
-                     + (f" — these {limit:,} are the most recent" if limit < len(rows) else "")
+                     + ((f" — these {limit:,} are the most recent" if limit <= len(rows) - len(undated)
+                         else f" — the last {limit:,} in that order, {limit - (len(rows) - len(undated)):,} of them undated")
+                        if limit < len(rows) else "")
                      + (f"; {len(undated):,} record(s) with no readable {af} are kept "
                         "before the dated ones and never count as latest" if undated else ""))
     tail = rows[-limit:]

@@ -138,3 +138,55 @@ def test_whole_names_and_respellings_still_resolve_in_their_own_country(gaz, log
     assert ingest._dropped_words("Battambang Province", "Battambang") == []
     assert ingest._dropped_words("Golfo de Nicoya", "Gulf of Nicoya") == []
     assert ingest._dropped_words("Battambang Cambodia", "Battambang", "cambodia") == []
+
+
+# ---- review of round 3: words that say what kind of place it is are not part of its name
+PUNTARENAS = box(-84.95, 9.9, -84.75, 10.05)
+
+
+def fake_search_generic(q):
+    k = q.strip().lower()
+    if k == "puntarenas city":                      # only a point for the full phrase
+        return [{"class": "place", "type": "city", "place_rank": 16, "lon": "-84.83", "lat": "9.97",
+                 "display_name": "Puntarenas, Puntarenas Province, 60101, Costa Rica",
+                 "geojson": {"type": "Point", "coordinates": [-84.83, 9.97]}}]
+    if k == "puntarenas":
+        return [_admin("Puntarenas, Puntarenas Province, 60101, Costa Rica", PUNTARENAS)]
+    if k == "battambang provnce":                   # a typo of the admin noun
+        return [{"class": "place", "type": "city", "place_rank": 16, "lon": "103.2", "lat": "13.1",
+                 "display_name": "Battambang, Battambang Province, Cambodia",
+                 "geojson": {"type": "Point", "coordinates": [103.2, 13.1]}}]
+    if k == "battambang":
+        return [_admin("Battambang, Battambang Province, Cambodia", BATTAMBANG)]
+    if k == "gulf of nicoya":
+        return [_river("Nicoya, Guanacaste Province, Costa Rica", -85.45, 10.15)]
+    if k == "nicoya":
+        return [_admin("Nicoya, Guanacaste Province, Costa Rica", box(-85.6, 10.0, -85.3, 10.3))]
+    return fake_search(q)
+
+
+@pytest.mark.parametrize("asked, landed", [("Puntarenas City", "Puntarenas"), ("Battambang Provnce", "Battambang")])
+def test_a_descriptor_or_an_admin_noun_typo_is_not_a_dropped_name(gaz, monkeypatch, asked, landed, log):
+    monkeypatch.setattr(ingest, "_search", fake_search_generic)
+    out = resolve.place_time(place=asked)
+    log("OUTPUT", json.dumps(out)[:300])
+    assert out.get("status") != "declined" and landed in json.dumps(out)
+
+
+def test_a_water_feature_word_still_counts_gulf_of_nicoya_is_not_the_canton(gaz, monkeypatch, log):
+    monkeypatch.setattr(ingest, "_search", fake_search_generic)
+    out = resolve.place_time(place="Gulf of Nicoya")
+    log("OUTPUT", json.dumps(out)[:300])
+    assert "corrected 'Gulf of Nicoya' -> 'Nicoya'" not in json.dumps(out)
+
+
+def test_an_accepted_correction_is_not_re_resolved_on_every_call(gaz, monkeypatch, log):
+    calls = []
+    def counting(q):
+        calls.append(q)
+        return fake_search_generic(q)
+    monkeypatch.setattr(ingest, "_search", counting)
+    for _ in range(3):
+        ingest.ensure_aoi(place="Puntarenas City", layers=())
+    log("OUTPUT", f"geocoder calls over 3 asks: {len(calls)}")
+    assert len(calls) == 2          # first ask: the phrase, then the correction; later asks: cache

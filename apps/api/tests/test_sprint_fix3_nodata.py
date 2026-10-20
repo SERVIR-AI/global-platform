@@ -80,7 +80,8 @@ def test_a_nan_mismatch_says_to_send_nan(gate, log):
                                          nodata=-3.4e38))
     out = _submit("measure_toy_fill", url, declared={**DECL, "nodata": "nan"})
     log("OUTPUT", out["problems"])
-    assert out["status"] == "declined" and 'send the string "nan"' in out["problems"][0]
+    # already declared "nan": telling them to send "nan" would be wrong advice (review)
+    assert out["status"] == "declined" and 'send the string "nan"' not in out["problems"][0]
     # a mismatch with no NaN on either side is not told about NaN
     assert 'send the string "nan"' not in rasters._explain("nodata 255 != declared 0",
                                                            {"nodata": 0}, {"nodata": 255})

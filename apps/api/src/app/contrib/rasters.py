@@ -738,7 +738,7 @@ def _explain(mismatch: str, decl: dict, obs: dict | None = None) -> str:
     elif mismatch.startswith("nodata "):
         mismatch += (" — declare the nodata the file is tagged with, or list other no-data "
                      "values under outside_values")
-        if _isnan(decl.get("nodata")) or _isnan((obs or {}).get("nodata")):
+        if _isnan((obs or {}).get("nodata")) and not _isnan(decl.get("nodata")):
             mismatch += '; for a NaN fill, send the string "nan"'
     return mismatch
 
