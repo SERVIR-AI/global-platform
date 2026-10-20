@@ -954,3 +954,60 @@ def test_a_service_that_will_not_count_lands_as_given_and_the_risk_pack_counts_i
                if c.get("title", "").startswith("toy_refugios (synthetic) vs"))
     assert "contributed layer" in exp["text"]
     assert _no_leftovers(env)
+
+
+def test_a_prepared_layer_over_the_cap_is_declined_before_it_is_parsed(env, monkeypatch, tmp_path):
+    """A GeoPackage over the cap as a download is read whole by itself. Its table, over
+    1.5x the cap, is declined from its size — never read into memory; under that but
+    over the cap as GeoJSON, declined before it is parsed again (inspect), the geometry
+    family read from the text (no raster proposed for points). Read whole, the vertex
+    budget counts every feature, of a GeoPackage and of a shapefile."""
+    from shapely.geometry import Point
+    polys = [Point(-85.0 + i * 0.003, 10.0).buffer(0.001, quad_segs=16) for i in range(400)]
+    path = tmp_path / "parcels.gpkg"
+    _gpkg(str(path), "parcels", polys, [{"cntry_iso3": "CRI", "area_ha": float(i)} for i in range(len(polys))])
+    data = path.read_bytes()
+    url = env["host"].put("parcels.gpkg", data)
+    monkeypatch.setattr(get_settings(), "grp_contrib_max_bytes", len(data) // 3)
+    real_read, real_inspect = vecio.to_geojson, vectors.inspect
+    monkeypatch.setattr(vecio, "to_geojson", lambda *a, **k: pytest.fail("parsed"))
+    out = _submit("vector", _layer("cr_parcels", url))
+    p = out["problems"][0]
+    assert out["status"] == "declined" and _fields(out) == [{"whole": True}], out
+    assert p.startswith(f"missing required field 'clip': the layer prepared from {url} is ")
+    assert "as GeoJSON" not in p and "ask the contributor which area to keep" in p
+
+    monkeypatch.setattr(vecio, "to_geojson", real_read)
+    monkeypatch.setattr(vectors, "inspect", lambda *a, **k: pytest.fail("inspected"))
+    monkeypatch.setattr(get_settings(), "grp_contrib_max_bytes", int(len(data) * 0.9))
+    out = _submit("vector", _layer("cr_parcels", url))
+    p = out["problems"][0]
+    assert out["status"] == "declined" and _fields(out) == [{"whole": True}], out
+    assert "as GeoJSON, over the" in p and "contribute it as kind 'raster'" in p
+    pts = [Point(-85.0 + i * 1e-4, 10.0) for i in range(3000)]
+    _gpkg(str(tmp_path / "wells.gpkg"), "wells", pts,
+          [{"cntry_iso3": "CRI", "area_ha": float(i)} for i in range(len(pts))])
+    wells = (tmp_path / "wells.gpkg").read_bytes()
+    monkeypatch.setattr(get_settings(), "grp_contrib_max_bytes", int(len(wells) * 0.9))
+    out = _submit("vector", _layer("cr_wells", env["host"].put("wells.gpkg", wells)))
+    assert "as GeoJSON, over the" in out["problems"][0], out
+    assert "contribute it as kind 'raster'" not in out["problems"][0]   # points: no raster
+    monkeypatch.setattr(vectors, "inspect", real_inspect)
+
+    monkeypatch.setattr(get_settings(), "grp_contrib_max_bytes", 50 << 20)
+    monkeypatch.setattr(get_settings(), "grp_prep_max_vertices", 1000)
+    verts = sum(len(g.exterior.coords) for g in polys)
+    out = _submit("vector", _layer("cr_parcels_v", url, whole=True))
+    assert out["problems"][0] == (
+        f"the layer has {verts:,} vertices, over the 1,000 one clip step may touch — ask the "
+        "contributor for the area that matters (clip) and resubmit with it, never guess one; "
+        "or give a smaller or simplified layer")
+    shp = env["host"].put("parcels.zip", _zip(_shapefile(
+        "parcels", polys, [{"n": i} for i in range(len(polys))])))
+    out = _submit("vector", _layer("cr_parcels_s", shp, whole=True))
+    assert out["problems"][0].startswith(f"the layer has {verts:,} vertices, over the 1,000 one")
+    monkeypatch.setattr(get_settings(), "grp_prep_max_vertices", 50_000_000)
+    out = _submit("vector", _layer("cr_parcels_s", shp, whole=True))
+    assert out["status"] == "approved", out
+    assert vectors.landed()["cr_parcels_s"]["features"] == len(polys)
+    assert _no_leftovers(env)

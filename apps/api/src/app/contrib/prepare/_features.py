@@ -428,16 +428,57 @@ def shapefile(ctx, files: dict, shp: str, box: Box | None, out_zip: str) -> dict
     with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED, allowZip64=True,
                          compresslevel=1) as z:
         if box is None:
+            verts = _shp_vertices(ctx, parts[".shp"])
+            ctx.check_vertices(verts, "the layer")
             for ext, p in parts.items():
                 if p:
                     z.write(p, stem + ext)
                     ctx.check_time()
-            return {"read": total, "kept": total, "member": shp}
+            return {"read": total, "kept": total, "vertices": verts, "member": shp}
         tally = _filter_records(ctx, parts, box, crs, z, stem)
         for ext in (".prj", ".cpg", ".cst"):
             if parts[ext]:
                 z.write(parts[ext], stem + ext)
     return {**tally, "member": shp}
+
+
+def _shp_vertices(ctx, path: str) -> int:
+    """The vertices of every record of the .shp at `path`, from the records' own counts
+    (nothing parsed), checked against the step's budget as they add up."""
+    n = k = 0
+    with open(path, "rb") as f:
+        f.seek(100)
+        while True:
+            rh = f.read(8)
+            if len(rh) < 8:
+                break
+            size = struct.unpack(">ii", rh)[1] * 2
+            if size < 0:
+                break                            # the gate's reader says what is wrong
+            head = f.read(min(size, 44))
+            rec = _shape_record(head)
+            if rec is not None:
+                n += max(0, int(rec[1]))
+            f.seek(size - len(head), 1)
+            k += 1
+            if k % 4096 == 0:
+                ctx.check_time()
+                ctx.check_vertices(n, "the layer")
+    return n
+
+
+def _gpkg_vertices(blobs) -> int:
+    """The vertices of GeoPackage geometry blobs, their WKB parsed in one go."""
+    import shapely
+    wkbs = []
+    for blob in blobs:
+        if not blob or blob[:2] != b"GP" or blob[3] & 0x20:
+            continue                             # not a geometry, or an empty one
+        env = {0: 0, 1: 32, 2: 48, 3: 48, 4: 64}.get((blob[3] >> 1) & 0x07, 0)
+        wkbs.append(bytes(blob[8 + env:]))
+    if not wkbs:
+        return 0
+    return int(get_num_coordinates(shapely.from_wkb(wkbs, on_invalid="ignore")).sum())
 
 
 def _filter_records(ctx, parts: dict, box: Box, crs, z, stem: str) -> dict:
@@ -648,12 +689,17 @@ def geopackage(ctx, path: str, layer_name: str | None, box: Box | None, out_path
             kept += 1
             batch.append(row)
             if len(batch) >= 2048:
-                ctx.check_vertices(verts, "the features kept")
+                if box is None:                  # whole: every row's vertices count too
+                    verts += _gpkg_vertices(r[gi] for r in batch)
+                ctx.check_vertices(verts, "the features kept" if box is not None else "the layer")
                 out.executemany(ins, batch)
                 batch = []
         if batch:
+            if box is None:
+                verts += _gpkg_vertices(r[gi] for r in batch)
+            ctx.check_vertices(verts, "the features kept" if box is not None else "the layer")
             out.executemany(ins, batch)
-        ctx.check_vertices(verts, "the features kept")
+        ctx.check_vertices(verts, "the features kept" if box is not None else "the layer")
         out.execute("pragma application_id = 1196444487")      # 'GPKG'
         out.execute("pragma user_version = 10200")
         out.commit()

@@ -1858,6 +1858,10 @@ def _prepare_vector(m: dict) -> dict:
         raise Declined(prepare.declined("vector", m, f"{m['url']}: {exc}", "vector_unreadable", url=m["url"], error=str(exc), head=bytes(raw[:16]))) from None
     except Exception as exc:
         raise Declined(f"{m['url']}: could not be read as a vector file: {type(exc).__name__}: {exc}") from None
+    if made is not None and len(raw) > cap:
+        # over the cap as stored: declined before it is parsed once more (inspect)
+        raise Declined(_vector_too_large(m, f"{_size(len(raw))} as GeoJSON", len(raw), cap,
+                                         _family_of(raw)))
     try:
         observed = vectors.inspect(raw)
     except ValueError as exc:
@@ -1866,9 +1870,6 @@ def _prepare_vector(m: dict) -> dict:
         # What the server did to the file rides the record, as a raster's does: each step's
         # inputs and sha256, and the stored GeoJSON's; the cap is on what is stored.
         import hashlib
-        if len(raw) > cap:
-            raise Declined(_vector_too_large(m, f"{_size(len(raw))} as GeoJSON", len(raw), cap,
-                                             observed.get("geometry")))
         sha = hashlib.sha256(raw).hexdigest()
         prep_notes = [*made.notes, *(prep_notes or [])]
         prep_notes = ([f"{prep_notes[0]}; the stored file's sha256 is {sha}", *prep_notes[1:]]
@@ -1884,6 +1885,18 @@ def _prepare_vector(m: dict) -> dict:
 
 
 GEOJSON_FACTOR = 3             # a prepared GeoJSON this many times the cap is not parsed
+PACKED_FACTOR = 1.5            # nor a prepared GeoPackage or zipped shapefile this many: as
+                               # GeoJSON (x, y at 7 decimals: ~25 bytes a vertex, against 16
+                               # to 32 packed) it keeps over 2/3 of its size, over the cap
+
+
+def _family_of(raw: bytes) -> str | None:
+    """The geometry family (points, lines, polygons) the first geometry in a GeoJSON names,
+    read from its first MiB without parsing it — None when none is found there."""
+    import re
+    m = re.search(rb'"type"\s*:\s*"(?:Multi)?(Point|LineString|Polygon)"', raw[:1 << 20])
+    return {b"Point": "points", b"LineString": "lines",
+            b"Polygon": "polygons"}[m.group(1)] if m else None
 
 
 def _size(n: int) -> str:
@@ -1910,8 +1923,9 @@ def _vector_too_large(m: dict, size: str, n: int, cap: int, geometry=None) -> st
 def _read_prepared(made, url: str, cap: int, m: dict | None = None) -> tuple[bytes, str]:
     """The bytes of a prepared vector file (removed once read) and its name, which says
     to the reader what it is. Read into memory only when it can still fit the cap as
-    stored (a zipped shapefile or GeoPackage grows as GeoJSON, rarely 8-fold; a GeoJSON
-    shrinks by its rounding and spacing, rarely 3-fold)."""
+    stored (a zipped shapefile or GeoPackage keeps over 2/3 of its size as GeoJSON; a
+    GeoJSON shrinks by its spacing, rarely 3-fold): one over PACKED_FACTOR (GEOJSON_FACTOR)
+    times the cap is declined unread — parsed, a 159 MiB GeoPackage took 2 GiB."""
     import os
     from ..graph.geo import vecio
     from . import remote_clip
@@ -1919,7 +1933,7 @@ def _read_prepared(made, url: str, cap: int, m: dict | None = None) -> tuple[byt
         size = os.path.getsize(made.path)
         with open(made.path, "rb") as f:
             text = vecio.kind_of(f.read(4096), made.filename or "") == "geojson"
-        if size > (GEOJSON_FACTOR if text else remote_clip.RAW_FACTOR) * cap:
+        if size > (GEOJSON_FACTOR if text else PACKED_FACTOR) * cap:
             raise Declined(_vector_too_large({**(m or {}), "url": url},
                                              remote_clip.size_text(size), size, cap))
         with open(made.path, "rb") as f:
