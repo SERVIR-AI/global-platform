@@ -3357,7 +3357,12 @@ def _prep_words() -> str:
     """What the server prepares and how to preview it, from contrib/prepare's registry."""
     try:
         from . import prepare
-        by_kind = {k: sorted(prepare.fields(k)) for k in KINDS if prepare.fields(k)}
+        # a kind's own field that an op of another kind owns too is that kind's own
+        # preparation (a raster's clip, cut at the source; the vector clip op's)
+        ops_fields = prepare.all_fields()
+        by_kind = {k: sorted(set(prepare.fields(k))
+                             | (prepare._own_fields(k) & ops_fields)) for k in KINDS}
+        by_kind = {k: f for k, f in by_kind.items() if f}
         itself = [op.NAME for op in prepare.ops()
                   if callable(getattr(op, "detect", None)) or callable(getattr(op, "auto", None))]
     except Exception:
