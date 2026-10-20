@@ -27,7 +27,7 @@ from app.contrib import jobs, prepare, staging
 from app.graph.geo import vectors
 from app.mcp import assemble, store
 
-from test_contrib_jobs import _call, _coded, _drain, _json, _plain, _status, _until, _vuln
+from test_contrib_jobs import _call, _coded, _drain, _json, _keep_checking, _plain, _status, _until, _vuln
 from test_prepare_auto import _fields, _layer, _no_leftovers, env  # noqa: F401  (fixture reuse)
 from test_prepare_clip import RISK_POLY, _FeatureServer, _admin, _shapefile, _zip
 from test_prepare_from_folder import drive  # noqa: F401  (fixture reuse)
@@ -104,8 +104,7 @@ def test_a_plain_manifest_prepared_by_itself_past_the_wait_lands_through_status(
     assert jobs._row(jid)["lane"] == "prepare"                # the url's shape sorted it
     mid = _until_step(jid, "the clip step")
     assert re.fullmatch(r"the platform is still preparing this \(the clip step, \d+ s so far\); "
-                        rf"call contribute_status with contribution_id {jid} \(it waits up to 0 s for the result\) "
-                        r"— do not resubmit", mid["message"])
+                        + _keep_checking(jid), mid["message"])
     gate.set()
     final = _until(jid)
     log("OUTPUT", json.dumps(final)[:400])
@@ -170,8 +169,7 @@ def test_a_preparation_applied_after_a_decline_waits_for_a_free_preparation_slot
     log("OUTPUT", json.dumps(mid))
     assert "queue_position" not in mid
     assert re.fullmatch(r"the platform is still preparing this \(waiting for a free slot to "
-                        r"prepare it in, \d+ s so far\); call contribute_status with "
-                        rf"contribution_id {sid} \(it waits up to 0 s for the result\) — do not resubmit",
+                        r"prepare it in, \d+ s so far\); " + _keep_checking(sid),
                         mid["message"])
     path = "/cri_admin_boundaries.shp.zip"
     asked = len(host.asked(path))
@@ -242,7 +240,7 @@ def test_status_waits_for_a_job_that_finishes_within_its_wait(jenv, monkeypatch)
     out = _call("contribute_submit", {"kind": "vector",
                                       "manifest": _layer("toy_slow", url, countries=["Toyland"])})
     assert out["status"] == "preparing"
-    assert "it waits up to 30 s for the result" in out["message"]
+    assert "each check waits up to 30 s" in out["message"]
     threading.Timer(1.0, gate.set).start()
     t0 = time.monotonic()
     final = _call("contribute_status", {"contribution_id": out["contribution_id"]})

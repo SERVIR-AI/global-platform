@@ -330,8 +330,10 @@ def _reply(row: dict) -> dict:
         step = _step_words(row["step"])
     out.update({"step": step, "elapsed_s": elapsed,
                 "message": f"the platform is still preparing this ({step}, {elapsed} s so far); "
-                           f"call contribute_status with contribution_id {row['id']} (it waits up "
-                           f"to {_status_wait():g} s for the result) — do not resubmit"})
+                           f"keep checking with contribute_status, contribution_id {row['id']}, "
+                           f"until it finishes (each check waits up to {_status_wait():g} s) — "
+                           "tell the person it is still being prepared, do not end your answer "
+                           "while it is, and do not resubmit"})
     return out
 
 

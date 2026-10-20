@@ -289,6 +289,13 @@ def _until(cid, caller=OWNER, timeout=60):
     raise AssertionError(f"job {cid} still preparing after {timeout} s")
 
 
+def _keep_checking(jid, wait=0):
+    """The tail of a 'preparing' message, as a regex."""
+    return (rf"keep checking with contribute_status, contribution_id {jid}, until it finishes "
+            rf"\(each check waits up to {wait} s\) — tell the person it is still being prepared, "
+            r"do not end your answer while it is, and do not resubmit")
+
+
 def _json(x):
     return json.loads(json.dumps(x, default=str))
 
@@ -370,8 +377,7 @@ def test_a_slow_preparation_answers_preparing_then_status_gives_the_final_result
     assert re.fullmatch(r"[0-9a-f]{16}", jid) and store.load_contribution(jid) is None
     assert out["step"] == "fetching the source"         # the prepare Context's own step
     assert re.fullmatch(r"the platform is still preparing this \(fetching the source, \d+ s so "
-                        rf"far\); call contribute_status with contribution_id {jid} \(it waits up to "
-                        r"0 s for the result\) — do not resubmit", out["message"])
+                        r"far\); " + _keep_checking(jid), out["message"])
     mid = _call("contribute_status", {"contribution_id": jid})
     assert mid["status"] == "preparing" and mid["step"] == "fetching the source"
     assert "queue_position" not in mid and mid["elapsed_s"] >= 0
