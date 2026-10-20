@@ -352,12 +352,16 @@ def test_a_folder_link_as_delivered_proposes_from_folder_and_fetches_nothing(env
     out = _submit("vector", _layer("cr_cuencas_costeras", url))
     log("OUTPUT", out["problems"][0])
     assert out["status"] == "declined" and len(out["problems"]) == 1
-    assert out["problems"][0].startswith("this is a Google Drive FOLDER link")
-    assert "or resubmit the same folder link with from_folder: true" in out["problems"][0]
+    # what works leads: the folder as it is, never a .zip to make by hand
+    assert out["problems"][0].startswith("this is a Google Drive FOLDER link: resubmit the same "
+                                         "folder link with from_folder: true")
     assert "add layer_name: '<the shapefile's name without .shp>'" in out["problems"][0]
+    assert "one file per contribution" not in out["problems"][0]
+    assert ".zip first" not in out["problems"][0]
     assert env["drive"].log == []
     ras = _submit("raster", {"layer": "landcover_x_2014", "url": url, "title": "t"})
-    assert any(p.startswith("this is a Google Drive FOLDER link") for p in ras["problems"])
+    assert any(p.startswith("this is a Google Drive FOLDER link: give the link of the file "
+                            "inside it") for p in ras["problems"])
     assert not any("from_folder" in p for p in ras["problems"])
     ras = _submit("raster", {"layer": "landcover_x_2014", "url": url, "from_folder": True})
     assert ("from_folder prepares a vector contribution (from_folder); it does not apply to a "

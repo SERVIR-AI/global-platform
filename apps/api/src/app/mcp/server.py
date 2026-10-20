@@ -88,6 +88,11 @@ def _audiences_line() -> str:
         "food-security analysts, hub teams and ministry advisors deciding whether to act months ahead"
 
 
+def _as_given() -> str:
+    from ..contrib import staging
+    return staging.AS_GIVEN
+
+
 def _instructions() -> str:
     """The connect-time instructions, built from what the platform holds NOW — the
     packs' summaries, places and target shapes read live. Built once at import they
@@ -110,6 +115,7 @@ as SOURCE FILES IN THE USER'S OWN PROJECT that they can run, version and deploy 
 never a hosted preview on a third-party host. A published static page also FREEZES \
 any verdict into markup that can never be re-resolved.
 - RUN-TIME: the user asks a question. Answer it now via the canonical loop.
+- CONTRIBUTE-TIME: someone offers data — call `contribute_submit`. {_as_given()}
 - INTERACTIVE SURFACES: this platform ships MCP Apps. If someone questions how risk \
 is WEIGHTED, call `risk_weights` — in a host that renders MCP Apps it opens a picker \
 with a slider per vulnerability layer, and proposing from it goes through the \
@@ -538,11 +544,16 @@ def risk_weights(hazard: str | None = None) -> dict:
 
 
 @mcp.tool()
-def contribute_status(contribution_id: str | None = None, action: str = "show") -> dict:
+def contribute_status(contribution_id: str | None = None, action: str = "show",
+                      offset: int = 0) -> dict:
     """Your contributions and their review state.
 
-    No arguments: everything you submitted, newest first (reviewers also get
-    `pending_review`, the queue). With a contribution_id: that record. With the
+    No arguments: ONE LINE per contribution you submitted, newest first — id, kind,
+    name, status, when, and one line of what was prepared — plus `preparing`, the
+    submissions still being worked on (reviewers also get `pending_review`, the queue).
+    It fits one reply: `more` says how many older ones are left, and offset=<n> pages
+    on. The full record (preview, landing, every prepared step) only with a
+    contribution_id. With the
     contribution_id of a submission that answered `preparing`: {status: preparing,
     step, elapsed_s, queue_position, message} while the server works on it, then the
     submission's own result (staged/approved/declined, with its real contribution_id);
@@ -577,7 +588,7 @@ def contribute_status(contribution_id: str | None = None, action: str = "show") 
     if action != "show":
         return {"status": "declined",
                 "note": f"unknown action {action!r} — show, withdraw or audit"}
-    return _staging.status(contribution_id)
+    return _staging.status(contribution_id, offset=offset)
 
 
 @mcp.tool()

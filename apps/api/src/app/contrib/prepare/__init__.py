@@ -75,7 +75,8 @@ from pathlib import Path, PurePosixPath
 ORDER = {"assemble": 10, "mosaic": 20, "convert": 30, "recode": 40, "clip": 50}
 
 # The situations a decline raises, each a dict with "event", "kind" and "manifest":
-#   stack_legend_mismatch  + stack, have (the stack's {code: label}), want (the manifest's)
+#   stack_legend_mismatch  + stack, have (the stack's {code: label}), want (the manifest's),
+#                            as_lands (the stack's {nodata, dtype, outside_values}, as known)
 #   duplicate_labels       + legend (the manifest's {code: label})
 #   class_range            + classes ([lo, hi], the namespace's class contract), declared
 #   url_refused            + url, problems (fetch_policy.check_url's words)
@@ -252,6 +253,16 @@ def answered(kind: str, manifest, problems: list) -> list:
     for (op.answers)."""
     ans = [op for op in requested(kind, manifest) if callable(getattr(op, "answers", None))]
     return [p for p in problems if not any(op.answers(manifest, p) for op in ans)]
+
+
+def resolves(kind: str, manifest, problem: str) -> bool:
+    """True when an op preparing `kind` answers this refusal of the url once it is asked
+    for (a vector's Drive FOLDER link: from_folder) — its proposal then leads the decline."""
+    try:
+        return any(op.answers(manifest, problem) for op in ops(kind)
+                   if callable(getattr(op, "answers", None)))
+    except Exception:
+        return False
 
 
 # --------------------------------------------------------------------------- by itself

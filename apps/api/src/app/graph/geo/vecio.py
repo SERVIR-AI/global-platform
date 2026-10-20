@@ -314,8 +314,9 @@ def _finish(geoms, props, crs, notes, source_label):
 
 
 # ------------------------------------------------------------------ GeoJSON
-_TRUNCATED = ("the server truncated this export at {n:,} features (exceededTransferLimit) — use "
-              "the portal's full download (e.g. the Hub 'Download' GeoJSON/shapefile) or page the query")
+# The fact only: the gate's decline leads with the platform's own step after it (the
+# clip op proposes whole: true), never with a download for the contributor to make.
+_TRUNCATED = "the server truncated this export at {n:,} features (exceededTransferLimit)"
 
 
 def _geojson_crs(fc: dict):

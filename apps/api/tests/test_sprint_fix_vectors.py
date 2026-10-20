@@ -233,8 +233,8 @@ def test_a_server_export_cut_at_its_record_limit_is_declined(where):
     top = {"exceededTransferLimit": True} if where == "top" else {"properties": {"exceededTransferLimit": True}}
     with pytest.raises(ValueError) as exc:
         vecio.to_geojson(_fc(feats, **top), "query.geojson")
-    assert str(exc.value) == ("the server truncated this export at 3 features (exceededTransferLimit) — use the "
-                              "portal's full download (e.g. the Hub 'Download' GeoJSON/shapefile) or page the query")
+    # the fact only: the gate's decline leads with whole: true after it (test_prepare_clip)
+    assert str(exc.value) == "the server truncated this export at 3 features (exceededTransferLimit)"
     assert vecio.to_geojson(_fc(feats, exceededTransferLimit=False), "q.geojson")[1] == []
 
 

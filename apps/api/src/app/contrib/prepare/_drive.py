@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import re
+import time
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urljoin, urlparse
 
@@ -16,6 +17,7 @@ FILE = "https://drive.google.com/file/d/{id}/view"
 PAGE_BYTES = 5 << 20
 MAX_FOLDERS = 200
 MAX_DEPTH = 8
+RETRY_SECONDS = 2.0     # the pause before listing a folder again after Drive answered 5xx
 
 _ID = r"[A-Za-z0-9_-]{10,}"
 _FOLDER_PATH = re.compile(rf"/folders/({_ID})")
@@ -131,18 +133,24 @@ def page(listing: str, url: str, ctx) -> str:
         addr = fp._addresses(parts.hostname)[0]           # already verified global
         session = fp._session(parts.hostname, parts.scheme)
         host = parts.hostname + (f":{parts.port}" if parts.port else "")
-        for attempt in (1, 2):                            # once more if Drive stalls
+        for attempt in (1, 2):                    # once more if Drive stalls or answers 5xx
             try:
                 r = session.get(fp._pinned_url(parts, addr), timeout=fp.TIMEOUT, stream=True,
                                 allow_redirects=False,
                                 headers={"User-Agent": fp.USER_AGENT, "Host": host})
-                break
             except requests.RequestException as exc:
                 if attempt == 2:
                     session.close()
                     raise PrepRefused(f"Google Drive did not answer when the platform listed "
                                       f"{url} ({type(exc).__name__}) — try again") from None
                 ctx.check_time()
+                continue
+            if r.status_code >= 500 and attempt == 1:
+                r.close()
+                time.sleep(RETRY_SECONDS)
+                ctx.check_time()
+                continue
+            break
         try:
             if 300 <= r.status_code < 400 and r.headers.get("location"):
                 current = urljoin(current, r.headers["location"])

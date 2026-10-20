@@ -362,7 +362,9 @@ class Reader:
         from . import PrepRefused
         if members.get("exceededTransferLimit") is True \
                 or (members.get("properties") or {}).get("exceededTransferLimit") is True:
-            raise PrepRefused(f"{self.url}: " + vecio._TRUNCATED.format(n=n))
+            raise PrepRefused(f"{self.url}: " + vecio._TRUNCATED.format(n=n)
+                              + " — use the portal's full download (e.g. the Hub 'Download' "
+                              "GeoJSON/shapefile) or page the query")
         mine = self._crs(members)
         if (mine is None) != (crs is None) or (mine is not None and mine != crs):
             raise PrepRefused(f"{self.url}: its pages declare different coordinate systems — "

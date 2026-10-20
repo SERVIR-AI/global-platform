@@ -294,9 +294,47 @@ def _by_label(have: dict, want: dict) -> dict | None:
     return None
 
 
-def _landing(have: dict, want: dict, m: dict) -> dict:
+def _as_stack(situation: dict, m: dict) -> dict:
+    """What a recoded year carries to land as its stack's years do: the stack's nodata
+    (with the stack's dtype when the year's cannot hold it) and outside_values — the
+    stack's, its nodata, and the year's own that the recode leaves in the file."""
+    from .. import rasters
+    st = situation.get("as_lands") or {}
+    decl = m.get("declared") if isinstance(m.get("declared"), dict) else {}
+    out = {}
+    nod = st.get("nodata")
+    if nod is not None:
+        out["nodata"] = nod
+        dtype = str(decl.get("dtype") or "")
+        if st.get("dtype") and dtype and isinstance(nod, (int, float)) and not _fits(dtype, nod):
+            out["dtype"] = st["dtype"]
+    if st.get("outside_values") is None and nod is None:
+        return out
+    gone = decl.get("nodata") if nod is not None else None      # rewritten to the stack's
+    own = [v for v in (rasters.outside_values(m) or []) if not (
+        rasters._isnum(gone) and rasters._isnum(v) and rasters._num(v) == rasters._num(gone))]
+    values = []
+    for v in [*(st.get("outside_values") or []), nod, *own]:
+        if rasters._isnum(v) and rasters._num(v) not in values:
+            values.append(rasters._num(v))
+    out["outside_values"] = values
+    return out
+
+
+def _stack_words(situation: dict, m: dict) -> tuple:
+    """(', nodata N', ' and outside_values: [...]') for a proposal's words, as known."""
+    st = _as_stack(situation, m)
+    nod = (f", nodata {st['nodata']}" + (f", dtype {st['dtype']}" if st.get("dtype") else "")
+           if "nodata" in st else "")
+    ov = f" and outside_values: {st['outside_values']}" if "outside_values" in st else ""
+    return nod, ov
+
+
+def _landing(have: dict, want: dict, m: dict, situation: dict | None = None) -> dict:
     """The fields that land a year coded `want` as its stack's `have`: the recode, the
-    stack's legend as the stack writes it, the declared range of the file as it lands."""
+    stack's legend as the stack writes it, the declared range of the file as it lands,
+    and the stack's nodata and outside values."""
+    from .. import rasters
     rc = _by_label(have, want)
     moves = {a: b for a, b in rc.items() if a != b}
     out = {}
@@ -306,9 +344,16 @@ def _landing(have: dict, want: dict, m: dict) -> dict:
         out["legend"] = dict(sorted(have.items()))
     decl = m.get("declared") if isinstance(m.get("declared"), dict) else None
     if moves and decl is not None:
-        landed = {**decl, "valid_min": min(have), "valid_max": max(have)}
+        st = _as_stack(situation or {}, m)
+        landed = {**decl, "valid_min": min(have), "valid_max": max(have),
+                  **{k: st[k] for k in ("nodata", "dtype") if k in st}}
         if landed != decl:
             out["declared"] = landed
+        given = m.get("outside_values")
+        if "outside_values" in st and not (
+                isinstance(given, list) and all(rasters._isnum(v) for v in given)
+                and [rasters._num(v) for v in given] == st["outside_values"]):
+            out["outside_values"] = st["outside_values"]
     return out
 
 
@@ -325,17 +370,18 @@ def auto(situation: dict) -> dict | None:
     rc = _by_label(have, want)
     if rc is None or len(rc) != len(have) or len({_same(v) for v in have.values()}) != len(have):
         return None                       # two codes for one class, here or in the stack: theirs
-    fields = _landing(have, want, m)
+    fields = _landing(have, want, m, situation)
     if not fields:
         return None
-    return {"fields": fields, "restates": [f for f in ("legend", "declared") if f in fields],
+    return {"fields": fields,
+            "restates": [f for f in ("legend", "declared", "outside_values") if f in fields],
             "why": f"the year's legend {_legend_json(want)} names the classes of the stack "
                    f"{situation.get('stack')!r}, {_legend_json(have)}, under other codes or "
                    "spellings, so the platform rewrites the cells to the stack's codes at "
                    "ingest; legend and declared describe the file as it lands"}
 
 
-def _proposed_by_order(have: dict, want: dict) -> str | None:
+def _proposed_by_order(have: dict, want: dict, tail: tuple = ("", "")) -> str | None:
     """When the labels differ but the classes are as many: the file's codes paired with
     the stack's — by label where one matches, else in code order — for the contributor to
     CONFIRM, never applied."""
@@ -357,6 +403,7 @@ def _proposed_by_order(have: dict, want: dict) -> str | None:
     return (f"the proposed mapping, to CONFIRM with the contributor before it is used: {shown} "
             f"— if they confirm it, resubmit the same link with recode: {_text(moves)}, legend: "
             f"{_legend_json(have)} and declared valid_min {min(have)}, valid_max {max(have)}"
+            f"{tail[0]}{tail[1]}"
             if moves else
             f"the proposed mapping, to CONFIRM with the contributor before it is used: {shown} "
             f"— if they confirm it, resubmit with the stack's legend {_legend_json(have)}")
@@ -372,18 +419,22 @@ def suggest(situation: dict) -> str | None:
     if event == "stack_legend_mismatch":
         have, want = situation["have"], situation["want"]
         rc = _by_label(have, want)
+        nod, ov = tail = _stack_words(situation, m)
         if rc is not None:
             moves = {a: b for a, b in rc.items() if a != b}
             lo, hi = min(have), max(have)
+            nod, ov = tail if moves else ("", "")      # no recode, no cell rewritten
             return (f"resubmit the same link with recode: {_text(moves)}, legend: "
-                    f"{_legend_json(have)} and declared valid_min {lo}, valid_max {hi} (the file "
-                    "as it lands) — the platform rewrites the cells at ingest, nothing to do by "
-                    "hand")
+                    f"{_legend_json(have)} and declared valid_min {lo}, valid_max {hi}{nod}{ov} "
+                    "(the file as it lands, as the stack's years do) — the platform rewrites the "
+                    "cells at ingest, nothing to do by hand")
         said = (f"or resubmit the same link with recode: {{<code in the file>: <the stack's "
-                f"code>, ...}} and the stack's legend {_legend_json(have)} — ASK the contributor "
+                f"code>, ...}} and the stack's legend {_legend_json(have)}"
+                + (f", declared{nod.lstrip(',')}" if nod else "") + ov
+                + " — ASK the contributor "
                 "which of the stack's classes each of the file's codes is (never guess); the "
                 "platform rewrites the cells at ingest")
-        order = _proposed_by_order(have, want)
+        order = _proposed_by_order(have, want, tail)
         return f"{said}; {order}" if order else said
     if event == "duplicate_labels":
         legend = situation["legend"]

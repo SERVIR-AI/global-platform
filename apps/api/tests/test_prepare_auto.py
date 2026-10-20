@@ -562,9 +562,11 @@ def test_a_year_whose_labels_are_the_stacks_under_other_codes_recodes_itself(env
     log("OUTPUT", out.get("message"))
     assert out["status"] == "approved", out
     pa = out["prepared_automatically"][0]
+    # the stack's nodata (3) and outside values ([3]) as the 1956 year carries them
     assert pa["fields"] == {"recode": {10: 1, 20: 2}, "legend": {1: "Mangrove", 2: "Non-mangrove"},
-                            "declared": {**decl, "valid_min": 1, "valid_max": 2}}
-    assert pa["given"] == {"legend": legend, "declared": decl}
+                            "declared": {**decl, "valid_min": 1, "valid_max": 2, "nodata": 3},
+                            "outside_values": [3]}
+    assert pa["given"] == {"legend": legend, "declared": decl, "outside_values": [-128]}
     assert "names the classes of the stack 'landcover_gulf', {1: Mangrove, 2: Non-mangrove}, " \
            "under other codes or spellings" in pa["why"]
     cat = tiffs.catalog()
@@ -583,8 +585,11 @@ def test_a_year_whose_labels_are_the_stacks_under_other_codes_recodes_itself(env
     mine, theirs = (get_settings().cache_dir / cat[f"{sid}_1985"]["local_path"]
                     for sid in ("landcover_gulf", "landcover_twin"))
     with rasterio.open(mine) as a, rasterio.open(theirs) as b:
-        assert np.array_equal(a.read(1), b.read(1)) and a.nodata == b.nodata == -128
-        assert set(np.unique(a.read(1))) == {-128, 1, 2}
+        assert np.array_equal(a.read(1), b.read(1)) and a.nodata == b.nodata == 3
+        assert set(np.unique(a.read(1))) == {3, 1, 2}
+    for y in (1956, 1985):                   # the year lands as the stack's years do
+        assert cat[f"landcover_gulf_{y}"]["outside_values"] == [3]
+        assert schema.schema_for(f"landcover_gulf_{y}")["nodata"] == 3
     assert int((hand85 == 1).sum()) > 0
     assert _no_leftovers(env)
 

@@ -333,7 +333,8 @@ def test_the_1985_and_2014_years_join_the_1956_stack_from_their_own_links(env, m
     assert out["status"] == "declined" and host.asked("MANGLE_1985_RCLSS.IMG") == []
     said = out["problems"][0]
     assert ("resubmit the same link with recode: {10: 1, 20: 2}, legend: {1: Mangrove, 2: "
-            "Non-mangrove} and declared valid_min 1, valid_max 2") in said
+            "Non-mangrove} and declared valid_min 1, valid_max 2, nodata 3 and outside_values: "
+            "[3] (the file as it lands, as the stack's years do)") in said     # the 1956 year's
     assert "nothing to do by hand" in said
 
     # the agent fills the proposed fields — and only the person's own choices stay theirs

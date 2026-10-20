@@ -51,4 +51,6 @@ def test_a_map_service_description_is_named_not_read_as_a_raster(log):
 def test_a_drive_folder_link_says_what_a_private_or_missing_folder_means():
     said = fetch_policy.check_url("https://drive.google.com/drive/folders/1PLJZMSjFvMlFjwjghWsxTVYdopvKukk7")
     text = " ".join(said)
-    assert "FOLDER link" in text and "not shared or the link is wrong" in text and ".zip" in text
+    assert "FOLDER link" in text and "not shared or the link is wrong" in text
+    assert text.startswith("this is a Google Drive FOLDER link: give the link of the file inside it")
+    assert "one file per contribution" not in text and ".zip" not in text
