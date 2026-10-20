@@ -712,7 +712,16 @@ def _geocoded(place, cap=None):
     center = _best_center(results)
     canonical = center["display_name"].split(",")[0]
     if canonical.strip().lower() != place.strip().lower():   # typo -> retry corrected name
-        retry = _search(canonical)
+        # A name the geocoder holds only by leaving words out is another place:
+        # 'Estero Puntarenas' -> 'Estero' answered for Estero, Florida.
+        dropped = _dropped_words(place, canonical, _country_of(center))
+        if dropped:
+            raise ValueError(
+                f"could not find '{place}': the geocoder's nearest match is '{canonical}' "
+                f"({center['display_name']}), which leaves out '{' '.join(dropped)}' of the "
+                "name asked, so it is not taken as the place")
+        # ...and a respelling is looked for only in the country of the first answer.
+        retry = [d for d in _search(canonical) if _country_of(d) == _country_of(center)]
         hit = _under_cap_admin(retry, area_cap)
         if hit:
             return (hit[0], hit[1], hit[2],
@@ -745,6 +754,22 @@ def _geocoded(place, cap=None):
                f"boundary of {found}: the geocoder gave a point and no admin or "
                "protected-area boundary for it")
     return (_km2(g), name, g, how, True)
+
+
+def _country_of(d) -> str:
+    """A geocoder result's country: the last part of its English display name."""
+    return _key(str(d.get("display_name") or "").rsplit(",", 1)[-1])
+
+
+def _dropped_words(asked, found, country="") -> list:
+    """Words of the asked name (before any comma) that `found` leaves out when every
+    word of `found` is one of them — 'Estero Puntarenas' -> 'Estero'. An administrative
+    noun or the result's own country is not part of a name; a respelling
+    ('Batambang') or a translation ('Golfo de Nicoya') leaves nothing out."""
+    want, got = _key(str(asked).partition(",")[0]).split(), _key(found).split()
+    if not got or not set(got) <= set(want):
+        return []
+    return [w for w in want if w not in got and w not in _ADMIN_NOUNS and w not in country.split()]
 
 
 def _search(place):
@@ -1067,8 +1092,12 @@ def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=N
         # resolver for that would re-fetch every cached area's OSM layers.
         legacy_box = (cached is not None and "approximate" not in cached
                       and str(cached.get("how") or "").startswith(f"{RADIUS_KM:.0f} km radius box"))
+        # ...and so is a 'correction' that left words of the name out (another place).
+        dropped = cached is not None and any(
+            _dropped_words(a, b) for a, b in
+            re.findall(r"\(corrected '(.*?)' -> '(.*?)'\)", str(cached.get("how") or "")))
         if cached is not None and place is not None \
-                and (int(cached.get("resolver", 0)) < RESOLVER_VERSION or legacy_box):
+                and (int(cached.get("resolver", 0)) < RESOLVER_VERSION or legacy_box or dropped):
             # The cache is keyed on the query string, so a resolution made by an older,
             # wronger resolver is served forever. "Battambang Province" kept returning a
             # records office long after the geocoder learned not to pick one. Stamp the
