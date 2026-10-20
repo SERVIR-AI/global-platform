@@ -279,7 +279,19 @@ def pick_member(names: list[str], member: str | None, quoted: str) -> tuple[str,
                       f"({_listed(rasters)}) — name the one to contribute with clip_member, e.g. "
                       f"clip_member: {rasters[0]!r} (or end the url with '#{rasters[0]}'), and "
                       "submit each one you need as its own layer; for tiles, pick the one that "
-                      "covers your area")
+                      "covers your area" + _proposed(rasters, quoted))
+
+
+def _proposed(rasters: list[str], quoted: str) -> str:
+    """What the server's preparation ops (contrib/prepare) propose for a zip of several
+    rasters ('; ' and the proposal), or ''."""
+    try:
+        from . import prepare
+        said = prepare.suggest({"event": "zip_of_rasters", "kind": "raster", "manifest": {},
+                                "url": quoted, "rasters": list(rasters)})
+    except Exception:                       # a suggestion never breaks a decline
+        said = None
+    return f"; {said}" if said else ""
 
 
 def member_head(container, member: str, quoted: str) -> bytes:
@@ -551,7 +563,8 @@ def ask_for_clip(url: str, cap: int, member: str | None = None, size: int | None
                 inside = zip_rasters(names)
                 if not (member or frag) and len(inside) != 1:
                     zipped = (f" It is a zip of {len(inside):,} rasters ({_listed(inside)}): ask "
-                              "which one too, and give it as clip_member.")
+                              "which one too, and give it as clip_member"
+                              + _proposed(inside, quoted) + ".")
             except (ClipRefused, fetch_policy.FetchRefused):
                 pass
     return ask_text(big) + zipped
