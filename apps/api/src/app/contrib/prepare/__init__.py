@@ -102,6 +102,10 @@ STALE_SECONDS = 6 * 3600     # a directory a crashed worker left behind
 # Who hears the step a preparation is on: a callable taking the step's name, set by
 # contrib/jobs.py for the thread running a submission (None: nobody asks).
 PROGRESS: contextvars.ContextVar = contextvars.ContextVar("grp_prep_progress", default=None)
+# What a preparation waits for before it starts: a callable returning once one of the
+# preparation slots is the submission's own, set by contrib/jobs.py — a preparation the
+# platform applies by itself may start in a lane not bounded for one (None: no wait).
+GATE: contextvars.ContextVar = contextvars.ContextVar("grp_prep_gate", default=None)
 
 
 def _tell(step: str) -> None:
@@ -607,6 +611,9 @@ def run(kind: str, manifest: dict, *, cap: int, folder, source=None, finish=None
     todo = requested(kind, manifest)
     if not todo:
         return None
+    gate = GATE.get()
+    if gate is not None:
+        gate()
     from ...config import get_settings
     s = get_settings()
     root = Path(s.cache_dir) / "prep"

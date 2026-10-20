@@ -9,13 +9,17 @@ contribute_status(<job id>) says the step it is on, then returns the submission'
 final result (with the real contribution_id). A client that never asks loses nothing:
 the submission lands, or is declined, as it would have.
 
-Lanes: a submission that declares a preparation (contrib/prepare) runs in the
-preparation lane — at most grp_prep_max_jobs at once (a rasterise can peak near 3 GB),
-the rest queued in order with their position; any other in the plain lane
-(PLAIN_WORKERS at once), so a document never waits behind a rasterise. Workers are
-daemon threads outside the tool call's own thread pool: the call returning, or its
-client going away, stops nothing. The job runs in a copy of the calling context with the
-submitter bound, as the call itself would have.
+Lanes: a submission that declares a preparation (contrib/prepare), or whose url's shape
+alone has the platform prepare it by itself (prepare.detect: a Drive folder, a service's
+query), runs in the preparation lane — at most grp_prep_max_jobs at once (a rasterise can
+peak near 3 GB), the rest queued in order with their position; any other in the plain
+lane (PLAIN_WORKERS at once), so a document never waits behind a rasterise. A preparation
+the platform applies by itself only after a decline (prepare.auto: an archive over the
+cap read whole, tiles joined) starts in the plain lane: it waits for one of the same
+grp_prep_max_jobs slots first (prepare.GATE), so at most that many prepare at once.
+Workers are daemon threads outside the tool call's own thread pool: the call returning,
+or its client going away, stops nothing. The job runs in a copy of the calling context
+with the submitter bound, as the call itself would have.
 
 State: table contribution_jobs in the store the gate already uses (sqlite), so any
 thread — or a status call long after — reads it. Only the submitter's identity sees a
@@ -50,6 +54,7 @@ STALE = 120                 # a job no process has beaten for this long was inte
 INSTANCE = os.urandom(8).hex()
 UNFINISHED = ("queued", "running")
 FIRST_STEP = "checking the submission"
+SLOT_STEP = "waiting for a free slot to prepare it in"
 
 _ID = re.compile(r"[0-9a-f]{16}")
 _lock = threading.Lock()
@@ -68,6 +73,7 @@ class _Lane:
         self.q: queue.Queue = queue.Queue()
         self.workers: list = []
         self.lock = threading.Lock()
+        self.slots = threading.Semaphore(self.size)   # preparations at once, any lane
 
     def put(self, fn) -> Future:
         fut: Future = Future()
@@ -103,7 +109,9 @@ def _lane(name: str) -> _Lane:
 
 def _sorted(kind: str, manifest) -> tuple[str, str]:
     """(the submission's kind as staging.submit will read it, its lane): 'prepare' when
-    it declares a preparation — the lane bounded for memory — else 'plain'."""
+    it declares a preparation, or its url's shape has the platform apply one by itself
+    (prepare.detect, nothing fetched) — the lane bounded for memory — else 'plain'."""
+    from ..config import get_settings
     try:
         m = manifest
         if isinstance(m, str):
@@ -111,7 +119,9 @@ def _sorted(kind: str, manifest) -> tuple[str, str]:
         if not isinstance(m, dict):
             return str(kind or ""), "plain"
         k = str(kind or m.get("kind") or "")
-        return k, ("prepare" if prepare.requested(k, m) else "plain")
+        prepares = prepare.requested(k, m) or (get_settings().grp_prep_auto
+                                               and prepare.detect(k, m))
+        return k, ("prepare" if prepares else "plain")
     except Exception:
         return str(kind or ""), "plain"
 
@@ -299,6 +309,20 @@ def _run(ident: str, kind: str, manifest, caller: identity.Caller):
     except sqlite3.Error:
         pass
     prepare.PROGRESS.set(lambda step: _set_step(ident, step))
+    held: list = []
+
+    def gate() -> None:
+        """One of the preparation slots, this job's own from its first preparation until
+        it ends (the prepared file is still read and checked after the steps)."""
+        if held:
+            return
+        slots = _lane("prepare").slots
+        if not slots.acquire(blocking=False):
+            _set_step(ident, SLOT_STEP)
+            slots.acquire()
+        held.append(slots)
+
+    prepare.GATE.set(gate)
     fetch_policy.PATIENT.set(True)       # nobody is waiting on this connection now
     token = identity.bind(caller)
     try:
@@ -309,6 +333,8 @@ def _run(ident: str, kind: str, manifest, caller: identity.Caller):
         raise
     finally:
         identity.unbind(token)
+        for slots in held:
+            slots.release()
     _finish(ident, out)
     return out
 

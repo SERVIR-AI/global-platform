@@ -236,9 +236,10 @@ class Settings(BaseSettings):
     # GRP_PREP_AUTO=0 turns it off: every such case is then a decline proposing the field.
     grp_prep_auto: bool = True
     # Submissions run in the background (contrib/jobs.py): at most GRP_PREP_MAX_JOBS that
-    # declare a preparation at once — a rasterise can peak near 3 GB — the rest queued in
-    # order; one still working after GRP_PREP_WAIT_SECONDS answers 'preparing' with an id
-    # contribute_status follows (MCP clients abandon a call at about a minute).
+    # prepare at once (declared, or applied by the platform itself) — a rasterise can peak
+    # near 3 GB — the rest queued in order; one still working after GRP_PREP_WAIT_SECONDS
+    # answers 'preparing' with an id contribute_status follows (MCP clients abandon a call
+    # at about a minute).
     grp_prep_max_jobs: int = 2
     grp_prep_wait_seconds: float = 40
     # DEVELOPMENT ONLY: let contributions fetch from private/loopback addresses, so a
