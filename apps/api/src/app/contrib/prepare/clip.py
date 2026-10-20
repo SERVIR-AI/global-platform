@@ -9,10 +9,12 @@ portal download instead; a WFS layer was asked for one box by a hand-built reque
 Now the link goes in as it is, with `clip` (the area, as a raster's clip: a bbox, a
 place or a contributed area name) or `whole: true`. A file is downloaded whole, streamed
 to disk under the preparation budget, decompressed or unpacked when it must be, and read
-feature by feature; the features that intersect the box are kept whole (never cut at its
-edge), copied as they are, and the gate's own reader converts what is kept. A service's
-query gets the box added and is paged until every feature it counts is in. The record
-keeps the box, every input's sha256 and, for a service, every page.
+feature by feature; the features that intersect the box are kept whole (cut at its edge
+only with `cut: true`, the contributor's choice), copied as they are, and the gate's own
+reader converts what is kept. A service's query gets the box added and is paged until
+every feature it counts is in. The record keeps the box, every input's sha256 and, for a
+service, every page. A service url or a gzipped layer given with neither is read whole
+by the platform itself (detect); the area is always the contributor's to give.
 """
 
 from __future__ import annotations
@@ -46,6 +48,13 @@ FIELDS = {
              "of several layers: name the one with layer_name) is downloaded whole, streamed "
              "to disk, and only that layer is kept. Nothing is filtered (with clip, only the "
              "area's features); the size cap applies to the layer as stored",
+    "cut": "true, with `clip`, to CUT the features that cross the area's edge at it (shapely, "
+           "on longitude/latitude) instead of keeping them whole — for a layer whose features "
+           "reach far beyond the area (a country's admin polygons, a national river network) "
+           "and would not fit the cap whole. Areas and lengths inside the area are exact; a "
+           "cut feature's own attributes (an area or length column, a total) still describe "
+           "the whole feature. The contributor's choice — ASK them, never set it unasked; "
+           "the record and every citation say which features were cut",
 }
 
 ARCGIS_PAGE = 2000           # features per request at most (the server's own limit if lower)
@@ -110,6 +119,12 @@ def validate(manifest) -> list[str]:
         problems += remote_clip.box_problems(m["clip"])
     if m.get("whole") is not None and m.get("whole") is not True:
         problems.append(f"whole must be true (or left out) — got {m['whole']!r}")
+    if m.get("cut") is not None:
+        if m.get("cut") is not True:
+            problems.append(f"cut must be true (or left out) — got {m['cut']!r}")
+        elif m.get("clip") is None:
+            problems.append("cut cuts the features at the clip's edge — give clip: the area "
+                            "(ASK the contributor for it; never guess one), or drop cut")
     svc = service(m.get("url"))
     if svc and svc["type"] == "wfs":
         problems += _wfs_problems(svc, m.get("clip"))
@@ -134,12 +149,114 @@ def run(ctx):
     if own:
         svc = service(m["url"])
         if svc is not None:
-            return _paged(ctx, svc, box, where)
+            return _cut_at_edge(ctx, _paged(ctx, svc, box, where), box, where)
         ctx.begin("fetch")                        # the download is a step of its own
         ctx.path = _download(ctx, str(m["url"]).split("#", 1)[0])
         ctx.filename = ctx.steps[-1]["inputs"].get("filename")
         ctx.begin(NAME)
-    return _from_file(ctx, box, where, own)
+    return _cut_at_edge(ctx, _from_file(ctx, box, where, own), box, where)
+
+
+def _edge(ctx) -> str:
+    return ("then cut at its edge (cut: true)" if ctx.manifest.get("cut")
+            else "whole features, not cut at its edge")
+
+
+NEIGHBOURS = ("the clip is a box: it keeps every feature reaching into it, so a place's "
+              "bounding box keeps its neighbours' features too — every pack clips to its own "
+              "boundary when it measures, so those do not count there")
+
+
+def _family(part, dim: int):
+    """The pieces of an intersection of the original's dimension (a polygon cut at a box
+    edge can leave a line along it), joined as one geometry; None when nothing is left."""
+    import shapely
+    from shapely.geometry import MultiLineString, MultiPoint, MultiPolygon
+    pieces = [g for g in shapely.get_parts(part)
+              if not g.is_empty and shapely.get_dimensions(g) == dim]
+    for g in list(pieces):
+        if g.geom_type.startswith("Multi") or g.geom_type == "GeometryCollection":
+            pieces.remove(g)
+            pieces += [x for x in shapely.get_parts(g) if shapely.get_dimensions(x) == dim]
+    if not pieces:
+        return None
+    if len(pieces) == 1:
+        return pieces[0]
+    return {0: MultiPoint, 1: MultiLineString, 2: MultiPolygon}[dim](pieces)
+
+
+def _cut_at_edge(ctx, made, box, where):
+    """With cut: true, the kept features cut at the clip box's edge: the file read by the
+    gate's own reader (graph/geo/vecio: any CRS to lon/lat, its repairs), each feature
+    reaching outside the box replaced by its part inside, written as GeoJSON."""
+    m = ctx.manifest
+    if box is None or not m.get("cut"):
+        return made
+    import shapely
+    from shapely.geometry import mapping, shape
+    from ...graph.geo import vecio
+    from .. import remote_clip
+    from . import PrepRefused, PreparedFile, size_text
+    quoted = _quoted(ctx)
+    size = os.path.getsize(made.path)
+    if size > remote_clip.RAW_FACTOR * ctx.cap:
+        raise PrepRefused(f"the features of {quoted} that intersect the clip box "
+                          f"{_box_text(box)}{where} are {size_text(size)} before cutting, far "
+                          f"over the {size_text(ctx.cap)} cap — ask the contributor for a "
+                          "smaller area (clip) and resubmit with it; never guess one")
+    ctx.begin("cut")
+    with open(made.path, "rb") as f:
+        raw = f.read()
+    name = ctx.filename if ctx.filename and os.path.splitext(ctx.filename)[1].lower() == \
+        os.path.splitext(made.path)[1].lower() else os.path.basename(made.path)
+    try:
+        gj, read_notes = vecio.to_geojson(raw, name, m.get("layer_name"))
+    except ValueError as exc:
+        raise PrepRefused(f"{quoted}: {exc}") from None
+    del raw
+    os.unlink(made.path)
+    fc = json.loads(gj)
+    del gj
+    kept, cut, dropped = [], 0, 0
+    for k, ft in enumerate(fc.get("features") or []):
+        if k % 512 == 0:
+            ctx.check_time()
+        g = ft.get("geometry") if isinstance(ft, dict) else None
+        if not g or not g.get("coordinates") and not g.get("geometries"):
+            kept.append(ft)                       # the gate counts and drops it, as ever
+            continue
+        try:
+            geom = shape(g)
+            if box.poly.contains(geom):
+                kept.append(ft)
+                continue
+        except Exception:
+            kept.append(ft)                       # the gate's reader says what is wrong
+            continue
+        try:
+            part = geom.intersection(box.poly)
+        except Exception:                         # an invalid polygon: repaired, then cut
+            part = shapely.make_valid(geom).intersection(box.poly)
+        part = _family(part, int(shapely.get_dimensions(geom)))
+        if part is None:
+            dropped += 1
+            continue
+        cut += 1
+        kept.append({**ft, "geometry": mapping(part)})
+    out = ctx.tmp(".geojson", "cut")
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump({"type": "FeatureCollection", "features": kept}, f, ensure_ascii=False)
+    note = (f"cut {cut:,} of the {len(kept) + dropped:,} features at the clip box's "
+            f"edge {_box_text(box)}{where} (shapely, on longitude/latitude"
+            + (f"; {dropped:,} only touched it and were left out" if dropped else "")
+            + "): areas and lengths inside the box are exact; a cut feature's own attributes "
+            "(an area or length column, a total) still describe the whole feature, not the "
+            "part kept")
+    inputs = dict((made.provenance or {}).get("inputs") or {})
+    inputs["cut"] = {"features_cut": cut, "left_out": dropped, "features": len(kept)}
+    ctx.record["cut"] = True
+    return PreparedFile(path=out, notes=[*made.notes, *(read_notes or []), note],
+                        provenance={"inputs": inputs})
 
 
 def _download(ctx, url: str) -> str:
@@ -263,7 +380,7 @@ def _done(ctx, box, where, out, info, fmt, family, fetched, said=(), member=None
     read_as = "downloaded whole (streamed to disk)" if fetched is not None else "prepared before"
     if box is not None:
         note = (f"kept the {kept:,} of {read:,} features of {fmt} that intersect the clip box "
-                f"{_box_text(box)}{where} — whole features, not cut at its edge; {got}")
+                f"{_box_text(box)}{where} — {_edge(ctx)}; {got}")
         ctx.record["read"] = f"{read_as}, filtered to the clip box"
     else:
         count = f" ({kept:,} features)" if kept is not None else ""
@@ -279,7 +396,8 @@ def _done(ctx, box, where, out, info, fmt, family, fetched, said=(), member=None
               "features": {"read": read, "kept": kept}}
     if info.get("searched"):
         inputs["searched"] = info["searched"]
-    return PreparedFile(path=out, notes=[note, *said], provenance={"inputs": inputs})
+    return PreparedFile(path=out, notes=[note, *said, *([NEIGHBOURS] if box is not None else [])],
+                        provenance={"inputs": inputs})
 
 
 # --------------------------------------------------------------------------- services
@@ -524,11 +642,13 @@ def _paged(ctx, svc, box, where):
             f"request(s) of up to {info['page_size']:,} ({info['paged_by']}) — {counted}")
     if box is not None:
         note += (f"; only those intersecting the clip box {_box_text(box)}{where} were asked "
-                 "for — whole features, not cut at its edge")
+                 f"for — {_edge(ctx)}")
     notes = [note]
     if info.get("output_format_replaced"):
         notes.append(f"asked for GeoJSON pages instead of the url's outputFormat "
                      f"{info['output_format_replaced']} (pages are joined as GeoJSON)")
+    if box is not None:
+        notes.append(NEIGHBOURS)
     ctx.record["read"] = f"paged: {k} request(s) of up to {info['page_size']:,} features"
     inputs = {"url": _quoted(ctx), "service": info["service"], "query": info["query"],
               "page_size": info["page_size"], "paged_by": info["paged_by"],
@@ -547,11 +667,93 @@ def _cut(error) -> bool:
     return vecio._TRUNCATED.split("{", 1)[0] in str(error or "")
 
 
+_VECTOR_GZ = re.compile(r"\.(?:gpkg|geojson|json|zip)\.gz$", re.I)
+
+
+def _gz_name(url) -> bool:
+    """A url whose path names a gzipped vector file (.gpkg.gz, .geojson.gz, .zip.gz)."""
+    try:
+        return bool(_VECTOR_GZ.search(urlparse(str(url or "").strip()).path or ""))
+    except ValueError:
+        return False
+
+
+_WHOLE_SERVICE = ("the url is {what}, so the platform pages it until every feature the server "
+                  "counts is in (its record limit would otherwise cut it short)")
+_WHOLE_GZ = ("the url is a gzipped layer, so the platform downloads it (streamed to disk), "
+             "decompresses it and reads it whole")
+
+
+def detect(kind: str, manifest) -> dict | None:
+    """A vector's url that is a service's layer or query (ArcGIS FeatureServer/MapServer,
+    a WFS GetFeature) or a gzipped layer file, given with no area: read whole — paging
+    or decompressing is no person's choice. The area (clip) always is."""
+    if kind not in KINDS:
+        return None
+    url = manifest.get("url")
+    svc = service(url)
+    if svc is not None:
+        low = {k.lower(): v for k, v in svc["params"]}
+        if svc["type"] == "wfs" and low.get("request", "").lower() != "getfeature":
+            return None                           # a capabilities request: its own words say so
+        what = ("an ArcGIS FeatureServer/MapServer layer" if svc["type"] == "arcgis"
+                else "a WFS GetFeature request")
+        return {"fields": {"whole": True}, "why": _WHOLE_SERVICE.format(what=what)}
+    if _gz_name(url):
+        return {"fields": {"whole": True}, "why": _WHOLE_GZ}
+    return None
+
+
+_WHOLE_BIG = ("the file is over the size cap as a download, so the platform downloads it "
+              "whole under its preparation budget (streamed to disk) and keeps its layer; the "
+              "cap applies to the layer as stored")
+
+
+def auto(situation: dict) -> dict | None:
+    """A vector file over the cap as a download (an archive of every admin level): read
+    whole under the preparation budget — which layer, if it holds several, is still asked.
+    A vector the gate could not read because it is gzipped (a link that does not say so
+    in its name): decompressed and read whole."""
+    from . import _features
+    if situation.get("kind") not in KINDS:
+        return None
+    if situation.get("event") == "vector_file_too_large":
+        return {"fields": {"whole": True}, "why": _WHOLE_BIG}
+    if situation.get("event") != "vector_unreadable":
+        return None
+    head = situation.get("head") or b""
+    if not isinstance(head, (bytes, bytearray)) or head[:2] != _features.GZIP_MAGIC:
+        return None
+    return {"fields": {"whole": True}, "why": _WHOLE_GZ}
+
+
 def suggest(situation: dict) -> str | None:
-    """A truncated service export: page it (whole: true) or ask for an area (clip)."""
+    """A truncated service export: page it (whole: true) or ask for an area (clip). A
+    layer over the cap: features cut at the area's edge (cut: true), the person's choice."""
     m = situation.get("manifest") or {}
+    if situation.get("kind") not in KINDS:
+        return None
+    if situation.get("event") == "vector_too_large":
+        if m.get("clip") is None:
+            return ("the clip keeps each feature that reaches into the area WHOLE, so a feature "
+                    "reaching far beyond it (an admin polygon, a long river) is kept entire; "
+                    "with cut: true they are cut at the area's edge (areas and lengths inside "
+                    "it stay exact, a cut feature's own totals do not) — ASK the contributor "
+                    "whether to cut, never set it unasked")
+        if not m.get("cut"):
+            return ("or resubmit with cut: true — the features crossing the clip's edge are cut "
+                    "at it (areas and lengths inside the area stay exact, a cut feature's own "
+                    "totals do not) — ASK the contributor whether to cut or to give a smaller "
+                    "area; never guess")
+        return None
     if any(m.get(f) is not None for f in FIELDS):
         return None
+    if situation.get("event") == "vector_file_too_large":
+        return ("or resubmit the same link with whole: true — the platform downloads it whole "
+                "under its preparation budget (streamed to disk) and keeps the one layer "
+                "(layer_name names it in an archive of several); the cap applies to the layer "
+                "as stored — or with clip: <the area> to keep only its features there (ASK the "
+                "contributor for the area; never guess one)")
     if situation.get("event") != "vector_unreadable" or not _cut(situation.get("error")):
         return None
     if service(situation.get("url") or m.get("url")):

@@ -313,10 +313,13 @@ def test_a_preparation_field_says_what_it_is_for_on_the_wrong_kind_or_namespace(
 
 
 # --------------------------------------------------------------------------- 2. the real case
-def test_the_1985_and_2014_years_join_the_1956_stack_from_their_own_links(env, log):
-    """The decline proposes the exact recode before fetching; the manifest the agent
-    builds from it lands; the stored files equal the hand-recoded ones cell for cell, the
-    pack's mangrove km² are the hand-recoded stack's, and every step is on the record."""
+def test_the_1985_and_2014_years_join_the_1956_stack_from_their_own_links(env, monkeypatch, log):
+    """The decline proposes the exact recode before fetching (the platform's own
+    preparation off, GRP_PREP_AUTO=0 — on, it applies the recode itself: test_prepare_auto);
+    the manifest the agent builds from it lands; the stored files equal the hand-recoded
+    ones cell for cell, the pack's mangrove km² are the hand-recoded stack's, and every
+    step is on the record."""
+    monkeypatch.setattr(get_settings(), "grp_prep_auto", False)
     y56, y85, y14, hand85, hand14 = _catie()
     host = env["host"]
     _land_1956(env, "landcover_gulf")

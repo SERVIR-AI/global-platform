@@ -274,28 +274,117 @@ def _mangled(label) -> str:
     return " ".join(str(label).lower().split())
 
 
+def _same(label) -> str:
+    """A label as two legends are compared: case, accents, whitespace and punctuation
+    aside ('Non-mangrove' is 'non mangrove', 'Bosque Húmedo' is 'bosque humedo')."""
+    import re
+    import unicodedata
+    s = "".join(c for c in unicodedata.normalize("NFKD", str(label))
+                if not unicodedata.combining(c))
+    return " ".join(re.sub(r"[\W_]+", " ", s.casefold()).split())
+
+
+def _by_label(have: dict, want: dict) -> dict | None:
+    """{file code: stack code} when every label of the file's legend is one of the stack's
+    (as _same compares them) and the two name the same classes; else None."""
+    code_of = {_same(v): k for k, v in have.items()}
+    rc = {k: code_of.get(_same(v)) for k, v in want.items()}
+    if all(c is not None for c in rc.values()) and set(rc.values()) == set(have):
+        return rc
+    return None
+
+
+def _landing(have: dict, want: dict, m: dict) -> dict:
+    """The fields that land a year coded `want` as its stack's `have`: the recode, the
+    stack's legend as the stack writes it, the declared range of the file as it lands."""
+    rc = _by_label(have, want)
+    moves = {a: b for a, b in rc.items() if a != b}
+    out = {}
+    if moves:
+        out["recode"] = moves
+    if m.get("legend") != have:
+        out["legend"] = dict(sorted(have.items()))
+    decl = m.get("declared") if isinstance(m.get("declared"), dict) else None
+    if moves and decl is not None:
+        landed = {**decl, "valid_min": min(have), "valid_max": max(have)}
+        if landed != decl:
+            out["declared"] = landed
+    return out
+
+
+def auto(situation: dict) -> dict | None:
+    """A year whose legend names its stack's classes under other codes (the labels the
+    same, case, accents, whitespace and punctuation aside): the recode, the stack's legend
+    and the declared range as it lands — what each code means is the labels', no person's
+    choice. Labels that differ stay a question (suggest)."""
+    m = situation.get("manifest") or {}
+    if (situation.get("kind") not in KINDS or situation.get("event") != "stack_legend_mismatch"
+            or m.get("recode") is not None):
+        return None
+    have, want = situation["have"], situation["want"]
+    rc = _by_label(have, want)
+    if rc is None or len(rc) != len(have) or len({_same(v) for v in have.values()}) != len(have):
+        return None                       # two codes for one class, here or in the stack: theirs
+    fields = _landing(have, want, m)
+    if not fields:
+        return None
+    return {"fields": fields, "restates": [f for f in ("legend", "declared") if f in fields],
+            "why": f"the year's legend {_legend_json(want)} names the classes of the stack "
+                   f"{situation.get('stack')!r}, {_legend_json(have)}, under other codes or "
+                   "spellings, so the platform rewrites the cells to the stack's codes at "
+                   "ingest; legend and declared describe the file as it lands"}
+
+
+def _proposed_by_order(have: dict, want: dict) -> str | None:
+    """When the labels differ but the classes are as many: the file's codes paired with
+    the stack's — by label where one matches, else in code order — for the contributor to
+    CONFIRM, never applied."""
+    if len(want) != len(have):
+        return None
+    code_of = {_same(v): k for k, v in have.items()}
+    pairs, used = {}, set()
+    for k, v in sorted(want.items()):
+        c = code_of.get(_same(v))
+        if c is not None and c not in used:
+            pairs[k] = c
+            used.add(c)
+    left = [c for c in sorted(have) if c not in used]
+    for k in sorted(want):
+        if k not in pairs:
+            pairs[k] = left.pop(0)
+    shown = ", ".join(f"{k} '{want[k]}' -> {c} '{have[c]}'" for k, c in sorted(pairs.items()))
+    moves = {a: b for a, b in pairs.items() if a != b}
+    return (f"the proposed mapping, to CONFIRM with the contributor before it is used: {shown} "
+            f"— if they confirm it, resubmit the same link with recode: {_text(moves)}, legend: "
+            f"{_legend_json(have)} and declared valid_min {min(have)}, valid_max {max(have)}"
+            if moves else
+            f"the proposed mapping, to CONFIRM with the contributor before it is used: {shown} "
+            f"— if they confirm it, resubmit with the stack's legend {_legend_json(have)}")
+
+
 def suggest(situation: dict) -> str | None:
     """The recode that resolves a decline, with the exact mapping — or, when what a code
     means is the contributor's to say, the question to ask them."""
     m = situation.get("manifest") or {}
-    if m.get("recode") is not None:
+    if situation.get("kind") not in KINDS or m.get("recode") is not None:
         return None                       # declared already: its own checks say what is wrong
     event = situation.get("event")
     if event == "stack_legend_mismatch":
         have, want = situation["have"], situation["want"]
-        code_of = {_mangled(v): k for k, v in have.items()}
-        rc = {k: code_of.get(_mangled(v)) for k, v in want.items()}
-        if all(c is not None for c in rc.values()) and set(rc.values()) == set(have):
+        rc = _by_label(have, want)
+        if rc is not None:
             moves = {a: b for a, b in rc.items() if a != b}
             lo, hi = min(have), max(have)
             return (f"resubmit the same link with recode: {_text(moves)}, legend: "
                     f"{_legend_json(have)} and declared valid_min {lo}, valid_max {hi} (the file "
                     "as it lands) — the platform rewrites the cells at ingest, nothing to do by "
                     "hand")
-        return (f"or resubmit the same link with recode: {{<code in the file>: <the stack's "
+        said = (f"or resubmit the same link with recode: {{<code in the file>: <the stack's "
                 f"code>, ...}} and the stack's legend {_legend_json(have)} — ASK the contributor "
                 "which of the stack's classes each of the file's codes is (never guess); the "
                 "platform rewrites the cells at ingest")
+        order = _proposed_by_order(have, want)
+        return f"{said}; {order}" if order else said
     if event == "duplicate_labels":
         legend = situation["legend"]
         first, rc = {}, {}

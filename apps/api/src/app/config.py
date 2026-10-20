@@ -230,6 +230,11 @@ class Settings(BaseSettings):
     grp_prep_op_seconds: int = 600
     grp_prep_max_cells: int = 4_000_000_000
     grp_prep_max_vertices: int = 50_000_000
+    # What the platform prepares BY ITSELF when no person's choice is involved (a Drive
+    # folder link for a vector: from_folder; a FeatureServer query: whole) — applied,
+    # said in the reply and kept on the record (contrib/prepare: detect, auto).
+    # GRP_PREP_AUTO=0 turns it off: every such case is then a decline proposing the field.
+    grp_prep_auto: bool = True
     # DEVELOPMENT ONLY: let contributions fetch from private/loopback addresses, so a
     # local dry run can serve test files from a local http server. Never set on a
     # deployed host — the fetch policy exists because the server sits on a shared

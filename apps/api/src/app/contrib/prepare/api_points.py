@@ -821,12 +821,35 @@ def _guess(doc) -> dict | None:
     return None
 
 
+def detect(kind: str, manifest) -> dict | None:
+    """A vector's url that is a preset API's query (GBIF's occurrence search, OBIS's
+    occurrences): paged to its end, one point per record — how the API pages is the
+    preset's, no person's choice. OBIS's /points (locations without attributes) is read
+    as the same query's records."""
+    if kind not in KINDS:
+        return None
+    name, fixed = _preset_for(str(manifest.get("url") or ""))
+    if not name:
+        return None
+    p = PRESETS[name]
+    if fixed:
+        return {"fields": {"api_points": name, "url": fixed}, "restates": ["url"],
+                "why": f"the url is {p['api']} answering the records' locations without their "
+                       f"attributes, so the platform reads the same query's records at "
+                       f"{p['host']}{p['path']} instead and pages them to their end on the "
+                       "server, one point per record keeping its own licence and attribution"}
+    return {"fields": {"api_points": name},
+            "why": f"the url is a query of {p['api']}, so the platform pages it to its end on "
+                   "the server, one point per record keeping its own licence and attribution"}
+
+
 def suggest(situation: dict) -> str | None:
     """For an answer that is a JSON API's records rather than a layer: the preset the url
     belongs to, or the generic form with the records' path and coordinate fields read
     from the answer itself — the paging is the API's to name, never guessed."""
     m = situation.get("manifest") or {}
-    if m.get("api_points") is not None or situation.get("event") != "not_features":
+    if (situation.get("kind") not in KINDS or m.get("api_points") is not None
+            or situation.get("event") != "not_features"):
         return None
     url = str(situation.get("url") or m.get("url") or "")
     name, fixed = _preset_for(url)

@@ -518,7 +518,8 @@ def test_a_layer_without_the_field_is_named_with_its_attributes(env):
     out = _submit("raster", _year(2025, url, clip=CLIP,
                                   rasterise=_rasterise(2025, field="CODIGO")))
     assert out["status"] == "declined"
-    assert out["problems"][0].startswith(f"no feature of the layer at {url} has an attribute "
+    assert out["problems"][0].startswith(f"missing required field 'rasterise.field': no "
+                                         f"feature of the layer at {url} has an attribute "
                                          "'CODIGO' — its attributes are C_USO, area_ha, depto, gid, usot")
     assert len(env["host"].asked("/geoserver/ows")) == 2          # said on the first page
     assert _no_leftovers(env)

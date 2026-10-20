@@ -373,8 +373,10 @@ def pick_shapefile(files: dict, layer_name: str | None, quoted: str) -> str:
                               f"holds: {', '.join(stems)} — set layer_name to one of them")
         return pick[0]
     if len(shps) > 1:
-        raise PrepRefused(f"the zip at {quoted} holds several shapefiles ({', '.join(stems)}) "
-                          "— name the one to contribute with layer_name")
+        raise PrepRefused(f"missing required field 'layer_name': the zip at {quoted} holds "
+                          f"several shapefiles ({', '.join(stems)}) — ASK the contributor which "
+                          "one to contribute (never guess) and resubmit with layer_name: <its "
+                          "name>; each layer is its own contribution")
     return shps[0]
 
 
@@ -583,9 +585,11 @@ def geopackage(ctx, path: str, layer_name: str | None, box: Box | None, out_path
                                   "layer_name to one of them")
             table, gcol, srs = pick[0]
         elif len(tables) > 1:
-            raise PrepRefused(f"the GeoPackage at {quoted} holds several feature tables ("
-                              + ", ".join(t[0] for t in tables) + ") — name the one to "
-                              "contribute with layer_name")
+            raise PrepRefused(f"missing required field 'layer_name': the GeoPackage at {quoted} "
+                              "holds several feature tables (" + ", ".join(t[0] for t in tables)
+                              + ") — ASK the contributor which one to contribute (never guess) "
+                              "and resubmit with layer_name: <its name>; each layer is its own "
+                              "contribution")
         else:
             table, gcol, srs = tables[0]
         crs = _gpkg_crs(con, srs)

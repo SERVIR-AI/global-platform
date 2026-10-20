@@ -347,10 +347,13 @@ def test_the_op_is_registered_from_its_module_and_its_field_reaches_the_vector_f
 
 
 # --------------------------------------------------------------------------- 2. GBIF, the real case
-def test_the_gbif_query_lands_every_record_not_one_page(env, log):
-    """The S2-GBIF case: the query url as delivered is declined with the exact field; with
-    api_points: gbif all 1,984 records land (7 pages of up to 300), each point with its
-    own licence; the 303 in the gulf box are the hand-built file's 303."""
+def test_the_gbif_query_lands_every_record_not_one_page(env, monkeypatch, log):
+    """The S2-GBIF case: the query url as delivered, with the platform's own preparation
+    off (GRP_PREP_AUTO=0; on, it applies api_points itself — test_prepare_auto), is
+    declined with the exact field; with api_points: gbif all 1,984 records land (7 pages
+    of up to 300), each point with its own licence; the 303 in the gulf box are the
+    hand-built file's 303."""
+    monkeypatch.setattr(get_settings(), "grp_prep_auto", False)
     host = env["host"]
     url = host.url("api.gbif.org", f"/v1/occurrence/search?{QUERY}")
     m = _layer("cr_gbif_mangrove_occ", url, name_field="species", group_field="species")
@@ -508,9 +511,12 @@ def test_a_wrong_preset_or_a_bad_form_is_declined_before_any_request(env):
 # --------------------------------------------------------------------------- 3. OBIS
 def test_the_obis_points_link_is_redirected_to_the_records_and_each_point_gets_its_rights(
         env, monkeypatch, log):
-    """The S2-OBIS case: /points (a bare MultiPoint) is declined with the records' url; with
-    api_points: obis every record lands (paged by `after`), each point carrying its
-    dataset's title and rights joined from the dataset endpoint on the same query."""
+    """The S2-OBIS case: /points (a bare MultiPoint) is declined with the records' url (the
+    platform's own preparation off, GRP_PREP_AUTO=0 — on, it reads the records itself:
+    test_prepare_auto); with api_points: obis every record lands (paged by `after`), each
+    point carrying its dataset's title and rights joined from the dataset endpoint on the
+    same query."""
+    monkeypatch.setattr(get_settings(), "grp_prep_auto", False)
     host = env["host"]
     monkeypatch.setitem(api_points.PRESETS["obis"], "paging",
                         {"after": "after", "after_field": "id", "limit": "size", "page_size": 1000})
