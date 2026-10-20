@@ -231,6 +231,16 @@ def check_url(url: str) -> list[str]:
     return problems
 
 
+def _pin(host: str):
+    """The address to connect to, itself checked: the name is resolved again here, and
+    an answer that turned private since check_url (DNS rebinding) is refused."""
+    addrs = _addresses(host)
+    bad = _refuse_private(host, addrs)
+    if bad:
+        raise FetchRefused(bad)
+    return addrs[0]
+
+
 def _session(hostname: str, scheme: str):
     """A requests session whose HTTPS connections present and verify `hostname`
     while the URL itself carries the pinned IP."""
@@ -421,7 +431,7 @@ def _fetch(url: str, cap: int, started: float, agent: str, dest: str | None = No
             raise FetchRefused("; ".join(problems))
         hops.append(current)
         parts = urlparse(current)
-        addr = _addresses(parts.hostname)[0]           # already verified global
+        addr = _pin(parts.hostname)
         host_header = parts.hostname + (f":{parts.port}" if parts.port else "")
         session = _session(parts.hostname, parts.scheme)
         quoted = _quote(current, url)
