@@ -2,25 +2,55 @@
 fetch it if missing, and what it represents. The route node uses the descriptions
 to pick which layer a question needs; ingest uses the entry to locate/download it.
 """
+import os
+
 import yaml
 
 from ...config import get_settings
+
+_BASE: dict = {}        # the merged, expanded hand + contributed catalog, keyed by both files' (mtime, size)
+_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+
+def _stamp(path):
+    try:
+        st = os.stat(path)
+    except FileNotFoundError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
+def _base():
+    """Hand-authored rows + contributed rows, stacks expanded — parsed once per
+    change of either file (the gate rewrites conf/tiffs.contrib.yml when a layer
+    lands or is withdrawn, so a new row is visible on the next call). A pack asks
+    for the catalog dozens of times; re-parsing a large YAML each time was most
+    of a question's wall time."""
+    settings = get_settings()
+    hand, contrib = settings.tiffs_config_path, settings.tiffs_contrib_path
+    key = (str(hand), _stamp(hand), str(contrib), _stamp(contrib))
+    hit = _BASE.get("cat")
+    if hit and hit[0] == key:
+        return hit[1]
+    with open(hand) as f:
+        cat = yaml.load(f, Loader=_LOADER) or {}
+    if key[3] is not None:
+        with open(contrib) as f:
+            rows = yaml.load(f, Loader=_LOADER) or {}
+        cat.update({k: v for k, v in rows.items() if k not in cat})
+    _expand_stacks(cat)
+    _BASE["cat"] = (key, cat)
+    return cat
 
 
 def catalog(include_staged: bool = True):
     """Hand-authored rows + contributed rows (conf/tiffs.contrib.yml — machine-
     owned, written only by the contribution gate; contrib cannot shadow) + the
     STAGED layers the current caller may see (contrib/staging.py: a contributor
-    previews their own layer; nobody else sees it until approval)."""
-    with open(get_settings().tiffs_config_path) as f:
-        cat = yaml.safe_load(f) or {}
-    contrib_path = get_settings().tiffs_contrib_path
-    try:
-        with open(contrib_path) as f:
-            contrib = yaml.safe_load(f) or {}
-        cat.update({k: v for k, v in contrib.items() if k not in cat})
-    except FileNotFoundError:
-        pass
+    previews their own layer; nobody else sees it until approval). Returns a new
+    top-level dict each call (callers add or replace keys; rows are shared and
+    never edited in place)."""
+    cat = dict(_base())
     if include_staged:
         try:
             from ...contrib import staging
@@ -31,7 +61,6 @@ def catalog(include_staged: bool = True):
                     cat[k] = staging.amended_row(k, cat[k])
         except Exception:                       # the catalog never fails on staging
             pass
-    _expand_stacks(cat)
     return cat
 
 
