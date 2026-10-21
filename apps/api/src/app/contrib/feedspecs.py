@@ -12,6 +12,10 @@ from pathlib import Path
 
 import yaml
 
+_ATTEST = " — the contributor's own words: ASK them for it; never compose it on their behalf"
+_ATTESTED = ("title", "description", "source", "license", "vintage", "countries")
+
+
 REQUIRED = ("dataset", "title", "description", "source", "validation",
             "residency", "cadence", "adapter")
 
@@ -29,7 +33,7 @@ def validate_spec(spec: dict) -> list[str]:
         return ["spec is not a mapping"]
     for k in REQUIRED:
         if not str(spec.get(k) or "").strip():
-            fails.append(f"missing required field '{k}'")
+            fails.append(f"missing required field '{k}'" + (_ATTEST if k in _ATTESTED else ""))
     adapter = spec.get("adapter")
     if adapter and adapter not in GENERIC_ADAPTERS:
         fails.append(f"adapter must be one of {GENERIC_ADAPTERS} for a declarative "

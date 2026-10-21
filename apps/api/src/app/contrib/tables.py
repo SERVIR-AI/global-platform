@@ -24,6 +24,10 @@ import yaml
 
 from . import catalog_io
 
+_ATTEST = " — the contributor's own words: ASK them for it; never compose it on their behalf"
+_ATTESTED = ("title", "description", "source", "license", "vintage", "countries")
+
+
 REQUIRED = ("dataset", "file", "title", "description", "source", "validation",
             "license", "vintage", "cadence", "columns", "units")
 # Where the rows speak: a table that declares neither is read for every place.
@@ -117,7 +121,7 @@ def validate_manifest(m: dict) -> list[str]:
         return ["manifest is not a mapping"]
     for k in REQUIRED:
         if not m.get(k):
-            fails.append(f"missing required field '{k}'")
+            fails.append(f"missing required field '{k}'" + (_ATTEST if k in _ATTESTED else ""))
     if m.get("validation") and m["validation"] not in VALIDATION:
         fails.append(f"validation must be one of {VALIDATION} — say 'unvalidated' "
                      "rather than invent one")

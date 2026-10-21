@@ -12,6 +12,10 @@ from pathlib import Path
 
 import yaml
 
+_ATTEST = " — the contributor's own words: ASK them for it; never compose it on their behalf"
+_ATTESTED = ("title", "description", "source", "license", "vintage", "countries")
+
+
 REQUIRED = ("pack", "url", "source", "title", "pub_date", "temporal", "validation")
 
 # Live vocabulary read from the corpus 2026-09-01, plus the honest escape hatch:
@@ -31,7 +35,7 @@ def validate_entry(e: dict) -> list[str]:
         return ["entry is not a mapping"]
     for k in REQUIRED:
         if not str(e.get(k) or "").strip():
-            fails.append(f"missing required field '{k}'")
+            fails.append(f"missing required field '{k}'" + (_ATTEST if k in _ATTESTED else ""))
     if e.get("temporal") and e["temporal"] not in TEMPORAL:
         fails.append(f"temporal must be one of {TEMPORAL}, got {e['temporal']!r} — "
                      "'forecast' gates what may be cited as an outlook")

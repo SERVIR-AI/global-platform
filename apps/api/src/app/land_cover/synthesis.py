@@ -566,7 +566,7 @@ def _method_citation(n, outside_values, two_years, level, how="", one_class=Fals
         + "Membership: a pixel counts when its centre falls inside the boundary. Area: computed "
         "on the WGS84 ellipsoid — each pixel's area is exact at its own latitude (via the "
         "authalic latitude), summed per class — no constant pixel area, no resampling of "
-        f"counts. Outside or unclassified: the producer's values {sorted(outside_values)} "
+        f"counts. Outside or unclassified: the producer's values {', '.join(str(v) for v in sorted(outside_values)) or 'none'} "
         "are reported as one excluded area, never as a class, and shares are of the classified "
         "area only. "
         + ("Change: computed only on pixels classified in both years, after placing the later "

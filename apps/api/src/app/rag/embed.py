@@ -12,6 +12,10 @@ from ..config import get_settings
 from ..llm import MissingAPIKey, build_client
 
 
+_QUERY_CACHE: dict = {}      # (provider, model, text) -> embedding; bounded, per process
+_QUERY_CACHE_MAX = 4096
+
+
 class ProviderEmbedder:
     """A provider's OpenAI-compat /embeddings endpoint. Provider is set separately
     from chat (claude serves no embeddings)."""
@@ -26,13 +30,22 @@ class ProviderEmbedder:
     def embed(self, texts: list[str]) -> np.ndarray:
         if not texts:  # never a (0,)-shaped footgun
             return np.zeros((0, 0), dtype=np.float32)
-        client = build_client(self.provider)
-        vectors: list[list[float]] = []
-        for i in range(0, len(texts), self._BATCH):
-            resp = client.embeddings.create(model=self.model,
-                                            input=texts[i:i + self._BATCH])
-            vectors.extend(d.embedding for d in resp.data)
-        return _unit(vectors)
+        # The same question text embeds to the same vector: keep a small per-process
+        # cache so a repeated retrieval query costs no round trip to the provider.
+        keys = [(self.provider, self.model, t) for t in texts]
+        misses = [t for k, t in zip(keys, texts) if k not in _QUERY_CACHE]
+        if misses:
+            client = build_client(self.provider)
+            fetched: list[list[float]] = []
+            for i in range(0, len(misses), self._BATCH):
+                resp = client.embeddings.create(model=self.model,
+                                                input=misses[i:i + self._BATCH])
+                fetched.extend(d.embedding for d in resp.data)
+            for t, v in zip(misses, fetched):
+                if len(_QUERY_CACHE) >= _QUERY_CACHE_MAX:
+                    _QUERY_CACHE.pop(next(iter(_QUERY_CACHE)))
+                _QUERY_CACHE[(self.provider, self.model, t)] = np.asarray(v, dtype=np.float32)
+        return _unit([_QUERY_CACHE[k] for k in keys])
 
 
 class VertexEmbedder:

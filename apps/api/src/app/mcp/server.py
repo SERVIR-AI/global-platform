@@ -115,7 +115,9 @@ as SOURCE FILES IN THE USER'S OWN PROJECT that they can run, version and deploy 
 never a hosted preview on a third-party host. A published static page also FREEZES \
 any verdict into markup that can never be re-resolved.
 - RUN-TIME: the user asks a question. Answer it now via the canonical loop.
-- CONTRIBUTE-TIME: someone offers data — call `contribute_submit`. {_as_given()}
+- CONTRIBUTE-TIME: someone offers data — call `contribute_submit`. {_as_given()} The declared fields \
+(title, description, source, licence, vintage, countries) are the CONTRIBUTOR'S OWN WORDS: when one \
+is missing, ASK for it and stop; never compose it on their behalf, and never submit before they answer.
 - INTERACTIVE SURFACES: this platform ships MCP Apps. If someone questions how risk \
 is WEIGHTED, call `risk_weights` — in a host that renders MCP Apps it opens a picker \
 with a slider per vulnerability layer, and proposing from it goes through the \

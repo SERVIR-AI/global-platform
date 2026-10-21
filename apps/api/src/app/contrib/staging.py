@@ -26,6 +26,19 @@ from datetime import datetime, timedelta, timezone
 from ..mcp import store
 from . import catalog_io, fetch_policy, identity, prepare, sources
 
+_ATTESTED = ("title", "description", "source", "license", "vintage", "countries")
+
+
+def _missing(k: str) -> str:
+    """A missing field named in the decline. The provenance fields are the contributor's
+    attestation, so the decline says to ask for them rather than compose them."""
+    base = f"missing required field '{k}'"
+    if k in _ATTESTED:
+        return base + " — the contributor's own words: ASK them for it; never compose it on their behalf"
+    return base
+
+
+
 KINDS = ("document", "table", "feed", "raster", "vector", "weights", "amend")
 STATUSES = ("pending", "approved", "rejected", "withdrawn", "failed")
 PENDING_CAP = 20               # open contributions per contributor
@@ -1794,7 +1807,7 @@ def _validate_vector(manifest) -> list[str]:
                         "your disk; give a url it can fetch")
     for k in VECTOR_FIELDS["required"]:
         if not m.get(k):
-            problems.append(f"missing required field '{k}'")
+            problems.append(_missing(k))
     taken = _vector_taken(str(m.get("layer") or ""))
     if taken and m.get("layer"):
         problems.append(taken)

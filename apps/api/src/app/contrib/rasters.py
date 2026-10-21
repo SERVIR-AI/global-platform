@@ -22,6 +22,10 @@ import yaml
 
 from . import catalog_io
 
+_ATTEST = " — the contributor's own words: ASK them for it; never compose it on their behalf"
+_ATTESTED = ("title", "description", "source", "license", "vintage", "countries")
+
+
 REQUIRED = ("layer", "file", "title", "description", "source", "license",
             "vintage", "legend", "declared")
 _DECLARED_REQUIRED = ("dtype", "valid_min", "valid_max")
@@ -683,7 +687,7 @@ def validate_manifest(m: dict) -> list[str]:
         if k == "legend" and rule and not rule.get("legend", True):
             continue          # a count or a measure has no classes to label
         if not m.get(k):
-            fails.append(f"missing required field '{k}'")
+            fails.append(f"missing required field '{k}'" + (_ATTEST if k in _ATTESTED else ""))
     if layer and not rule:
         fails.append("layer must be namespaced — the platform's namespaces: " + namespace_text())
     if rule.get("stack"):
