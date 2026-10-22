@@ -53,3 +53,6 @@ screencapture-localhost-5173-2026-06-29-19_41_17.pdf
 
 # secret-scan output — quotes real matches back at you, never commit it
 gitleaks-report.json
+
+# runtime lock beside the contrib catalogs (catalog_io.LOCK)
+conf/.contrib.lock
