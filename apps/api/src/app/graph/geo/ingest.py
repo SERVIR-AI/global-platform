@@ -188,6 +188,7 @@ def _boundary_kind(d):
 # never picked; and a parent or country named after a comma must hold the feature.
 
 _GAZETTEER: dict = {}      # layer -> (stamp, {key: [area]}); the stamp moves with the master file
+_GAZETTEER_LOCK = threading.Lock()
 # Properties that MEASURE a feature rather than say which area it is. A shapefile
 # repeats them per part (SICAP's AREA_ASP, WDPA's GIS_AREA, the COD's area_sqkm and
 # center_lat) and a row id differs per part, so two parts of one park differ only here.
@@ -254,6 +255,17 @@ def _gazetteer(layer, entry) -> dict:
     cached = _GAZETTEER.get(layer)
     if cached and cached[0] == stamp:
         return cached[1]
+    # Built once, under a lock: two questions on a fresh worker each built their own
+    # copy and the second replaced the first, so the first held areas the shared copy
+    # no longer had and failed looking one up by id ("Error calling tool: 13123...").
+    with _GAZETTEER_LOCK:
+        cached = _GAZETTEER.get(layer)
+        if cached and cached[0] == stamp:
+            return cached[1]
+        return _build_gazetteer(layer, path, field, stamp)
+
+
+def _build_gazetteer(layer, path, field, stamp) -> dict:
     try:
         with open(path) as f:
             fc = json.load(f)
@@ -406,6 +418,11 @@ def _forms(areas, layers) -> dict:
             continue
         entry = layers[a["layer"]]
         group = _gazetteer(a["layer"], entry).get(a["key"]) or [a]
+        if not any(b is a for b in group):
+            # `a` came from an earlier build of the layer (its master file changed in
+            # between): judge it among its own copy's group, matched by what it says.
+            same = [b for b in group if b["label"] == a["label"] and b["attrs"] == a["attrs"]]
+            group = [a] + [b for b in group if b not in same]
         quals = _qualifiers(group, entry)
         for b in group:
             q = quals.get(id(b))
@@ -1104,6 +1121,34 @@ def resolve_place(place):
             **({"contributed_not_used": c["aside"]} if c["aside"] else {})}
 
 
+def _adopt_other_cap(cache, slug, cap, adir) -> None:
+    """Reuse a bundle cached under another land-cover cap. Raising the cap renamed every
+    area's bundle, and each place's first question then rebuilt its boundary and clips
+    (35-60 s instead of 5-9 s, 22 Oct). A bundle holding a real boundary within this cap
+    is the same bundle; one holding a box the old cap forced is not, and is left to be
+    resolved again. Renamed, not copied: the clips inside it are reused too."""
+    import glob
+    base = slug.rsplit("-cap", 1)[0]
+    stem = os.path.join(cache, base) + "-cap"
+    best = None
+    for d in glob.glob(glob.escape(stem) + "*"):
+        if d == adir or not os.path.isdir(d) or not d[len(stem):].isdigit():
+            continue
+        info = _read_meta(d, quiet=True)
+        if not info or info.get("approximate") or float(info.get("area_km2") or 0) > cap:
+            continue
+        if str(info.get("how") or "").startswith(f"{RADIUS_KM:.0f} km radius box"):
+            continue
+        if best is None or os.path.getmtime(d) > os.path.getmtime(best):
+            best = d
+    if best:
+        try:
+            os.rename(best, adir)
+            print(f"   [ingest: reusing {os.path.basename(best)} as {os.path.basename(adir)}]")
+        except OSError:
+            pass                    # another worker adopted it first, or built this one
+
+
 def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=None, how=None):
     """Return a cached bundle of file paths for an AOI — resolved from a `place` name, or
     from a user-drawn `geometry` (GeoJSON Polygon or [minLon,minLat,maxLon,maxLat] bbox,
@@ -1146,6 +1191,8 @@ def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=N
         slug += f"-cap{int(cap)}"
     adir = os.path.join(cache, slug)
     meta = os.path.join(adir, "meta.json")
+    if cap != AREA_CAP_KM2 and not os.path.exists(adir):
+        _adopt_other_cap(cache, slug, cap, adir)
 
     # A polygon's label is the caller's, per call, and never written back. One gulf
     # asked about under several names by several people is one cached bundle: writing
