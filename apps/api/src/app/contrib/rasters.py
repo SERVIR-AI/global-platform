@@ -223,6 +223,36 @@ def packing(dtype: str, width: int, height: int) -> dict:
     return out
 
 
+OVERVIEWS_FROM_BYTES = 64 << 20   # a landed raster over this size gets overviews built into it
+
+
+def build_overviews(path: str, role: str) -> str | None:
+    """Coarser copies of the raster inside the file, so a question over a large area reads
+    a few hundred thousand cells instead of the whole file. Classes keep their values
+    (nearest); an amount or a count is averaged. A file that already has overviews, or is
+    under OVERVIEWS_FROM_BYTES, is left alone. Never fails a landing: a problem is a note."""
+    import os
+    try:
+        import rasterio
+        from rasterio.enums import Resampling
+        if os.path.getsize(path) < OVERVIEWS_FROM_BYTES:
+            return None
+        with rasterio.open(path, "r+") as ds:
+            if ds.overviews(1):
+                return None
+            side = max(ds.width, ds.height)
+            factors = [f for f in (2, 4, 8, 16, 32, 64, 128) if side // f >= 256]
+            if not factors:
+                return None
+            method = (Resampling.average if str(role) in ("measure", "population")
+                      else Resampling.nearest)
+            ds.build_overviews(factors, method)
+            ds.update_tags(ns="rio_overview", resampling=method.name)
+        return f"overviews built at ingest: levels {factors}, {method.name}"
+    except Exception as exc:          # noqa: BLE001 — a landing never fails on this
+        return f"overviews not built: {type(exc).__name__}: {exc}"
+
+
 def unreadable(path: str, exc: Exception) -> str:
     """Why GDAL could not open a file, in the contributor's terms: what the file is when
     its first bytes say so, never the server's temporary path."""
@@ -956,9 +986,13 @@ def _verify_and_land(manifest, dry_run, review, keep_prepared, prepared_before, 
         catalog_io.write_text(sch_path, "# Contributed raster contracts — machine-owned.\n"
                               + yaml.safe_dump(sch, sort_keys=False, allow_unicode=True))
 
+        passport = {k: row[k] for k in ("title", "source", "license", "vintage")}
+        note = build_overviews(str(dest), layer.split("_", 1)[0])
+        if note:
+            passport["overviews"] = note
         return {"status": "landed", "layer": layer, "verified": True,
-                "file": str(dest), "observed": obs,
-                "passport": {k: row[k] for k in ("title", "source", "license", "vintage")}}
+                "file": str(dest), "observed": obs, "passport": passport,
+                **({"overviews": note} if note else {})}
 
 
 def _norm_legend(legend):

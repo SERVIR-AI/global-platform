@@ -74,7 +74,9 @@ def _fetch(url: str) -> tuple[bytes, str]:
     403), one browser retry, Drive links and figshare articles resolved, a login wall
     or a bot challenge refused in words, and the filename the host gives the file."""
     from . import fetch_policy
-    return fetch_policy.fetch(url)
+    from ..config import get_settings
+    s = get_settings()
+    return fetch_policy.fetch(url, max_bytes=int(min(s.grp_contrib_max_bytes_other, s.grp_contrib_max_bytes)))
 
 
 def contribute(entries: list[dict], dry_run: bool = False) -> dict:

@@ -151,7 +151,7 @@ def _prepare_document(m: dict) -> dict:
     if corpus is None:
         raise Declined(why)
     try:
-        raw, fname = fetch_policy.fetch(m["url"])
+        raw, fname = fetch_policy.fetch(m["url"], max_bytes=_other_cap())
     except fetch_policy.FetchRefused as exc:
         raise Declined(str(exc)) from None
     except Exception as exc:
@@ -219,7 +219,7 @@ def _land_document(rec: dict) -> dict:
     if raw_path is not None:
         raw, fname = raw_path.read_bytes(), raw_path.name
     else:  # archive missing (should not happen): re-fetch under the same policy
-        raw, fname = fetch_policy.fetch(m["url"])
+        raw, fname = fetch_policy.fetch(m["url"], max_bytes=_other_cap())
         fname = m.get("filename") or fname
     text = docloader.extract_text(raw, fname)
     meta = _document_meta(m)
@@ -288,6 +288,15 @@ TABLE_FIELDS = {
     },
 }
 CSV_TEXT_CAP = 200 * 1024
+
+
+def _other_cap() -> int:
+    """The byte cap for documents, tables and vectors: parsed in memory whole, so the
+    lower of config.grp_contrib_max_bytes_other and the raster cap — a deployment that
+    lowers the raster cap lowers these with it."""
+    from ..config import get_settings
+    s = get_settings()
+    return int(min(s.grp_contrib_max_bytes_other, s.grp_contrib_max_bytes))
 
 # Staged feed rows live here — never in conf/feeds/ — and are rebuilt from the
 # contribution records on first use after a restart. feeds.query and
@@ -365,7 +374,7 @@ def _prepare_table(m: dict) -> dict:
         raw = m["csv_text"].encode("utf-8")
     else:
         try:
-            raw, _ = fetch_policy.fetch(m["url"])
+            raw, _ = fetch_policy.fetch(m["url"], max_bytes=_other_cap())
         except fetch_policy.FetchRefused as exc:
             raise Declined(str(exc)) from None
         except Exception as exc:
@@ -1841,7 +1850,7 @@ def _prepare_vector(m: dict) -> dict:
     if taken:
         raise Declined(taken)
     from ..config import get_settings
-    cap = int(get_settings().grp_contrib_max_bytes)
+    cap = _other_cap()
     made = None
     try:
         made = _prepared_source("vector", m, cap, vectors._dir())
@@ -1849,7 +1858,7 @@ def _prepare_vector(m: dict) -> dict:
             raw, fname = _read_prepared(made, m["url"], cap, m)
         else:
             try:
-                raw, fname = fetch_policy.fetch(m["url"])
+                raw, fname = fetch_policy.fetch(m["url"], max_bytes=cap)
             except fetch_policy.TooLarge as exc:
                 # the size as the fact; what the platform does about it comes from the ops
                 big = (f"{m['url']} is {prepare.size_text(exc.size)} as a download, over the "

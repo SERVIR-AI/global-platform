@@ -215,6 +215,10 @@ class Settings(BaseSettings):
     # on a shared network: fetches are also refused for private addresses
     # (contrib/fetch_policy.py), independent of this cap.
     grp_contrib_max_bytes: int = 50 * 1024 * 1024
+    # Largest document, table or vector file (GRP_CONTRIB_MAX_BYTES_OTHER). These kinds
+    # are parsed in memory whole (a GeoJSON costs several times its size), so they keep a
+    # lower cap than rasters, which stream to disk and are sampled block by block.
+    grp_contrib_max_bytes_other: int = 500 * 1024 * 1024
     # Submissions one contributor may make per rolling hour (GRP_CONTRIB_HOURLY_CAP);
     # 0 = no cap. Under OAuth each signed-in person is their own contributor; with
     # OAuth off everyone on the box is one (local-dev) and shares this budget — a
