@@ -1084,22 +1084,32 @@ def _raster_source(m: dict, cap: int, folder) -> tuple[str, list, dict | None]:
                                 box, where, member, cap, folder, found=found)
         if found["size"] is not None and found["size"] > cap:
             raise Declined(rc.whole_only(m["url"], found, cap))
+    # Streamed to disk, never held whole in memory: a 765 MB file fetched as bytes
+    # took 1.5 GB of a worker's memory before a single pixel was checked, and the
+    # cap is a stored-file cap, not a memory budget.
+    fd, part = tempfile.mkstemp(prefix="staged-tmp-", suffix=".part", dir=folder)
+    os.close(fd)
     try:
-        raw, _ = fetch_policy.fetch(url)
-    except fetch_policy.TooLarge as exc:
-        if box is not None:     # the clip is given; the host would not send a part of it
-            raise Declined(rc.whole_only(m["url"], {**found, "size": exc.size}, cap)) from None
-        raise Declined(rc.ask_for_clip(m["url"], cap, member, size=exc.size)) from None
-    except fetch_policy.FetchRefused as exc:
-        raise Declined(str(exc)) from None
-    except Exception as exc:
-        raise Declined(f"could not fetch {m['url']}: {type(exc).__name__}: {exc}") from None
-    _raster_page(raw, m["url"])
-    kind = rasters.sniff(raw)
-    fd, tmp = tempfile.mkstemp(prefix="staged-tmp-", suffix=rasters.SUFFIX.get(kind, ".tif"),
-                               dir=folder)
-    with os.fdopen(fd, "wb") as f:
-        f.write(raw)
+        try:
+            fetch_policy.fetch_to_file(url, part, max_bytes=cap)
+        except fetch_policy.TooLarge as exc:
+            if box is not None:     # the clip is given; the host would not send a part of it
+                raise Declined(rc.whole_only(m["url"], {**found, "size": exc.size}, cap)) from None
+            raise Declined(rc.ask_for_clip(m["url"], cap, member, size=exc.size)) from None
+        except fetch_policy.FetchRefused as exc:
+            raise Declined(str(exc)) from None
+        except Exception as exc:
+            raise Declined(f"could not fetch {m['url']}: {type(exc).__name__}: {exc}") from None
+        with open(part, "rb") as f:
+            head = f.read(fetch_policy._HEAD)
+        _raster_page(head, m["url"])
+        kind = rasters.sniff(head)
+    except BaseException:
+        if os.path.exists(part):
+            os.unlink(part)
+        raise
+    tmp = part[:-len(".part")] + rasters.SUFFIX.get(kind, ".tif")
+    os.replace(part, tmp)
     if kind != "zip" and box is None:
         if m.get("clip_member"):
             os.unlink(tmp)

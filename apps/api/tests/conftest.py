@@ -141,3 +141,21 @@ def log(request):
         print(f"  {kind:<8}{msg}")
 
     return _log
+
+
+@pytest.fixture(autouse=True)
+def _fetch_to_file_follows_fetch(monkeypatch):
+    """Tests stub the network at fetch_policy.fetch (bytes). The raster path now streams
+    with fetch_to_file; when a test has replaced fetch(), honour that stub there too."""
+    from app.contrib import fetch_policy
+    real_fetch, real_to_file = fetch_policy.fetch, fetch_policy.fetch_to_file
+
+    def to_file(url, dest, max_bytes=None, deadline=None):
+        if fetch_policy.fetch is not real_fetch:
+            raw, name = fetch_policy.fetch(url, max_bytes)
+            with open(dest, "wb") as f:
+                f.write(raw)
+            return len(raw), name
+        return real_to_file(url, dest, max_bytes=max_bytes, deadline=deadline)
+
+    monkeypatch.setattr(fetch_policy, "fetch_to_file", to_file)

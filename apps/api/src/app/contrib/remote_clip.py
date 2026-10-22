@@ -49,6 +49,15 @@ from . import fetch_policy
 PROBE_BYTES = 65536        # one ranged request: enough to know what the file is
 CLIP_DEADLINE = 300        # seconds for one windowed read (the 1.6 GB DEM's gulf: 48 s)
 RAW_FACTOR = 8             # a window over 8x the cap before compression is refused unread
+
+
+def _deadline() -> int:
+    """CLIP_DEADLINE unless the deployment sets GRP_CLIP_DEADLINE_SECONDS."""
+    from ..config import get_settings
+    try:
+        return max(30, int(get_settings().grp_clip_deadline_seconds or CLIP_DEADLINE))
+    except Exception:
+        return CLIP_DEADLINE
 LIST_BUDGET = 16 << 20     # bytes a zip's directory may cost to list
 SHOWN = 8                  # members named in a decline
 
@@ -506,9 +515,9 @@ def cut(path: str, box: list[float] | None, dest: str, cap: int, *, quoted: str,
                                    **rasters.packing(dtype, w, h)) as dst:
                     step = 1024
                     for r in range(0, h, step):
-                        if time.monotonic() - started > CLIP_DEADLINE:
+                        if time.monotonic() - started > _deadline():
                             raise ClipRefused(f"reading the clip from {quoted} took over "
-                                              f"{CLIP_DEADLINE} s — give a smaller box, or try "
+                                              f"{_deadline()} s — give a smaller box, or try "
                                               "again if the host was slow")
                         part = src.read(1, window=Window(c0, r0 + r, w, min(step, h - r)))
                         dst.write(part, 1, window=Window(0, r, w, part.shape[0]))

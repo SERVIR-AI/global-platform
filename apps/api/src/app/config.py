@@ -227,6 +227,13 @@ class Settings(BaseSettings):
     # (GRP_PREP_OP_SECONDS); the cells a raster step and the vertices a vector step
     # may touch.
     grp_prep_max_input_bytes: int = 3 * 1024 ** 3
+    # Submission checks (fetch + contract check) one worker process runs at once
+    # (GRP_CHECK_MAX_JOBS). A check of a large raster holds memory while it runs, so
+    # this bounds memory per process; preparations have their own cap above.
+    grp_check_max_jobs: int = 4
+    # Seconds one windowed clip read may take before it is refused
+    # (GRP_CLIP_DEADLINE_SECONDS); a slow source or a big box needs more.
+    grp_clip_deadline_seconds: int = 300
     grp_prep_op_seconds: int = 600
     grp_prep_max_cells: int = 4_000_000_000
     grp_prep_max_vertices: int = 50_000_000

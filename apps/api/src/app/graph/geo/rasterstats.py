@@ -28,20 +28,39 @@ def windowed_stats(path, sample=1024, keep_values=(), skip_values=(), driver=Non
         crs = src.crs.to_string() if src.crs else None
         pixel = abs(src.transform.a)
         out_h, out_w = min(sample, full_h), min(sample, full_w)
-        arr = src.read(1, out_shape=(out_h, out_w))   # decimated; uses overviews if present
-
-    a = arr.astype("float64").ravel()
-    a = a[~np.isnan(a)]
-    if nodata is not None and float(nodata) not in {float(v) for v in keep_values}:
-        a = a[a != nodata]
-    skip = [float(v) for v in skip_values if float(v) not in {float(k) for k in keep_values}]
-    if skip:
-        a = a[~np.isin(a, np.array(skip, dtype="float64"))]
-    if a.size:
-        smin, smax, ndist = float(a.min()), float(a.max()), int(np.unique(a).size)
-    else:
+        # A decimated read (`out_shape`) is only cheap when the file has overviews; a
+        # tiled file without them makes GDAL touch every block and a 1 GB file took
+        # 5 GB of memory to sample. Sample whole BLOCKS instead: every k-th block,
+        # k chosen so about sample*sample cells are read, one block in memory at a
+        # time. A small file (under the budget) is read in full, so its min/max/
+        # distinct are exact, not sampled.
+        keep = {float(v) for v in keep_values}
+        drop = [float(v) for v in skip_values if float(v) not in keep]
+        if nodata is not None and float(nodata) not in keep:
+            drop.append(float(nodata))
+        blocks = list(src.block_windows(1))
+        # Read about 256 blocks spread evenly over the file (a 1 GB tiled float32
+        # file: 6% of it), or all of them when there are fewer.
+        want = max(16, min(len(blocks), 256))
+        k = max(1, int(np.ceil(len(blocks) / float(want)))) if blocks else 1
         smin = smax = None
-        ndist = 0
+        distinct: set = set()
+        _DISTINCT_CAP = 100_000             # a continuous raster has no useful distinct count
+        for i, (_, win) in enumerate(blocks):
+            if i % k:
+                continue
+            blk = src.read(1, window=win).astype("float64").ravel()
+            blk = blk[~np.isnan(blk)]
+            if drop:
+                blk = blk[~np.isin(blk, np.array(drop, dtype="float64"))]
+            if not blk.size:
+                continue
+            bmin, bmax = float(blk.min()), float(blk.max())
+            smin = bmin if smin is None else min(smin, bmin)
+            smax = bmax if smax is None else max(smax, bmax)
+            if len(distinct) < _DISTINCT_CAP:
+                distinct.update(np.unique(blk).tolist())
+    ndist = int(len(distinct))
     return {
         "dtype": dtype, "nodata": nodata, "crs": crs, "crs_epsg": crs_epsg,
         "pixel_size_deg": pixel, "width": full_w, "height": full_h,

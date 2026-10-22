@@ -138,6 +138,14 @@ class SessionGate:
         self.app, self._web_auth = app, web_auth
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        # A connector configured with the site root instead of /mcp posts JSON-RPC
+        # to "/" and is refused 401 forever (101 such posts in one evening). Send it
+        # to the transport: 307 keeps the method and body, and the transport's own
+        # 401 then names the right resource metadata.
+        if scope.get("type") == "http" and scope.get("method") == "POST" \
+                and scope.get("path", "") in ("", "/"):
+            await RedirectResponse("/mcp", status_code=307)(scope, receive, send)
+            return
         if scope.get("type") == "http" and not await self._authorized(scope):
             path = scope.get("path", "")
             if scope.get("method") in ("GET", "HEAD") and not path.startswith("/api"):
@@ -204,11 +212,32 @@ async def _lifespan(app: FastAPI):
         yield
 
 
+def _timestamp_uvicorn_logs() -> None:
+    """Prefix uvicorn's access and error lines with a UTC timestamp. The deployed log
+    is the only record of who called what; without a time on each line it cannot be
+    read against the store or an incident. Best effort: logging never breaks boot."""
+    try:
+        from uvicorn.logging import AccessFormatter, DefaultFormatter
+        import time as _time
+        datefmt = "%Y-%m-%dT%H:%M:%SZ"
+        for name, cls, fmt in (
+                ("uvicorn.access", AccessFormatter,
+                 '%(asctime)s %(levelprefix)s %(client_addr)s - "%(request_line)s" %(status_code)s'),
+                ("uvicorn.error", DefaultFormatter, "%(asctime)s %(levelprefix)s %(message)s")):
+            for h in logging.getLogger(name).handlers:
+                f = cls(fmt=fmt, datefmt=datefmt, use_colors=False)
+                f.converter = _time.gmtime
+                h.setFormatter(f)
+    except Exception:            # noqa: BLE001 — a logging quirk must never stop the app
+        pass
+
+
 def create_app() -> FastAPI:
     """Build the app: CORS, the /api router, the /mcp transport, and the web app."""
     settings = get_settings()
 
     app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=_lifespan)
+    _timestamp_uvicorn_logs()
 
     # Standard-app login (web_auth.py): built only when the OAuth switch and a
     # client id are set, so an MCP-only deployment is untouched. The gate below

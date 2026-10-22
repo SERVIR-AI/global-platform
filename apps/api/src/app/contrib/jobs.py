@@ -123,7 +123,9 @@ class _Lane:
 
 def _lane(name: str) -> _Lane:
     from ..config import get_settings
-    size = max(1, int(get_settings().grp_prep_max_jobs if name == "prepare" else PLAIN_WORKERS))
+    s = get_settings()
+    size = max(1, int(s.grp_prep_max_jobs if name == "prepare"
+                       else (s.grp_check_max_jobs or PLAIN_WORKERS)))
     with _lock:
         lane = _lanes.get(name)
         if lane is None or lane.size != size:
