@@ -159,3 +159,13 @@ def _fetch_to_file_follows_fetch(monkeypatch):
         return real_to_file(url, dest, max_bytes=max_bytes, deadline=deadline)
 
     monkeypatch.setattr(fetch_policy, "fetch_to_file", to_file)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_feed_caches():
+    """Each test starts with empty per-worker table and address-check caches: a verdict
+    or a parsed table kept from another test's files must not answer for this one's."""
+    from app.mcp import feeds
+    feeds._TABLE_CACHE.clear()
+    feeds._URL_CHECKS.clear()
+    yield

@@ -582,6 +582,65 @@ def params_doc(spec: dict) -> dict:
     return dict(spec.get("params") or {})
 
 
+import threading as _threading
+
+# Parsed landed tables, per worker, keyed by the file's version. Every question read,
+# hashed and parsed each bound table again (two 17-20k-row tables contributed on 21-22
+# Oct added about a second per question, multiplied under concurrency). The bytes are
+# hashed once per version, so an out-of-band edit is still refused on the next read.
+_TABLE_CACHE: dict = {}
+_TABLE_CACHE_MAX = 16
+_TABLE_LOCK = _threading.Lock()
+# The contributed-address check, re-run on every read of a contributed source, resolves
+# the host in DNS; its verdict is kept for a few minutes per address.
+_URL_CHECKS: dict = {}
+_URL_CHECK_SECONDS = 300
+
+
+def _checked_url(url: str) -> list:
+    import time as _time
+    from ..contrib import fetch_policy
+    hit = _URL_CHECKS.get(url)
+    now = _time.monotonic()
+    if hit and now - hit[0] < _URL_CHECK_SECONDS:
+        return hit[1]
+    problems = fetch_policy.check_url(url)
+    _URL_CHECKS[url] = (now, problems)
+    return problems
+
+
+def _parsed_table(path, fetch: dict):
+    """(header, rows as read, sha256 hex) for one landed table version; raises
+    FeedDecline when the bytes no longer match the sha recorded at landing."""
+    import csv as _csv
+    import hashlib as _hashlib
+    import io as _io
+    from ..contrib import tables as _tables
+    st = path.stat()
+    key = (str(path), st.st_mtime_ns, st.st_size, fetch.get("encoding"), fetch.get("sha256"))
+    hit = _TABLE_CACHE.get(str(path))
+    if hit and hit[0] == key:
+        return hit[1]
+    raw = path.read_bytes()
+    digest = _hashlib.sha256(raw).hexdigest()
+    if fetch.get("sha256") and digest != fetch["sha256"]:
+        raise FeedDecline(
+            "the landed table's bytes no longer match the sha recorded at "
+            "contribution time — the file was modified out-of-band; re-land it "
+            "so provenance stays true",
+            expected_sha256=fetch["sha256"], observed_sha256=digest)
+    enc = fetch.get("encoding")
+    text = raw.decode(enc) if enc else _tables.decode(raw)[0]
+    reader = _csv.DictReader(_io.StringIO(text.lstrip("\ufeff")))
+    header = list(reader.fieldnames or [])
+    parsed = (header, list(reader), digest)
+    with _TABLE_LOCK:
+        _TABLE_CACHE[str(path)] = (key, parsed, {})
+        while len(_TABLE_CACHE) > _TABLE_CACHE_MAX:
+            _TABLE_CACHE.pop(next(iter(_TABLE_CACHE)))
+    return parsed
+
+
 def _adapt_generic_csv(params: dict, spec: dict) -> dict:
     """Declarative adapter for LANDED tables (X2c). Serves the platform-archived
     copy and refuses if the bytes changed since landing — a table silently edited
@@ -612,18 +671,8 @@ def _adapt_generic_csv(params: dict, spec: dict) -> dict:
             f"landed table missing at {path} — the feed spec recorded "
             f"{fetch['path']!r}, which is a path on the machine that staged the "
             "contribution, not on this host. Re-land the table here.")
-    raw = path.read_bytes()
-    digest = _hashlib.sha256(raw).hexdigest()
-    if fetch.get("sha256") and digest != fetch["sha256"]:
-        raise FeedDecline(
-            "the landed table's bytes no longer match the sha recorded at "
-            "contribution time — the file was modified out-of-band; re-land it "
-            "so provenance stays true",
-            expected_sha256=fetch["sha256"], observed_sha256=digest)
-    enc = fetch.get("encoding")
-    text = raw.decode(enc) if enc else _tables.decode(raw)[0]
-    reader = _csv.DictReader(_io.StringIO(text.lstrip("﻿")))
-    header = list(reader.fieldnames or [])
+    header, records, digest = _parsed_table(path, fetch)
+    reader = iter(records)
     cols = fetch.get("columns") or {}
 
     # Filter keys: the table's output fields first, then its raw CSV headers.
@@ -636,11 +685,7 @@ def _adapt_generic_csv(params: dict, spec: dict) -> dict:
     filters, box = _filters(params, by_key, lat_col, lon_col, [*cols, *header],
                             "this table", "column")
 
-    rows, total = [], 0
-    for rec in reader:
-        total += 1
-        if not _keeps(rec, filters, box, lat_col, lon_col):
-            continue
+    def _coerce(rec):
         out = {name: rec.get(col) for name, col in cols.items()}
         for k, v in out.items():
             if isinstance(v, str):
@@ -648,7 +693,30 @@ def _adapt_generic_csv(params: dict, spec: dict) -> dict:
                     out[k] = float(v) if "." in v else int(v)
                 except ValueError:
                     pass
-        rows.append(out)
+        return out
+
+    if not filters and box is None:
+        # The read every pack makes: all rows, converted once per table version; each
+        # caller gets its own copies, so nothing it changes reaches the next one.
+        ckey = ("coerced", tuple(sorted(cols.items())))
+        with _TABLE_LOCK:
+            hit = _TABLE_CACHE.get(str(path))
+            done = hit[2].get(ckey) if hit and len(hit) > 2 else None
+        if done is None:
+            done = [_coerce(rec) for rec in records]
+            with _TABLE_LOCK:
+                hit = _TABLE_CACHE.get(str(path))
+                if hit and len(hit) > 2:
+                    hit[2][ckey] = done
+        total = len(records)
+        rows = [dict(r) for r in done]
+    else:
+        rows, total = [], 0
+        for rec in reader:
+            total += 1
+            if not _keeps(rec, filters, box, lat_col, lon_col):
+                continue
+            rows.append(_coerce(rec))
     if not total:
         raise FeedDecline("the landed table has a header but no rows")
     asked = _asked(filters, box)
@@ -760,7 +828,7 @@ def query(dataset: str, params: dict | None = None) -> dict:
         # contributor named must still be a public one (contrib/fetch_policy.py).
         from ..contrib import fetch_policy
         url = (spec.get("fetch") or {}).get("url")
-        problems = fetch_policy.check_url(url) if url else []
+        problems = _checked_url(url) if url else []
         if problems:
             return {"status": "declined", "dataset": dataset,
                     "note": f"{dataset}: upstream refused by the fetch policy — " + "; ".join(problems)}

@@ -1452,17 +1452,24 @@ def _context_citation(n, ds, spec, res, name, countries, boundary):
     why, placeable) when no row is about it or none can be placed at all. It used to
     quote the first three rows of whatever was bound, so a Gulf of Nicoya answer cited
     a UK salt-marsh core."""
-    from shapely.geometry import Point
-    from shapely.prepared import prep
     recs = res.get("records") or []
     total = _true_count(res)
     lat_k, lon_k = _key_of(recs, _LAT_KEYS), _key_of(recs, _LON_KEYS)
     cty_k = _key_of(recs, _COUNTRY_KEYS)
     declared = [str(c) for c in (spec.get("countries") or []) if str(c).strip()]
     if lat_k and lon_k:
-        inside_area = prep(boundary)
-        rows = [r for r in recs if _num(r.get(lat_k)) is not None and _num(r.get(lon_k)) is not None
-                and inside_area.intersects(Point(_num(r.get(lon_k)), _num(r.get(lat_k))))]
+        # Placed in one vectorised call: a row at a time took ~200 ms for the 55,000
+        # rows a Costa Rica question reads, and that Python loop serialised questions
+        # arriving together on one worker. Same rule: a point on the edge is inside.
+        import numpy as np
+        import shapely
+        xs = np.array([_num(r.get(lon_k)) for r in recs], dtype=float)
+        ys = np.array([_num(r.get(lat_k)) for r in recs], dtype=float)
+        ok = np.isfinite(xs) & np.isfinite(ys)
+        hit = np.zeros(len(recs), dtype=bool)
+        if ok.any():
+            hit[ok] = shapely.intersects_xy(boundary, xs[ok], ys[ok])
+        rows = [r for r, h in zip(recs, hit) if h]
         how, placed_by = f"their {lat_k}/{lon_k} fall inside the boundary", f"its {lat_k}/{lon_k}"
     elif cty_k and countries:
         rows = [r for r in recs if str(r.get(cty_k) or "").strip()
