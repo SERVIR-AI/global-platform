@@ -776,6 +776,39 @@ def _attribution_warnings(draft: str, citations: list) -> list[dict]:
     return out
 
 
+# Exact unit conversions a reader asks for: km² <-> ha (100), t <-> kt and m <-> km
+# (1000), and "million" (1e6). Not 10: a tenfold slip is a wrong figure, not a unit.
+_UNIT_SCALES = (1.0, 100.0, 0.01, 1000.0, 0.001, 1e6, 1e-6)
+
+
+def _rounded_or_converted(num: str, evid_nums: set) -> str | None:
+    """`num` as a pack figure rounded to the digits it was written with, or converted
+    exactly between units — 957 for 957.5 ha, 40,840 ha for 408.4 km², 12.8 million
+    for 12,797,972. Both trace to the platform's own figure. A sum, a difference or
+    a ratio is not covered: those stay refused. The pack figure must itself be a
+    load-bearing number, so a stray 1.5 cannot vouch for a 150."""
+    try:
+        v = float(num)
+    except ValueError:                                      # pragma: no cover
+        return None
+    decimals = len(num.split(".")[1]) if "." in num else 0
+    tol = 0.5 * 10 ** (-decimals) + 1e-9
+    for e in evid_nums:
+        try:
+            f = float(e)
+        except ValueError:                                  # pragma: no cover
+            continue
+        if not _load_bearing(e):
+            continue
+        for scale in _UNIT_SCALES:
+            g = f * scale
+            if abs(v - g) <= tol:
+                how = f"{e} × {scale:g}" if scale != 1.0 else e
+                return f"{how} rounded to {decimals} decimal(s)" if abs(v - g) > 1e-9 \
+                    else (f"{e} × {scale:g} (unit conversion)" if scale != 1.0 else e)
+    return None
+
+
 def _cited_share(target: str, citations: list, draft_nums: set | None = None) -> str | None:
     """Is `target` a share of a total stated in the SAME citation?
 
@@ -908,7 +941,11 @@ def check_grounded(draft, citations, sections=None, extra_evidence=None,
         if share:
             derived[num] = share
         else:
-            unverified.append(num)
+            traced = _rounded_or_converted(num, evid_nums)
+            if traced:
+                derived[num] = traced
+            else:
+                unverified.append(num)
     misattributed = _attribution_warnings(draft, citations)
     driver_only = _driver_only_claims(draft, citations)
     unowned_gaps = _unacknowledged_gaps(draft, gaps)
