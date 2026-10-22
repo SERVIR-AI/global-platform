@@ -28,7 +28,7 @@ OWNER = identity.Caller("user_owner", "gis@hub.test", False, "bound")
 # The re-test's plain Gulf of Nicoya box, as an anticlockwise ring.
 GULF = {"type": "Polygon", "coordinates": [[[-85.2977, 9.9337], [-84.7561, 9.9337], [-84.7561, 10.2968],
                                             [-85.2977, 10.2968], [-85.2977, 9.9337]]]}
-CAP = 250_000            # the land-cover pack's cap: its own cache identity, as in the re-test
+CAP = 2_000_000            # the land-cover pack's cap: its own cache identity, as in the re-test
 # An irregular basin, contributed through the gate as a named polygon layer.
 BASIN = Polygon([(-83.75, 8.70), (-83.05, 8.78), (-82.98, 9.25), (-83.30, 9.42), (-83.80, 9.30)])
 

@@ -34,8 +34,10 @@ SECTIONS = (
 ROLE = "landcover"
 PACK_ID = "land-cover"
 # Raster counting is cheap, so a country is a fair question here (it is not for OSM
-# asset fetching, which is what the resolver's own 25,000 km² cap protects).
-AREA_CAP_KM2 = 250_000.0
+# asset fetching, which is what the resolver's own 25,000 km² cap protects). Above
+# PIXEL_BUDGET the read goes through the file's overviews at a fixed cell count, so a
+# large country costs about what a province does; the cap only keeps out continents.
+AREA_CAP_KM2 = 2_000_000.0
 # Full resolution up to about a province; above it, the overviews — and the pack says so.
 PIXEL_BUDGET = 60_000_000
 DEFAULT_COLORS = ["#4f8fd6", "#cfe3f5", "#2e7d32", "#c9b27c", "#d64545", "#e6c84a",
