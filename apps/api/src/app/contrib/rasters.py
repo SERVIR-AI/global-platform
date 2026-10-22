@@ -230,27 +230,53 @@ def build_overviews(path: str, role: str) -> str | None:
     """Coarser copies of the raster inside the file, so a question over a large area reads
     a few hundred thousand cells instead of the whole file. Classes keep their values
     (nearest); an amount or a count is averaged. A file that already has overviews, or is
-    under OVERVIEWS_FROM_BYTES, is left alone. Never fails a landing: a problem is a note."""
+    under OVERVIEWS_FROM_BYTES, is left alone. Built in a CHILD process: GDAL holds the
+    interpreter lock for the whole build, which stopped the job heartbeat and had a live
+    landing declared interrupted; the parent waits without the lock, and a crash in the
+    build cannot take the worker with it. Never fails a landing: a problem is a note."""
+    import json
     import os
+    import subprocess
+    import sys
     try:
-        import rasterio
-        from rasterio.enums import Resampling
         if os.path.getsize(path) < OVERVIEWS_FROM_BYTES:
             return None
-        with rasterio.open(path, "r+") as ds:
-            if ds.overviews(1):
-                return None
-            side = max(ds.width, ds.height)
-            factors = [f for f in (2, 4, 8, 16, 32, 64, 128) if side // f >= 256]
-            if not factors:
-                return None
-            method = (Resampling.average if str(role) in ("measure", "population")
-                      else Resampling.nearest)
-            ds.build_overviews(factors, method)
-            ds.update_tags(ns="rio_overview", resampling=method.name)
-        return f"overviews built at ingest: levels {factors}, {method.name}"
+        method = "average" if str(role) in ("measure", "population") else "nearest"
+        r = subprocess.run([sys.executable, "-c", _OVERVIEW_CHILD, path, method],
+                           capture_output=True, text=True, timeout=_overview_seconds())
+        if r.returncode != 0:
+            return f"overviews not built: {(r.stderr or r.stdout).strip()[-300:]}"
+        out = json.loads(r.stdout.strip().splitlines()[-1])
+        if out.get("skipped"):
+            return None
+        return f"overviews built at ingest: levels {out['factors']}, {method}"
     except Exception as exc:          # noqa: BLE001 — a landing never fails on this
         return f"overviews not built: {type(exc).__name__}: {exc}"
+
+
+_OVERVIEW_CHILD = r'''
+import json, sys, warnings
+warnings.filterwarnings("ignore")
+import rasterio
+from rasterio.enums import Resampling
+path, method = sys.argv[1], sys.argv[2]
+with rasterio.open(path, "r+") as ds:
+    side = max(ds.width, ds.height)
+    factors = [f for f in (2, 4, 8, 16, 32, 64, 128) if side // f >= 256]
+    if ds.overviews(1) or not factors:
+        print(json.dumps({"skipped": True})); sys.exit(0)
+    ds.build_overviews(factors, getattr(Resampling, method))
+    ds.update_tags(ns="rio_overview", resampling=method)
+print(json.dumps({"factors": factors}))
+'''
+
+
+def _overview_seconds() -> int:
+    from ..config import get_settings
+    try:
+        return max(60, int(get_settings().grp_prep_op_seconds))
+    except Exception:                                       # pragma: no cover
+        return 1800
 
 
 def unreadable(path: str, exc: Exception) -> str:
@@ -395,9 +421,8 @@ def normalise(path: str, role: str, declared: dict | None = None,
     is refused in words — re-gridding moves people between cells. A file with no nodata
     tag is tagged with the declared one. The passport says what was done. Returns (path
     to use, notes); the path is the input when nothing changed."""
-    import numpy as np
     import rasterio
-    from rasterio.warp import Resampling, calculate_default_transform, reproject
+    from rasterio.warp import Resampling, calculate_default_transform
     from ..graph.geo import schema
     rule = schema.namespaces().get(str(role)) or {}
     regrid = str(rule.get("regrid") or "refuse")
@@ -451,15 +476,21 @@ def normalise(path: str, role: str, declared: dict | None = None,
             notes.append("the file declares no nodata; cells outside its original grid are 0 "
                          "after reprojection")
         method = Resampling.bilinear if regrid == "bilinear" else Resampling.nearest
-        arr = np.full((height, width), fill, dtype=dtype)
-        reproject(source=rasterio.band(src, 1), destination=arr,
-                  src_transform=src.transform, src_crs=crs,
-                  dst_transform=transform, dst_crs="EPSG:4326",
-                  src_nodata=nodata, dst_nodata=nodata, resampling=method)
-        with rasterio.open(out, "w", driver="GTiff", width=width, height=height, count=1,
-                           dtype=dtype, crs="EPSG:4326", transform=transform, nodata=nodata,
-                           **packing(dtype, width, height)) as dst:
-            dst.write(arr, 1)
+        # Re-gridded in strips through a warped view, never the whole grid in memory: a
+        # 1.5 GB global file held two 3.7 GB arrays this way before, and GDAL holds the
+        # interpreter lock for the whole of one reproject call.
+        from rasterio.vrt import WarpedVRT
+        from rasterio.windows import Window
+        with WarpedVRT(src, src_crs=crs, crs="EPSG:4326", transform=transform, width=width,
+                       height=height, resampling=method, src_nodata=nodata,
+                       nodata=nodata if nodata is not None else fill) as vrt, \
+                rasterio.open(out, "w", driver="GTiff", width=width, height=height, count=1,
+                              dtype=dtype, crs="EPSG:4326", transform=transform, nodata=nodata,
+                              **packing(dtype, width, height)) as dst:
+            step = 1024
+            for r0 in range(0, height, step):
+                win = Window(0, r0, width, min(step, height - r0))
+                dst.write(vrt.read(1, window=win), 1, window=win)
         how = ("bilinear — the surface is interpolated between cell centres, so a cell's "
                "value may differ slightly from any one source cell"
                if method == Resampling.bilinear else
