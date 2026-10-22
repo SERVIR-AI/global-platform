@@ -1018,12 +1018,15 @@ def _verify_and_land(manifest, dry_run, review, keep_prepared, prepared_before, 
                               + yaml.safe_dump(sch, sort_keys=False, allow_unicode=True))
 
         passport = {k: row[k] for k in ("title", "source", "license", "vintage")}
-        note = build_overviews(str(dest), layer.split("_", 1)[0])
-        if note:
-            passport["overviews"] = note
-        return {"status": "landed", "layer": layer, "verified": True,
-                "file": str(dest), "observed": obs, "passport": passport,
-                **({"overviews": note} if note else {})}
+        landed = {"status": "landed", "layer": layer, "verified": True,
+                  "file": str(dest), "observed": obs, "passport": passport}
+    # Overviews take minutes on a large file: built outside the catalog lock, so other
+    # landings and corrections on other workers are not held behind this one.
+    note = build_overviews(landed["file"], layer.split("_", 1)[0])
+    if note:
+        landed["passport"]["overviews"] = note
+        landed["overviews"] = note
+    return landed
 
 
 def _norm_legend(legend):
