@@ -58,3 +58,28 @@ def test_the_instrument_rule_rides_the_capabilities_payload(log):
     assert obs["read_first"] == "servirplatform://skill/trace-emit"
     assert "publish_answer" in obs["surface"]
     assert "real run" in obs["prove"]
+
+
+def test_a_build_turns_an_implied_calculation_into_a_method(log):
+    """A figure the platform does not compute is asked for and offered as a method,
+    never written into the app, in the instructions and in the build prompt alike."""
+    from app.mcp.server import INSTRUCTIONS, build_a_tool
+    build_line = next(l for l in INSTRUCTIONS.split("\n- ") if l.startswith("BUILD-TIME"))
+    assert "kind=method" in build_line and "do NOT" in build_line
+    assert "servirplatform://skill/contribute-logic" in build_line
+    contribute_line = next(l for l in INSTRUCTIONS.split("\n- ") if l.startswith("CONTRIBUTE-TIME"))
+    assert "data or logic" in contribute_line
+    p = build_a_tool()
+    assert "IF THE TOOL NEEDS A CALCULATION" in p and "kind=method" in p
+    log("CHECK", "build rule, contribute rule and build prompt all name the method route")
+
+
+def test_the_build_prompt_names_only_published_tools(log):
+    """It once told every builder to run ui_validate, a tool that was never published."""
+    import re
+    from app.mcp.server import build_a_tool, mcp
+    published = {t.name for t in asyncio.run(mcp.list_tools())}
+    not_tools = {"pack_id", "required_sections"}
+    named = set(re.findall(r"\b[a-z]+(?:_[a-z]+)+\b", build_a_tool())) - not_tools
+    log("OUTPUT", sorted(named))
+    assert named <= published, f"the build prompt names tools that are not published: {sorted(named - published)}"
