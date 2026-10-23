@@ -358,6 +358,7 @@ def test_the_map_lists_methods_first_and_stays_readable(env, log):
     keys = list(caps)
     assert keys.index("methods") < keys.index("tools_available") < keys.index("feeds")
     assert "restorable_above_threshold" in caps["methods"] and "not tools" in caps["methods_note"]
+    assert "never copy its steps into your code" in caps["methods_note"]
     assert "test_restoration_units" in caps["feeds"] or "test_restoration_units" in caps["staged_feeds"]
     row = caps["feeds"].get("test_restoration_units")
     if row is not None:

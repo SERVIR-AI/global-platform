@@ -515,7 +515,11 @@ def capabilities(available_tools=None, available_prompts=None,
         # to bury it past 125 KB of feed rows, where no client read it (MGV-517).
         "methods_note": ("METHODS are logic people contributed (formulas, thresholds, rules): "
                          "every answer of their pack computes them and cites the result. They "
-                         "are not tools. Add one with contribute_submit kind=method."),
+                         "are not tools. To use one in something you build, read its result "
+                         "from a pack (assemble_pack, then publish_answer for the receipt) and "
+                         "show that figure; never copy its steps into your code. A method gives "
+                         "one figure per area, not a verdict per unit. Add one with "
+                         "contribute_submit kind=method."),
         "methods": _methods_listed(),
         "tools_available": tools,
         # Payload-carried on purpose: connect-time INSTRUCTIONS lose to whatever
