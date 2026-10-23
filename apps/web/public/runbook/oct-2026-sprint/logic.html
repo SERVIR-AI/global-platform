@@ -75,7 +75,7 @@ code{font:12.5px var(--mono);background:var(--code);padding:1px 5px;border-radiu
 <p class="eyebrow">SERVIR Global Platform sprint · brambling · contributing logic</p>
 <h1>Adding your own logic</h1>
 <p class="sub">Turn a rule or formula you use into a method. The platform stores it like data, computes it in every answer it applies to, and cites it with your name, so the receipt covers the figure.</p>
-<nav class="chips" aria-label="On this page"><a href="#what">What you can add</a><a href="#before">Before you start</a><a href="#ask">Ask for it</a><a href="#next">What happens next</a><a href="#use">Use it</a><a href="#build">When you build something</a><a href="#change">Change or remove it</a><a href="#limits">Limits today</a><a href="#declines">If it is declined</a></nav>
+<nav class="chips" aria-label="On this page"><a href="#what">What you can add</a><a href="#before">Before you start</a><a href="#ask">Ask for it</a><a href="#next">What happens next</a><a href="#use">Use it</a><a href="#figures">Figures it does not compute</a><a href="#build">When you build something</a><a href="#change">Change or remove it</a><a href="#limits">Limits today</a><a href="#declines">If it is declined</a></nav>
 
 <h2 id="what">What you can add</h2>
 <p>On this platform, a method means logic someone contributed, not one of the platform's tools. It is written as rules over data the platform already has, giving one number for the area someone asks about. It does not have to be a formula. A rule such as "a unit counts when it is an estuary and more than 70 percent restorable" is a method too.</p>
@@ -125,6 +125,14 @@ code{font:12.5px var(--mono);background:var(--code);padding:1px 5px;border-radiu
 <li><div class="head"><span class="chip c-time">question</span><span class="txt">Ask a question your method answers</span><button class="copy" type="button" data-copy="Using servirplatform, how many mangrove restoration units in South Sumatra are above 70 percent restorable, and how many hectares do they hold? Use the 2020 mangrove map and the platform&#x27;s own calculation, and give me the governed answer with its receipt.">Copy</button></div><div class="req">Using servirplatform, how many mangrove restoration units in South Sumatra are above 70 percent restorable, and how many hectares do they hold? Use the 2020 mangrove map and the platform&#x27;s own calculation, and give me the governed answer with its receipt.</div><p class="exp">Naming the year of the map helps: land-cover questions need one, and naming it saves Claude extra tries.</p></li>
 </ol>
 <p>Your method then runs in every answer of its pack for any place its data covers, for anyone who asks.</p>
+
+<h2 id="figures">Figures the platform does not compute</h2>
+<p>By default, Claude does not add up, average, count, rank or score platform data itself, in chat or in code it writes. It quotes the figures the platform returned. When you need a figure the platform does not compute yet, Claude asks you two things in turn:</p>
+<ol class="steps">
+<li>It proposes the calculation in plain words and asks you to approve it, or asks for your own.</li>
+<li>It asks whether to add it to the platform as a method, so the platform computes it, cites it and covers it with a receipt for everyone.</li>
+</ol>
+<p>If you approve the calculation but want no method, Claude can do it, and says plainly that it is its own arithmetic: unchecked and outside the receipt. In something it builds, the app labels that figure as its own calculation, not a platform figure.</p>
 
 <h2 id="build">When you build something</h2>
 <p>When you ask Claude to build an app or a page, and it needs a figure the platform does not compute yet, such as a priority score or a threshold count, Claude should not invent a formula and write it into the app. It asks you for the logic in your own words, offers to add it as a method, and has the app read the platform's result. The figure is then cited, covered by a receipt and reusable by everyone, rather than hidden in one app's code.</p>
