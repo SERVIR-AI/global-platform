@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Adding your own logic</title><style>
+/* layout: one reading column, tables scroll in their own box; status is a chip, never only a colour */
+:root{--bg:#F7F8F5;--fg:#1E2A24;--mute:#5C6B63;--line:#D9DFD9;--card:#FFFFFF;--accent:#1F6F5C;--accent-bg:#E4F1EC;
+--ok:#1E7440;--ok-bg:#E3F2E8;--pend:#9A5300;--pend-bg:#FBEEDB;--blk:#B0261D;--blk-bg:#FBE5E2;--hub:#2F4C9A;--hub-bg:#E6ECFA;--wd:#5A5F5C;--wd-bg:#ECEEEC;--code:#F1F3EF;--uc1:#1F6F5C;--uc1-bg:#E4F1EC;--uc2:#5B3FA0;--uc2-bg:#EDE7FA;--uc3:#A0472F;--uc3-bg:#F8E6DF;
+--display:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;--body:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#141A17;--fg:#E7ECE8;--mute:#9FB0A7;--line:#2A3530;--card:#1B2420;--accent:#7BD3B8;--accent-bg:#16301F;
+--ok:#8FD3A6;--ok-bg:#163A24;--pend:#F0B25E;--pend-bg:#3A2A12;--blk:#F19A92;--blk-bg:#3E1A17;--hub:#9FB6F5;--hub-bg:#1C2642;--wd:#B7BDB9;--wd-bg:#262B28;--code:#10160F;--uc1:#7BD3B8;--uc1-bg:#16301F;--uc2:#C9B8F5;--uc2-bg:#2A2144;--uc3:#F0A98F;--uc3-bg:#3E2217;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#141A17;--fg:#E7ECE8;--mute:#9FB0A7;--line:#2A3530;--card:#1B2420;--accent:#7BD3B8;--accent-bg:#16301F;
+--ok:#8FD3A6;--ok-bg:#163A24;--pend:#F0B25E;--pend-bg:#3A2A12;--blk:#F19A92;--blk-bg:#3E1A17;--hub:#9FB6F5;--hub-bg:#1C2642;--wd:#B7BDB9;--wd-bg:#262B28;--code:#10160F;--uc1:#7BD3B8;--uc1-bg:#16301F;--uc2:#C9B8F5;--uc2-bg:#2A2144;--uc3:#F0A98F;--uc3-bg:#3E2217;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font:15px/1.55 var(--body);margin:0}
+main{max-width:1040px;margin:0 auto;padding-block:24px 72px;padding-inline:16px}
+.eyebrow{font:600 11px/1 var(--body);text-transform:uppercase;letter-spacing:.08em;color:var(--mute);margin:0 0 8px}
+h1{font:800 28px/1.15 var(--display);margin:0 0 8px;text-wrap:balance}
+h2{font:700 20px/1.2 var(--display);margin:40px 0 6px;padding-top:12px;border-top:2px solid var(--accent)}
+h3{font:700 16px/1.25 var(--display);margin:22px 0 6px}
+h4{font:700 14px/1.25 var(--display);margin:14px 0 4px}
+p{margin:6px 0;max-width:72ch}
+.sub{color:var(--mute);margin:0 0 14px}
+nav.chips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 4px}
+nav.chips a{font:600 12px var(--body);color:var(--accent);background:var(--accent-bg);padding:5px 10px;border-radius:999px;text-decoration:none}
+nav.chips a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin:14px 0}
+.tile{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;min-width:0}
+.tile h3{margin:0 0 4px}
+.tile .uc{color:var(--mute);font-size:13px;margin:0 0 8px}
+.counts{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-block;font:600 11px/1 var(--body);padding:4px 8px;border-radius:4px;white-space:nowrap;text-transform:uppercase;letter-spacing:.04em}
+.c-done{color:var(--ok);background:var(--ok-bg)}.c-pending{color:var(--pend);background:var(--pend-bg)}.c-blocked{color:var(--blk);background:var(--blk-bg)}.c-hub{color:var(--hub);background:var(--hub-bg)}.c-withdrawn{color:var(--wd);background:var(--wd-bg)}.c-note{color:var(--mute);background:var(--code)}
+.c-time{color:var(--accent);background:var(--accent-bg)}.c-try{color:var(--ok);background:var(--ok-bg)}.c-ref{color:var(--wd);background:var(--wd-bg)}
+details.ref,details.pres{border:1px solid var(--line);border-radius:10px;padding:8px 14px;margin:14px 0;background:var(--code)}details.ref>summary,details.pres>summary{font:700 15px var(--display);color:var(--fg);padding:4px 0}details.pres h2{border-top:0;margin-top:10px;font-size:18px}.c-uc1{color:var(--uc1);background:var(--uc1-bg)}.c-uc2{color:var(--uc2);background:var(--uc2-bg)}.c-uc3{color:var(--uc3);background:var(--uc3-bg)}.c-unm{color:var(--pend);background:var(--pend-bg)}
+.legend{display:flex;flex-wrap:wrap;gap:8px 14px;margin:10px 0 0;font-size:13px;color:var(--mute);align-items:center}
+.filters,.ucfilters{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 0}
+.filters button,.ucfilters button{font:600 12px var(--body);border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:999px;padding:5px 10px;cursor:pointer}
+.filters button.on,.ucfilters button.on{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}
+.tbl{overflow-x:auto;margin:8px 0 4px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:760px}
+th{font:600 11px/1.2 var(--body);text-transform:uppercase;letter-spacing:.05em;color:var(--mute);text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);background:var(--card);position:sticky;top:0}
+td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+td.src{font-weight:600;min-width:200px}
+td.where{font-family:var(--mono);font-size:12px;color:var(--mute);word-break:break-word;min-width:150px}
+tr.group td{background:var(--code);font:600 12px var(--body);text-transform:uppercase;letter-spacing:.05em;color:var(--mute);padding:6px 10px}
+.note{background:var(--accent-bg);border-left:3px solid var(--accent);padding:10px 14px;border-radius:0 8px 8px 0;margin:12px 0}
+.warn{background:var(--pend-bg);border-left:3px solid var(--pend);padding:10px 14px;border-radius:0 8px 8px 0;margin:12px 0}
+ul,ol{padding-left:22px;margin:6px 0}li{margin:4px 0}
+.q{list-style:none;padding:0;margin:8px 0}
+.q li{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:8px 0;min-width:0}
+.q .head{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;margin-bottom:4px}
+.q .txt{font-weight:600}
+.exp{font-size:13px;color:var(--mute);margin-top:4px}.exp a{color:var(--accent)}
+button.copy{font:600 12px var(--body);border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:6px;padding:3px 9px;cursor:pointer}
+button.copy:hover{border-color:var(--accent)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:10px 0;min-width:0}
+.card h4{margin:0 0 6px}
+.req{background:var(--code);border-radius:8px;padding:10px 12px;font-size:13.5px;white-space:pre-wrap;word-break:break-word}
+details{margin-top:8px}summary{cursor:pointer;font:600 13px var(--body);color:var(--accent)}
+pre{background:var(--code);border-radius:8px;padding:10px 12px;overflow-x:auto;font:12px/1.45 var(--mono);margin:6px 0 0;max-width:100%}
+.meta{font-size:12px;color:var(--mute);margin-top:6px}
+footer{margin-top:48px;font-size:12px;color:var(--mute);border-top:1px solid var(--line);padding-top:12px}
+
+.tbl.fit table{min-width:0}
+.steps{counter-reset:s;list-style:none;padding:0;margin:8px 0}
+.steps li{position:relative;padding:8px 12px 8px 44px;margin:6px 0;background:var(--card);border:1px solid var(--line);border-radius:10px}
+.steps li::before{counter-increment:s;content:counter(s);position:absolute;left:12px;top:8px;width:22px;height:22px;border-radius:50%;background:var(--accent-bg);color:var(--accent);font:700 12px/22px var(--body);text-align:center}
+code{font:12.5px var(--mono);background:var(--code);padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+<main><p class="eyebrow" style="margin:0 0 18px"><a href="../index.html#oct-2026-sprint" style="color:var(--accent);text-decoration:none">&larr; Runbook</a> &middot; Oct 2026 Sprint</p>
+<p class="eyebrow">SERVIR Global Platform sprint · brambling · contributing logic</p>
+<h1>Adding your own logic</h1>
+<p class="sub">Turn a rule or formula you use into a method. The platform stores it like data, computes it in every answer it applies to, and cites it with your name, so the receipt covers the figure.</p>
+<nav class="chips" aria-label="On this page"><a href="#what">What you can add</a><a href="#before">Before you start</a><a href="#ask">Ask for it</a><a href="#next">What happens next</a><a href="#use">Use it</a><a href="#change">Change or remove it</a><a href="#limits">Limits today</a><a href="#declines">If it is declined</a></nav>
+
+<h2 id="what">What you can add</h2>
+<p>A method is logic written as rules over data the platform already has, giving one number for the area someone asks about. It does not have to be a formula. A rule such as "a unit counts when it is an estuary and more than 70 percent restorable" is a method too.</p>
+<div class="tbl fit"><table><thead><tr><th>What you have</th><th>Where it goes today</th></tr></thead><tbody>
+<tr><td class="src">A formula or rule over data on the platform</td><td><span class="chip c-done">Method</span> The platform computes it, cites it and the receipt covers it.</td></tr>
+<tr><td class="src">A formula or rule that needs data the platform does not have</td><td><span class="chip c-pending">Data first</span> Add the data as a table or feed, then the method.</td></tr>
+<tr><td class="src">A rule on a map layer, such as a vegetation threshold on a raster</td><td><span class="chip c-blocked">Not yet</span> Methods read feeds and tables only. The platform declines it and says why.</td></tr>
+<tr><td class="src">A procedure, guidance or expert judgement</td><td><span class="chip c-hub">Document</span> Add it as a document. Answers find and quote it, but nothing is computed from it.</td></tr>
+</tbody></table></div>
+<p>Examples of methods: a count and total above a threshold, a weighted average, a rule that classifies units and counts them, or an equation such as an allometric formula applied to a table of measurements.</p>
+
+<h2 id="before">Before you start</h2>
+<ol class="q">
+<li><div class="head"><span class="chip c-try">check</span><span class="txt">Check the data is there, and see its field names</span><button class="copy" type="button" data-copy="Using servirplatform, which feeds and tables cover South Sumatra, and what fields does each one have?">Copy</button></div><div class="req">Using servirplatform, which feeds and tables cover South Sumatra, and what fields does each one have?</div></li>
+<li><div class="head"><span class="chip c-try">check</span><span class="txt">Check nobody has added the same logic</span><button class="copy" type="button" data-copy="Using servirplatform, which contributed methods are on the platform, and what does each one compute?">Copy</button></div><div class="req">Using servirplatform, which contributed methods are on the platform, and what does each one compute?</div><p class="exp">The platform cannot spot a duplicate yet. Two copies of the same method both run in every answer.</p></li>
+</ol>
+<div class="note">Have a worked example ready: a few input values and the result you calculated yourself, by hand or from a published table. The platform re-runs it before accepting the method.</div>
+
+<h2 id="ask">Ask for it</h2>
+<p>Start with "Using servirplatform", then give as much of this as you can in the first message: what it computes, the data it uses, a title, a sentence in your own words, the source, the licence and your worked example. Claude asks for whatever is missing.</p>
+<ol class="q">
+<li><div class="head"><span class="chip c-ref">template</span><span class="txt">Template</span><button class="copy" type="button" data-copy="Using servirplatform, I want to add my own calculation to the &lt;pack&gt; pack so everyone can reuse it. It computes &lt;what, in plain words&gt; from &lt;the feed or table on the platform&gt;. Call it &quot;&lt;title&gt;&quot;. In my words: &lt;what it is for&gt;. Source: &lt;paper, DOI, equation or table&gt;. Licence: &lt;licence, or don&#x27;t know&gt;. Worked example: &lt;a few input values&gt; give &lt;the result you calculated yourself&gt;.">Copy</button></div><div class="req">Using servirplatform, I want to add my own calculation to the &lt;pack&gt; pack so everyone can reuse it. It computes &lt;what, in plain words&gt; from &lt;the feed or table on the platform&gt;. Call it &quot;&lt;title&gt;&quot;. In my words: &lt;what it is for&gt;. Source: &lt;paper, DOI, equation or table&gt;. Licence: &lt;licence, or don&#x27;t know&gt;. Worked example: &lt;a few input values&gt; give &lt;the result you calculated yourself&gt;.</div></li>
+<li><div class="head"><span class="chip c-try">example</span><span class="txt">A weighted average</span><button class="copy" type="button" data-copy="Using servirplatform, I want to add my own calculation to the land-cover pack: the average above-ground biomass of the mangrove plots in the area asked, weighted by each plot&#x27;s basal area, from the mangrove forest structure table. Call it &quot;Basal-area-weighted mangrove biomass&quot;. In my words: it gives a plot-based biomass figure for a place, where larger plots count for more. Source: the 2021 GEB mangrove forest structure dataset. Licence: don&#x27;t know. Worked example: plots with 100 and 300 Mg/ha of biomass and basal areas of 10 and 30 m²/ha give 250 Mg/ha.">Copy</button></div><div class="req">Using servirplatform, I want to add my own calculation to the land-cover pack: the average above-ground biomass of the mangrove plots in the area asked, weighted by each plot&#x27;s basal area, from the mangrove forest structure table. Call it &quot;Basal-area-weighted mangrove biomass&quot;. In my words: it gives a plot-based biomass figure for a place, where larger plots count for more. Source: the 2021 GEB mangrove forest structure dataset. Licence: don&#x27;t know. Worked example: plots with 100 and 300 Mg/ha of biomass and basal areas of 10 and 30 m²/ha give 250 Mg/ha.</div><p class="exp">Uses the mangrove forest structure table, already on the platform.</p></li>
+<li><div class="head"><span class="chip c-try">example</span><span class="txt">A rule that classifies and counts</span><button class="copy" type="button" data-copy="Using servirplatform, I want to add a rule to the land-cover pack: a restoration unit is a priority when it is an estuary and more than 70 percent of its lost mangrove is restorable. Count the priority units in the area asked and total their restorable hectares, from TNC&#x27;s restoration feed for Southeast Asia. Call it &quot;Priority estuary restoration units&quot;. In my words: &lt;what it is for&gt;. Source: &lt;your citation&gt;. Licence: &lt;licence&gt;. Worked example: an estuary at 98% with 1,528 ha, an estuary at 52% with 492 ha and an open coast at 99% with 343 ha give 1 unit and 1,528 ha.">Copy</button></div><div class="req">Using servirplatform, I want to add a rule to the land-cover pack: a restoration unit is a priority when it is an estuary and more than 70 percent of its lost mangrove is restorable. Count the priority units in the area asked and total their restorable hectares, from TNC&#x27;s restoration feed for Southeast Asia. Call it &quot;Priority estuary restoration units&quot;. In my words: &lt;what it is for&gt;. Source: &lt;your citation&gt;. Licence: &lt;licence&gt;. Worked example: an estuary at 98% with 1,528 ha, an estuary at 52% with 492 ha and an open coast at 99% with 343 ha give 1 unit and 1,528 ha.</div><p class="exp">The parts in angle brackets are yours to fill in. Claude asks for them if you leave them out.</p></li>
+</ol>
+<p>In Claude Desktop you can also start from the <strong>contribute_logic</strong> prompt under servirplatform in the + menu.</p>
+<div class="warn">"Restorable mangrove above 70 percent" is already on the platform. Use it in a question rather than adding it again.</div>
+
+<h2 id="next">What happens next</h2>
+<ol class="steps">
+<li>Claude reads the platform's guide to contributing logic.</li>
+<li>It finds your data on the platform and checks its fields.</li>
+<li>It reads the steps back in plain words. Say yes, or correct it.</li>
+<li>It asks for anything missing: title, description, source, licence, worked example. These must be your words and your numbers; it is told never to make them up.</li>
+<li>It submits the method. The platform checks every step, re-runs your worked example and runs the method once on real rows. If anything fails, it is declined with the reason.</li>
+<li>Once accepted, the method is live for everyone. This week contributions are approved automatically, with no human review, and the record says so.</li>
+</ol>
+
+<h2 id="use">Use it</h2>
+<p>Open a new chat and ask a normal question about a place the data covers. The answer cites your method, with its steps and your name, and the receipt covers the figure.</p>
+<ol class="q">
+<li><div class="head"><span class="chip c-time">question</span><span class="txt">Ask a question your method answers</span><button class="copy" type="button" data-copy="Using servirplatform, how many mangrove restoration units in South Sumatra are above 70 percent restorable, and how many hectares do they hold? Use the 2020 mangrove map and the platform&#x27;s own calculation, and give me the governed answer with its receipt.">Copy</button></div><div class="req">Using servirplatform, how many mangrove restoration units in South Sumatra are above 70 percent restorable, and how many hectares do they hold? Use the 2020 mangrove map and the platform&#x27;s own calculation, and give me the governed answer with its receipt.</div><p class="exp">Naming the year of the map helps: land-cover questions need one, and naming it saves Claude extra tries.</p></li>
+</ol>
+<p>Your method then runs in every answer of its pack for any place its data covers, for anyone who asks.</p>
+
+<h2 id="change">Change or remove it</h2>
+<ol class="q">
+<li><div class="head"><span class="chip c-ref">withdraw</span><span class="txt">Withdraw a method you added</span><button class="copy" type="button" data-copy="Using servirplatform, withdraw my method &quot;&lt;title&gt;&quot;.">Copy</button></div><div class="req">Using servirplatform, withdraw my method &quot;&lt;title&gt;&quot;.</div><p class="exp">Only the person who added a method can withdraw it. To change one, withdraw it and add the new version. Answers and receipts already built on it can still be replayed.</p></li>
+</ol>
+
+<h2 id="how">How the platform runs it</h2>
+<p>The platform saves your method as a short YAML file. When someone asks a question in that pack, the platform's own calculator reads the file, keeps the rows of your data that fall inside the area asked, and works through your steps one by one. Your text is never run as a program: the calculator accepts only arithmetic, comparisons, counts, sums, averages, powers, logs and similar steps, and refuses anything else before it starts. The result is computed fresh for every question and cited in the evidence, so the figure in the answer is the platform's, not the assistant's.</p>
+
+<h2 id="limits">Limits today</h2>
+<ul>
+<li>Inputs are feeds and tables. Map layers and land-cover class areas cannot be inputs yet.</li>
+<li>Each result is one number for the area asked, with its unit.</li>
+<li>There are no versions: to change a method, withdraw it and add it again.</li>
+<li>The platform does not detect duplicates yet, so check what is already there first.</li>
+<li>Contributions are approved automatically this week, without human review.</li>
+</ul>
+
+<h2 id="declines">If it is declined</h2>
+<div class="tbl fit"><table><thead><tr><th>The platform says</th><th>What to do</th></tr></thead><tbody>
+<tr><td class="src">missing required field (title, description, source, licence or examples)</td><td>Give it in your own words. Do not let Claude write it for you.</td></tr>
+<tr><td class="src">names a dataset the platform does not serve</td><td>Ask which feeds and tables exist, and use the exact name. Or add the data first.</td></tr>
+<tr><td class="src">has no field … did you mean …</td><td>Use the field name exactly as the platform shows it.</td></tr>
+<tr><td class="src">example came out X, the example expects Y</td><td>Check the steps and your example. Do not change your expected number to make it pass.</td></tr>
+<tr><td class="src">mixes the rows of two inputs</td><td>Reduce each input to one number first, then combine the numbers.</td></tr>
+<tr><td class="src">an output is one value per row</td><td>Wrap it in a sum, average, count or another total.</td></tr>
+<tr><td class="src">a method with that name is already on the platform</td><td>Choose another name, or withdraw the old one first.</td></tr>
+</tbody></table></div>
+<footer>Methods went live on this host on 23 October 2026. Every question on this page starts with "Using servirplatform" so Claude uses the platform's tools.</footer>
+</main>
+<script>
+document.querySelectorAll("button.copy").forEach(function (b) {
+  b.addEventListener("click", function () {
+    var t = b.getAttribute("data-copy"), o = b.textContent;
+    function done() { b.textContent = "Copied"; setTimeout(function () { b.textContent = o; }, 1200); }
+    function pick() { var r = document.createRange(); r.selectNodeContents(b.closest("li").querySelector(".req"));
+      var s = window.getSelection(); s.removeAllRanges(); s.addRange(r); b.textContent = "Selected"; setTimeout(function () { b.textContent = o; }, 1500); }
+    try { navigator.clipboard.writeText(t).then(done, pick); } catch (e) { pick(); }
+  });
+});
+</script>
+</body>
+</html>
