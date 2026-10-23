@@ -83,3 +83,18 @@ def test_the_build_prompt_names_only_published_tools(log):
     named = set(re.findall(r"\b[a-z]+(?:_[a-z]+)+\b", build_a_tool())) - not_tools
     log("OUTPUT", sorted(named))
     assert named <= published, f"the build prompt names tools that are not published: {sorted(named - published)}"
+
+
+def test_no_arithmetic_by_default_with_two_questions(log):
+    """The user's rule: no calculations by default; propose one, get approval, then ask
+    whether it becomes a method. Said where the model looks, early and in every lookup."""
+    from app.mcp import loop
+    from app.mcp.server import INSTRUCTIONS, build_a_tool
+    at = INSTRUCTIONS.find("NO ARITHMETIC BY DEFAULT")
+    assert 0 <= at < 2500, at
+    rule = INSTRUCTIONS[at:at + 700]
+    assert "approve" in rule and "as a method" in rule and "own arithmetic" in rule
+    hint = loop.ENTRY_HINT["no_arithmetic"]
+    assert "approve" in hint and "kind=method" in hint and "no receipt" in hint
+    assert "ask me whether to add it to the platform as a method" in build_a_tool()
+    log("CHECK", f"rule at char {at} of the instructions, in every lookup reply, in the build prompt")

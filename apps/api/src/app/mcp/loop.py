@@ -171,6 +171,14 @@ ENTRY_HINT = {
              "assemble_pack gathers the pack's full evidence with its declared gaps "
              "(" + _packs.target_shapes_long() + "), and it mints the pack_id that "
              "publish_answer needs to gate and receipt your brief."),
+    "no_arithmetic": ("By default, do not add up, average, count, rank or score these records "
+                      "yourself, in chat or in code you write: quote the figures the platform "
+                      "returned. If a figure is needed that no pack computes, (1) propose the "
+                      "calculation in plain words and ask the user to approve it, then (2) ask "
+                      "whether to add it to the platform as a method (contribute_submit "
+                      "kind=method) so the platform computes and cites it for everyone. If they "
+                      "approve it but want no method, you may do that calculation, and say "
+                      "plainly it is your own arithmetic: unchecked, with no receipt."),
     "call": {"tool": "assemble_pack",
              "args": {"<the pack's target params, e.g.>": _packs.target_shapes(),
                       "focus": "<what the user actually asked>"}},
