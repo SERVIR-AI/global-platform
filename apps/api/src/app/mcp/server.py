@@ -119,6 +119,8 @@ write that calculation into the app: ask the user for the logic in their own wor
 to add it to the platform as a method (`contribute_submit` kind=method, guided by \
 servirplatform://skill/contribute-logic), and have the app read the platform's result.
 - RUN-TIME: the user asks a question. Answer it now via the canonical loop.
+- METHODS: on this platform a method is contributed logic (a formula, rule or threshold) that packs compute and cite; \
+platform_capabilities lists them first. When someone asks what methods or calculations exist, list THOSE, not these tools.
 - CONTRIBUTE-TIME: someone offers data or logic (a formula, rule or threshold is kind=method) — call `contribute_submit`. {_as_given()} The declared fields \
 (title, description, source, licence, vintage, countries) are the CONTRIBUTOR'S OWN WORDS: when one \
 is missing, ASK for it and stop; never compose it on their behalf, and never submit before they answer.
@@ -275,7 +277,8 @@ class _LiveText(Middleware):
 # the server what it is serving, and asking IT rather than a list is the whole point.
 @mcp.tool()
 async def platform_capabilities() -> dict:
-    """The platform map: which tools/prompts are live, the bones and their status,
+    """The platform map: contributed METHODS first (logic people added, which packs
+    compute and cite), then which tools/prompts are live, the bones and their status,
     packs, sources with provenance, calendars, and DECLARED gaps. Bone status is
     derived from the live registry, so it never drifts. Call this first in a build
     session to scope honestly before writing code.

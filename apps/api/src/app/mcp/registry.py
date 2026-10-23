@@ -511,6 +511,12 @@ def capabilities(available_tools=None, available_prompts=None,
                   "resources": resources,  # human-readable guides (e.g. servirplatform://how-to-use)
                   "modes": ["build-time: build a reusable app on the tools",
                             "run-time: answer one question now"]},
+        # Contributed logic first: what people mean by "methods" here. The listing used
+        # to bury it past 125 KB of feed rows, where no client read it (MGV-517).
+        "methods_note": ("METHODS are logic people contributed (formulas, thresholds, rules): "
+                         "every answer of their pack computes them and cites the result. They "
+                         "are not tools. Add one with contribute_submit kind=method."),
+        "methods": _methods_listed(),
         "tools_available": tools,
         # Payload-carried on purpose: connect-time INSTRUCTIONS lose to whatever
         # rides the tool results (measured — render_with was honored to the letter
@@ -536,22 +542,50 @@ def capabilities(available_tools=None, available_prompts=None,
         },
         # registry rows invoked via compose_run — not tools, so the count stays flat
         "compositions": {k: v for k, v in COMPOSITIONS.items()},
-        # registry rows queried via feeds_query — dataset is a parameter
-        "feeds": {k: v for k, v in FEEDS.items()},
+        # registry rows queried via feeds_query — dataset is a parameter. One summary per
+        # feed: the full rows (fetch specs, long descriptions) made this map ~125 KB, too
+        # large for a client to read whole; feeds_query returns any feed in full.
+        "feeds_note": ("one summary per feed or table; feeds_query(dataset=...) returns its "
+                       "records, its full passport and its parameters"),
+        "feeds": {k: _feed_brief(v) for k, v in FEEDS.items()},
         # the caller's own staged contributions (reviewers: all) — queryable by
         # them alone until approved; never a platform feed to anyone else
         "staged_feeds": _staged_feeds(),
-        # contributed logic (contrib/methods.py): every method the caller can use, by
-        # name — approved ones, and the caller's own staged ones
-        "methods": _methods_listed(),
         "bones": _bones(set(tools)),
         # NB two different things are called "pack": a DOMAIN PACK (below) is the
         # versioned bundle of sources/calendars/composition — there is one per
         # domain. An EVIDENCE PACK (pack_id, from assemble_pack) is a per-question
         # snapshot of gathered evidence — a new one is minted on every call.
         "design_language": _design_language(),
-        "domain_packs": [pack_manifest(pid) for pid in packs.available()],
+        "domain_packs": [_pack_brief(pid, pack_manifest(pid)) for pid in packs.available()],
     }
+
+
+_FEED_KEEP = ("title", "status", "pack", "source", "cadence", "validation", "license",
+              "countries", "bbox", "contributed")
+
+
+def _feed_brief(row: dict) -> dict:
+    """A feed as the map shows it: what it is, its state and how to ask for it."""
+    out = {k: row[k] for k in _FEED_KEEP if row.get(k) not in (None, "", [], {})}
+    if isinstance(out.get("source"), str) and len(out["source"]) > 140:
+        out["source"] = out["source"][:140] + "…"
+    if isinstance(row.get("params"), dict) and row["params"]:
+        out["params"] = sorted(row["params"])
+    about = str(row.get("description") or "")
+    if about:
+        out["about"] = about[:200] + ("…" if len(about) > 200 else "")
+    return out
+
+
+def _pack_brief(pid: str, manifest: dict) -> dict:
+    """A domain pack as the map shows it: its sources counted, the full list one
+    resource away (the land-cover pack alone listed 32 KB of them here)."""
+    out = dict(manifest)
+    srcs = out.pop("sources", None)
+    if isinstance(srcs, list):
+        out["sources"] = {"count": len(srcs), "full_list": f"servirplatform://pack/{pid}"}
+    return out
 
 
 def coverage() -> dict:

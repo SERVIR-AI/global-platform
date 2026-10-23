@@ -345,3 +345,28 @@ def test_the_skill_travels_with_the_platform():
     assert "Contribute logic as a method" in text and "Their words, not yours" in text
     guide = staging.describe_submit()
     assert "method — how:" in guide and methods.SKILL in guide
+
+
+# --------------------------------------------------------------------------- finding them
+
+def test_the_map_lists_methods_first_and_stays_readable(env, log):
+    """The listing buried methods past 125 KB of feed rows, where no client read them."""
+    import json
+    _units(env)
+    staging.submit("method", _threshold())
+    caps = registry.capabilities(available_tools=["platform_capabilities"])
+    keys = list(caps)
+    assert keys.index("methods") < keys.index("tools_available") < keys.index("feeds")
+    assert "restorable_above_threshold" in caps["methods"] and "not tools" in caps["methods_note"]
+    assert "test_restoration_units" in caps["feeds"] or "test_restoration_units" in caps["staged_feeds"]
+    assert all("fetch" not in row and len(json.dumps(row)) < 1500 for row in caps["feeds"].values())
+    for p in caps["domain_packs"]:
+        if "sources" in p:
+            assert set(p["sources"]) == {"count", "full_list"} and p["sources"]["full_list"].endswith(p["id"])
+    log("OUTPUT", f"{len(json.dumps(caps)):,} chars, {len(caps['feeds'])} feeds")
+
+
+def test_the_instructions_say_what_a_method_is():
+    from app.mcp.server import INSTRUCTIONS
+    line = next(l for l in INSTRUCTIONS.split("\n- ") if l.startswith("METHODS"))
+    assert "not these tools" in line and "platform_capabilities lists them first" in line

@@ -757,6 +757,8 @@ def catalog() -> dict[str, dict]:
             out.setdefault(k, {"title": v.get("title"), "packs": v.get("packs"),
                                "inputs": {a: next(iter(r.values())) for a, r in (v.get("inputs") or {}).items()},
                                "outputs": {o: (s or {}).get("unit") for o, s in (v.get("outputs") or {}).items()},
+                               "steps": v.get("steps"), "params": render_params(v) or None,
+                               "holds_for": v.get("countries") or "anywhere its inputs cover",
                                "contributor": v.get("contributor_label"), "status": src})
     return out
 
