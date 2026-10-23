@@ -166,11 +166,6 @@ def after_record(receipt_id: str) -> dict:
 from . import packs as _packs   # the target shapes below are generated from the pack rows
 
 ENTRY_HINT = {
-    "note": ("These are raw lookup results — evidence, not a governed answer. If you "
-             "are answering a user's question with them, go through the loop instead: "
-             "assemble_pack gathers the pack's full evidence with its declared gaps "
-             "(" + _packs.target_shapes_long() + "), and it mints the pack_id that "
-             "publish_answer needs to gate and receipt your brief."),
     "no_arithmetic": ("By default, do not add up, average, count, rank or score these records "
                       "yourself, in chat or in code you write: quote the figures the platform "
                       "returned. If a figure is needed that no pack computes, (1) suggest one "
@@ -179,20 +174,71 @@ ENTRY_HINT = {
                       "whether to add it to the platform as a method (contribute_submit "
                       "kind=method) so the platform computes and cites it for everyone. If they "
                       "approve it but want no method, you may do that calculation, and say "
-                      "plainly it is your own arithmetic: unchecked, with no receipt."),
+                      "plainly it is your own arithmetic: unchecked, with no receipt. A "
+                      "dataset's own note on how its fields combine ('sum hectares') says what "
+                      "adds up; it is not a request to add them up in the answer."),
+    "note": ("These are raw lookup results — evidence, not a governed answer. If you "
+             "are answering a user's question with them, go through the loop instead: "
+             "assemble_pack gathers the pack's full evidence with its declared gaps "
+             "(" + _packs.target_shapes_long() + "), and it mints the pack_id that "
+             "publish_answer needs to gate and receipt your brief."),
     "call": {"tool": "assemble_pack",
              "args": {"<the pack's target params, e.g.>": _packs.target_shapes(),
                       "focus": "<what the user actually asked>"}},
 }
 
 
+METHOD_FIRST = ("An approved method already computes figures from this dataset "
+                "(methods_reading). For a figure it computes, do not count or add up these "
+                "rows: call assemble_pack for the place asked, quote the method's cited "
+                "result, and publish_answer receipts it. The pack keeps only the rows inside "
+                "the place's own boundary; a bbox is a rectangle and takes in neighbouring areas.")
+
+
+def methods_reading(dataset) -> list[dict]:
+    """The approved methods, and the caller's staged ones, that read `dataset`, each with
+    the assemble_pack call that returns its cited result. Read from the method registry
+    and the pack registry, so a method contributed today is named with no code change."""
+    if not dataset:
+        return []
+    try:
+        from ..contrib import methods
+        rows = {**methods.staged_visible(), **methods.landed()}
+    except Exception:                              # a lookup never fails on its pointer
+        return []
+    out = []
+    for name, row in sorted(rows.items()):
+        reads = {str(next(iter(r.values()))) for r in (row.get("inputs") or {}).values()
+                 if isinstance(r, dict) and r}
+        if str(dataset) not in reads:
+            continue
+        calls = []
+        for pid in row.get("packs") or []:
+            sp = _packs.PACKS.get(pid)
+            if sp:
+                req = [k for k in sp["target_keys"] if k not in (sp.get("optional_keys") or ())]
+                calls.append({"tool": "assemble_pack",
+                              "args": {"pack": pid, **{k: f"<the {k} asked about>" for k in req}}})
+        out.append({"method": name, "title": row.get("title") or name,
+                    "computes": {o: (spec or {}).get("unit")
+                                 for o, spec in (row.get("outputs") or {}).items()},
+                    "get_its_result": calls})
+    return out
+
+
 def with_entry_hint(result: dict) -> dict:
-    """Attach the route into the loop to a successful lookup result.
+    """Attach the route into the loop to a lookup result, AHEAD of the rows: a host may
+    show only the start of a long reply (Claude Code keeps 2 KB of one over 50 KB).
+    A decline keeps its honest cause first and gains only the method pointer.
 
     Applied at the TOOL boundary, not inside the fetch/feeds functions: the hint is
     for an LLM deciding what to do next, and the platform's own internal callers
     (synthesis assembling a pack) must not find guidance mixed into their evidence.
     """
-    if not isinstance(result, dict) or result.get("status") != "ok":
+    if not isinstance(result, dict):
         return result
-    return {**result, "for_a_governed_answer": ENTRY_HINT}
+    reading = methods_reading(result.get("dataset"))
+    pointer = {"method_first": METHOD_FIRST, "methods_reading": reading} if reading else {}
+    if result.get("status") != "ok":
+        return {**result, **pointer} if pointer else result
+    return {"status": "ok", "for_a_governed_answer": {**pointer, **ENTRY_HINT}, **result}

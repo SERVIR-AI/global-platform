@@ -188,6 +188,21 @@ def test_a_lookup_offers_the_way_into_the_loop(log):
     assert "not a governed answer" in hinted["for_a_governed_answer"]["note"]
 
 
+def test_the_rule_and_the_receipt_lead_their_replies(pack, log):
+    """Seen live: Claude Code kept 2 KB of a 51 KB publish reply, and the receipt sat at
+    character 32,736, so it never reached the user; a lookup's no-arithmetic rule sat
+    after 20 KB of rows. Both now come first."""
+    import json
+    out = publish.answer(pack["pack_id"], _passing_draft(pack), question="q")
+    head = json.dumps(out, ensure_ascii=False)[:2000]
+    log("OUTPUT", f"publish keys: {list(out)[:5]}")
+    assert out["receipt_id"] in head and '"public_resolver"' in head
+    hinted = loop.with_entry_hint({"status": "ok", "dataset": "d",
+                                   "records": [{"v": i} for i in range(5000)]})
+    assert list(hinted)[:2] == ["status", "for_a_governed_answer"]
+    assert "do not add up" in json.dumps(hinted)[:2000]
+
+
 def test_a_declined_lookup_is_not_hinted(log):
     """A decline's `note` is the honest cause and must not be crowded out by
     guidance about a tool that would decline for the same reason."""

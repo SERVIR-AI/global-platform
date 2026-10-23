@@ -430,6 +430,9 @@ def answer(pack_id: str, draft: str, question: str | None = None) -> dict:
     # The receipt already carries its own forward edge (show it via ui_embed), so
     # this returns the verdict fields alongside it rather than restating them.
     return {"status": "ok", "passed": True,
+            # The receipt LEADS: a host may show only the start of a long reply (Claude
+            # Code keeps 2 KB of one over 50 KB), and the answer must reach the user with it.
+            **{k: r[k] for k in ("receipt_id", "public_resolver", "answer_status") if k in r},
             # The gated text comes BACK to the caller: a model that publishes and
             # then has nothing to restate answers with a bare embed and two lines.
             "insight": _insight(pack_id, draft),

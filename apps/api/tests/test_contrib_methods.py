@@ -8,7 +8,7 @@ import pytest
 
 from app.config import get_settings
 from app.contrib import methods, staging
-from app.mcp import methods_step, packs, registry, store
+from app.mcp import feeds, loop, methods_step, packs, registry, store
 
 UNITS_CSV = ("Unit,Lon,Lat,PctRestorable,RestorableHa,Class\n"
              "OpenCoast_61060,104.88,-2.10,99,343,OpenCoast\n"
@@ -400,3 +400,28 @@ def test_a_proposed_calculation_comes_without_its_result():
     from app.mcp import loop
     from app.mcp.server import INSTRUCTIONS
     assert "without results" in INSTRUCTIONS and "without their results" in loop.ENTRY_HINT["no_arithmetic"]
+
+
+def test_a_lookup_of_a_methods_input_names_the_method_and_its_call(env, log):
+    """Seen live: asked how many units are above 70%, a model read the method's input with
+    feeds_query and counted 13 inside a rough bbox; the method, over the province boundary,
+    says 6. A lookup of a method's input names the method and, for every pack it is bound
+    to, the assemble_pack call that returns its cited result — from the registries."""
+    _units(env)
+    staging.submit("method", _threshold())
+    out = loop.with_entry_hint(feeds.query("test_restoration_units", {"limit": 5}))
+    assert list(out)[:2] == ["status", "for_a_governed_answer"]
+    named = out["for_a_governed_answer"]["methods_reading"]
+    log("OUTPUT", f"named: {named}")
+    assert [m["method"] for m in named] == ["restorable_above_threshold"]
+    calls = {c["args"]["pack"]: c["args"] for c in named[0]["get_its_result"]}
+    assert set(calls) == {"land-cover", "risk"}
+    for pid, args in calls.items():
+        sp = packs.PACKS[pid]
+        assert {k for k in sp["target_keys"] if k not in (sp.get("optional_keys") or ())} <= set(args)
+    refused = loop.with_entry_hint(feeds.query("test_restoration_units", {"place": "Test Province"}))
+    assert list(refused)[0] == "status" and refused["status"] == "declined"
+    assert refused["methods_reading"][0]["method"] == "restorable_above_threshold"
+    _contribute_table("test_other_table", "Site,Value\nA,1\n", {"site": "Site", "value": "Value"})
+    plain = loop.with_entry_hint(feeds.query("test_other_table", {"limit": 5}))
+    assert "methods_reading" not in plain["for_a_governed_answer"]
