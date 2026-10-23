@@ -2694,6 +2694,11 @@ _KINDS = {
     "method": {"validate": _validate_method, "prepare": _prepare_method,
                "stage": _stage_method, "land": _land_method, "retire": _retire_method,
                "unland": _unland_method, "fields": _methods.METHOD_FIELDS,
+               "preview": lambda m, p: {"method": m.get("method"), "runs_in": m.get("packs"),
+                                        "inputs": p.get("inputs"), "checked": [
+                                            "every field and step", "the worked examples, re-run",
+                                            "one run on real rows of each input"],
+                                        "sample": p.get("sample")},
                "title": lambda m: f"{m.get('title') or 'untitled method'} ({m.get('method')})"},
 }
 

@@ -373,3 +373,28 @@ def test_the_instructions_say_what_a_method_is():
     from app.mcp.server import INSTRUCTIONS
     line = next(l for l in INSTRUCTIONS.split("\n- ") if l.startswith("METHODS"))
     assert "not these tools" in line and "platform_capabilities lists them first" in line
+
+
+def test_a_method_can_be_previewed_and_nothing_is_stored(env, log):
+    """Claude tried preview first in every UAT run; it now checks everything and stores nothing."""
+    _units(env)
+    out = staging.submit("method", {**_threshold(method="preview_only_method"), "preview": True})
+    log("OUTPUT", {k: out.get(k) for k in ("status", "next")})
+    assert out["status"] == "preview" and out["would_land"]["method"] == "preview_only_method"
+    assert "the worked examples, re-run" in out["would_land"]["checked"]
+    assert "preview_only_method" not in methods.for_pack("land-cover")
+    assert not (get_settings().methods_conf_dir / "preview_only_method.yml").exists()
+
+
+def test_the_dry_run_hands_out_no_figures(env):
+    """A dry run over rows placed in no area answers nothing, so it gives no numbers to quote."""
+    _units(env)
+    out = staging.submit("method", _threshold())
+    sample = out["preview"]["sample"]
+    assert sample["outputs"] == ["n_units", "restorable_ha"] and "ran" in sample
+
+
+def test_a_proposed_calculation_comes_without_its_result():
+    from app.mcp import loop
+    from app.mcp.server import INSTRUCTIONS
+    assert "without its result" in INSTRUCTIONS and "without its result" in loop.ENTRY_HINT["no_arithmetic"]

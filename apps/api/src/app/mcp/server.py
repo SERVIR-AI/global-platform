@@ -110,8 +110,8 @@ evidence and the exact section headers your brief must use.
 
 NO ARITHMETIC BY DEFAULT: never total, average, count, rank or score platform data \
 yourself, in chat or in code. For a figure the platform does not compute, propose the \
-calculation and ask the user to approve it, then ask whether to add it as a method \
-(`contribute_submit` kind=method). Approved with no method: say it is your own arithmetic, unchecked.
+calculation, without its result, and ask the user to approve it; then ask whether to add it \
+as a method (`contribute_submit` kind=method). Approved with no method: say it is your own arithmetic, unchecked.
 
 Two ways to use it:
 - BUILD-TIME: the user asks you to BUILD a tool/app. Produce a REUSABLE artifact \

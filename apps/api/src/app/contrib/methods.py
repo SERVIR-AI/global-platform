@@ -817,10 +817,14 @@ def prepare(m: dict) -> dict:
         sample = evaluate(m, rows)
     except MethodError as exc:
         raise MethodError(f"the method does not run on its inputs' real rows: {exc}") from None
+    # The dry run proves the steps run on real rows; its numbers answer nothing (the rows
+    # are placed in no area), so they are not handed out to be quoted (MGV-514).
     return {"inputs": inputs,
             "sample": {"over": {a: f"{len(r):,} rows read for the check (not placed in any area)"
                                 for a, r in rows.items()},
-                       "outputs": {k: _fmt(v) for k, v in sample.items()}}}
+                       "ran": "every step ran on these real rows without error; the results "
+                              "for a place come from a question in its pack",
+                       "outputs": sorted(sample)}}
 
 
 def row_from(rec: dict) -> dict:
