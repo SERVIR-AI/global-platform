@@ -477,6 +477,14 @@ def _skills_available() -> list[str]:
     return skills.available()
 
 
+def _methods_listed() -> dict:
+    try:
+        from ..contrib import methods
+        return methods.catalog()
+    except Exception:                       # the map never crashes on a method file
+        return {}
+
+
 def _staged_feeds() -> dict:
     try:
         from ..contrib import staging
@@ -533,6 +541,9 @@ def capabilities(available_tools=None, available_prompts=None,
         # the caller's own staged contributions (reviewers: all) — queryable by
         # them alone until approved; never a platform feed to anyone else
         "staged_feeds": _staged_feeds(),
+        # contributed logic (contrib/methods.py): every method the caller can use, by
+        # name — approved ones, and the caller's own staged ones
+        "methods": _methods_listed(),
         "bones": _bones(set(tools)),
         # NB two different things are called "pack": a DOMAIN PACK (below) is the
         # versioned bundle of sources/calendars/composition — there is one per

@@ -21,7 +21,7 @@ _SKILLS_DIR = _REPO_ROOT / ".claude" / "skills"
 # Served skills are an allowlist, not a directory scan: .claude/skills also holds
 # repo-internal working discipline (tracker, commits, uat) that would be noise —
 # or worse, confusion — for an external builder.
-SERVED = ("trace-emit", "trace-visualize")
+SERVED = ("trace-emit", "trace-visualize", "contribute-logic")
 
 
 def available() -> list[str]:

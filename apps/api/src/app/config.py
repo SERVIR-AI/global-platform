@@ -86,6 +86,8 @@ class Settings(BaseSettings):
     # overrides are cited in the brief as ADJUSTED.
     crop_calendar_path: Path = _REPO_ROOT / "conf" / "crop_calendar.yml"
     feeds_conf_dir: Path = _REPO_ROOT / "conf" / "feeds"
+    # contributed methods (contrib/methods.py): one file per approved method
+    methods_conf_dir: Path = _REPO_ROOT / "conf" / "methods"
 
     # --- Food security (GEOGLAM Crop Monitor) ---
     # The CMET Global_SHP FeatureServer: per-region crop-condition expert
@@ -210,6 +212,8 @@ class Settings(BaseSettings):
     # stays fully in place and returns with GRP_AUTO_APPROVE=0. Turn it off before
     # this platform serves decisions.
     grp_auto_approve: bool = True
+    # hold every contributed method for a human reviewer even when auto-approve is on
+    grp_method_review: bool = False
 
     # Largest file a contribution may fetch from a URL (bytes). The server sits
     # on a shared network: fetches are also refused for private addresses

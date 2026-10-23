@@ -25,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 
 from ..mcp import store
 from . import catalog_io, fetch_policy, identity, prepare, sources
+from . import methods as _methods
 
 _ATTESTED = ("title", "description", "source", "license", "vintage", "countries")
 
@@ -39,7 +40,7 @@ def _missing(k: str) -> str:
 
 
 
-KINDS = ("document", "table", "feed", "raster", "vector", "weights", "amend")
+KINDS = ("document", "table", "feed", "raster", "vector", "weights", "amend", "method")
 STATUSES = ("pending", "approved", "rejected", "withdrawn", "failed")
 PENDING_CAP = 20               # open contributions per contributor
 # Submissions per contributor per rolling hour: GRP_CONTRIB_HOURLY_CAP (config.py).
@@ -532,6 +533,14 @@ def _ensure_staged_loaded() -> None:
                 "staged_by": rec["contributor_id"], "contribution_id": rec["contribution_id"],
                 "contributor_label": rec.get("contributor_label"),
                 "rationale": (rec.get("manifest") or {}).get("rationale")}
+    try:
+        meths = store.list_contributions(status="pending", kind="method")
+    except Exception:
+        return
+    for rec in meths:
+        row = (rec.get("preview") or {}).get("row")
+        if row and row.get("method") and row["method"] not in STAGED_METHODS:
+            STAGED_METHODS[row["method"]] = row
 
 
 def visible_staged_feed(dataset: str) -> dict | None:
@@ -2561,6 +2570,94 @@ def _unland_amend(rec: dict) -> dict:
             **({"left_as_corrected_later": kept} if kept else {}), "note": removal._HISTORY}
 
 
+# --------------------------------------------------------------------------- methods
+
+# Staged methods: the contributor's own answers compute them, nobody else's do,
+# until a reviewer approves (contrib/methods.py for_pack reads this).
+STAGED_METHODS: dict[str, dict] = {}
+
+
+def _validate_method(manifest) -> list[str]:
+    return _methods.validate(manifest)
+
+
+def _prepare_method(m: dict) -> dict:
+    """The live half of the check: every input answers and the method runs on its rows."""
+    taken = _methods.name_taken(str(m["method"]))
+    if taken:
+        raise Declined(taken)
+    try:
+        return _methods.prepare(m)
+    except _methods.MethodError as exc:
+        raise Declined(str(exc)) from None
+
+
+def _stage_method(rec: dict, prepared: dict) -> dict:
+    _ensure_staged_loaded()
+    row = {**_methods.row_from(rec), "staged_by": rec["contributor_id"],
+           "review": _preview_review(rec)}
+    STAGED_METHODS[row["method"]] = row
+    packs = " or ".join(row.get("packs") or [])
+    return {"method": row["method"], "row": row, "inputs": prepared["inputs"],
+            "sample": prepared["sample"],
+            "how_to_test": (f"ask a {packs} question about a place its inputs cover: the pack "
+                            "computes this method there and cites it; only you and reviewers "
+                            "see it until it is approved")}
+
+
+@catalog_io.serialised
+def _land_method(rec: dict) -> dict:
+    import yaml
+    m = rec["manifest"]
+    name = str(m["method"])
+    path = _methods._dir() / f"{name}.yml"
+    if path.exists():
+        raise Declined(f"{path.name} already exists — contributions never overwrite")
+    note = _review_note(rec, "method")
+    row = {**_methods.row_from(rec), **({"review": note} if note else {})}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    catalog_io.write_text(
+        path,
+        "# A contributed method, machine-owned: written by the contribution gate on\n"
+        "# approval. Withdraw it with contribute_status; never hand-edit it.\n"
+        + yaml.safe_dump(row, sort_keys=False, allow_unicode=True))
+    _methods.reload()
+    _ensure_staged_loaded()
+    STAGED_METHODS.pop(name, None)
+    return {"method": name, "file": str(path)}
+
+
+def _retire_method(rec: dict) -> dict:
+    _ensure_staged_loaded()
+    name = (rec.get("preview") or {}).get("method") or (rec.get("manifest") or {}).get("method") or ""
+    removed = STAGED_METHODS.pop(str(name), None) is not None
+    return {"removed": removed, "note": "nothing was written to disk for a staged method"}
+
+
+@catalog_io.serialised
+def _unland_method(rec: dict) -> dict:
+    """A landed method stops running in every pack at once. Its file is kept beside,
+    renamed, so a receipt citing it can still show what it computed."""
+    import yaml
+    name = str((rec.get("manifest") or {}).get("method") or "")
+    path = _methods._dir() / f"{name}.yml"
+    if not name or not path.is_file():
+        return {"removed": False, "note": f"{name!r} is no longer a platform method — nothing "
+                                          "of it was running"}
+    try:
+        owner = (yaml.safe_load(path.read_text()) or {}).get("contribution_id")
+    except Exception:
+        owner = None
+    if owner and owner != rec.get("contribution_id"):
+        return {"removed": False, "note": f"{path.name} now belongs to a later contribution "
+                                          f"({owner}); it was left in place"}
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    kept = path.with_name(f"{path.name}.retired-{stamp}")
+    os.replace(path, kept)
+    _methods.reload()
+    return {"removed": True, "method": name, "kept_as": kept.name, "note": _HISTORY}
+
+
 _KINDS = {
     "document": {"validate": _validate_document, "prepare": _prepare_document,
                  "stage": _stage_document, "land": _land_document,
@@ -2594,6 +2691,10 @@ _KINDS = {
               "stage": _stage_amend, "land": _land_amend, "retire": _retire_amend,
               "unland": _unland_amend, "fields": AMEND_FIELDS,
               "title": lambda m: f"correction of the record of {m.get('layer')}"},
+    "method": {"validate": _validate_method, "prepare": _prepare_method,
+               "stage": _stage_method, "land": _land_method, "retire": _retire_method,
+               "unland": _unland_method, "fields": _methods.METHOD_FIELDS,
+               "title": lambda m: f"{m.get('title') or 'untitled method'} ({m.get('method')})"},
 }
 
 
@@ -2660,6 +2761,11 @@ def _needs_a_human(kind: str, manifest: dict, prepared: dict) -> str | None:
         return (f"its text holds {n} e-mail addresses — personal data. The document's owner "
                 "must confirm they may be served to every caller (or share a copy without "
                 "them) before a reviewer lets it go live")
+    if kind == "method":
+        from ..config import get_settings
+        if get_settings().grp_method_review:
+            return ("a method changes the figures every caller gets, and this deployment asks "
+                    "a reviewer to check each one before it goes live")
     return None
 
 
@@ -2824,7 +2930,8 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
             return {"status": "declined", "kind": kind,
                     "problems": [f"preview shows what a {' or '.join(able)} contribution would "
                                  f"land; a {kind} has no preview yet — drop preview and submit "
-                                 "it (contribute_status(action='withdraw') takes it back)"]}
+                                 "it (contribute_status(action='withdraw') takes it back)"],
+                    "fields": spec["fields"]}
     # What the platform prepares by itself, no person's choice involved (contrib/prepare:
     # detect before the first attempt, auto after a decline), applied and said.
     from ..config import get_settings
@@ -3126,6 +3233,11 @@ def _landed_state(rec: dict) -> dict:
                     return {"live": None, "why": f"superseded by a later correction ({by[-1]})"}
             return {"live": not stale, "why": None if not stale else
                     f"the record no longer says what this correction set for {stale}"}
+        if kind == "method":
+            name = m.get("method")
+            live = name in _methods.landed()
+            return {"live": live, "why": None if live else
+                    f"no method file named {name!r} is being read"}
     except Exception as exc:                                # pragma: no cover
         return {"live": None, "why": f"could not check ({type(exc).__name__}: {exc})"}
     return {"live": None, "why": f"no reconciliation for kind {kind!r}"}
@@ -3447,6 +3559,8 @@ def describe_submit() -> str:
         fields = _KINDS[kind]["fields"]
         lines.append(f"\n{kind} — required: " + "; ".join(f"{k} ({v})" for k, v in fields["required"].items()))
         lines.append(f"{kind} — optional: " + "; ".join(f"{k} ({v})" for k, v in fields["optional"].items()))
+        if fields.get("guide"):
+            lines.append(f"{kind} — how: {fields['guide']}")
     lines += ["",
               ("Returns {status: approved, contribution_id, preview, landing, review, next} — "
                "live now for every caller (if landing fails it is left {status: staged, "

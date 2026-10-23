@@ -21,7 +21,7 @@ TOOLS = {
     "ui_design", "ui_catalog", "ui_component", "ui_embed",
     "contribute_submit", "contribute_status", "contribute_review", "risk_weights",
 }
-PROMPTS = {"build_a_tool", "run_analysis", "explain_platform"}
+PROMPTS = {"build_a_tool", "run_analysis", "explain_platform", "contribute_logic"}
 PANEL_TOOLS = ("record_receipt", "publish_answer")
 
 
@@ -45,9 +45,9 @@ def test_resources_cover_the_app_the_guide_and_every_pack(log):
     uris = {str(r.uri) for r in asyncio.run(mcp.list_resources())}
     log("OUTPUT", str(sorted(uris)))
     from app.mcp.weights_ui import UI_URI as WEIGHTS_UI_URI
-    expected = {UI_URI, WEIGHTS_UI_URI, "servirplatform://how-to-use",
-                "servirplatform://skill/trace-emit",
-                "servirplatform://skill/trace-visualize"} | {
+    from app.mcp import skills
+    expected = {UI_URI, WEIGHTS_UI_URI, "servirplatform://how-to-use"} | {
+        f"servirplatform://skill/{name}" for name in skills.SERVED} | {
         f"servirplatform://pack/{pid}" for pid in packs.available()}
     log("CHECK", "a new pack row would have to appear here too")
     assert uris == expected

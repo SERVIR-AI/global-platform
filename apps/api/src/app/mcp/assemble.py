@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from ..llm import MissingAPIKey
 from ..rag.store import CorpusError
-from . import context, layers as layers_step, loop, packs, store, vectors as vectors_step
+from . import context, layers as layers_step, loop, methods_step, packs, store, vectors as vectors_step
 
 
 def assemble(country: str | None = None, crop: str | None = None,
@@ -131,6 +131,10 @@ def assemble(country: str | None = None, crop: str | None = None,
     # reads the gatherer's `_area`; the layer step pops it.
     vector_block, vector_area = vectors_step.attach(spec, target, stats, citations, gaps,
                                                     vectors, extras)
+    # Contributed methods: logic contributed like data, computed here for every pack
+    # over the same area (before the layer step pops it) and cited like evidence.
+    method_block = methods_step.attach(pack_id_name, target, stats, citations, gaps,
+                                       trace, extras)
     layer_block, layer_area = layers_step.attach(spec, target, stats, citations, gaps,
                                                  layers, extras)
     if layers is not None:
@@ -164,6 +168,8 @@ def assemble(country: str | None = None, crop: str | None = None,
     if vector_block:
         pack_body["vectors"] = vector_block        # measures per layer, beside their citations
         pack_body["vectors_area"] = vector_area    # persisted with the pack, not returned
+    if method_block:
+        pack_body["methods"] = method_block        # results per contributed method, beside their citations
     if stats.get("viz") is not None:                # a pack may carry embed data
         pack_body["viz"] = stats["viz"]
         pack_body["stats"].pop("viz", None)

@@ -784,6 +784,16 @@ def run_analysis(country: str = "Kenya", crop: str = "maize") -> str:
 
 
 @mcp.prompt()
+def contribute_logic(logic: str = "") -> str:
+    """Contribute a calculation (an equation, a threshold rule, an index) as a platform
+    METHOD that every answer of its pack computes and cites."""
+    from . import skills as _skills
+    ask = (f"The person's logic, in their words: {logic}\n\n" if logic.strip() else "")
+    return (ask + "Follow this skill step by step. Ask the person for everything it says "
+            "is theirs; never invent it.\n\n" + _skills.bundle("contribute-logic"))
+
+
+@mcp.prompt()
 def explain_platform() -> str:
     """What the servirplatform platform is and how to use it (build-time vs run-time)."""
     return ("Call platform_capabilities, then explain in plain terms what the servirplatform "

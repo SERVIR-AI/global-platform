@@ -99,6 +99,18 @@ def _no_reverse_geocode(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_methods(tmp_path, monkeypatch):
+    """Contributed methods land in a per-test folder, never the repo's conf/methods."""
+    from app.contrib import methods, staging
+    monkeypatch.setattr(get_settings(), "methods_conf_dir", tmp_path / "methods")
+    methods.reload()
+    staging.STAGED_METHODS.clear()
+    yield
+    methods.reload()
+    staging.STAGED_METHODS.clear()
+
+
+@pytest.fixture(autouse=True)
 def _redirect_traces(tmp_path, monkeypatch):
     """Keep trace writes out of the repo's cache/ during tests."""
     monkeypatch.setattr(get_settings(), "traces_dir", tmp_path / "traces")

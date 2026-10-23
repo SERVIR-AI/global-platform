@@ -1088,7 +1088,9 @@ def area_of(aoi) -> dict | None:
     except (KeyError, IndexError, OSError, ValueError, TypeError):
         return None
     return {"name": aoi.get("name"), "how": aoi.get("how"),
-            "area_km2": aoi.get("area_km2"), "geometry": geom}
+            "area_km2": aoi.get("area_km2"), "geometry": geom,
+            # the country its boundary resolved to, for steps that place rows by country
+            "countries": [str(aoi["country"])] if aoi.get("country") else []}
 
 
 def resolve_place(place):
