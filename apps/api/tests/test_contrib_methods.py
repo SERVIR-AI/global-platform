@@ -359,6 +359,9 @@ def test_the_map_lists_methods_first_and_stays_readable(env, log):
     assert keys.index("methods") < keys.index("tools_available") < keys.index("feeds")
     assert "restorable_above_threshold" in caps["methods"] and "not tools" in caps["methods_note"]
     assert "test_restoration_units" in caps["feeds"] or "test_restoration_units" in caps["staged_feeds"]
+    row = caps["feeds"].get("test_restoration_units")
+    if row is not None:
+        assert {"pct_restorable", "restorable_ha"} <= set(row["fields"])
     assert all("fetch" not in row and len(json.dumps(row)) < 1500 for row in caps["feeds"].values())
     for p in caps["domain_packs"]:
         if "sources" in p:

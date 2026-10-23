@@ -575,6 +575,11 @@ def _feed_brief(row: dict) -> dict:
     about = str(row.get("description") or "")
     if about:
         out["about"] = about[:200] + ("…" if len(about) > 200 else "")
+    # the field names each record carries, so "what does it hold" needs no records read
+    fetch = row.get("fetch") or {}
+    names = fetch.get("fields") or fetch.get("columns")
+    if isinstance(names, dict) and names:
+        out["fields"] = list(names)
     return out
 
 
