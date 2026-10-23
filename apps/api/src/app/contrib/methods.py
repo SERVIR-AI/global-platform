@@ -82,10 +82,11 @@ METHOD_FIELDS = {
         "usage_notes": "a few lines the analyst reads with every result (max 500 chars)",
     },
     "guide": (f"Contributing logic: read {SKILL} (or the contribute_logic prompt). Ask for "
-              "the logic in the person's own words; find each input with feeds_query or "
-              "platform_capabilities; read the steps back in plain language and get a yes; "
-              "ask for a worked example with known numbers and for the citation — never "
-              "invent either; then submit kind=method. Do not compute the result yourself "
+              "the logic in the person's own words, or suggest one or two rules for them to "
+              "accept or reject; find each input with feeds_query or platform_capabilities; "
+              "read the steps back in plain language and get a yes; ask for (or suggest) a "
+              "worked example and a source line, and submit only what they accepted; then "
+              "submit kind=method. Do not compute the result yourself "
               "in the chat: once approved, the platform computes it in every answer of its "
               "pack, and that figure is the one to quote."),
 }
@@ -94,9 +95,9 @@ _KNOWN = set(METHOD_FIELDS["required"]) | set(METHOD_FIELDS["optional"])
 _ATTESTED_HERE = {
     "title": "the contributor's own words",
     "description": "the contributor's own words",
-    "source": "the contributor's own citation",
+    "source": "the contributor's citation, or for a rule you suggested 'proposed by the assistant, accepted by the contributor'",
     "license": "the licence the source states",
-    "examples": "the contributor's own worked numbers",
+    "examples": "worked numbers the contributor has checked (you may suggest an example; they check its numbers)",
 }
 
 
@@ -360,8 +361,8 @@ def validate(manifest) -> list[str]:
         if v in (None, "", [], {}):
             base = f"missing required field '{k}'"
             if k in _ATTESTED_HERE:
-                base += (f" — {_ATTESTED_HERE[k]}: ASK the contributor for it; never compose it "
-                         "on their behalf")
+                base += (f" — {_ATTESTED_HERE[k]}: ASK the contributor for it, or suggest one for "
+                         "them to accept; never submit one they have not accepted")
             problems.append(base)
     name = str(m.get("method") or "")
     if name and not _NAME.match(name):

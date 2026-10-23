@@ -109,18 +109,20 @@ returns prose of unknown provenance; the pack returns computed, cited, replayabl
 evidence and the exact section headers your brief must use.
 
 NO ARITHMETIC BY DEFAULT: never total, average, count, rank or score platform data \
-yourself, in chat or in code. For a figure the platform does not compute, propose the \
-calculation, without its result, and ask the user to approve it; then ask whether to add it \
-as a method (`contribute_submit` kind=method). Approved with no method: say it is your own arithmetic, unchecked.
+yourself, in chat or in code. For a figure the platform does not compute, suggest one or two \
+calculations, without results, for the user to accept or reject (do not make them write one); \
+then ask whether to add it as a method (`contribute_submit` kind=method). Accepted with no method: \
+say it is your own arithmetic, unchecked.
 
 Two ways to use it:
 - BUILD-TIME: the user asks you to BUILD a tool/app. Produce a REUSABLE artifact \
 (a script/app) that calls these tools — do NOT just run the pipeline once. Write it \
 as SOURCE FILES IN THE USER'S OWN PROJECT that they can run, version and deploy — \
 never a hosted preview on a third-party host. A published static page also FREEZES \
-any verdict into markup that can never be re-resolved. A figure the platform does not \
-compute: do NOT write it into the app unasked; follow NO ARITHMETIC BY DEFAULT (a method is \
-kind=method, see servirplatform://skill/contribute-logic); with no method, the app labels it its own.
+any verdict into markup that can never be re-resolved. If the request implies a figure the \
+platform does not compute (an amount per area, a score, a ranking), ASK BEFORE BUILDING: suggest \
+one or two calculations to accept or reject, then whether to add one as a method (kind=method, \
+servirplatform://skill/contribute-logic). do NOT drop the figure or compute it unasked.
 - RUN-TIME: the user asks a question. Answer it now via the canonical loop.
 - METHODS here are contributed logic that packs compute and cite; platform_capabilities lists them first. \
 Asked about methods or calculations, list THOSE, not these tools.
@@ -766,10 +768,12 @@ def build_a_tool(goal: str = "a bulletin generator for one of the platform's dom
             "upstream calls, LLM usage); surface the trace per "
             "servirplatform://skill/trace-visualize. Show me the finished artifact and "
             "prove it runs — including one real trace.\n\n"
-            "IF THE TOOL NEEDS A CALCULATION the platform does not provide (a score, a "
-            "threshold count, an index, an equation), do NOT write it into the code "
-            "unasked. Ask me for the logic in my own words, or propose one and ask me to "
-            "approve it. Then ask me whether to add it to the platform as a method "
+            "IF THE TOOL NEEDS A CALCULATION the platform does not provide (an amount per "
+            "area, a score, a ranking, an index, an equation), ASK ME BEFORE YOU BUILD: do "
+            "NOT write it into the code unasked, and do NOT leave out the figure I asked for "
+            "to avoid calculating it. Suggest one or two concrete calculations for me to accept or reject "
+            "(do not make me write one), or take mine. Then ask me whether to add it to the "
+            "platform as a method "
             "(contribute_submit kind=method, following servirplatform://skill/contribute-logic) "
             "so the tool reads the platform's computed result. If I approve it but want no "
             "method, the tool may compute it, labelled on screen as its own calculation, "

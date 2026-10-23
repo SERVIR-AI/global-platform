@@ -173,9 +173,9 @@ ENTRY_HINT = {
              "publish_answer needs to gate and receipt your brief."),
     "no_arithmetic": ("By default, do not add up, average, count, rank or score these records "
                       "yourself, in chat or in code you write: quote the figures the platform "
-                      "returned. If a figure is needed that no pack computes, (1) propose the "
-                      "calculation in plain words, without its result, and ask the user to "
-                      "approve it, then (2) ask "
+                      "returned. If a figure is needed that no pack computes, (1) suggest one "
+                      "or two calculations in plain words, without their results, for the user "
+                      "to accept or reject (never make them write one from scratch), then (2) ask "
                       "whether to add it to the platform as a method (contribute_submit "
                       "kind=method) so the platform computes and cites it for everyone. If they "
                       "approve it but want no method, you may do that calculation, and say "

@@ -93,8 +93,8 @@ def test_no_arithmetic_by_default_with_two_questions(log):
     at = INSTRUCTIONS.find("NO ARITHMETIC BY DEFAULT")
     assert 0 <= at < 2500, at
     rule = INSTRUCTIONS[at:at + 700]
-    assert "approve" in rule and "as a method" in rule and "own arithmetic" in rule
+    assert "accept or reject" in rule and "as a method" in rule and "own arithmetic" in rule
     hint = loop.ENTRY_HINT["no_arithmetic"]
-    assert "approve" in hint and "kind=method" in hint and "no receipt" in hint
+    assert "accept or reject" in hint and "kind=method" in hint and "no receipt" in hint
     assert "ask me whether to add it to the platform as a method" in build_a_tool()
     log("CHECK", f"rule at char {at} of the instructions, in every lookup reply, in the build prompt")

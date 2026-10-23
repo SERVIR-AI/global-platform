@@ -25,11 +25,14 @@ contributor, so the figure is the platform's arithmetic and the receipt covers i
   something it cannot say, tell the person what is missing instead of approximating.
 - **Never do the arithmetic yourself in the answer.** The point of a method is that
   the platform computes it.
-- **You may suggest the logic, never impose it.** If the person has no rule of their
-  own, propose one in plain words and ask them to approve it, then ask whether it
-  should become a method. Record a suggested rule's source honestly, as proposed by the
-  assistant and approved by the contributor, never as published science. The worked
-  example must still be numbers the person has checked.
+- **Lead with suggestions; never impose them.** Do not make the person write a rule
+  from scratch. Offer one or two concrete rules built from data the platform has, in
+  plain words and without results, and ask them to accept, adjust or reject one. Then
+  ask whether it should become a method. You may suggest wording for the title and
+  description too, but submit only what they accepted or wrote. Record a suggested
+  rule's source honestly, as proposed by the assistant and accepted by the contributor,
+  never as published science. You may suggest a worked example as well; the person must
+  check its numbers before it is submitted.
 
 ## Steps
 

@@ -397,4 +397,4 @@ def test_the_dry_run_hands_out_no_figures(env):
 def test_a_proposed_calculation_comes_without_its_result():
     from app.mcp import loop
     from app.mcp.server import INSTRUCTIONS
-    assert "without its result" in INSTRUCTIONS and "without its result" in loop.ENTRY_HINT["no_arithmetic"]
+    assert "without results" in INSTRUCTIONS and "without their results" in loop.ENTRY_HINT["no_arithmetic"]
