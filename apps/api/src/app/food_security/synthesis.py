@@ -188,10 +188,18 @@ _POINT = re.compile(rf"\b(?:{_W})(?:[\s-]+(?:{_W}|hundred|and))*\s+point(?:\s+(?
 
 
 def _gate_codes() -> dict:
-    """The code lists the gate reads (conf/gate_codes.yml): ISO 3166 and ISO 4217, as data."""
+    """The code lists the gate reads (conf/gate_codes.yml): ISO 3166 and ISO 4217, as data.
+    Missing or unreadable, it is logged loudly and only the country-domain and currency checks go."""
+    import logging
     import yaml
-    with open(get_settings().gate_codes_path, encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+    path = get_settings().gate_codes_path
+    try:
+        with open(path, encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        logging.getLogger(__name__).error("gate code lists unreadable (%s: %s): country-domain and "
+                                          "currency checks are off until it is installed", path, exc)
+        return {}
 
 
 def _plain(word: str) -> str:

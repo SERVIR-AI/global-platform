@@ -630,3 +630,22 @@ def test_the_gate_reads_the_evidence_and_the_draft_once(monkeypatch):
     fs.check_grounded("## Answer\n\nA 12,040 ha figure [1].\n\nAnd 4,000 ha [2].", cits,
                       sections=["## Answer"], extra_evidence={"area_km2": 120.4})
     assert calls.count(False) == 2 * len(cits) + 1 and calls.count(True) == 3
+
+
+def test_a_missing_code_list_never_stops_the_gate(tmp_path, log):
+    """Deployed without conf/gate_codes.yml, the gate still imports and runs, and says which
+    checks are off: a missing data file must never take publishing down."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    src = Path(__file__).resolve().parents[1] / "src"
+    env = {**os.environ, "GATE_CODES_PATH": str(tmp_path / "absent.yml"),
+           "CACHE_DIR": str(tmp_path / "cache"), "PYTHONPATH": str(src)}
+    run = subprocess.run([sys.executable, "-c", "from app.food_security import synthesis as s; "
+                          "print(len(s._CC), callable(s.check_grounded))"],
+                         env=env, capture_output=True, text=True, timeout=120)
+    log("OUTPUT", f"rc={run.returncode} out={run.stdout.strip()} err={run.stderr.strip()[-160:]}")
+    assert run.returncode == 0, run.stderr
+    assert run.stdout.split() == ["0", "True"]
+    assert "gate code lists unreadable" in run.stderr
