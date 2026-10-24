@@ -14,6 +14,8 @@ same discipline as registry.pack_manifest's local import.
 
 from __future__ import annotations
 
+from . import budget
+
 
 def _gather_food_security(target: dict, focus: str, trace: list,
                           extras: dict) -> tuple[list, list, dict]:
@@ -128,7 +130,7 @@ def _risk_hazard_words() -> str:
         by_base.setdefault(base, []).append(n)
     for base, ns in by_base.items():
         words.append(f"{base} at {min(ns)}- to {max(ns)}-year return periods")
-    return ", ".join(words) if words else "mapped hazards"
+    return budget.names(words, more="more hazards") if words else "mapped hazards"
 
 
 def risk_coverage() -> dict:
@@ -182,7 +184,7 @@ def _in_risk_region(entry: dict, cov: dict) -> bool:
     return not boxes or not isinstance(bbox, (list, tuple))
 
 
-def _risk_asset_words() -> str:
+def _risk_assets() -> list[str]:
     """What can be counted under a hazard: people when a count grid is landed, the
     built-in OSM classes, and every contributed point layer inside the region the
     hazard maps cover, by its title. A Costa Rica occurrence layer was being offered
@@ -203,7 +205,11 @@ def _risk_asset_words() -> str:
                 words.append(str(vis[layer].get("title") or layer).lower())
     except Exception:
         pass
-    return ", ".join(words[:-1]) + " and " + words[-1]
+    return words
+
+
+def _risk_asset_words() -> str:
+    return budget.names(_risk_assets(), last=" and ", more="more asset layers")
 
 
 def _risk_where() -> str:
@@ -239,7 +245,7 @@ def _risk_where() -> str:
                  f"lon {box[0]:.1f} to {box[2]:.1f}, lat {box[1]:.1f} to {box[3]:.1f}" if box else "")
         if where and where not in places:
             places.append(where)
-    return "; ".join(places)
+    return budget.names(places, sep="; ", more="more regions")
 
 
 def _risk_summary() -> str:
@@ -247,6 +253,22 @@ def _risk_summary() -> str:
     return (f"HAZARD RISK — {_risk_asset_words()} exposed to a mapped hazard ({_risk_hazard_words()}) "
             + (f"for any place in {where}" if where else "where a hazard map in the catalog reaches")
             + ", plus vulnerability-weighted risk levels")
+
+
+def _risk_covers() -> str:
+    """Counts and a region, never a layer name: the connect-time opening is budgeted."""
+    from ..graph.geo import tiffs
+    try:
+        cov, cat = risk_coverage(), tiffs.catalog()
+    except Exception:
+        cov, cat = {}, {}
+    maps = [k for k in cov if not ((cat.get(k) or {}).get("internal") or _is_synthetic(cat.get(k) or {}))]
+    where = _risk_where()
+    n_m, n_a = len(maps), len(_risk_assets())
+    region = (f", {where}" if where and len(where) <= 60 else
+              f", {where.count(';') + 1} regions" if where else "")
+    return (f"{n_m} hazard map{'s' if n_m != 1 else ''}, "
+            f"{n_a} asset layer{'s' if n_a != 1 else ''}{region}")
 
 
 def _risk_keywords() -> str:
@@ -270,6 +292,22 @@ def _fs_summary() -> str:
     crops, where = _fs_coverage()
     return (f"FOOD SECURITY — {crops} outlooks for {where} and the climate drivers behind them "
             "(ENSO, IOD, live indices, a governed document library)")
+
+
+def _fs_covers() -> str:
+    """Counts only (countries, crops, documents) for the budgeted opening."""
+    from . import registry
+    try:
+        c = registry.coverage()
+    except Exception:
+        c = {}
+    try:
+        docs = int(registry._corpus_summary().get("documents") or 0)
+    except Exception:
+        docs = 0
+    n_c, n_k = len(c.get("countries") or []), len(c.get("crops") or [])
+    return (f"{n_c} countr{'y' if n_c == 1 else 'ies'}, {n_k} crop{'' if n_k == 1 else 's'}"
+            + (f", {docs} documents" if docs else ", no documents yet"))
 
 
 def _fs_keywords() -> str:
@@ -314,7 +352,8 @@ def _lc_stacks_words() -> tuple[str, str]:
     top = sorted(named, key=lambda f: (-shared[f], order.index(f)))[:10]
     classes = ", ".join(named[f] for f in top) + (
         " and the other classes of each stack's own legend" if len(named) > len(top) else "")
-    where = "; ".join((f"{c}: " if c else "") + ", ".join(titles) for c, titles in groups.items())
+    where = budget.names(((f"{c}: " if c else "") + ", ".join(titles) for c, titles in groups.items()),
+                         sep="; ", more="more stacks")
     return classes, where
 
 
@@ -340,10 +379,34 @@ def _lc_summary() -> str:
             f"today over {where}")
 
 
+def _lc_covers() -> str:
+    """Counts only (stacks, classes, span, countries) for the budgeted opening."""
+    try:
+        from ..land_cover.synthesis import _fold, landcover_stacks
+        from ..graph.geo import stacks as _stacks
+        rows = landcover_stacks()
+    except Exception:
+        rows = {}
+    if not rows:
+        return "no land-cover stack registered yet"
+    classes, years, countries = set(), [], set()
+    for row in rows.values():
+        classes.update(_fold(str(v)) for v in (row.get("legend") or {}).values())
+        countries.update(str(c) for c in (row.get("countries") or []) if str(c).strip())
+        try:
+            years += [int(y) for y in _stacks.years(row)]
+        except Exception:
+            pass
+    n = len(rows)
+    return (f"{n} stack{'s' if n != 1 else ''}, {len(classes)} classes"
+            + (f", {min(years)}-{max(years)}" if years else "")
+            + (f", {len(countries)} countr{'y' if len(countries) == 1 else 'ies'}" if countries else ""))
+
+
 def _lc_keywords() -> str:
     classes, _where = _lc_stacks_words()
     return (f"land cover: {classes}, land-cover change, deforestation and forest gain, "
-            f"fire detections ({'; '.join(dict.fromkeys(_lc_where()))})")
+            f"fire detections ({budget.names(dict.fromkeys(_lc_where()), sep='; ', more='more')})")
 
 
 def target_shapes(sep: str = " | ") -> str:
@@ -453,6 +516,7 @@ PACKS: dict[str, dict] = {
         "corpus": "food-security",
         "cites_sources": ("feeds", "tables"),
         "summary": lambda: _fs_summary(),
+        "covers": lambda: _fs_covers(),
         "audience": "food-security analysts, hub teams and ministry advisors deciding whether to act months ahead",
         "keywords": lambda: _fs_keywords(),
         "default_focus": lambda t: f"{t.get('country', '')} {t.get('crop', '')}".strip(),
@@ -473,6 +537,7 @@ PACKS: dict[str, dict] = {
         "manifest": _risk_manifest,
         "cites_sources": ("feeds", "tables"),
         "summary": lambda: _risk_summary(),
+        "covers": lambda: _risk_covers(),
         "audience": "disaster-risk and preparedness planners and the hubs that support them",
         "keywords": lambda: _risk_keywords(),
         "default_focus": lambda t: f"{t.get('hazard', '')} exposure in {t.get('place', '')}".strip(),
@@ -509,6 +574,7 @@ PACKS: dict[str, dict] = {
         "cites_sources": ("tables",),
         "manifest": _lc_manifest,
         "summary": lambda: _lc_summary(),
+        "covers": lambda: _lc_covers(),
         "audience": "foresters, land-use and conservation planners, and the hubs that map land cover",
         "keywords": lambda: _lc_keywords(),
         "subjects": ["land cover by class", "forest, cropland, grassland and built-up change "
