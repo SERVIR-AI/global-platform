@@ -214,6 +214,9 @@ def test_every_ambiguity_decline_offers_forms_that_resolve(gaz, log):
         hit = ingest.resolve_place(q)
         assert hit["status"] == "ok" and _bbox(hit) == colorado and hit["name"] == "Colorado (Abangares)", q
     assert _bbox(ingest.resolve_place("Palo Verde, National Park")) == (-85.4, 10.3, -85.25, 10.4)
+    # a designation with commas in it: the hint the decline gives, and any part of it, resolve
+    for q in ("Palo Verde, Ramsar Site", "Palo Verde, Ramsar Site, Wetland of International Importance"):
+        assert _bbox(ingest.resolve_place(q)) == (-85.42, 10.28, -85.24, 10.42), q
     # only the canton carries a province: the parent names exactly one area
     assert ingest.resolve_place("Nicoya, Guanacaste")["how"].startswith("contributed boundary: Nicoya from Testland cantons")
     # a part that holds several still declines, with the forms that tell them apart

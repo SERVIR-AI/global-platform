@@ -492,7 +492,9 @@ def _held(areas, later, layers):
     def says(a, part):
         declared = [str(c) for c in (layers[a["layer"]].get("countries") or []) if str(c).strip()]
         k = _key(part)
-        return (k in {_key(v) for v in a["attrs"].values()}
+        # a value with commas in it ('Ramsar Site, Wetland of International Importance') is
+        # also held by each of its parts, since the query was split on the same commas
+        return (k in {_key(p) for v in a["attrs"].values() for p in (v, *str(v).split(","))}
                 or k in {_key(c) for c in declared}
                 or bool(declared and _vectors.country_matches(declared, part)))
 
