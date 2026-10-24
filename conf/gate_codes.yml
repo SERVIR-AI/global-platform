@@ -1,0 +1,206 @@
+# Code lists the groundedness gate reads (app/food_security/synthesis.py): which bare hosts are
+# country web domains, and which marks and words name a currency. Data, not code: edit it here.
+# Lists of codes are space-separated strings (YAML would read a bare NO as false).
+
+# ISO 3166-1 alpha-2, every assigned code (tzdata iso3166.tab, ISO/TC 46 N1127, 2024-02-29), and
+# the exceptionally reserved codes delegated as country domains (AC, EU, SU, UK).
+iso_3166_alpha2: >-
+  AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR
+  BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ
+  EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW
+  GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY
+  KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV
+  MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY
+  QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG
+  TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM
+  ZW AC EU SU UK
+# Codes that are common English words: never read as a country domain ('feature.id', 'data.in').
+english_word_codes: AM AS AT BE BY DO ID IN IS IT ME MY NO SO TO US
+
+# ISO 4217, every active code, with the English name of its unit; null where that name is no
+# currency (metals, funds, test and accounting units) or a common English word (mark, real, sol,
+# sum, won). A code marks a figure as money before it ('KES 45 million'); a unit name after it.
+iso_4217:
+  AED: dirham
+  AFN: afghani
+  ALL: lek
+  AMD: dram
+  ANG: guilder
+  AOA: kwanza
+  ARS: peso
+  AUD: dollar
+  AWG: florin
+  AZN: manat
+  BAM: null
+  BBD: dollar
+  BDT: taka
+  BGN: lev
+  BHD: dinar
+  BIF: franc
+  BMD: dollar
+  BND: dollar
+  BOB: boliviano
+  BOV: null
+  BRL: null
+  BSD: dollar
+  BTN: ngultrum
+  BWP: pula
+  BYN: ruble
+  BZD: dollar
+  CAD: dollar
+  CDF: franc
+  CHE: null
+  CHF: franc
+  CHW: null
+  CLF: null
+  CLP: peso
+  CNY: yuan
+  COP: peso
+  COU: null
+  CRC: colón
+  CUP: peso
+  CVE: escudo
+  CZK: koruna
+  DJF: franc
+  DKK: krone
+  DOP: peso
+  DZD: dinar
+  EGP: pound
+  ERN: nakfa
+  ETB: birr
+  EUR: euro
+  FJD: dollar
+  FKP: pound
+  GBP: pound
+  GEL: lari
+  GHS: cedi
+  GIP: pound
+  GMD: dalasi
+  GNF: franc
+  GTQ: quetzal
+  GYD: dollar
+  HKD: dollar
+  HNL: lempira
+  HTG: gourde
+  HUF: forint
+  IDR: rupiah
+  ILS: shekel
+  INR: rupee
+  IQD: dinar
+  IRR: rial
+  ISK: króna
+  JMD: dollar
+  JOD: dinar
+  JPY: yen
+  KES: shilling
+  KGS: som
+  KHR: riel
+  KMF: franc
+  KPW: null
+  KRW: null
+  KWD: dinar
+  KYD: dollar
+  KZT: tenge
+  LAK: kip
+  LBP: pound
+  LKR: rupee
+  LRD: dollar
+  LSL: loti
+  LYD: dinar
+  MAD: dirham
+  MDL: leu
+  MGA: ariary
+  MKD: denar
+  MMK: kyat
+  MNT: tugrik
+  MOP: pataca
+  MRU: ouguiya
+  MUR: rupee
+  MVR: rufiyaa
+  MWK: kwacha
+  MXN: peso
+  MXV: null
+  MYR: ringgit
+  MZN: metical
+  NAD: dollar
+  NGN: naira
+  NIO: córdoba
+  NOK: krone
+  NPR: rupee
+  NZD: dollar
+  OMR: rial
+  PAB: balboa
+  PEN: null
+  PGK: kina
+  PHP: peso
+  PKR: rupee
+  PLN: zloty
+  PYG: guaraní
+  QAR: riyal
+  RON: leu
+  RSD: dinar
+  RUB: ruble
+  RWF: franc
+  SAR: riyal
+  SBD: dollar
+  SCR: rupee
+  SDG: pound
+  SEK: krona
+  SGD: dollar
+  SHP: pound
+  SLE: leone
+  SOS: shilling
+  SRD: dollar
+  SSP: pound
+  STN: dobra
+  SVC: colón
+  SYP: pound
+  SZL: lilangeni
+  THB: baht
+  TJS: somoni
+  TMT: manat
+  TND: dinar
+  TOP: paʻanga
+  TRY: lira
+  TTD: dollar
+  TWD: dollar
+  TZS: shilling
+  UAH: hryvnia
+  UGX: shilling
+  USD: dollar
+  USN: null
+  UYI: null
+  UYU: peso
+  UYW: null
+  UZS: null
+  VED: bolívar
+  VES: bolívar
+  VND: dong
+  VUV: vatu
+  WST: tala
+  XAF: franc
+  XAG: null
+  XAU: null
+  XBA: null
+  XBB: null
+  XBC: null
+  XBD: null
+  XCD: dollar
+  XCG: guilder
+  XDR: null
+  XOF: franc
+  XPD: null
+  XPF: franc
+  XPT: null
+  XSU: null
+  XTS: null
+  XUA: null
+  XXX: null
+  YER: rial
+  ZAR: rand
+  ZMW: kwacha
+  ZWG: null
+
+# How currencies are also written that is neither an ISO code nor a Unicode currency symbol
+# (category Sc, read from the Unicode database itself): local letter symbols.
+written_forms: US KSh Ksh K ZK Rs Tk Rp RMB RM TSh USh MK Nu CFA FCFA

@@ -14,7 +14,7 @@ import hashlib
 from ..food_security import synthesis
 from ..llm import MissingAPIKey
 from ..rag.store import CorpusError
-from . import context, record, registry, store
+from . import assemble, context, loop, record, registry, store
 
 
 def _run_foodsecurity_brief(question, override, override_country, override_crop,
@@ -57,32 +57,32 @@ def run(composition: str = "foodsecurity.brief", question: str = "",
         model: str | None = None) -> dict:
     """Run a composition by id. Returns the governed brief plus the ids that make
     it replayable (pack/report/receipt)."""
+    # every decline at the seam assemble_pack uses: a caller's error or an outage says it is no
+    # coverage gap; the runner's own decline names what is not served
     spec = registry.COMPOSITIONS.get(composition)
     if spec is None:
-        return {"status": "declined", "note": f"unknown composition {composition!r}",
-                "available": sorted(registry.COMPOSITIONS)}
+        return assemble.declined(f"unknown composition {composition!r}", coverage=False,
+                                 available=sorted(registry.COMPOSITIONS))
     runner = _RUNNERS.get(composition)
     if runner is None:
-        return {"status": "declined",
-                "note": f"composition {composition!r} is registered but has no runner "
-                        "(not implemented)"}
+        return assemble.declined(f"composition {composition!r} is registered but has no runner "
+                                 "(not implemented)", coverage=False)
     if not (question or "").strip():
-        return {"status": "declined", "note": "question is required"}
+        return assemble.declined("question is required", coverage=False)
     if override is not None and not context._valid_override(override):
-        return {"status": "declined",
-                "note": "override must be a list of {season, planting:[m,m], harvest:[m,m]}"}
+        return assemble.declined("override must be a list of {season, planting:[m,m], "
+                                 "harvest:[m,m]}", coverage=False)
     try:
         out = runner(question, override, override_country, override_crop, provider, model)
     except MissingAPIKey as exc:
-        return {"status": "declined", "note": f"LLM key missing: {exc}"}
+        return assemble.declined(f"LLM key missing: {exc}", coverage=False)
     except CorpusError as exc:
-        return {"status": "declined", "note": str(exc)}
+        return assemble.declined(str(exc), coverage=False)
 
     citations = out.get("citations") or []
     if out.get("declined"):
-        return {"status": "declined", "note": out.get("decline_reason"),
-                "citations": citations, "grounded": out.get("grounded"),
-                "trace": out.get("trace")}
+        return assemble.declined(out.get("decline_reason"), citations=citations,
+                                 grounded=out.get("grounded"), trace=out.get("trace"))
 
     parsed, stats = out.get("parsed") or {}, out.get("evidence") or {}
     brief = out.get("brief") or ""
@@ -112,6 +112,7 @@ def run(composition: str = "foodsecurity.brief", question: str = "",
 
     return {"status": "ok", "composition": composition, "brief": brief,
             "citations": citations, "gaps": out.get("gaps") or [],
+            **({"not_served": loop.not_served(out["gaps"])} if out.get("gaps") else {}),
             "grounded": grounded, "pack_id": pack_id, "report_id": report_id,
             "receipt_id": rec.get("receipt_id"), "draft_sha256": digest,
             # parity with /chat: the step trace and token usage must not be lost

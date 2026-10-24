@@ -88,6 +88,8 @@ class Settings(BaseSettings):
     feeds_conf_dir: Path = _REPO_ROOT / "conf" / "feeds"
     # contributed methods (contrib/methods.py): one file per approved method
     methods_conf_dir: Path = _REPO_ROOT / "conf" / "methods"
+    # the groundedness gate's code lists: ISO country domains and currencies (data, not code)
+    gate_codes_path: Path = _REPO_ROOT / "conf" / "gate_codes.yml"
 
     # --- Food security (GEOGLAM Crop Monitor) ---
     # The CMET Global_SHP FeatureServer: per-region crop-condition expert

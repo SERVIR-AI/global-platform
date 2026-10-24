@@ -25,13 +25,18 @@ def _tools():
 
 
 def _served() -> dict:
-    """Every surface a section may be homed on, read as a client would."""
-    async def guide():
+    """Every surface a section may be homed on, read as a client would (every published
+    prompt rendered with its defaults)."""
+    async def read():
         from fastmcp import Client
         async with Client(mcp) as c:
-            return (await c.read_resource(instructions.HOW_TO_USE))[0].text
-    out = {"instructions": instructions.compose(), instructions.GUIDE: asyncio.run(guide()),
-           "prompt:build_a_tool": build_a_tool()}
+            guide = (await c.read_resource(instructions.HOW_TO_USE))[0].text
+            prompts = {f"prompt:{p.name}": "\n".join(m.content.text for m in
+                                                     (await c.get_prompt(p.name)).messages)
+                       for p in await c.list_prompts()}
+            return guide, prompts
+    guide, prompts = asyncio.run(read())
+    out = {"instructions": instructions.compose(), instructions.GUIDE: guide, **prompts}
     out.update({f"tool:{k}": v for k, v in _tools().items()})
     out.update({f"skill:{n}": skills.bundle(n) for n in skills.SERVED})
     return out

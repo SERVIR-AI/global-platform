@@ -18,6 +18,14 @@ from . import context, layers as layers_step, loop, methods_step, packs, store, 
 NOT_RETURNED = ("viz", "layers_area", "vectors_area")
 
 
+def declined(note: str, coverage: bool = True, **extra) -> dict:
+    """Every decline at this seam: its note, then one line (G13). A coverage decline names the
+    kinds its note names and asks for the source; a caller's error or an outage
+    (`coverage=False`), or a note naming no kind, says it is no coverage gap."""
+    return {"status": "declined", "note": note, **extra,
+            "not_served": loop.not_served(note, gap=False) if coverage else loop.NOT_A_GAP}
+
+
 def assemble(country: str | None = None, crop: str | None = None,
              focus: str | None = None, pack: str | None = None,
              place: str | None = None, hazard: str | None = None,
@@ -38,8 +46,8 @@ def assemble(country: str | None = None, crop: str | None = None,
     and FS packs keep top-level country/crop keys — Desktop configs and the embed
     resolver read them."""
     if override is not None and not context._valid_override(override):
-        return {"status": "declined",
-                "note": "override must be a list of {season, planting:[m,m], harvest:[m,m]}"}
+        return declined("override must be a list of {season, planting:[m,m], harvest:[m,m]}",
+                        coverage=False)
     params = {"country": (country or "").strip(), "crop": (crop or "").strip(),
               "place": (place or "").strip(), "hazard": (hazard or "").strip(),
               "min_severity": min_severity,
@@ -49,36 +57,34 @@ def assemble(country: str | None = None, crop: str | None = None,
               "stack": (stack or "").strip()}
     pack_id_name = packs.infer(pack, **params)
     if pack_id_name is None or pack_id_name not in packs.PACKS:
-        return {"status": "declined",
-                "note": (f"unknown pack {pack_id_name or pack!r} — available: "
-                         + ", ".join(packs.available())
-                         + ". Name one, or pass its target params: "
-                         + "; ".join(f"{pid}: {', '.join(sp['target_keys'])}"
-                                     for pid, sp in sorted(packs.PACKS.items()))),
-                "available_packs": packs.available()}
+        return declined(f"unknown pack {pack_id_name or pack!r} — available: "
+                        + ", ".join(packs.available())
+                        + ". Name one, or pass its target params: "
+                        + "; ".join(f"{pid}: {', '.join(sp['target_keys'])}"
+                                    for pid, sp in sorted(packs.PACKS.items())),
+                        coverage=False, available_packs=packs.available())
     spec = packs.PACKS[pack_id_name]
     # a pack row may let a call param stand in for a required key (its `satisfied_by`):
     # a geometry for a place, a vector or layer measure for a map year
     target, why = packs.build_target(pack_id_name, {**params, "geometry": geometry,
                                                     "vectors": vectors, "layers": layers})
     if target is None:
-        return {"status": "declined", "note": why,
-                "available_packs": packs.available()}
+        return declined(why, coverage=False, available_packs=packs.available())
     # Layer names are checked before the gather — an unknown name is a decline, said
     # with the registered list, never a slow pack with a silent hole in it.
     bad_layers = layers_step.check(layers)
     if bad_layers:
-        return {"status": "declined", "note": bad_layers}
+        return declined(bad_layers)
     bad_vectors = vectors_step.check(vectors)
     if bad_vectors:
-        return {"status": "declined", "note": bad_vectors}
+        return declined(bad_vectors)
     within_how = None
     if within:
         # Any pack with an area: the area becomes the part of it inside a contributed
         # polygon layer — mangrove inside protected areas, exposure inside a watershed.
         if not any(k in spec["target_keys"] for k in ("place",)):
-            return {"status": "declined",
-                    "note": f"within needs a pack that analyses an area; {pack_id_name} has none"}
+            return declined(f"within needs a pack that analyses an area; {pack_id_name} has none",
+                            coverage=False)
         from ..graph.geo import ingest as _ingest
         from shapely.geometry import mapping as _mapping
         try:
@@ -87,11 +93,11 @@ def assemble(country: str | None = None, crop: str | None = None,
                 base_label = place or "the area you supplied"
             else:
                 if not place:
-                    return {"status": "declined", "note": "within needs a place or a geometry to restrict"}
+                    return declined("within needs a place or a geometry to restrict", coverage=False)
                 _km2, base_label, base, _how = _ingest._boundary(place, 250_000.0)
             restricted, label, within_how = vectors_step.restrict_within(str(within).strip(), base, base_label)
         except ValueError as exc:
-            return {"status": "declined", "note": str(exc)}
+            return declined(str(exc))
         geometry = _mapping(restricted)
         place = label
         target = {**target, "place": label, "within": str(within).strip()}
@@ -112,22 +118,21 @@ def assemble(country: str | None = None, crop: str | None = None,
     try:
         citations, gaps, stats = spec["gather"](target, focus, trace, extras)
     except MissingAPIKey as exc:
-        return {"status": "declined", "note": f"embedding key missing: {exc}"}
+        return declined(f"embedding key missing: {exc}", coverage=False)
     except ValueError as exc:
         # A gatherer refusing its target (unknown hazard, bad month...) is a
         # GOVERNED decline, not a transport error — rule 2, at the dispatch seam
         # so it holds for every pack.
-        return {"status": "declined", "note": str(exc)}
+        return declined(str(exc))
     except (OSError, RuntimeError) as exc:
         # Upstream infrastructure failing mid-gather (geocoder down, mirrors
         # exhausted, raster unreadable) must also decline with the cause. OSError
         # covers requests' connection errors and rasterio's IO errors alike.
-        return {"status": "declined",
-                "note": f"evidence gathering failed: {type(exc).__name__}: {exc}. "
+        return declined(f"evidence gathering failed: {type(exc).__name__}: {exc}. "
                         "This is an upstream/infrastructure failure, not a coverage "
-                        "gap — retrying later may succeed."}
+                        "gap — retrying later may succeed.", coverage=False)
     except CorpusError as exc:
-        return {"status": "declined", "note": str(exc)}
+        return declined(str(exc), coverage=False)
     # Contributed vector layers measured inside the area this pack used, then the
     # values of registered raster layers over it — the same two steps for every pack;
     # each numbers its citations after the last, before the gaps. The vector step
@@ -204,5 +209,7 @@ def assemble(country: str | None = None, crop: str | None = None,
             # Seen live: a model averaged a pack's rows itself. One contextual line; the
             # rule in full is in the instructions and the tool's description.
             "no_arithmetic": loop.NO_ARITHMETIC,
+            # G13: the declared gaps say what is missing; this says what to do about it.
+            "not_served": loop.not_served(gaps),
             **response,
             "your_next_output": loop.YOUR_NEXT_OUTPUT.format(pack_id=pack_id)}

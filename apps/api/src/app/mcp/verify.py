@@ -13,12 +13,8 @@ from . import loop, packs, store
 
 
 def groundedness(draft: str, pack_id: str) -> dict:
-    """Gate `draft` against the pack's numbered citations. Blocking failures:
-    missing required sections, model-written Sources, no/phantom citations,
-    uncited paragraphs, and any number that appears in no citation and in no
-    platform-computed figure. Warned (not blocking): a number attributed to a
-    citation that does not contain it.
-    Persists a report_id resolvable later (feeds record_receipt)."""
+    """Gate `draft` against the pack (synthesis.check_grounded: what blocks, what only warns)
+    and persist a report_id resolvable later (feeds record_receipt)."""
     pack = store.load_pack(pack_id)
     if pack is None:
         return {"status": "declined",
@@ -72,6 +68,8 @@ def groundedness(draft: str, pack_id: str) -> dict:
             "missing_sections": r["missing_sections"],
             "uncited_paragraphs": r["uncited_paragraphs"],
             "numbers_unverified_recorded": r["numbers_unverified"],
+            "links_not_served": r.get("links_not_served") or [],
+            "numbers_unreadable": r.get("numbers_unreadable") or [],
             # NOT blocking yet, and deliberately so: each of these closes a hole a
             # cold-consumer UAT found on the deployed host, and each is queued for
             # promotion once its false-alarm rate has been measured over ordinary

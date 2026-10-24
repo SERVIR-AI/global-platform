@@ -11,6 +11,7 @@ Areas are summed per pixel at the pixel's own latitude, exact on the WGS84
 ellipsoid, never with one constant pixel area: a 30 m cell at 28 N covers 11% less
 ground than one at the equator. Counts are never resampled.
 """
+import functools
 import math
 
 import numpy as np
@@ -150,6 +151,35 @@ def rank(candidates, facts):
 RANK_RULE = ("two or more classes first, then the extent covering most of the area, then the "
              f"finest cells (within {CELL_TIE:.0%} counts as equal), then the most years, then "
              "the first registered")
+
+
+def bounds(layer_key, row=None, cat=None):
+    """A layer's [w, s, e, n]: its row's declared extent or bbox, else its file's own header
+    when the file is on this server (read once per file version); None when neither."""
+    import os
+    cat = cat if cat is not None else tiffs.catalog()
+    row = row if row is not None else cat.get(layer_key) or {}
+    ext, bbox = row.get("extent") or {}, row.get("bbox")
+    if ext.get("lon") and ext.get("lat"):
+        return [float(ext["lon"][0]), float(ext["lat"][0]), float(ext["lon"][1]), float(ext["lat"][1])]
+    if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+        return [float(v) for v in bbox]
+    path = year_path(layer_key, cat)
+    if not path:
+        return None
+    try:
+        stamp = None if str(path).startswith("/vsi") else os.stat(path).st_mtime_ns
+    except OSError:
+        return None                                    # not on this server (yet)
+    return _file_bounds(str(path), stamp)
+
+
+@functools.lru_cache(maxsize=1024)
+def _file_bounds(path, stamp):
+    try:
+        return list(header(path)["bounds"])
+    except Exception:
+        return None
 
 
 def header(path, driver=None):

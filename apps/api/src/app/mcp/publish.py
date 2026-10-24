@@ -415,6 +415,8 @@ def answer(pack_id: str, draft: str, question: str | None = None) -> dict:
                          "failures below and call publish_answer again."),
                 "report_id": v["report_id"],
                 "failures": v["failures"],
+                "links_not_served": v["links_not_served"],
+                "numbers_unreadable": v["numbers_unreadable"],
                 "phantom_citations": v["phantom_citations"],
                 "missing_sections": v["missing_sections"],
                 "uncited_paragraphs": v["uncited_paragraphs"],
@@ -441,6 +443,9 @@ def answer(pack_id: str, draft: str, question: str | None = None) -> dict:
             "report_id": v["report_id"], "draft_sha256": v["draft_sha256"],
             "evidence_tier": v["evidence_tier"],
             "numbers_unverified_recorded": v["numbers_unverified_recorded"],
+            # what did not block, and which pack figure vouched for each figure: on the reply
+            # and the receipt, so a reader sees '3 million <- 3,357,982 pixels'
+            **record.gate_notes(v),
             **{k: val for k, val in r.items() if k != "status"}}
 
 

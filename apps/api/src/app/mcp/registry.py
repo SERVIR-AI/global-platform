@@ -501,6 +501,7 @@ def capabilities(available_tools=None, available_prompts=None,
     tools = sorted(available_tools or [])
     prompts = sorted(available_prompts or [])
     resources = sorted(available_resources or [])
+    layers = raster_layers()
     return {
         "server": {"name": "servirplatform", "version": VERSION,
                    "transport": os.environ.get("GRP_MCP_TRANSPORT", "stdio")},
@@ -524,8 +525,10 @@ def capabilities(available_tools=None, available_prompts=None,
                          "for them to accept or reject first. Add one with contribute_submit "
                          "kind=method."),
         "methods": _methods_listed(),
-        # Coverage BY NAME — the opening of the instructions carries counts only.
-        "coverage": coverage_by_name(),
+        # Coverage BY NAME — the opening of the instructions carries counts only — and every
+        # raster layer in the catalog, whole, built-in and contributed alike.
+        "coverage": coverage_by_name(layers),
+        "raster_layers": layers,
         "tools_available": tools,
         # Payload-carried on purpose: connect-time INSTRUCTIONS lose to whatever
         # rides the tool results (measured — render_with was honored to the letter
@@ -675,18 +678,100 @@ def coverage_line() -> str:
             f"behind them ({subj}). Sources include {shown}{more}.")
 
 
-def coverage_by_name() -> dict:
-    """What the platform covers, by name, derived: each pack's own summary (stacks, classes,
-    countries, hazards, assets), the live feeds, their publishers, the contributed vector
-    layers, and where every place name is listed."""
+def coverage_by_name(layers=None) -> dict:
+    """What the platform covers, by name, derived: each pack's own summary, the live feeds,
+    their publishers, every raster layer in the catalog by title (budget-fitted), the
+    contributed vector layers, and where every place name is listed."""
     c = coverage()
     return {"packs": {pid: packs.text(sp, "summary") or packs.text(sp, "covers")
                       or f"not declared by this pack; servirplatform://pack/{pid}"
                       for pid, sp in packs.PACKS.items()},
             "live_feeds": c["subjects"], "publishers": c["publishers"],
+            "raster_layers": _layers_by_title(raster_layers() if layers is None else layers),
             "contributed_vector_layers": sorted(_contributed_vector_names()),
             "place_names": ("resolve_place_time(list='all'); every name with its km²: "
                             "servirplatform://places")}
+
+
+def _on_server(key: str, cat: dict) -> bool | None:
+    """Whether a layer's file is here (a download_url or remote /vsi path counts as fetchable);
+    None when its row names no file. A listing never claims a file this server lacks."""
+    import os
+    from ..graph.geo import stacks
+    if (cat.get(key) or {}).get("download_url"):
+        return True
+    path = str(stacks.year_path(key, cat) or "")
+    if not path:
+        return None
+    if path.startswith("/vsizip/"):
+        return os.path.exists(path[len("/vsizip/"):].split(".zip")[0] + ".zip")
+    return path.startswith("/vsi") or os.path.exists(path)
+
+
+def raster_layers() -> list[dict]:
+    """Every raster layer in the catalog (tiffs.catalog(): built-in and contributed, every
+    namespace; a stack once, with its years): name, title, namespace, countries or extent."""
+    try:
+        from ..graph.geo import schema, stacks, tiffs
+        cat, spaces = tiffs.catalog(), schema.namespaces()
+    except Exception:                          # the map never crashes on the catalog
+        return []
+    prefixes = sorted(((str(r["prefix"]), ns) for ns, r in spaces.items() if r.get("prefix")),
+                      key=lambda p: -len(p[0]))
+    years: dict = {}
+    for key, row in cat.items():
+        if (row or {}).get("stack") in cat and (row or {}).get("year") is not None:
+            years.setdefault(row["stack"], []).append((int(row["year"]), key))
+    out = []
+    for name, row in cat.items():
+        row = row or {}
+        if row.get("stack") in cat and row.get("year") is not None:
+            continue                           # a stack's year: listed with its stack
+        item = {"name": name, "title": str(row.get("title") or name),
+                "namespace": row.get("role") or next((ns for p, ns in prefixes
+                                                      if name.startswith(p)), "undeclared")}
+        countries = [str(c) for c in row.get("countries") or [] if str(c).strip()]
+        try:
+            box = None if countries else stacks.bounds(name, row, cat)
+        except Exception:
+            box = None
+        item.update({"countries": countries} if countries else
+                    {"extent": [round(v, 2) for v in box] if box else "not declared"})
+        if years.get(name):
+            item["years"] = sorted(y for y, _ in years[name])
+            gone = sorted(y for y, k in years[name] if _on_server(k, cat) is False)
+            if gone:
+                item["missing_years"] = gone
+        elif _on_server(name, cat) is False:
+            item["file"] = "missing on this server"
+        if row.get("contributed"):
+            item["contributed"] = True
+        out.append(item)
+    # contributed first: no pack summary names them; then by namespace and name
+    return sorted(out, key=lambda i: (not i.get("contributed"), i["namespace"], i["name"]))
+
+
+def _layers_by_title(layers: list) -> dict:
+    """{name: 'title — namespace; where'} while budget.LIST_CHARS has room; past it, a count
+    and the section that lists every layer."""
+    shown, used = {}, 0
+    for i in layers:
+        where = (", ".join(i["countries"]) if i.get("countries") else
+                 f"extent {i['extent']}" if isinstance(i.get("extent"), list) else "extent not declared")
+        years = f"; {i['years'][0]}-{i['years'][-1]}" if i.get("years") else ""
+        line = f"{i['title']} — {i['namespace']}{years}; {where}"
+        if i.get("file"):
+            line += " (file missing on this server)"
+        elif i.get("missing_years"):
+            line += f" (years missing on this server: {', '.join(map(str, i['missing_years']))})"
+        if used + len(i["name"]) + len(line) > budget.LIST_CHARS:
+            break
+        shown[i["name"]] = line
+        used += len(i["name"]) + len(line) + 6
+    rest = len(layers) - len(shown)
+    every = "platform_capabilities(section='raster_layers')"
+    return {"count": len(layers), "layers": shown,
+            "more": (f"{rest} more, by name: {every}" if rest else f"each in full: {every}")}
 
 
 def sources_line() -> str:

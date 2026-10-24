@@ -71,10 +71,6 @@ def _as_given() -> str:
     return staging.AS_GIVEN
 
 
-def _shapes() -> str:
-    return _packs().target_shapes(", ")
-
-
 # --------------------------------------------------------------------------- the texts
 COVERAGE = ("Coverage by name: platform_capabilities(section='coverage'); place names: "
             "resolve_place_time(list='all').")
@@ -92,47 +88,54 @@ def _opening() -> str:
 
 
 def _answer_here() -> str:
+    """The web-search clause lives in PLATFORM_SOURCES; this keeps why the pack wins. The
+    target shapes are the opening's (and assemble_pack's), not repeated here."""
     return ("WHEN A QUESTION IS ABOUT ONE OF THESE DOMAINS, THIS PLATFORM ANSWERS IT: call "
-            f"`assemble_pack` FIRST with the pack's target ({_shapes()}). Never web-search for "
-            "figures it computes: a search returns prose of unknown provenance; the pack returns "
-            "computed, cited, replayable evidence.")
+            "`assemble_pack` FIRST with the pack's target (as above): computed, cited, replayable "
+            "evidence; a web search is prose of unknown provenance.")
 
 
-LOOP = ("CANONICAL LOOP, THREE STEPS: assemble_pack(<target>) -> YOUR LLM drafts a brief from "
-        "the pack, citing [n] in its required_sections -> publish_answer(pack_id, draft, question), "
-        "which gates it, mints the receipt and returns the evidence view. NEVER show the "
-        "user a brief that has not been through publish_answer: that skips the gate and leaves "
-        "nothing replayable. (Or verify_groundedness + record_receipt.)")
+# The two-step alternative (verify_groundedness + record_receipt) is said at its homes: the
+# guide's loop paragraph, every pack's next_step and publish_answer's description.
+LOOP = ("CANONICAL LOOP: assemble_pack(<target>) -> YOUR LLM drafts a brief citing [n] in its "
+        "required_sections -> publish_answer(pack_id, draft, question) gates it, mints the "
+        "receipt, returns the evidence view. NEVER show the user a brief that has not been "
+        "through publish_answer: that skips the gate, leaves nothing replayable.")
+
+# G13, ranked with the receipt rule (<= 300 chars): web results never enter a brief and come
+# only when asked; a missing source is checked against coverage first, then asked for.
+PLATFORM_SOURCES = ("PLATFORM SOURCES ONLY: a brief holds only what the platform serves; web "
+                    "results, only if asked, follow it labelled UNRECEIPTED. Need a source? Check "
+                    "platform_capabilities(section='coverage') first; not served there: ask the "
+                    "person for its link (never search), contribute_submit kind=<kind>, stop.")
 
 NO_ARITHMETIC = ("NO ARITHMETIC BY DEFAULT: never total, average, count, rank or score platform "
-                 "data yourself, in chat or in code; a dataset's note like 'sum hectares' says "
-                 "what adds up, not to add it up. For a figure it does not compute, suggest "
-                 "one or two calculations, without results, for the user to accept or reject "
-                 "(do not make them write one); then ask whether to add it as a method "
-                 "(contribute_submit kind=method). Accepted with no method: say it is your own "
-                 "arithmetic, unchecked.")
+                 "data yourself, in chat or code; a dataset's note like 'sum hectares' says what "
+                 "adds up, not to add it up. A figure it does not compute: suggest one or two "
+                 "calculations, without results, to accept or reject (never make the user write "
+                 "one), then ask whether to add it as a method (contribute_submit kind=method). "
+                 "Accepted with no method: say it is your own arithmetic, unchecked.")
 
-HARD_LIMIT = ("ONE HARD LIMIT: a rendered page FREEZES whatever is in it. Evidence, dates, numbers "
-              "and sources are safe to freeze (snapshots; say so); a VERDICT is not. Never paint "
-              "\"verified\"/\"passed\" "
-              "into an artifact: show it through `ui_embed`, which re-resolves live, or state it "
-              "as UNVERIFIED and link the receipt resolver.")
+HARD_LIMIT = ("ONE HARD LIMIT: a rendered page FREEZES its contents: evidence, dates, numbers and "
+              "sources may freeze (snapshots; say so), a VERDICT may not. Never paint "
+              "\"verified\"/\"passed\" into an artifact: show it via `ui_embed` (re-resolves "
+              "live) or state it UNVERIFIED and link the receipt resolver.")
 
 
 def _modes() -> str:
-    return ("- BUILD-TIME: asked to BUILD a tool/app, produce a REUSABLE artifact "
-            "that calls these tools, as SOURCE FILES IN THE USER'S OWN PROJECT (run, version, "
-            "deploy); do NOT just run the pipeline once; never a hosted preview, which FREEZES "
-            "any verdict. A figure it does not compute (an amount per area, a "
-            "score, a ranking): ASK BEFORE BUILDING, as above (kind=method: "
-            "servirplatform://skill/contribute-logic); do NOT drop it or compute it unasked.\n"
-            "- RUN-TIME: a question: answer it now via the canonical loop (corpus_search/"
+    return ("- BUILD-TIME: asked to BUILD a tool/app, write a REUSABLE artifact calling these "
+            "tools as SOURCE FILES IN THE USER'S OWN PROJECT (run, version, deploy), not a "
+            "one-off run, never a hosted preview (it FREEZES any verdict). A figure it does not "
+            "compute (an amount per area, a score, a ranking): ASK BEFORE BUILDING, as above "
+            "(kind=method: servirplatform://skill/contribute-logic); do NOT drop it or compute "
+            "it unasked.\n"
+            "- RUN-TIME: answer a question now via the canonical loop (corpus_search/"
             "corpus_document: provenance; context_get: crop calendar).\n"
             "- CONTRIBUTE-TIME: someone offers data or logic (a formula, rule or threshold is "
             f"kind=method): call `contribute_submit` (kind alone returns that kind's form: read it "
             f"before asking). {_as_given()} Declared fields (title, "
             "description, source, licence, vintage, countries) are the CONTRIBUTOR'S OWN WORDS: "
-            "missing one, ASK and stop; never compose them, never submit before they answer.\n"
+            "missing one, ASK and stop; never compose them or submit before they answer.\n"
             "- METHODS are contributed logic that packs compute and cite; "
             "platform_capabilities lists them first. Asked about methods or calculations, list "
             "THOSE, not these tools.")
@@ -191,6 +194,8 @@ SECTIONS: tuple[dict, ...] = (
     {"key": "answer_here", "tier": 1, "title": "This platform answers its domains",
      "text": _answer_here},
     {"key": "loop", "tier": 1, "title": "The canonical loop", "text": LOOP},
+    {"key": "platform_sources", "tier": 1, "title": "Platform sources only",
+     "text": PLATFORM_SOURCES, "home": ("prompt:run_analysis", "prompt:build_a_tool")},
     {"key": "no_arithmetic", "tier": 1, "title": "No arithmetic by default", "text": NO_ARITHMETIC},
     {"key": "hard_limit", "tier": 1, "title": "One hard limit", "text": HARD_LIMIT},
     {"key": "modes", "tier": 2, "title": "Build-time, run-time, contribute-time", "text": _modes},
@@ -199,14 +204,14 @@ SECTIONS: tuple[dict, ...] = (
      "home": ("tool:ui_catalog",)},
     {"key": "richest_output", "tier": 3, "title": "Use the richest output your host supports",
      "text": RICHEST_OUTPUT,
-     "pointer": "the RICHEST OUTPUT your host supports (ui_component)",
+     "pointer": "RICHEST OUTPUT your host supports (ui_component)",
      "triggers": ("RICHEST OUTPUT",), "home": ("tool:ui_component",)},
     {"key": "own_interface", "tier": 3, "title": "Use the platform's own interface",
      "text": OWN_INTERFACE,
-     "pointer": "the PLATFORM'S OWN INTERFACE (ui_design)", "triggers": ("OWN INTERFACE",),
+     "pointer": "PLATFORM'S OWN INTERFACE (ui_design)", "triggers": ("OWN INTERFACE",),
      "home": ("tool:ui_design",)},
     {"key": "interactive_surfaces", "tier": 3, "title": "Interactive surfaces", "text": INTERACTIVE,
-     "pointer": ("asked how risk is WEIGHTED -> risk_weights; asked to SEE the evidence -> "
+     "pointer": ("risk WEIGHTED: risk_weights; to SEE the evidence: "
                  "publish_answer/record_receipt (MCP Apps)"),
      "triggers": ("WEIGHTED", "risk_weights", "SEE the evidence", "publish_answer", "record_receipt"),
      "home": ("tool:risk_weights", "tool:record_receipt")},
@@ -222,7 +227,7 @@ SECTIONS: tuple[dict, ...] = (
 )
 
 # The guide's own trigger, kept in the instructions: a question about the server itself.
-ASKED_HOW = f"How to use this server: explain_platform, or {HOW_TO_USE} (every rule in full)."
+ASKED_HOW = f"How to use this server: explain_platform or {HOW_TO_USE} (every rule in full)."
 
 
 PACK_IS_EVIDENCE = ("A pack is evidence, NOT a finished answer. Draft from it, citing the numbered "

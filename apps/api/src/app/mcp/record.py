@@ -19,14 +19,48 @@ def _abs(path: str) -> str:
     return ui.tokens()["product"]["resolver"]["base"].rstrip("/") + path
 
 
+GATE_NOTES = ("numbers_derived", "warnings", "numbers_attributed_elsewhere",
+              "numbers_index_scale_unverified")
+
+
+def gate_notes(checks: dict | None) -> dict:
+    """What the gate let through and why (a verify reply or a report's checks): every
+    figure's voucher and every warning, carried on the reply and the receipt."""
+    checks = checks or {}
+    return {k: checks.get(k) or ({} if k == "numbers_derived" else []) for k in GATE_NOTES}
+
+
+def _offered(pack: dict) -> tuple:
+    """The receipt components the pack's row says its evidence fits (`components`, data)."""
+    from . import packs
+    row = packs.PACKS.get(pack.get("pack") or "food-security") or {}   # no field: a legacy FS pack
+    return tuple(row.get("components") or ())
+
+
+def _verdict(pack: dict, rid: str) -> dict:
+    """What shows THIS receipt's verdict, from the theme and the pack row: the strip once it
+    embeds; else a receipt-bound embed the pack offers; else the resolver link, UNVERIFIED."""
+    comps = (ui.tokens().get("components") or {})
+    if (comps.get("groundedness_strip") or {}).get("embeddable"):
+        return {"tool": "ui_embed", "component": "groundedness_strip", "receipt_id": rid}
+    for c in _offered(pack):
+        spec = comps.get(c) or {}
+        if spec.get("embeddable") and spec.get("trust_class") == "receipt_bound" and \
+                (spec.get("binds") or "receipt_id") == "receipt_id":
+            return {"tool": "ui_embed", "component": c, "receipt_id": rid,
+                    "note": f"groundedness_strip is not embeddable yet; {c} shows the gate"}
+    return {"url": _resolver_url(rid),
+            "note": ("groundedness_strip is not embeddable yet: state the verdict UNVERIFIED "
+                     "and link this resolver, which re-resolves it live")}
+
+
 def _render_with(pack: dict, rid: str) -> dict:
     """Which platform components display THIS receipt — dispatched on the pack.
     Review: the hardcoded FS block pointed risk receipts at the provenance graph
     (food-security furniture lanes) and never mentioned the map recorded on the
     pack precisely to be its replay visual."""
     out = {
-        "verdict": {"tool": "ui_embed", "component": "groundedness_strip",
-                    "receipt_id": rid},
+        "verdict": _verdict(pack, rid),
         "sources": {"tool": "ui_component", "component": "source_card",
                     "note": "one card per numbered source; copy-owned recipe"},
         "note": ("Do not hand-roll a chart, graph or map for this. Call ui_catalog "
@@ -56,12 +90,12 @@ def _render_with(pack: dict, rid: str) -> dict:
                          "note": "one grid per layer, clipped to the pack's area, with its "
                                  "unit, source, vintage, validation and no-data; draw it with "
                                  "the declared range or legend, never an invented scale"}
-    if pack.get("pack", "food-security") == "food-security":
+    if "provenance_graph" in _offered(pack):
         out["provenance"] = {"tool": "ui_embed", "component": "provenance_graph",
                              "receipt_id": rid}
     else:
-        out["provenance_note"] = ("provenance_graph's lanes are food-security-"
-                                  "shaped and are not offered for this pack yet")
+        out["provenance_note"] = ("provenance_graph is not offered for this pack: its pack row "
+                                  "lists no such component (its lanes fit other evidence)")
     return out
 
 
@@ -84,6 +118,9 @@ def replay_view(receipt: dict) -> dict:
                                 "stored, so the map and evidence views cannot be rebuilt")}
     view = {"render_with": _render_with(pack, rid),
             "public_resolver": _resolver_url(rid)}
+    report = store.load_report(receipt["report_id"]) if receipt.get("report_id") else None
+    if report is not None:
+        view.update(gate_notes(report.get("checks")))
     if pack.get("viz") is not None:
         view["map_url"] = _embed_url("hazard_map", rid)
     if pack.get("layers"):
@@ -300,7 +337,8 @@ def record(pack_id: str | None = None, report_id: str | None = None,
         if r is None:
             return {"status": "declined", "note": f"no receipt with id {receipt_id!r}"}
         ins = insight(r) if with_insight else None
-        return {"status": "ok", **r, **replay_view(r), **({"insight": ins} if ins else {})}
+        return {"status": "ok", **r, **replay_view(r), **_not_served(r),
+                **({"insight": ins} if ins else {})}
 
     pack = store.load_pack(pack_id) if pack_id else None
     if pack is None:
@@ -322,15 +360,17 @@ def record(pack_id: str | None = None, report_id: str | None = None,
         "sources": _sources(pack),
         "evidence_freshness": _freshness(pack),
         "queries": pack.get("queries"), "gaps": pack.get("gaps"),
+        **(gate_notes(report.get("checks")) if report else {}),
         "claim_scope": _claim_scope(pack),
         "minted_at": datetime.now(timezone.utc).isoformat(),
         **({"staged_by": pack["staged_by"], "staged_note": pack.get("staged_note")}
            if pack.get("staged_by") else {}),
     }
     rid = store.save_receipt(receipt)
+    shown = _render_with(pack, rid)
     return {"status": "ok", "receipt_id": rid,
             "answer_status": loop.RECEIPT_NEEDS_SHOWING,
-            "next_step": loop.after_record(rid),
+            "next_step": loop.after_record(rid, shown["verdict"]),
             "resolve_with": "record_receipt(receipt_id=...)",
             # The HTTP resolver a browser can reach. Consumers MUST point trust chrome
             # here: a verdict a consuming app serves about itself attests nothing.
@@ -346,5 +386,12 @@ def record(pack_id: str | None = None, report_id: str | None = None,
             # receipt_bound and delivered as an EMBED, so it re-resolves its state
             # here at view time — which is the only way a verdict can be displayed
             # without being frozen into the page (rule 5).
-            "render_with": _render_with(pack, rid),
+            "render_with": shown,
+            **_not_served(receipt),
             **receipt}
+
+
+def _not_served(receipt: dict) -> dict:
+    """A receipt's gap list carries the one not-served line (G13); never stored with it."""
+    gaps = receipt.get("gaps")
+    return {"not_served": loop.not_served(gaps)} if gaps else {}

@@ -296,7 +296,7 @@ def assemble_pack(country: str | None = None, crop: str | None = None,
     parameter is explained in servirplatform://how-to-use. detail='full' skips the
     reply shaping (mcp/shape.py) and, like any call, gathers a new pack."""
     if detail not in shape.DETAIL:
-        return shape.bad_detail(detail)
+        return assemble.declined(shape.bad_detail(detail)["note"], coverage=False)
     out = assemble.assemble(geometry=geometry, map_layer=map_layer, stack=stack, country=country, crop=crop, focus=focus, pack=pack,
                             place=place, hazard=hazard, min_severity=min_severity,
                             override=override, override_country=override_country,
@@ -316,12 +316,14 @@ def verify_groundedness(draft: str, pack_id: str) -> dict:
     as [n], and contain the required sections (returned as `required_sections` —
     conform to them or the gate fails "missing sections"). Blocking failures:
     missing sections, a model-written "## Sources", no citations, phantom
-    citations (numbers not in the pack), uncited paragraphs. Recorded but not
-    blocking: numbers in the draft absent from the evidence.
+    citations (numbers not in the pack), uncited paragraphs, a figure (digits,
+    words or a magnitude like "3.2 million") the evidence does not hold, and a
+    link or web domain the pack does not carry (platform sources only).
 
     Returns: {status, report_id, passed, evidence_tier, required_sections,
     failures, cited, phantom_citations, missing_sections, uncited_paragraphs,
-    numbers_unverified_recorded}. status "declined" -> unknown pack_id (`note`).
+    numbers_unverified_recorded, links_not_served, numbers_unreadable}. status
+    "declined" -> unknown pack_id (`note`).
     """
     return verify.groundedness(draft, pack_id)
 
@@ -709,7 +711,8 @@ def build_a_tool(goal: str = "a bulletin generator for one of the platform's dom
             "declared gaps), assemble_pack with the pack's target (" + _target_shapes(", ")
             + "), have the tool's own LLM draft "
             "a brief from the pack citing [n] in the pack's required_sections, then "
-            "verify_groundedness(draft, pack_id) and publish ONLY if it passes. "
+            "publish_answer(pack_id, draft, question), which gates the draft and mints the "
+            "receipt: the tool shows a brief ONLY once it passes, a blocked one never. "
             "INSTRUMENT IT: read servirplatform://skill/trace-emit first and make every "
             "response the tool produces carry an execution trace (steps, timings, "
             "upstream calls, LLM usage); surface the trace per "
@@ -727,10 +730,17 @@ def build_a_tool(goal: str = "a bulletin generator for one of the platform's dom
             "code. If I approve it but want no "
             "method, the tool may compute it, labelled on screen as its own calculation, "
             "not a platform figure.\n\n"
+            "WHAT YOU BUILD RESTS ON PLATFORM SOURCES ONLY: bake no web data into a built page "
+            "or app, not even in a labelled section (no scraped figures, no web links, no web "
+            "search in its own LLM). If a source it needs is not served (check "
+            "platform_capabilities(section='coverage') first), STOP and ask me for its link to "
+            "contribute (contribute_submit; kind alone returns the form); never search the web "
+            "for one yourself.\n\n"
             "BEFORE you tell me it is ready, check every file you wrote and fix what "
             "fails: every figure it shows comes from a platform response it fetches when "
             "it runs (a receipt, a pack or a feed), never typed into the code or computed "
-            "by the app itself; every publisher it names is one a receipt cites; every "
+            "by the app itself; every publisher it names is one a receipt cites; every link "
+            "it shows is one a pack or receipt carries; every "
             "verdict comes from ui_embed; and it calls the platform at all. Six builds in "
             "a row failed those checks "
             "and every one of them looked finished: invented numbers under invented "
@@ -743,9 +753,12 @@ def build_a_tool(goal: str = "a bulletin generator for one of the platform's dom
 def run_analysis(country: str = "Kenya", crop: str = "maize") -> str:
     """RUN-TIME: answer one food-security question now via the canonical loop."""
     return (f"Using the servirplatform MCP server, produce a grounded brief for {crop} in {country} "
-            "now: assemble_pack, draft from the pack citing [n] in the required_sections, "
-            "verify_groundedness, and give me the brief plus the report_id — or the "
-            "decline reason if it can't be grounded. Do not fabricate beyond the pack.\n\n"
+            f"now, through the canonical loop: assemble_pack(country='{country}', crop='{crop}'); "
+            "draft the brief from the pack, citing [n] under its required_sections; then "
+            "publish_answer(pack_id, draft, question), which gates the draft and mints the "
+            "receipt. Show me the brief only once it passes, with its receipt_id and "
+            "public_resolver; blocked, fix the failures and publish again; declined, give me "
+            "the reason. Do not fabricate beyond the pack.\n\n"
             "RENDER IT, do not just print prose. Give me an artifact with the brief and "
             "its numbered sources side by side, each source showing who published it, "
             "when, and how it was validated; any index or series as a small chart; and "
@@ -753,7 +766,7 @@ def run_analysis(country: str = "Kenya", crop: str = "maize") -> str:
             "the pack could NOT find is part of the answer.\n"
             "Show the groundedness result as UNVERIFIED with a link to the receipt "
             "resolver, or embed it with ui_embed so it re-resolves live. Do not paint a "
-            "verdict into the page.")
+            "verdict into the page.\n\n" + instructions.home_text("prompt:run_analysis"))
 
 
 @mcp.prompt()

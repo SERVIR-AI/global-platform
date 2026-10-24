@@ -667,10 +667,10 @@ def _adapt_generic_csv(params: dict, spec: dict) -> dict:
             raise FeedDecline("'limit' must be a whole number") from exc
     path = _landed_table(fetch["path"])
     if not path.is_file():
-        raise FeedDecline(
-            f"landed table missing at {path} — the feed spec recorded "
-            f"{fetch['path']!r}, which is a path on the machine that staged the "
-            "contribution, not on this host. Re-land the table here.")
+        raise FeedDecline(                       # the file's name, never a host path
+            f"landed table {path.name!r} is not landed on this host — the feed spec "
+            "records a path on the machine that staged the contribution. Re-land the "
+            "table here.")
     header, records, digest = _parsed_table(path, fetch)
     reader = iter(records)
     cols = fetch.get("columns") or {}

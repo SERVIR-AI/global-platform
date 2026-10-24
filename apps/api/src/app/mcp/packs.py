@@ -148,17 +148,10 @@ def risk_coverage() -> dict:
         if not k.startswith("hazard_") or (row or {}).get("kind") == "stack":
             continue
         row = row or {}
-        ext, bbox, bounds = row.get("extent") or {}, row.get("bbox"), None
-        if ext.get("lon") and ext.get("lat"):
-            bounds = [float(ext["lon"][0]), float(ext["lat"][0]), float(ext["lon"][1]), float(ext["lat"][1])]
-        elif isinstance(bbox, (list, tuple)) and len(bbox) == 4:
-            bounds = [float(v) for v in bbox]
-        else:
-            try:
-                path = stacks.year_path(k, cat)
-                bounds = list(stacks.header(path)["bounds"]) if path else None
-            except Exception:
-                bounds = None
+        try:
+            bounds = stacks.bounds(k, row, cat)
+        except Exception:
+            bounds = None
         out[k] = {"title": row.get("title") or k, "bounds": bounds,
                   "countries": [str(c) for c in (row.get("countries") or []) if str(c).strip()]}
     return out
@@ -521,6 +514,8 @@ PACKS: dict[str, dict] = {
         "keywords": lambda: _fs_keywords(),
         "default_focus": lambda t: f"{t.get('country', '')} {t.get('crop', '')}".strip(),
         "doctor_target": {"country": "kenya", "crop": "maize"},
+        # receipt components whose lanes fit this pack's evidence (record.render_with offers them)
+        "components": ("provenance_graph",),
     },
     "risk": {
         "display_name": "Risk Platform",

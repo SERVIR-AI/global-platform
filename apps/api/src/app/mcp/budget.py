@@ -26,6 +26,9 @@ ERROR_CHARS = 10000
 # A contextual line riding a reply (the general rule lives in the instructions and the tool
 # descriptions, not in every result).
 NOTE_CHARS = 400
+# Chars a derived list may take inside one section of a reply (coverage's raster layers): past
+# it, a count and the section that lists every one.
+LIST_CHARS = 6000
 # Chars a derived name list may take inside a generated text, tried in order by fit() until
 # the text fits its budget (None: every name). Contributions grow the lists, not the rules.
 CAPS: tuple[int | None, ...] = (None, 600, 300, 120, 0)

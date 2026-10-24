@@ -2670,22 +2670,23 @@ _KINDS = {
                  "validate": _validate_document, "prepare": _prepare_document,
                  "stage": _stage_document, "land": _land_document,
                  "retire": _retire_document, "unland": _unland_document,
-                 "fields": DOCUMENT_FIELDS,
+                 "fields": DOCUMENT_FIELDS, "said_as": ("document", "library", "publication"),
                  "title": lambda m: str(m.get("title") or "untitled document")},
     "table": {"what": "a CSV of values, as a link or the text itself",
               "validate": _validate_table, "prepare": _prepare_table,
               "stage": _stage_table, "land": _land_table, "retire": _retire_table,
-              "unland": _unland_feed, "fields": TABLE_FIELDS,
+              "unland": _unland_feed, "fields": TABLE_FIELDS, "said_as": ("table", "csv"),
               "title": lambda m: f"{m.get('title') or 'untitled table'} ({m.get('dataset')})"},
     "feed": {"what": "a live API, index series or map service",
              "validate": _validate_feed, "prepare": _prepare_feed,
              "stage": _stage_feed, "land": _land_feed, "retire": _retire_feed,
-             "unland": _unland_feed, "fields": FEED_FIELDS,
+             "unland": _unland_feed, "fields": FEED_FIELDS, "said_as": ("feed", "api"),
              "title": lambda m: f"{m.get('title') or 'untitled feed'} ({m.get('dataset')})"},
     "raster": {"what": "a GeoTIFF or GDAL-readable grid: a hazard, class, measure or population layer",
                "validate": _validate_raster, "prepare": _prepare_raster,
                "stage": _stage_raster, "land": _land_raster, "retire": _retire_raster,
                "unland": _unland_raster, "fields": RASTER_FIELDS,
+               "said_as": ("raster", "stack", "hazard", "grid"),
                "prep": {"source": _raster_prep_source, "finish": _raster_prep_finish},
                "preview": lambda m, p: _preview_raster(m, p),
                "title": lambda m: f"{m.get('title') or 'untitled layer'} ({m.get('layer')})"},
@@ -2693,12 +2694,13 @@ _KINDS = {
                "validate": _validate_vector, "prepare": _prepare_vector,
                "stage": _stage_vector, "land": _land_vector, "retire": _retire_vector,
                "unland": _unland_vector, "fields": VECTOR_FIELDS,
+               "said_as": ("vector", "polygon", "boundary", "boundaries", "points"),
                "preview": lambda m, p: _preview_vector(m, p),
                "title": lambda m: f"{m.get('title') or 'untitled point layer'} ({m.get('layer')})"},
     "weights": {"what": "vulnerability weights for one hazard",
                 "validate": _validate_weights, "prepare": _prepare_weights,
                 "stage": _stage_weights, "land": _land_weights, "retire": _retire_weights,
-                "unland": _unland_weights, "fields": WEIGHTS_FIELDS,
+                "unland": _unland_weights, "fields": WEIGHTS_FIELDS, "said_as": ("weights",),
                 "title": lambda m: f"vulnerability weights for {m.get('hazard')}"},
     "amend": {"what": "a correction of an approved contribution's record",
               "validate": _validate_amend, "prepare": _prepare_amend,
@@ -2710,6 +2712,7 @@ _KINDS = {
                "validate": _validate_method, "prepare": _prepare_method,
                "stage": _stage_method, "land": _land_method, "retire": _retire_method,
                "unland": _unland_method, "fields": _methods.METHOD_FIELDS,
+               "said_as": ("contributed method", "formula", "equation", "calculation"),
                "preview": lambda m, p: {"method": m.get("method"), "runs_in": m.get("packs"),
                                         "inputs": p.get("inputs"), "checked": [
                                             "every field and step", "the worked examples, re-run",
@@ -2717,6 +2720,19 @@ _KINDS = {
                                         "sample": p.get("sample")},
                "title": lambda m: f"{m.get('title') or 'untitled method'} ({m.get('method')})"},
 }
+
+
+def kinds_named(text) -> list[str]:
+    """The kinds `text` names by their own words (each row's `said_as`), in KINDS order:
+    what a decline or a declared gap is missing, as a contribution kind."""
+    low = str(text or "").lower()
+    return [k for k in KINDS if any(re.search(rf"\b{re.escape(w)}(?:e?s)?\b", low)
+                                    for w in _KINDS[k].get("said_as", ()))]
+
+
+def source_kinds() -> list[str]:
+    """Every kind whose form asks for a `source`: what can fill a source the platform lacks."""
+    return [k for k in KINDS if "source" in (_KINDS[k]["fields"].get("required") or {})]
 
 
 # What the tool's core description has no room for, said on the form it applies to.

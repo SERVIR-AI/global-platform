@@ -44,6 +44,15 @@ _LOST_AT_VERDICT = (
     "evidence view, which record_receipt returns, is never shown.")
 
 
+# G13: the one build policy, here where every builder's publish_answer reply carries it and in
+# build_a_tool: a built page or app shows no web content at all, labelled or not.
+BUILD_SOURCES = ("Bake no web content into a page or app you build, not even in a labelled "
+                 "section: every figure and link it shows comes from a platform response (a pack, "
+                 "a receipt, a feed). A source it lacks (not in platform_capabilities(section="
+                 "'coverage')): ask the person for its link and contribute it (contribute_submit); "
+                 "never search the web for one.")
+
+
 RECEIPT_NEEDS_SHOWING = (
     "GOVERNED and replayable. If your host renders MCP Apps (Claude Desktop, "
     "claude.ai), the evidence panel is ALREADY displayed beside this result — do "
@@ -71,6 +80,9 @@ def _draft_rules(required_sections, gaps_citation_n=None) -> list[str]:
         "is a phantom citation and blocks the gate.",
         "Do NOT write your own '## Sources' section; the receipt carries the "
         "sources with their provenance.",
+        "Platform sources only: a figure the pack does not hold (in digits, words or "
+        "a magnitude like '3.2 million'; write '7.4m' in full) or a link or web domain "
+        "it does not carry blocks the gate.",
     ]
     if gaps_citation_n is not None:
         rules.insert(2, f"The declared gaps are themselves citable evidence: entry "
@@ -130,13 +142,22 @@ def after_verify(pack_id: str, report_id: str, passed: bool,
     }
 
 
-def after_record(receipt_id: str) -> dict:
-    """The last seam. This USED to say "call ui_embed" unconditionally — written for
-    coding hosts before the MCP App existed. In a chat host the panel has already
-    rendered beside the result, and a model that obeyed anyway pasted an <iframe>
-    into its reply, which the host's CSP (frame-src 'self' blob: data:) blocked into
-    a giant blank white box. Measured on Claude Desktop, 2026-08-25. So the guidance
-    is now conditional on what kind of host is reading it."""
+def after_record(receipt_id: str, verdict: dict) -> dict:
+    """The last seam, by host: an MCP-Apps host already shows the panel (an iframe pasted into
+    chat renders as a blank box: Claude Desktop CSP, 2026-08-25); a page you write shows the
+    verdict as the receipt's render_with.verdict does, its embed or the resolver, UNVERIFIED."""
+    if verdict.get("tool") == "ui_embed":
+        page = {"note": ("ui_embed's iframe is for pages YOU are writing (a dashboard, a report "
+                         "file the user opens in a browser) — there it re-resolves live and is "
+                         "the only way to show a verdict."),
+                "platform_sources": BUILD_SOURCES,
+                "call": {"tool": "ui_embed", "args": {"component": verdict["component"],
+                                                      "receipt_id": receipt_id}}}
+    else:
+        page = {"note": ("no component embeds this pack's verdict yet: in a page you write, state "
+                         "it UNVERIFIED and link the resolver, which re-resolves it live; never "
+                         "paint \"passed\" into the page."),
+                "platform_sources": BUILD_SOURCES, "link": verdict.get("url")}
     return {
         "required": False,
         "step": "presentation — depends on your host",
@@ -145,13 +166,7 @@ def after_record(receipt_id: str) -> dict:
             "this tool result. Add nothing visual. Do NOT paste iframe markup into "
             "the chat — external frames are blocked by the host's CSP and render as "
             "a blank box."),
-        "if_building_a_web_page": {
-            "note": ("ui_embed's iframe is for pages YOU are writing (a dashboard, "
-                     "a report file the user opens in a browser) — there it "
-                     "re-resolves live and is the only way to show a verdict."),
-            "call": {"tool": "ui_embed",
-                     "args": {"component": "provenance_graph",
-                              "receipt_id": receipt_id}}},
+        "if_building_a_web_page": page,
         "if_neither": (
             "Text-only host: present the sources as a TABLE with publisher, date "
             "and validation. Never a paragraph."),
@@ -173,6 +188,32 @@ NO_ARITHMETIC = ("Quote figures as returned; do not add up, average, count, rank
                  "calculations, without their results, to accept or reject, then offer a method "
                  "(contribute_submit kind=method); done without one, say so: your own "
                  "arithmetic, no receipt.")
+
+# G13: the one line a decline or a declared-gaps list carries (<= budget.NOTE_CHARS), saying
+# what PLATFORM SOURCES ONLY says in the instructions. not_served() names the kinds.
+_WEB = ("Web results, only if the person asks, follow the answer labelled UNRECEIPTED, never "
+        "inside it.")
+NOT_SERVED = ("Not served here, and nothing in platform_capabilities(section='coverage') fits? Ask "
+              "the person to contribute the source (contribute_submit kind={kinds}; kind alone "
+              "returns the form: read it before asking) and stop; never search the web for one. "
+              + _WEB)
+# A caller's error or an outage: the data may well be served, so no contribution is asked for.
+NOT_A_GAP = "Not a coverage gap: fix the call as the note says, or retry later. " + _WEB
+
+
+def not_served(said=(), gap: bool = True) -> str:
+    """NOT_SERVED naming the kinds `said` (a decline note, a gap list) names by their own
+    words; naming none, every kind whose form takes a source for a gap list (`gap`), and
+    NOT_A_GAP for a decline — derived, never typed."""
+    from . import budget
+    from ..contrib import staging
+    text = " ".join(str(s) for s in (said if isinstance(said, (list, tuple)) else [said]) if s)
+    kinds = staging.kinds_named(text)
+    if not kinds and not gap:
+        return NOT_A_GAP
+    return budget.fit("the not-served line", lambda: NOT_SERVED.format(kinds=budget.names(
+        kinds or staging.source_kinds(), last=" or ")), budget.NOTE_CHARS)
+
 
 ENTRY_HINT = {
     "no_arithmetic": NO_ARITHMETIC,

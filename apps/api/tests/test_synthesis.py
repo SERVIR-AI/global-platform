@@ -458,22 +458,23 @@ def test_absent_calendar_is_citable_evidence(brief_env):
 
 
 def test_a_rounded_or_unit_converted_pack_figure_is_not_a_fabrication():
-    """MGV-478: the platform's own figure rounded (957 for 957.5 ha), or converted
-    exactly between units (40,840 ha for 408.4 km²; 12.8 million for 12,797,972),
-    traces to the pack. A sum, a difference, extra precision or a figure with no
-    origin still blocks."""
+    """MGV-478/G13: a pack figure rounded, converted between units both sides name, or as a
+    magnitude of the same count traces to the pack; a sum, a difference, extra precision, an
+    unnamed conversion, pixels for hectares or a figure with no origin blocks."""
     from app.food_security import synthesis as fs
-    evid = fs._number_set("mangrove 957.5 ha; 408.4 km² classified; 12,797,972 pixels; "
-                          "extent 557.9 km² and 430.7 km²")
+    evid = fs._vouchers("mangrove 957.5 ha; 408.4 km² classified; 12,797,972 pixels; "
+                        "extent 557.9 km² and 430.7 km²")
     assert fs._rounded_or_converted("957", evid)          # rounded
     assert fs._rounded_or_converted("958", evid)          # the other rounding convention
-    assert fs._rounded_or_converted("40840", evid)        # km² -> ha, exact
-    assert fs._rounded_or_converted("4.084", evid)        # ha -> km² of a km² figure? no: 408.4 × 0.01
-    assert fs._rounded_or_converted("12.8", evid)         # million
+    assert fs._rounded_or_converted("40840", evid, units=["ha"])     # km² -> ha, exact
+    assert fs._rounded_or_converted("40840", evid) is None           # no unit named: no conversion
+    assert fs._rounded_or_converted("40840", evid, units=["t"]) is None   # km² is not tonnes
+    assert fs._rounded_or_converted("12800000", evid, tol=50000, nouns=["pixels"])
+    assert fs._rounded_or_converted("12800000", evid, tol=50000, nouns=["hectares"]) is None
     assert fs._rounded_or_converted("957.53", evid) is None     # more precision than the pack
     assert fs._rounded_or_converted("127.2", evid) is None      # a difference (557.9 - 430.7)
     assert fs._rounded_or_converted("604", evid) is None        # no origin at all
-    assert fs._rounded_or_converted("150", fs._number_set("a factor of 1.5")) is None  # base not load-bearing
+    assert fs._rounded_or_converted("150", fs._vouchers("a factor of 1.5")) is None  # base not load-bearing
 
 
 def test_check_grounded_passes_a_rounded_figure_and_records_how():

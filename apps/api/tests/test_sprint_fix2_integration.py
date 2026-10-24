@@ -131,6 +131,49 @@ def test_the_gate_declines_a_class_map_its_readers_cannot_count(env, monkeypatch
     assert ok["status"] == "approved", ok
 
 
+def test_every_contributed_raster_is_listed_by_title_in_the_coverage(env, monkeypatch, request, log):
+    """A measure_ and a change_ raster fresh through the gate appear by title in
+    platform_capabilities (concise, section='coverage', detail='full') and whole in
+    section='raster_layers'; past budget.LIST_CHARS the rest are counted and pointed to."""
+    import asyncio
+    from app.mcp import budget, server
+    live = next(m for m in server.mcp.middleware if type(m).__name__ == "_LiveText")
+    request.addfinalizer(lambda: setattr(live, "_at", 0.0))   # its 30 s cache saw this bay
+    monkeypatch.setattr(get_settings(), "grp_auto_approve", True)
+    soc = _submit("measure_bay_soc", env["serve"]("soc.tif", np.full((H, W), 5.0, "float32")),
+                  title="Bay soil carbon (synthetic)",
+                  declared={"dtype": "float32", "valid_min": 0, "valid_max": 10, "units": "t C/ha"})
+    chg = _submit("change_bay_cover", env["serve"]("cover.tif", _change_map(), nodata=I32_FILL),
+                  title="Bay mangrove change (synthetic)", legend=CHANGE_LEGEND,
+                  declared=CHANGE_DECL, from_year=1996, to_year=2020)
+    assert soc["status"] == chg["status"] == "approved", (soc, chg)
+    replies = {"concise": asyncio.run(server.platform_capabilities())["coverage"],
+               "section": asyncio.run(server.platform_capabilities(section="coverage"))["coverage"],
+               "full": asyncio.run(server.platform_capabilities(detail="full"))["coverage"]}
+    for how, cov in replies.items():
+        listed = cov["raster_layers"]["layers"]
+        log("OUTPUT", f"{how}: {listed.get('measure_bay_soc')} | {listed.get('change_bay_cover')}")
+        assert listed["measure_bay_soc"].startswith("Bay soil carbon (synthetic) — measure;"), how
+        assert listed["change_bay_cover"].startswith("Bay mangrove change (synthetic) — change;"), how
+    every = {i["name"]: i for i in asyncio.run(server.platform_capabilities(
+        section="raster_layers"))["raster_layers"]}
+    assert set(every) == {k for k, r in tiffs.catalog().items()
+                          if not (r.get("stack") in tiffs.catalog() and r.get("year") is not None)}
+    assert every["measure_bay_soc"]["contributed"]
+    assert every["change_bay_cover"]["countries"] == ["Testland"]
+    os.remove(stacks.year_path("measure_bay_soc"))         # a listing never claims a lost file
+    gone = {i["name"]: i for i in asyncio.run(server.platform_capabilities(
+        section="raster_layers"))["raster_layers"]}
+    assert gone["measure_bay_soc"]["file"] == "missing on this server"
+    line = asyncio.run(server.platform_capabilities(section="coverage"))["coverage"]["raster_layers"]
+    assert line["layers"]["measure_bay_soc"].endswith("(file missing on this server)")
+    monkeypatch.setattr(budget, "LIST_CHARS", 150)
+    capped = asyncio.run(server.platform_capabilities(section="coverage"))["coverage"]["raster_layers"]
+    assert 0 < len(capped["layers"]) < capped["count"] == len(every)
+    assert capped["more"] == (f"{len(every) - len(capped['layers'])} more, by name: "
+                              "platform_capabilities(section='raster_layers')")
+
+
 def test_an_all_fill_class_map_is_declined_with_the_readers_words(env):
     empty = np.full((H, W), I32_FILL, "int32")
     out = _submit("change_bay_empty", env["serve"]("empty.tif", empty, nodata=I32_FILL),

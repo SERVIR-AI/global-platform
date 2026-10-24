@@ -22,12 +22,13 @@ PRIORITY: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("verdict", ("public_resolver", "passed", "answer_status", "grounded", "evidence_tier",
                  "draft_sha256", "map_url", "resolve_with")),
     ("guidance", ("note", "next_step", "for_a_governed_answer", "usage_notes", "no_arithmetic",
-                  "method_first", "methods_reading", "staged_note", "render_with", "shown",
-                  "how_to_use")),
+                  "not_served", "method_first", "methods_reading", "staged_note", "render_with",
+                  "shown", "how_to_use")),
     ("required_sections", ("required_sections",)),
     ("figures", ("brief", "count", "summary", "as_of", "stats", "numbers_unverified_recorded",
-                 "failures", "phantom_citations", "missing_sections", "uncited_paragraphs",
-                 "verified_text", "minted_at", "available", "available_packs", "candidates")),
+                 "failures", "links_not_served", "numbers_unreadable", "phantom_citations",
+                 "missing_sections", "uncited_paragraphs", "verified_text", "minted_at",
+                 "available", "available_packs", "candidates")),
     ("citations", ("citations", "passport")),
 )
 TAIL = ("your_next_output",)
