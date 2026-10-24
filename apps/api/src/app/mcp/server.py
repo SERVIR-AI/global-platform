@@ -9,15 +9,17 @@ from __future__ import annotations
 from typing import Any
 
 import base64
+import inspect
+import builtins
 import os
 
 from fastmcp import FastMCP
 from fastmcp.server.middleware import Middleware
 from mcp.types import Icon
 
-from . import (app_ui, assemble, auth, compose, context, feeds, fetch, loop,
-               weights_ui,
-               publish, record, registry, resolve, ui, verify)
+from . import (app_ui, assemble, auth, budget, compose, context, feeds, fetch, instructions,
+               loop, weights_ui,
+               publish, record, registry, resolve, shape, store, ui, verify)
 from ..config import get_settings
 
 
@@ -58,138 +60,15 @@ def _http_transport() -> dict:
     mcp.auth = auth.provider()
     return {"stateless_http": True, **_transport_security()}
 
-# Orientation shown to a connecting LLM at initialize — so it isn't a headless
-# chicken. DESCRIBE the two consumption patterns; don't enforce (no mode switch).
-# Kept terse: every connection pays its token cost.
-def _domains_line() -> str:
-    """One clause per domain pack, read from the registry so a new pack introduces
-    itself at connect time with no edit here."""
-    from . import packs as _packs
-    parts = [_packs.text(sp, "summary") for _, sp in sorted(_packs.PACKS.items())
-             if _packs.text(sp, "summary")]
-    return "; ".join(parts) if parts else "food-security decision support"
-
-
-def _domain_count() -> str:
-    from . import packs as _packs
-    n = len(_packs.PACKS)
-    return {1: "one", 2: "two", 3: "three", 4: "four", 5: "five"}.get(n, str(n))
-
-
+# Orientation shown to a connecting LLM at initialize: composed from mcp/instructions.py
+# (sections as data, budgeted to what the strictest client keeps; derived from the packs).
 def _target_shapes(sep: str = " | ") -> str:
     from . import packs as _packs
     return _packs.target_shapes(sep)
 
 
-def _audiences_line() -> str:
-    from . import packs as _packs
-    parts = [sp["audience"] for _, sp in sorted(_packs.PACKS.items()) if sp.get("audience")]
-    return "; ".join(parts) if parts else \
-        "food-security analysts, hub teams and ministry advisors deciding whether to act months ahead"
-
-
-def _as_given() -> str:
-    from ..contrib import staging
-    return staging.AS_GIVEN
-
-
 def _instructions() -> str:
-    """The connect-time instructions, built from what the platform holds NOW — the
-    packs' summaries, places and target shapes read live. Built once at import they
-    went stale the moment a hub contributed: a Costa Rica mangrove stack landed and
-    every new connection was still told land cover covers the HKH."""
-    return f"""The Global Risk Platform — a GOVERNED TOOLKIT for decision support across \
-{_domain_count()} domains, not a chatbot: {_domains_line()}. Every insight carries its evidence; \
-declines say why; answers are replayable; a groundedness gate blocks ungrounded briefs.
-
-WHEN A QUESTION IS ABOUT ONE OF THESE DOMAINS, THIS PLATFORM ANSWERS IT: call \
-`assemble_pack` FIRST, with the pack's target ({_target_shapes(", ")}). Do not \
-web-search for figures this platform computes — a web search \
-returns prose of unknown provenance; the pack returns computed, cited, replayable \
-evidence and the exact section headers your brief must use.
-
-NO ARITHMETIC BY DEFAULT: never total, average, count, rank or score platform data \
-yourself, in chat or in code. For a figure the platform does not compute, suggest one or two \
-calculations, without results, for the user to accept or reject (do not make them write one); \
-then ask whether to add it as a method (`contribute_submit` kind=method). Accepted with no method: \
-say it is your own arithmetic, unchecked.
-
-Two ways to use it:
-- BUILD-TIME: the user asks you to BUILD a tool/app. Produce a REUSABLE artifact \
-(a script/app) that calls these tools — do NOT just run the pipeline once. Write it \
-as SOURCE FILES IN THE USER'S OWN PROJECT that they can run, version and deploy — \
-never a hosted preview on a third-party host. A published static page also FREEZES \
-any verdict into markup that can never be re-resolved. If the request implies a figure the \
-platform does not compute (an amount per area, a score, a ranking), ASK BEFORE BUILDING: suggest \
-one or two calculations to accept or reject, then whether to add one as a method (kind=method, \
-servirplatform://skill/contribute-logic). do NOT drop the figure or compute it unasked.
-- RUN-TIME: the user asks a question. Answer it now via the canonical loop.
-- METHODS here are contributed logic that packs compute and cite; platform_capabilities lists them first. \
-Asked about methods or calculations, list THOSE, not these tools.
-- CONTRIBUTE-TIME: someone offers data or logic (a formula, rule or threshold is kind=method) — call `contribute_submit`. {_as_given()} The declared fields \
-(title, description, source, licence, vintage, countries) are the CONTRIBUTOR'S OWN WORDS: when one \
-is missing, ASK for it and stop; never compose it on their behalf, and never submit before they answer.
-- INTERACTIVE SURFACES: this platform ships MCP Apps. If someone questions how risk \
-is WEIGHTED, call `risk_weights` — in a host that renders MCP Apps it opens a picker \
-with a slider per vulnerability layer, and proposing from it goes through the \
-contribution gate. If someone asks to SEE the evidence behind an answer, \
-`record_receipt` and `publish_answer` carry an evidence view the host renders. \
-Measured: small models asked these very questions answered from memory instead of \
-opening the tool, so reach for them by name.
-
-KNOW WHO THIS IS FOR, AND SHOW THEM. The people using this are {_audiences_line()}. \
-What helps them is SEEING the evidence chain — how old each source is, which are \
-live pulls, what is missing — not reading it as prose. You do not need to be asked \
-for a visual. Assume one helps, and produce it.
-
-USE THE RICHEST OUTPUT YOUR HOST SUPPORTS. This server cannot see which client \
-you are running in, so it assumes a coding-agent host (files, HTML you can open, \
-markdown, tables) — write a real file the user can open rather than describing one. \
-If your host renders more (artifacts, canvases, inline images, iframes), use that \
-instead. If it renders less, degrade deliberately: a clean table beats a paragraph. \
-Never default to prose just because prose always works.
-
-USE THE PLATFORM'S OWN INTERFACE, DO NOT INVENT ONE. This server ships its design \
-language and its components: `ui_design` for tokens (colour, type, the trust \
-conventions), `ui_catalog` for what exists, `ui_component` for ready-built markup \
-and brand assets, `ui_embed` for anything showing a verdict. Tool results tell you \
-what to reach for — `record_receipt` returns a `render_with` block naming the \
-component for each part. Reach for those before hand-rolling a chart, a graph or a \
-colour scheme; what you invent will not match, and a verdict you draw yourself \
-attests nothing.
-
-SHIP OBSERVABILITY WITH ANYTHING YOU BUILD. A product built on this platform \
-must emit an execution trace: every response it produces carries a structured \
-record of what ran — steps, timings, upstream calls, LLM usage and cost, and what \
-each step decided. Read `servirplatform://skill/trace-emit` BEFORE writing the \
-backend (it is a complete, portable guide with worked examples) and \
-`servirplatform://skill/trace-visualize` for rendering the trace. An answer whose \
-execution cannot be inspected is only half governed.
-
-NEVER PASTE IFRAME MARKUP INTO A CHAT REPLY. Chat hosts block external frames \
-(CSP frame-src 'self'), so it renders as a blank white box. In hosts that render \
-MCP Apps the evidence panel appears beside the tool result by itself; ui_embed's \
-iframe is only for web pages you are writing.
-
-ONE HARD LIMIT: a rendered page FREEZES whatever is in it. Evidence, dates, numbers \
-and sources are safe to freeze; they are snapshots and say so. A VERDICT is not. \
-Never paint "verified"/"passed" into an artifact. Show it through `ui_embed`, which \
-re-resolves live against the platform, or state it as UNVERIFIED and link the \
-receipt resolver (rule 5).
-
-Canonical loop, THREE steps: assemble_pack(<the pack's target: {_target_shapes(", ")}>) \
--> YOUR LLM drafts a \
-brief from the pack, citing [n] in the pack's required_sections -> \
-publish_answer(pack_id, draft, question), which gates the draft, mints the receipt \
-and returns the evidence view in one call. NEVER show the user a brief that has not \
-been through publish_answer: drafting it into the conversation skips the gate and \
-leaves nothing replayable. (verify_groundedness + record_receipt do the same two \
-things separately if you want them apart.) Use platform_capabilities to scope \
-honestly, corpus_search/corpus_document for evidence with provenance, context_get \
-for the (adjustable) crop calendar when the question is food security.
-
-If the user asks how to use this server, read the `servirplatform://how-to-use` resource (a \
-human-readable guide) — or run the `explain_platform` prompt — and answer from it."""
+    return instructions.compose()
 
 
 INSTRUCTIONS = _instructions()
@@ -219,6 +98,22 @@ def _brand_icons() -> list[Icon]:
 mcp = FastMCP("servirplatform", instructions=INSTRUCTIONS, icons=_brand_icons(),
               website_url=get_settings().grp_public_url.strip() or None)
 
+# tool name -> the function that writes its description from live state. One map feeds the
+# decorator AND _LiveText, so a generated description is never frozen at import.
+DESCRIBERS: dict[str, Any] = {}
+
+
+def _describe(name: str, fn) -> str:
+    """Register `fn` as the tool's live describer (plus every instruction section homed on
+    the tool), fitted to budget.TOOL_DESCRIPTION — derived name lists counted past what fits,
+    an overrun logged — and return today's text."""
+    def live() -> str:
+        return budget.fit(f"tool description {name}",
+                          lambda: instructions.with_home(f"tool:{name}", fn()),
+                          budget.TOOL_DESCRIPTION)
+    DESCRIBERS[name] = live
+    return live()
+
 
 class _LiveText(Middleware):
     """Connect-time text that follows the platform's state. Every description built
@@ -236,13 +131,8 @@ class _LiveText(Middleware):
         import time
         if self._instr is not None and time.monotonic() - self._at < self.TTL:
             return
-        gens = {"assemble_pack": registry.describe_assemble, "publish_answer": publish.describe,
-                "feeds_query": feeds.describe, "ui_design": ui.describe_design,
-                "ui_catalog": ui.describe_catalog, "ui_component": ui.describe_component,
-                "ui_embed": ui.describe_embed, "contribute_submit": _staging.describe_submit,
-                "risk_weights": weights_ui.describe}
         descs = {}
-        for name, fn in gens.items():
+        for name, fn in DESCRIBERS.items():
             try:
                 descs[name] = fn()
             except Exception:                 # keep the registered text rather than fail a listing
@@ -278,16 +168,27 @@ class _LiveText(Middleware):
         return out
 
 
+class _ErrorBudget(Middleware):
+    """An error a tool raises is measured against budget.ERROR_CHARS (a client drops the
+    middle of a longer one) and logged when over; then raised unchanged."""
+
+    async def on_call_tool(self, context, call_next):
+        try:
+            return await call_next(context)
+        except Exception as exc:
+            name = getattr(getattr(context, "message", None), "name", "?")
+            budget.check(f"tool error {name}", str(exc), budget.ERROR_CHARS)
+            raise
+
+
+def _braced(text: str) -> str:
+    """An argument as it goes into a next-call template ({next} is the only placeholder)."""
+    return text.replace("{", "{{").replace("}", "}}")
+
+
 # async because the surface accessors are coroutines: there is no sync way to ask
 # the server what it is serving, and asking IT rather than a list is the whole point.
-@mcp.tool()
-async def platform_capabilities() -> dict:
-    """The platform map: contributed METHODS first (logic people added, which packs
-    compute and cite), then which tools/prompts are live, the bones and their status,
-    packs, sources with provenance, calendars, and DECLARED gaps. Bone status is
-    derived from the live registry, so it never drifts. Call this first in a build
-    session to scope honestly before writing code.
-    """
+async def _capabilities() -> dict:
     return registry.capabilities(
         available_tools=[t.name for t in await mcp.list_tools()],
         available_prompts=[p.name for p in await mcp.list_prompts()],
@@ -295,9 +196,35 @@ async def platform_capabilities() -> dict:
 
 
 @mcp.tool()
+async def platform_capabilities(section: str | None = None, detail: str = "concise") -> dict:
+    """The platform map: contributed METHODS first (logic people added, which packs
+    compute and cite), then which tools/prompts are live, the bones and their status,
+    packs, sources with provenance, calendars, and DECLARED gaps. Bone status is
+    derived from the live registry, so it never drifts. Call this first in a build
+    session to scope honestly before writing code.
+
+    The default reply is the map at a glance (packs as counts, feeds and compositions
+    as names). `section` returns one section whole (feeds, methods, domain_packs,
+    compositions, bones, ...); detail='full' returns the whole map.
+    """
+    if detail not in shape.DETAIL:
+        return shape.bad_detail(detail)
+    caps = await _capabilities()
+    if section:
+        if section not in caps:
+            return {"status": "declined", "section": section,
+                    "note": "unknown section — one of: " + ", ".join(caps)}
+        return {section: caps[section]}
+    if detail == "full":
+        return caps
+    return shape.shape(shape.concise_capabilities(caps), "capabilities")
+
+
+@mcp.tool()
 def corpus_search(query: str, k: int = 5, country: str | None = None,
                   crop: str | None = None, temporal: str | None = None,
-                  doc_type: str | None = None, pack: str | None = None) -> dict:
+                  doc_type: str | None = None, pack: str | None = None,
+                  offset: int = 0) -> dict:
     """Search a domain pack's authoritative document library. Prefer this over a web
     search for the subjects it covers (see `platform_capabilities` for the live
     list): every passage carries a provenance passport
@@ -313,11 +240,18 @@ def corpus_search(query: str, k: int = 5, country: str | None = None,
                            filters exclude / below the relevance floor — a
                            below-floor miss is a decline, not a weak match)
       status "declined" -> hits: [], and `note` says WHY (missing key / torn corpus)
-    Whenever status != "ok", render `note` — it is the honest cause.
+    Whenever status != "ok", render `note` — it is the honest cause. Hits past the reply
+    budget are named in `shown`; `offset` skips that many ranked hits to read on (top 50).
     """
-    return loop.with_entry_hint(
-        fetch.search(query, k=k, country=country, crop=crop,
-                     temporal=temporal, doc_type=doc_type, pack=pack))
+    offset = max(0, int(offset or 0))
+    named = {"query": query, "k": k, "country": country, "crop": crop, "temporal": temporal,
+             "doc_type": doc_type, "pack": pack}
+    again = ("corpus_search(" + ", ".join(_braced(f"{a}={v!r}") for a, v in named.items()
+                                          if v is not None) + ", offset={next})")
+    return shape.shape(loop.with_entry_hint(
+        fetch.search(query, k=k + offset, country=country, crop=crop,
+                     temporal=temporal, doc_type=doc_type, pack=pack)), "search",
+        offset=offset, again=again)
 
 
 @mcp.tool()
@@ -342,7 +276,7 @@ def context_get(country: str, crop: str, asked_month: int | None = None,
                        override_country=override_country, override_crop=override_crop)
 
 
-@mcp.tool(description=registry.describe_assemble())
+@mcp.tool(description=_describe("assemble_pack", registry.describe_assemble))
 def assemble_pack(country: str | None = None, crop: str | None = None,
                   focus: str | None = None, pack: str | None = None,
                   place: str | None = None, hazard: str | None = None,
@@ -357,52 +291,19 @@ def assemble_pack(country: str | None = None, crop: str | None = None,
                   stack: str | None = None,
                   layers: list[str] | None = None,
                   vectors: list[str] | None = None,
-                  within: str | None = None) -> dict:
-    """Assembles a deterministic, citable EVIDENCE PACK for one domain pack's target
-    (country/crop; place/hazard; place/year) and mints a `pack_id`. For a pack whose
-    target is a place, pass `geometry` (a GeoJSON Polygon/MultiPolygon in EPSG:4326, or a
-    [minLon,minLat,maxLon,maxLat] bbox) to analyse an area YOU hold the boundary for — an
-    admin district from another system, a hub's own polygon; `place` is then its label.
-    `layers` names registered raster layers whose VALUES the pack returns for its area
-    (`layers.<name>`: a grid clipped to the area, unit, source, vintage, validation,
-    nodata, summary) — any pack, any registered or contributed layer; omit it for the
-    pack's own defaults (risk: the recipe's vulnerability layers), pass [] for none.
-    `vectors` names contributed vector layers (points, lines or polygons) to MEASURE
-    inside the pack's area — a count, km of line, km² (ha) of polygon, broken down by
-    the contributor's group field, with the largest named features — each as a cited
-    item [n] and in `vectors.<name>`; an unknown name declines with the list.
-    `within` names a contributed POLYGON layer (protected areas, a watershed): the pack's
-    area becomes the part of `place`/`geometry` inside that layer, its features merged so
-    overlaps count once — "mangrove inside protected areas", "exposure inside the
-    watershed". Every figure in the pack is then for that restricted area.
-    `map_layer` names which counted point layer the map draws — hospitals, schools,
-    buildings, or a contributed layer such as evacuation_centres; unnamed ones are
-    declined by name. Whatever is drawn, every counted layer's places — name,
-    coordinates, hazard class, risk level — are in `stats.assets`.
-    Without it, `place` is geocoded. Land cover: `year` picks the map; add `year_to` for
-    change and transitions between two mapped years, and `classes` to detail named
-    classes; `stack` picks a registered stack when more than one covers the place
-    (the pack's gaps name the alternatives). This is the hand-off seam of the platform: YOUR LLM writes the
-    brief from this pack (cite the numbered items as [n]), then calls
-    verify_groundedness(draft, pack_id) to gate it. No LLM runs inside this tool.
-
-    The pack gathers: corpus evidence (a forecast slice + a retrospective slice,
-    each item with source/date/validation/archived-copy), the live GEOGLAM
-    conditions feed, and the crop calendar. A calendar `override` is target-pinned
-    (mismatch dropped + declared). DECLARED GAPS are returned as content — surface
-    them; they are what's missing, said honestly.
-
-    Returns: {status, pack_id, country, crop, citations:[{n,...}], gaps, queries,
-    required_sections, stats}. `required_sections` is what verify_groundedness
-    will demand — draft those exact section headers so the gate passes in one shot.
-    status "declined" -> `note` (missing key / torn corpus / bad override).
-    """
-    return assemble.assemble(geometry=geometry, map_layer=map_layer, stack=stack, country=country, crop=crop, focus=focus, pack=pack,
-                             place=place, hazard=hazard, min_severity=min_severity,
-                             override=override, override_country=override_country,
-                             override_crop=override_crop,
-                             year=year, year_to=year_to, classes=classes,
-                             layers=layers, vectors=vectors, within=within)
+                  within: str | None = None, detail: str = "concise") -> dict:
+    """Thin carrier: registry.describe_assemble() is the contract a model reads; every
+    parameter is explained in servirplatform://how-to-use. detail='full' skips the
+    reply shaping (mcp/shape.py) and, like any call, gathers a new pack."""
+    if detail not in shape.DETAIL:
+        return shape.bad_detail(detail)
+    out = assemble.assemble(geometry=geometry, map_layer=map_layer, stack=stack, country=country, crop=crop, focus=focus, pack=pack,
+                            place=place, hazard=hazard, min_severity=min_severity,
+                            override=override, override_country=override_country,
+                            override_crop=override_crop,
+                            year=year, year_to=year_to, classes=classes,
+                            layers=layers, vectors=vectors, within=within)
+    return out if detail == "full" else shape.shape(out, "pack")
 
 
 @mcp.tool()
@@ -428,16 +329,18 @@ def verify_groundedness(draft: str, pack_id: str) -> dict:
 @mcp.tool()
 def resolve_place_time(country: str | None = None, crop: str | None = None,
                        region: str | None = None, when: str | None = None,
-                       place: str | None = None, list: str | None = None) -> dict:
+                       place: str | None = None, list: str | None = None,
+                       detail: str = "concise") -> dict:
     """Turn human place-and-time into machine place-and-time. Pass whichever half
     your question has — a `place` ("Battambang, Cambodia", "Bang Sue District,
     Bangkok"), a `country`+`crop` season, or both.
 
     `list="all"` (or a layer id) LISTS what can be named instead: every contributed
-    boundary layer with its names and each name's area in km² and size class — the
-    menu to pick an area from before asking, so a question never has to carry
-    coordinates. Call it when someone asks what areas, boundaries or study sites
-    the platform knows, or which are small enough to answer quickly.
+    boundary layer with its names grouped by size class — the menu to pick an area
+    from before asking, so a question never has to carry coordinates. Call it when
+    someone asks what areas, boundaries or study sites the platform knows, or which
+    are small enough to answer quickly. Every name with its km²: detail='full' or
+    the resource servirplatform://places.
 
     A `place` (or a `region`, resolved against its country) comes back as the area
     the platform would actually analyse: its canonical name, area in km², bounding
@@ -454,8 +357,17 @@ def resolve_place_time(country: str | None = None, crop: str | None = None,
     place, or neither half given (`note`); "empty" -> no calendar for that
     country/crop.
     """
-    return resolve.place_time(country=country, crop=crop, region=region,
-                              when=when, place=place, list=list)
+    import sys
+    if detail not in shape.DETAIL:
+        return shape.bad_detail(detail)
+    out = resolve.place_time(country=country, crop=crop, region=region,
+                             when=when, place=place, list=list,
+                             names_cap=sys.maxsize if detail == "full" else None)
+    if detail == "full":
+        return shape.complete_places(out)
+    if isinstance(out, dict) and isinstance(out.get("layers"), builtins.list):
+        return shape.shape(shape.concise_places(out), "places")
+    return shape.shape(out)
 
 
 @mcp.tool()
@@ -479,20 +391,17 @@ def compose_run(composition: str = "foodsecurity.brief", question: str = "",
     pack_id, report_id, receipt_id, draft_sha256, provider, model}. status
     "declined" -> `note` (unknown composition / no question / ungroundable).
     """
-    return compose.run(composition=composition, question=question, override=override,
-                       override_country=override_country, override_crop=override_crop,
-                       provider=provider, model=model)
+    return shape.shape(compose.run(composition=composition, question=question, override=override,
+                                   override_country=override_country,
+                                   override_crop=override_crop, provider=provider, model=model),
+                       "pack")
 
 
 # `meta.ui.resourceUri` is how MCP Apps links a result to a renderable surface:
 # a host that advertises io.modelcontextprotocol/ui fetches ui://servirplatform/evidence and
 # renders it in a sandboxed iframe beside the text. Hosts that do not understand
 # _meta ignore it, so the text answer is unchanged for everyone else.
-@mcp.tool(meta={"ui": {"resourceUri": app_ui.UI_URI}})
-def record_receipt(pack_id: str | None = None, report_id: str | None = None,
-                   receipt_id: str | None = None,
-                   question: str | None = None) -> dict[str, Any]:
-    """Mint or resolve a replayable RECEIPT — the shareable proof of an answer.
+_RECORD_RECEIPT = """Mint or resolve a replayable RECEIPT — the shareable proof of an answer.
 
     Mint (pass pack_id, and report_id from verify_groundedness): ties the question,
     the evidence pack, and the verdict into one persisted receipt_id. Resolve (pass
@@ -505,44 +414,60 @@ def record_receipt(pack_id: str | None = None, report_id: str | None = None,
     unauthenticated reader — EXCEPT for a receipt citing a staged contribution,
     which stays visible to its contributor and reviewers only and says so in
     `staged_note`. status "declined" -> `note` (no pack for mint / unknown
-    receipt_id).
+    receipt_id). The reply is budgeted: a spilled section names its resource
+    (servirplatform://receipt/<id>/<section>); resolving with detail='full' returns every
+    section, the published insight (brief, map, layers, series) included, and mints nothing.
     """
-    return record.record(pack_id=pack_id, report_id=report_id,
-                         receipt_id=receipt_id, question=question)
+
+
+@mcp.tool(description=_describe("record_receipt", lambda: inspect.cleandoc(_RECORD_RECEIPT)),
+          meta={"ui": {"resourceUri": app_ui.UI_URI}})
+def record_receipt(pack_id: str | None = None, report_id: str | None = None,
+                   receipt_id: str | None = None,
+                   question: str | None = None, detail: str = "concise") -> dict[str, Any]:
+    """Mint or resolve a replayable receipt (the description above is the contract)."""
+    if detail not in shape.DETAIL:
+        return shape.bad_detail(detail)
+    out = record.record(pack_id=pack_id, report_id=report_id, receipt_id=receipt_id,
+                        question=question, with_insight=detail == "full")
+    return out if detail == "full" else shape.shape(out, "receipt")
 
 
 # The MCP App rides on this tool as well as record_receipt: this is where a
 # run-time answer actually ENDS, so it is where a host that can render should get
 # the evidence view without the model having to ask for it.
-@mcp.tool(description=publish.describe(),
+@mcp.tool(description=_describe("publish_answer", publish.describe),
           meta={"ui": {"resourceUri": app_ui.UI_URI}})
 def publish_answer(pack_id: str, draft: str,
-                   question: str | None = None) -> dict[str, Any]:
-    return publish.answer(pack_id=pack_id, draft=draft, question=question)
+                   question: str | None = None, detail: str = "concise") -> dict[str, Any]:
+    if detail not in shape.DETAIL:
+        return shape.bad_detail(detail)
+    out = publish.answer(pack_id=pack_id, draft=draft, question=question)
+    return out if detail == "full" else shape.shape(out, "receipt")
 
 
-@mcp.tool(description=feeds.describe())
+@mcp.tool(description=_describe("feeds_query", feeds.describe))
 def feeds_query(dataset: str, params: dict | None = None) -> dict:
-    return loop.with_entry_hint(feeds.query(dataset=dataset, params=params))
+    return shape.shape(loop.with_entry_hint(feeds.query(dataset=dataset, params=params)), "feed")
 
 
-@mcp.tool(description=ui.describe_design())
+@mcp.tool(description=_describe("ui_design", ui.describe_design))
 def ui_design(format: str = "all") -> dict:
     return ui.design(fmt=format)
 
 
-@mcp.tool(description=ui.describe_catalog())
+@mcp.tool(description=_describe("ui_catalog", ui.describe_catalog))
 def ui_catalog() -> dict:
     return ui.catalog()
 
 
-@mcp.tool(description=ui.describe_component())
+@mcp.tool(description=_describe("ui_component", ui.describe_component))
 def ui_component(name: str, treatment: str | None = None,
                  layout: str | None = None) -> dict:
     return ui.component(name, treatment=treatment, layout=layout)
 
 
-@mcp.tool(description=ui.describe_embed())
+@mcp.tool(description=_describe("ui_embed", ui.describe_embed))
 def ui_embed(component: str, receipt_id: str | None = None, place: str | None = None) -> dict:
     return ui.embed(component, receipt_id=receipt_id, place=place)
 
@@ -551,13 +476,13 @@ def ui_embed(component: str, receipt_id: str | None = None, place: str | None = 
 from ..contrib import staging as _staging  # noqa: E402  (after mcp exists)
 
 
-@mcp.tool(description=_staging.describe_submit())
+@mcp.tool(description=_describe("contribute_submit", _staging.describe_submit))
 def contribute_submit(kind: str = "", manifest: dict | str | None = None) -> dict:
     from ..contrib import jobs
     return jobs.submit(kind, manifest)
 
 
-@mcp.tool(description=weights_ui.describe(),
+@mcp.tool(description=_describe("risk_weights", weights_ui.describe),
           meta={"ui": {"resourceUri": weights_ui.UI_URI}})
 def risk_weights(hazard: str | None = None) -> dict:
     return {"status": "ok", "weights_picker": weights_ui.payload(hazard)}
@@ -613,7 +538,8 @@ def contribute_status(contribution_id: str | None = None, action: str = "show",
 
 @mcp.tool()
 def contribute_review(action: str = "list", contribution_id: str | None = None,
-                      note: str | None = None, status_filter: str = "pending") -> dict:
+                      note: str | None = None, status_filter: str = "pending",
+                      offset: int = 0) -> dict:
     """The review queue — reviewers only (GRP_REVIEWERS); anyone else is declined.
 
     action="list": contributions with the given status_filter (pending | approved |
@@ -625,10 +551,12 @@ def contribute_review(action: str = "list", contribution_id: str | None = None,
     taken down for every caller — `unlanded` says what was undone — and its record
     keeps the note. action="remove" is the same for an approved one. Packs and
     receipts already built on it stay replayable. Returns {status, ...}; on a decline
-    `note` says why.
+    `note` says why. The list fits one reply: `shown` names the offset for the next page.
     """
     if action == "list":
-        return _staging.review_list(status_filter=status_filter)
+        return shape.shape(_staging.review_list(status_filter=status_filter), "review",
+                           offset=offset, again=("contribute_review(action='list', status_filter="
+                                                 + _braced(repr(status_filter)) + ", offset={next})"))
     if action not in ("approve", "reject", "remove"):
         return {"status": "declined",
                 "note": f"unknown action {action!r} — list, approve, reject or remove"}
@@ -640,7 +568,8 @@ def contribute_review(action: str = "list", contribution_id: str | None = None,
 
 
 @mcp.tool()
-def corpus_document(doc_id: str | None = None, pack: str | None = None) -> dict:
+def corpus_document(doc_id: str | None = None, pack: str | None = None,
+                    offset: int = 0) -> dict:
     """Trace a passage back to its source document.
 
     `pack` picks the library, as it does for corpus_search; omit it for
@@ -648,11 +577,16 @@ def corpus_document(doc_id: str | None = None, pack: str | None = None) -> dict:
 
     Returns: {status, ...}.
       No doc_id, status "ok" -> {documents, inventory: [{doc_id, chunks, passport}]}
-      With a doc_id, status "ok" -> {doc_id, chunks, passport} (the trace-back terminus)
+      With a doc_id, status "ok" -> {doc_id, chunks, passport, extracted_text} (the
+      trace-back terminus)
       status "declined" -> `note` says WHY (unreadable corpus / unknown doc_id)
-    Whenever status != "ok", render `note`.
+    Whenever status != "ok", render `note`. A long text or inventory comes in parts:
+    `shown` names the `offset` (chars of the text, or rows of the inventory) to read on.
     """
-    return fetch.document(doc_id, pack=pack)
+    args = [_braced(a) for a in
+            ([f"doc_id={doc_id!r}"] if doc_id else []) + ([f"pack={pack!r}"] if pack else [])]
+    return shape.shape(fetch.document(doc_id, pack=pack), "document", offset=offset,
+                       again="corpus_document(" + ", ".join(args + ["offset={next}"]) + ")")
 
 
 def _register_pack_manifests() -> None:
@@ -712,43 +646,56 @@ def evidence_app() -> str:
     return app_ui.template()
 
 
+@mcp.resource("servirplatform://capabilities/{section}", mime_type="application/json")
+async def capabilities_section(section: str) -> dict:
+    """One section of platform_capabilities, whole — feeds (briefs, params, declared gaps),
+    methods, domain_packs, bones, ... An unknown section declines with the list."""
+    caps = await _capabilities()
+    if section not in caps:
+        return {"status": "declined", "section": section,
+                "note": "unknown section — one of: " + ", ".join(caps)}
+    return {section: caps[section]}
+
+
+# The resources a shaped reply spills to (mcp/shape.py): one section of a stored pack or
+# receipt, whole, and the full place list — served from the store, never re-gathered.
+@mcp.resource("servirplatform://pack/{pack_id}/{section}", mime_type="application/json")
+def pack_section(pack_id: str, section: str) -> dict:
+    """One section of a stored evidence pack, whole — citations, layers, vectors, methods,
+    stats, trace, queries, gaps, exec: what assemble_pack returns, never the map payload
+    it keeps out of a reply (the hazard_map embed draws that). Unknown ones decline."""
+    pack = store.load_pack(pack_id)
+    if pack is None:
+        return {"status": "declined", "note": f"no pack with id {pack_id!r}"}
+    served = [k for k in pack if k not in assemble.NOT_RETURNED]
+    if section not in served:
+        return {"status": "declined", "section": section,
+                "note": "unknown section — one of: " + ", ".join(served)
+                        + ("; the map is drawn by ui_embed(component='hazard_map', receipt_id=...)"
+                           if "viz" in pack else "")}
+    return {section: pack[section]}
+
+
+@mcp.resource("servirplatform://receipt/{receipt_id}/{section}", mime_type="application/json")
+def receipt_section(receipt_id: str, section: str) -> dict:
+    """One section of a receipt, whole — sources, evidence_freshness, gaps, claim_scope,
+    render_with, or a part of the published insight (map, layers, series, ...)."""
+    return record.section(receipt_id, section)
+
+
+@mcp.resource("servirplatform://places", mime_type="application/json")
+def places() -> dict:
+    """Every contributed boundary name with its km² and size class — the full list that
+    resolve_place_time(list='all') groups and abridges."""
+    import sys
+    from ..graph.geo import ingest
+    return ingest.list_boundaries(names_cap=sys.maxsize)
+
+
 @mcp.resource("servirplatform://how-to-use", mime_type="text/markdown")
-def how_to_use() -> str:
+async def how_to_use() -> str:
     """How to use the Global Risk Platform (human-readable) — attach/open in the host."""
-    return """# How to use the Global Risk Platform
-
-A **governed toolkit** for decision support across its domain packs — food security,
-hazard risk and land cover today — not a chatbot. Every insight carries its evidence,
-declines say why, and a groundedness gate blocks ungrounded briefs. You use it in one
-of two ways.
-
-## Build-time — build your own tool on ours
-Ask your AI client to *build* something. It produces a reusable app/script that
-calls these tools, so the guardrails live in your tool, not in a one-off chat.
-- Claude Code: run the `build_a_tool` prompt (`/` menu) or just say
-  "build me a bulletin tool for a country and crop", "a flood-exposure checker for
-  any district", or "a forest-change report for any Nepal district".
-- Claude Desktop: pick **build_a_tool** from the prompt (+) menu.
-
-## Run-time — get one governed answer now
-Ask a question. The assistant runs the loop and returns a grounded, cited brief.
-- Use the `run_analysis` prompt, or ask e.g. "what should I expect for maize in
-  Kenya this season?", "how many people in Banan District are in the 100-year flood
-  zone?", or "how much of Bagmati Province was forest in 2022, and how did it change
-  since 2000?"
-
-## The canonical loop (what a good answer does)
-platform_capabilities (scope honestly) → assemble_pack(the pack's target:
-one pack's target params — platform_capabilities lists them) → your LLM
-drafts a brief from the pack citing [n] in its required_sections →
-verify_groundedness(draft, pack_id) → publish only if it passes →
-record_receipt mints a replayable receipt.
-
-## See what's actually live (never trust a stale doc)
-Call **platform_capabilities** (or run the `explain_platform` prompt) for the
-current tools, bones, and DECLARED gaps — that map is derived from the live
-server, so it's always accurate.
-"""
+    return instructions.how_to_use([(p.name, p.description) for p in await mcp.list_prompts()])
 
 
 @mcp.prompt()
@@ -789,7 +736,7 @@ def build_a_tool(goal: str = "a bulletin generator for one of the platform's dom
             "and every one of them looked finished: invented numbers under invented "
             "publishers, and in one case exposure figures generated by Math.random() "
             "that rerolled on each render. A build nobody gated is a build nobody "
-            "checked.")
+            "checked.\n\n" + instructions.home_text("prompt:build_a_tool"))
 
 
 @mcp.prompt()
@@ -822,7 +769,8 @@ def contribute_logic(logic: str = "") -> str:
 @mcp.prompt()
 def explain_platform() -> str:
     """What the servirplatform platform is and how to use it (build-time vs run-time)."""
-    return ("Call platform_capabilities, then explain in plain terms what the servirplatform "
+    return ("Call platform_capabilities, and platform_capabilities(section='domain_packs') for "
+            "each pack's declared gaps in full, then explain in plain terms what the servirplatform "
             "platform is, what it can and can't do right now (its declared gaps), and "
             "the two ways to use it: BUILD-TIME (build a reusable tool on its bones) vs "
             "RUN-TIME (answer one question now).")
@@ -845,6 +793,7 @@ def main() -> None:
 
 
 mcp.add_middleware(_LiveText())
+mcp.add_middleware(_ErrorBudget())
 
 
 if __name__ == "__main__":

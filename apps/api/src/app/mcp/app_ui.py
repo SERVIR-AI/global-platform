@@ -846,6 +846,33 @@ function traceCard(t){
     ${t.note ? `<div class="meta" style="margin-top:.35rem">${esc(t.note)}</div>` : ""}
   </details>`;
 }
+// A budgeted reply replaces an oversize section with {spilled_to, chars, how} (mcp/shape.py).
+// The panel draws what it has and names what it did not get — ANY pointer, at the top or
+// inside insight, so a part added later is handled too — then fetches the whole receipt.
+const isSpill = v => !!(v && typeof v === "object" && !Array.isArray(v) && v.spilled_to);
+function unspill(d){
+  const c = {...d};
+  const notes = [], missing = [];
+  const take = (o, k, label) => { notes.push(label + " (" + (o[k].chars || "?") + " chars) at " + o[k].spilled_to); missing.push(label); delete o[k]; };
+  for (const k of Object.keys(c)) if (isSpill(c[k])) take(c, k, k);
+  if (c.insight && typeof c.insight === "object") {
+    c.insight = {...c.insight};
+    for (const k of Object.keys(c.insight)) if (isSpill(c.insight[k])) take(c.insight, k, "insight." + k);
+  }
+  c._spilled = notes; c._missing = missing;
+  return c;
+}
+// record_receipt(receipt_id, detail='full') returns every section and mints nothing: the host
+// proxies it (serverTools), and the panel redraws whole. No bridge: the note above stays.
+function refetchSpilled(d){
+  const rid = d.receipt_id;
+  if (!rid || !serverToolsOK() || !Object.keys(d).some(k => isSpill(d[k]) ||
+      (k === "insight" && d.insight && Object.values(d.insight).some(isSpill)))) return;
+  callTool("record_receipt", { receipt_id: rid, detail: "full" }).then(res => {
+    const full = (res && res.structuredContent) || toolJSON(res);
+    if (full && full.status === "ok") { render(strip(unspill(full))); reportSize(); }
+  }).catch(() => {});
+}
 function render(d){
   _data = d;
   const srcs = d.sources || [], gaps = d.gaps || [];
@@ -857,7 +884,8 @@ function render(d){
   const computed = new Set((d.evidence_freshness||{}).computed_sources || []);
   document.getElementById("root").innerHTML = `
     <h2>${esc(d.question || "Evidence")}</h2>
-    <div class="sub">${srcs.length} sources · ${pulled.size} pulled live${computed.size?` · ${computed.size} computed`:""} · ${gaps.length} declared gap(s)</div>
+    <div class="sub">${(d._missing||[]).includes("sources") ? "sources not in this reply" : srcs.length + " sources"} · ${(d._missing||[]).includes("evidence_freshness") ? "freshness not in this reply" : pulled.size + " pulled live"}${computed.size?` · ${computed.size} computed`:""} · ${(d._missing||[]).includes("gaps") ? "declared gaps not in this reply" : gaps.length + " declared gap(s)"}</div>
+    ${(d._spilled || []).length ? `<div class="meta">Not in this reply (budget): ${d._spilled.map(esc).join("; ")}</div>` : ""}
     ${globalBar(series)}
     ${_ov && series.filter(sr => !sr.categorical).length > 1 ? overlayCard(series) : ""}
     ${ins.map ? mapCard(ins.map) : ""}
@@ -1060,7 +1088,7 @@ window.addEventListener("message", e => {
          || m.structuredContent || m.evidence;
   if (!d) return;
   if (d.status === "blocked" || d.status === "declined") { renderRefusal(strip(d)); return; }
-  if (d.sources || d.question) { render(strip(d)); reportSize(); }
+  if (d.sources || d.question) { render(strip(unspill(d))); reportSize(); refetchSpilled(d); }
 });
 request("ui/initialize", INIT_PARAMS);
 // Same spec document names the method `ui/initialize` in its normative text and

@@ -464,4 +464,6 @@ def describe() -> str:
         "evidence_freshness, claim_scope, render_with, next_step}. status \"blocked\" "
         "-> the gate refused it: `failures` says why, NO receipt is minted, and the "
         "draft must not be shown. Use verify_groundedness / record_receipt directly "
-        "only if you need the two steps separately.")
+        "only if you need the two steps separately. The reply is budgeted: a section it "
+        "spills names its resource (servirplatform://receipt/<id>/<section>); "
+        "detail='full' returns everything.")

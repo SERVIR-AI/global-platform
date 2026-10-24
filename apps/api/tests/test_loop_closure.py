@@ -191,16 +191,22 @@ def test_a_lookup_offers_the_way_into_the_loop(log):
 def test_the_rule_and_the_receipt_lead_their_replies(pack, log):
     """Seen live: Claude Code kept 2 KB of a 51 KB publish reply, and the receipt sat at
     character 32,736, so it never reached the user; a lookup's no-arithmetic rule sat
-    after 20 KB of rows. Both now come first."""
-    import json
-    out = publish.answer(pack["pack_id"], _passing_draft(pack), question="q")
-    head = json.dumps(out, ensure_ascii=False)[:2000]
+    after 20 KB of rows. The tool boundary (mcp/shape.py) now orders every reply by one
+    declared priority: ids and the receipt first, guidance next, rows last."""
+    from app.mcp import budget, shape
+    out = shape.shape(publish.answer(pack["pack_id"], _passing_draft(pack), question="q"), "receipt")
+    head = budget.serialise(out)[:2000]
     log("OUTPUT", f"publish keys: {list(out)[:5]}")
+    assert list(out)[:2] == ["status", "receipt_id"]
     assert out["receipt_id"] in head and '"public_resolver"' in head
-    hinted = loop.with_entry_hint({"status": "ok", "dataset": "d",
-                                   "records": [{"v": i} for i in range(5000)]})
-    assert list(hinted)[:2] == ["status", "for_a_governed_answer"]
-    assert "do not add up" in json.dumps(hinted)[:2000]
+    hinted = shape.shape(loop.with_entry_hint({
+        "status": "ok", "dataset": "d", "count": 5000,
+        "summary": "5000 records, recency unverified",
+        "records": [{"v": i} for i in range(5000)]}), "feed")
+    keys = list(hinted)
+    assert keys[:2] == ["status", "dataset"]
+    assert keys.index("for_a_governed_answer") < keys.index("count") < keys.index("records")
+    assert "do not add up" in budget.serialise(hinted)[:2000]
 
 
 def test_a_declined_lookup_is_not_hinted(log):
@@ -241,7 +247,7 @@ def test_the_app_strips_the_verdict_before_rendering(pack, log):
     # ...and the renderer removes every one of them before drawing
     for field in app_ui._VERDICT_FIELDS:
         assert f'"{field}"' in tmpl.split("const VERDICT_FIELDS = ")[1].split(";")[0]
-    assert "render(strip(d))" in tmpl
+    assert "render(strip(unspill(d)))" in tmpl
 
 
 def test_the_apps_field_list_is_generated_not_retyped(log):
@@ -365,3 +371,18 @@ def test_a_gaps_only_missing_section_passes_the_gate(risk_pack, log):
     v = verify.groundedness("\n\n".join(parts), risk_pack["pack_id"])
     log("OUTPUT", f"passed={v['passed']} failures={v['failures']}")
     assert v["passed"] is True
+
+
+def test_every_pack_carries_the_no_arithmetic_line_by_priority(pack, risk_pack, log):
+    """Seen live: asked an average, a model read a land-cover pack's rows and divided them
+    itself; the rule rode only on lookups. Every pack now carries ONE contextual line,
+    placed by priority — after the next call, before the citations — never the long rule
+    (that lives in the instructions and the tool description)."""
+    from app.mcp import budget, shape
+    for p in (pack, risk_pack):
+        keys = list(shape.shape(p, "pack"))
+        log("OUTPUT", f"{p.get('pack')}: {keys[:6]}")
+        assert keys[:2] == ["status", "pack_id"]
+        assert keys.index("next_step") < keys.index("no_arithmetic") < keys.index("citations")
+        assert "accept or reject" in p["no_arithmetic"]
+        assert len(p["no_arithmetic"]) <= budget.NOTE_CHARS

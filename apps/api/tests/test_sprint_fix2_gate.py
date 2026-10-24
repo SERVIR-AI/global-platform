@@ -160,9 +160,12 @@ def test_a_json_feed_filters_by_its_own_fields_and_a_bbox_and_declines_the_rest(
     nobox = _as(OWNER, lambda: feeds.query("test_obis", {"bbox": NICOYA}))
     assert nobox["status"] == "declined"
     assert "this feed has no latitude/longitude output fields, so it cannot be filtered by bbox" in nobox["note"]
-    # the tool text says what each feed takes, from its own fields
-    text = feeds.describe()
-    assert "equality filter on an output field (scientific_name, iucn_category, obis_records)" in text
+    # the tool text names the feed; the map says what it takes, from its own fields
+    from app.mcp import registry
+    assert "`test_obis`" in feeds.describe()
+    brief = registry.capabilities(available_tools=["platform_capabilities"])["feeds"]["test_obis"]
+    assert ("equality filter on an output field (scientific_name, iucn_category, obis_records)"
+            in brief["params"]["<field>"])
 
 
 def test_every_other_feed_declines_a_param_it_does_not_take(hub, log):

@@ -32,8 +32,10 @@ def _month(when) -> tuple[int | None, str | None]:
 
 def place_time(country: str | None = None, crop: str | None = None,
                region: str | None = None, when: str | None = None,
-               place: str | None = None, list: str | bool | None = None) -> dict:
-    """Resolve a place and/or a country-crop season into machine terms.
+               place: str | None = None, list: str | bool | None = None,
+               names_cap: int | None = None) -> dict:
+    """Resolve a place and/or a country-crop season into machine terms. `names_cap`: names
+    a listed layer shows before it is abridged (the listing's own default when None).
 
     A place is resolved by the platform's own gazetteer — the same one every
     hazard answer uses — so the two halves of "place and time" now both work.
@@ -43,7 +45,8 @@ def place_time(country: str | None = None, crop: str | None = None,
     if list:
         from ..graph.geo import ingest
         return ingest.list_boundaries(layer=list if isinstance(list, str)
-                                      and list.lower() not in ("all", "true", "*") else None)
+                                      and list.lower() not in ("all", "true", "*") else None,
+                                      **({"names_cap": names_cap} if names_cap else {}))
 
     month, err = _month(when)
     if err:

@@ -800,14 +800,17 @@ def test_method_and_gaps_state_the_boundary_once_and_the_carbon_rule_honestly(bi
 
 
 def test_connect_time_text_follows_contributions(binary_stack):
-    """A stack contributed after the server started appears in the instructions and in
-    assemble_pack's description the next time a client connects."""
+    """A stack contributed after the server started appears in assemble_pack's description
+    the next time a client connects, and the instructions' derived counts follow it — the
+    instructions are budgeted to counts; names live in the description and the manifest."""
     import asyncio
-    from app.mcp import server
+    from app.land_cover.synthesis import landcover_stacks
+    from app.mcp import budget, server
     mw = next(m for m in server.mcp.middleware if type(m).__name__ == "_LiveText")
     mw._at = 0.0
     mw._fresh()
-    assert "Testland" in mw._instr
+    n = len(landcover_stacks())
+    assert f"{n} stack" in mw._instr and "Testland" not in mw._instr
     assert "Testland" in mw._descs["assemble_pack"]
 
     class Ctx:
@@ -818,7 +821,8 @@ def test_connect_time_text_follows_contributions(binary_stack):
             return None
         await mw.on_initialize(Ctx(), nxt)
     asyncio.run(run())
-    assert "Testland" in server.mcp.instructions
+    assert f"{n} stack" in server.mcp.instructions
+    assert len(server.mcp.instructions) <= budget.INSTRUCTIONS
 
 
 def test_within_restricts_any_packs_area_and_overlaps_count_once(binary_stack, tmp_path, monkeypatch, log):

@@ -46,7 +46,8 @@ def test_resources_cover_the_app_the_guide_and_every_pack(log):
     log("OUTPUT", str(sorted(uris)))
     from app.mcp.weights_ui import UI_URI as WEIGHTS_UI_URI
     from app.mcp import skills
-    expected = {UI_URI, WEIGHTS_UI_URI, "servirplatform://how-to-use"} | {
+    expected = {UI_URI, WEIGHTS_UI_URI, "servirplatform://how-to-use",
+                "servirplatform://places"} | {
         f"servirplatform://skill/{name}" for name in skills.SERVED} | {
         f"servirplatform://pack/{pid}" for pid in packs.available()}
     log("CHECK", "a new pack row would have to appear here too")

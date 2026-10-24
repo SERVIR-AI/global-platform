@@ -104,6 +104,36 @@ def replay_view(receipt: dict) -> dict:
     return view
 
 
+def insight(receipt: dict) -> dict | None:
+    """The published insight (brief, series, map, layers, ...), recomputed from the stored
+    pack and the report's draft; None for a receipt minted without a report."""
+    report = store.load_report(receipt["report_id"]) if receipt.get("report_id") else None
+    if report is None or not receipt.get("pack_id"):
+        return None
+    from . import publish
+    return publish._insight(receipt["pack_id"], report.get("draft") or "")
+
+
+def section(receipt_id: str, name: str) -> dict:
+    """One section of a receipt, whole — what a shaped reply points at: a stored key, a part
+    of the published insight, or a replay-view key (computed last: it re-measures layers).
+    An unknown id or section declines with the list."""
+    r = store.load_receipt(receipt_id)
+    if r is None:
+        return {"status": "declined", "note": f"no receipt with id {receipt_id!r}"}
+    if name in r:
+        return {name: r[name]}
+    ins = insight(r)
+    if ins is not None and (name == "insight" or name in ins):
+        return {name: ins if name == "insight" else ins[name]}
+    view = replay_view(r)
+    if name in view:
+        return {name: view[name]}
+    return {"status": "declined", "section": name,
+            "note": "unknown section — one of: " + ", ".join(
+                sorted(set(r) | set(view) | ({"insight", *ins} if ins is not None else set())))}
+
+
 def _embed_url(component: str, rid: str) -> str | None:
     """The platform's own embed address for a component and receipt, from the theme
     (so GRP_PUBLIC_BASE governs it, exactly as it governs the resolver)."""
@@ -258,8 +288,10 @@ def _claim_scope(pack: dict) -> str:
 
 
 def record(pack_id: str | None = None, report_id: str | None = None,
-           receipt_id: str | None = None, question: str | None = None) -> dict:
-    """Resolve mode (receipt_id given) returns the stored receipt. Mint mode
+           receipt_id: str | None = None, question: str | None = None,
+           with_insight: bool = False) -> dict:
+    """Resolve mode (receipt_id given) returns the stored receipt — with the recomputed
+    insight when asked, so a spilled part comes back with no side effect. Mint mode
     (pack_id given) ties the pack + groundedness report into a receipt and
     persists it. A receipt minted without a report_id records an ungated pack
     (passed=null)."""
@@ -267,7 +299,8 @@ def record(pack_id: str | None = None, report_id: str | None = None,
         r = store.load_receipt(receipt_id)
         if r is None:
             return {"status": "declined", "note": f"no receipt with id {receipt_id!r}"}
-        return {"status": "ok", **r, **replay_view(r)}
+        ins = insight(r) if with_insight else None
+        return {"status": "ok", **r, **replay_view(r), **({"insight": ins} if ins else {})}
 
     pack = store.load_pack(pack_id) if pack_id else None
     if pack is None:

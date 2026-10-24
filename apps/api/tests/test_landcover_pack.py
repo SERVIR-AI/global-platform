@@ -187,6 +187,7 @@ def test_declines_are_governed(lc_env):
 
 def test_full_loop_mints_a_receipt(lc_env, log):
     p = assemble.assemble(pack="land-cover", place="Test District", year=2000, year_to=2022)
+    assert list(p)[:2] == ["status", "pack_id"] and "accept or reject" in p["no_arithmetic"]
     n = {c["kind"]: c["n"] for c in p["citations"]}
     c1 = p["citations"][0]["text"]
     forest = c1.split("Forest ")[1].split(" km²")[0]

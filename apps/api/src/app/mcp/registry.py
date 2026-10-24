@@ -9,7 +9,7 @@ import os
 
 from ..food_security import calendar as fs_calendar
 from ..rag.store import Corpus, CorpusError
-from . import packs
+from . import budget, packs
 
 VERSION = "0.2.0-phase1"
 _FS_CORPUS = "food-security"
@@ -524,6 +524,8 @@ def capabilities(available_tools=None, available_prompts=None,
                          "for them to accept or reject first. Add one with contribute_submit "
                          "kind=method."),
         "methods": _methods_listed(),
+        # Coverage BY NAME — the opening of the instructions carries counts only.
+        "coverage": coverage_by_name(),
         "tools_available": tools,
         # Payload-carried on purpose: connect-time INSTRUCTIONS lose to whatever
         # rides the tool results (measured — render_with was honored to the letter
@@ -577,11 +579,17 @@ def _feed_brief(row: dict) -> dict:
     out = {k: row[k] for k in _FEED_KEEP if row.get(k) not in (None, "", [], {})}
     if isinstance(out.get("source"), str) and len(out["source"]) > 140:
         out["source"] = out["source"][:140] + "…"
-    if isinstance(row.get("params"), dict) and row["params"]:
-        out["params"] = sorted(row["params"])
-    about = str(row.get("description") or "")
-    if about:
-        out["about"] = about[:200] + ("…" if len(about) > 200 else "")
+    try:
+        from . import feeds as _feeds
+        params = _feeds.params_doc(row)
+    except Exception:
+        params = row.get("params") if isinstance(row.get("params"), dict) else {}
+    if params:
+        out["params"] = {str(k): str(v) for k, v in params.items()}   # name -> what it takes
+    if row.get("status") != "available" and row.get("reason"):
+        out["declared_gap"] = str(row["reason"])
+    if row.get("description"):
+        out["about"] = str(row["description"])     # whole: a table's caveat is a gate field
     # the field names each record carries, so "what does it hold" needs no records read
     fetch = row.get("fetch") or {}
     names = fetch.get("fields") or fetch.get("columns")
@@ -667,6 +675,32 @@ def coverage_line() -> str:
             f"behind them ({subj}). Sources include {shown}{more}.")
 
 
+def coverage_by_name() -> dict:
+    """What the platform covers, by name, derived: each pack's own summary (stacks, classes,
+    countries, hazards, assets), the live feeds, their publishers, the contributed vector
+    layers, and where every place name is listed."""
+    c = coverage()
+    return {"packs": {pid: packs.text(sp, "summary") or packs.text(sp, "covers")
+                      or f"not declared by this pack; servirplatform://pack/{pid}"
+                      for pid, sp in packs.PACKS.items()},
+            "live_feeds": c["subjects"], "publishers": c["publishers"],
+            "contributed_vector_layers": sorted(_contributed_vector_names()),
+            "place_names": ("resolve_place_time(list='all'); every name with its km²: "
+                            "servirplatform://places")}
+
+
+def sources_line() -> str:
+    """The live feeds by title and the publishers, generated: the coverage a model routes
+    on that a budgeted description can afford. A newly available feed appears by itself."""
+    c = coverage()
+    subj = budget.names(c["subjects"], sep="; ", more="more (feeds_query)")
+    pubs = c["publishers"]
+    shown = ", ".join(pubs[:6])
+    more = f" and {len(pubs) - 6} others" if len(pubs) > 6 else ""
+    return ((f"Live feeds: {subj}. " if subj else "")
+            + (f"Sources include {shown}{more}." if pubs else "")).strip()
+
+
 def _contributed_vector_names() -> list[str]:
     """Names of the contributed vector layers the caller may see — read live, so the
     tool text names what the platform holds today."""
@@ -714,71 +748,57 @@ def _class_split_line() -> str:
     return ("Where a pack counts the classes of a map (" + "; ".join(docs) + "), every layer read "
             "is ALSO split PER CLASS of that map in `layers.<name>.summary.by_class_of` and in its "
             "citation: each class's area and area with a value, and for an amount its mean, median "
-            "and, for a density, its total — mean biomass inside Mangrove, soil carbon under each "
-            "class, mangrove area per elevation band. ")
+            "and, for a density, its total (mean biomass inside Mangrove, soil carbon per class). ")
 
 
 def describe_assemble() -> str:
-    """`assemble_pack`'s tool description, GENERATED.
+    """`assemble_pack`'s tool description, GENERATED and fitted to budget.TOOL_DESCRIPTION:
+    every derived name list (keywords, feeds, vector layers) is whole while there is room
+    and counted past it; the names are all in platform_capabilities(section='coverage')."""
+    return budget.fit("tool description assemble_pack", _assemble_text, budget.TOOL_DESCRIPTION)
 
-    A model picks a tool from its first line, so that line must name the subject in
-    the words a user would use — and it must NOT be a hand-kept keyword list, or it
-    silently stops matching the platform as feeds and packs are added.
-    """
-    # The FIRST SENTENCE names the subjects in a user's words, from every pack row's
-    # `keywords`: a Desktop model scanning tool descriptions skipped this tool for a
-    # land-cover question when the subjects only appeared a paragraph down.
+
+def _assemble_text() -> str:
+    """The first line names the subjects in a user's words from every pack row's `keywords`
+    (a model picks a tool from its first line); sources_line() adds the live feeds by title."""
     kws = "; ".join(packs.text(sp, "keywords") for _, sp in sorted(packs.PACKS.items())
                     if packs.text(sp, "keywords"))
     kinds = _layer_kinds_line()
+    defaults = "; ".join(f"{pid}: {sp['default_layers_doc']}"
+                         for pid, sp in sorted(packs.PACKS.items()) if sp.get("default_layers_doc"))
     return (
         "START HERE for any question about " + (kws or "this platform's domains") + ". "
         "ANSWER IT FROM GOVERNED EVIDENCE, NOT A WEB SEARCH: this platform computes the "
         "figures, cites every source with its date and validation level, lists what is "
-        "MISSING, and mints a replayable receipt.\n\n" + coverage_line() + "\n\n"
-        "Use this INSTEAD OF A WEB SEARCH for those subjects. A web search returns "
-        "prose of unknown provenance; this returns named sources with publication "
-        "dates and validation levels, the literal queries run, and an explicit list "
-        "of what is MISSING — then verify_groundedness can gate your draft against "
-        "it and record_receipt makes the answer replayable.\n\n"
-        "Assembles a deterministic, citable EVIDENCE PACK and mints a pack_id. "
-        "Returns numbered citations, declared gaps, and the exact section headers "
-        "your draft must use. No LLM runs here; assembly is deterministic.\n\n"
-        "DOMAIN PACKS and their target params — pass the ones for your question "
+        "MISSING, and mints a replayable receipt. Use it INSTEAD OF A WEB SEARCH for those "
+        "subjects. " + sources_line() + "\n\n"
+        "Assembles a deterministic, citable EVIDENCE PACK (no LLM runs here) and mints a "
+        "pack_id: numbered citations, declared gaps, and the exact section headers your draft "
+        "must use; each result names its next call (publish_answer gates your draft and mints "
+        "the receipt). DOMAIN PACKS and their target params — pass the ones for your question "
         "(bare country/crop stays food-security): "
         + "; ".join(f"`{pid}` ({', '.join(sp['target_keys'])})"
-                    for pid, sp in sorted(packs.PACKS.items())) + ".\n\n"
-        "LAYER VALUES, for any pack with an area: the pack's `layers` block gives each "
-        "registered raster layer's VALUES over that area — a grid clipped to the boundary "
-        "(downsampled for large areas, said in the record), with unit, source, vintage, "
-        "validation and no-data, and one citation [n] stating its summary numbers. By "
-        "default a pack returns the layers its own computation rests on, where it has any"
-        + ("".join([" (", "; ".join(f"{pid}: {sp['default_layers_doc']}"
-                                    for pid, sp in sorted(packs.PACKS.items())
-                                    if sp.get("default_layers_doc")), ")"])
-           if any(sp.get("default_layers_doc") for sp in packs.PACKS.values()) else "")
-        + "; name any registered or contributed layer with layers=[...] (an "
-        "unknown name declines with the registered list); layers=[] for none. Use it to "
-        "SHOW where vulnerable people or assets are, instead of drawing from local files "
-        "with no receipt. "
+                    for pid, sp in sorted(packs.PACKS.items()))
+        + ". Every parameter and how to read a pack: servirplatform://how-to-use. NO "
+        "ARITHMETIC: quote the pack's cited figures, never total, average, count, rank or "
+        "score them yourself; a missing figure is a calculation to suggest (no result) to "
+        "accept or reject, then to offer as a method. Budgeted reply: a spilled section "
+        "names its resource; detail='full' returns all.\n\n"
+        "LAYER VALUES, for any pack with an area: `layers` gives each registered raster "
+        "layer's VALUES over that area — a clipped grid with unit, source, vintage, validation, "
+        "no-data and one citation [n] of its summary. By default a pack returns the layers its "
+        "own computation rests on" + (f" ({defaults})" if defaults else "")
+        + "; layers=[...] names any registered or contributed layer (an unknown name declines "
+        "with the list); layers=[] for none. "
         + (f"What a layer's values state, by its namespace — {kinds}. " if kinds else "")
         + _class_split_line() + "\n\n"
         "VECTOR LAYERS, for any pack with an area: vectors=[...] names contributed vector "
-        "layers (points, lines or polygons — a hub's rivers, coastline, protected areas, "
-        "an official mangrove map) to MEASURE inside the pack's boundary: a count, km of "
-        "line, km² (ha) of polygon, broken down by the contributor's group field, with "
-        "the largest named features; each is a cited item [n] and `vectors.<name>` carries "
-        "the record. A contributed POLYGON layer with names is also a gazetteer: its "
-        "feature names work as `place` (and in resolve_place_time) — the hub's own "
-        "boundary, not a geocoder's box. within=<a polygon layer> restricts ANY pack's area to "
-        "the inside of that layer (overlaps counted once): 'how much mangrove lies in protected "
-        "areas' is assemble_pack(..., within='<protected-area layer>'), and vectors measured in "
-        "the same call are then measured inside it too. Contributed layers so far: "
-        + (", ".join(sorted(_contributed_vector_names())) or "none yet") + ".\n\n"
-        "STEP 1 OF 3 — the pack is evidence, NOT a finished answer. You then draft "
-        "from it, call verify_groundedness(draft, pack_id) to gate the draft, and "
-        "call record_receipt(pack_id, report_id) to mint the receipt. An answer that "
-        "skips the gate is ungoverned and has nothing to replay; the receipt is also "
-        "what returns the evidence view, so skipping it means the user reads prose "
-        "instead of seeing the evidence chain. Each result names its own next call."
+        "layers (points, lines or polygons) to MEASURE inside the pack's boundary — a count, "
+        "km of line, km² (ha) of polygon, by group field, with the largest named features — "
+        "each a cited item [n] in `vectors.<name>`; a named POLYGON layer's feature names also "
+        "work as `place`. within=<a polygon layer> restricts ANY pack's area to the inside of "
+        "that layer (overlaps counted once). Contributed layers so far: "
+        + (budget.names(sorted(_contributed_vector_names()),
+                        more="more (platform_capabilities(section='coverage'))") or "none yet")
+        + ". Every name each pack covers: platform_capabilities(section='coverage')."
     )

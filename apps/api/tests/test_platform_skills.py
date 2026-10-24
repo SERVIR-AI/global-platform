@@ -35,14 +35,17 @@ def test_absent_skill_declines_instead_of_serving_empty(monkeypatch, tmp_path, l
 
 
 def test_builds_are_told_to_instrument(log):
-    """The user's directive, literally: ship tracing with anything they build."""
+    """The user's directive, literally: ship tracing with anything they build. The
+    instructions point at it (budgeted); the build prompt carries the rule whole."""
+    from app.mcp import instructions
     from app.mcp.server import INSTRUCTIONS, build_a_tool
     assert "SHIP OBSERVABILITY" in INSTRUCTIONS
     assert "servirplatform://skill/trace-emit" in INSTRUCTIONS
     p = build_a_tool()
     assert "trace-emit" in p and "execution trace" in p
     assert "including one real trace" in p
-    log("CHECK", "instructions and the build prompt both require tracing")
+    assert instructions.section_text("observability") in p
+    log("CHECK", "instructions point at tracing; the build prompt requires it in full")
 
 
 def test_the_instrument_rule_rides_the_capabilities_payload(log):
@@ -88,10 +91,10 @@ def test_the_build_prompt_names_only_published_tools(log):
 def test_no_arithmetic_by_default_with_two_questions(log):
     """The user's rule: no calculations by default; propose one, get approval, then ask
     whether it becomes a method. Said where the model looks, early and in every lookup."""
-    from app.mcp import loop
+    from app.mcp import budget, loop
     from app.mcp.server import INSTRUCTIONS, build_a_tool
     at = INSTRUCTIONS.find("NO ARITHMETIC BY DEFAULT")
-    assert 0 <= at < 2500, at
+    assert 0 <= at < budget.INSTRUCTIONS_CORE, at
     rule = INSTRUCTIONS[at:at + 700]
     assert "accept or reject" in rule and "as a method" in rule and "own arithmetic" in rule
     hint = loop.ENTRY_HINT["no_arithmetic"]

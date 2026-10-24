@@ -165,22 +165,21 @@ def after_record(receipt_id: str) -> dict:
 # legitimate on their own, so this is a route in, not a demand.
 from . import packs as _packs   # the target shapes below are generated from the pack rows
 
+# The one contextual line a reply with rows or figures carries (<= budget.NOTE_CHARS); the
+# rule in full is in the instructions and the assemble_pack / feeds_query descriptions.
+NO_ARITHMETIC = ("Quote figures as returned; do not add up, average, count, rank or score them "
+                 "yourself, in chat or code. A dataset's note like 'sum hectares' says what adds "
+                 "up, not to add it up. For a figure no pack computes, suggest one or two "
+                 "calculations, without their results, to accept or reject, then offer a method "
+                 "(contribute_submit kind=method); done without one, say so: your own "
+                 "arithmetic, no receipt.")
+
 ENTRY_HINT = {
-    "no_arithmetic": ("By default, do not add up, average, count, rank or score these records "
-                      "yourself, in chat or in code you write: quote the figures the platform "
-                      "returned. If a figure is needed that no pack computes, (1) suggest one "
-                      "or two calculations in plain words, without their results, for the user "
-                      "to accept or reject (never make them write one from scratch), then (2) ask "
-                      "whether to add it to the platform as a method (contribute_submit "
-                      "kind=method) so the platform computes and cites it for everyone. If they "
-                      "approve it but want no method, you may do that calculation, and say "
-                      "plainly it is your own arithmetic: unchecked, with no receipt. A "
-                      "dataset's own note on how its fields combine ('sum hectares') says what "
-                      "adds up; it is not a request to add them up in the answer."),
-    "note": ("These are raw lookup results — evidence, not a governed answer. If you "
-             "are answering a user's question with them, go through the loop instead: "
-             "assemble_pack gathers the pack's full evidence with its declared gaps "
-             "(" + _packs.target_shapes_long() + "), and it mints the pack_id that "
+    "no_arithmetic": NO_ARITHMETIC,
+    # <= budget.NOTE_CHARS whatever the number of packs: the target shapes ride `call`.
+    "note": ("These are raw lookup results — evidence, not a governed answer. Answering a "
+             "user's question with them? Go through the loop: assemble_pack (the call below) "
+             "gathers the pack's evidence with its declared gaps and mints the pack_id "
              "publish_answer needs to gate and receipt your brief."),
     "call": {"tool": "assemble_pack",
              "args": {"<the pack's target params, e.g.>": _packs.target_shapes(),
@@ -227,13 +226,12 @@ def methods_reading(dataset) -> list[dict]:
 
 
 def with_entry_hint(result: dict) -> dict:
-    """Attach the route into the loop to a lookup result, AHEAD of the rows: a host may
-    show only the start of a long reply (Claude Code keeps 2 KB of one over 50 KB).
-    A decline keeps its honest cause first and gains only the method pointer.
+    """Attach the route into the loop to a lookup result. A decline keeps its honest cause
+    first and gains only the method pointer.
 
-    Applied at the TOOL boundary, not inside the fetch/feeds functions: the hint is
-    for an LLM deciding what to do next, and the platform's own internal callers
-    (synthesis assembling a pack) must not find guidance mixed into their evidence.
+    Applied at the TOOL boundary (shape.py then orders it ahead of the rows), never inside
+    the fetch/feeds functions: the platform's own internal callers (synthesis assembling a
+    pack) must not find guidance mixed into their evidence.
     """
     if not isinstance(result, dict):
         return result

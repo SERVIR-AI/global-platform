@@ -20,7 +20,7 @@ from app.config import get_settings
 from app.contrib import fetch_policy, identity, jobs, prepare, staging
 from app.contrib.prepare import _drive, clip, recode
 from app.graph.geo import vecio
-from app.mcp import store
+from app.mcp import budget, store
 
 OWNER = identity.Caller("user_owner", "gis@hub.test", False, "bound")
 OTHER = identity.Caller("user_other", "analyst@hub.test", False, "bound")
@@ -44,7 +44,7 @@ def env(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- 1. hand-backs
 def test_submit_the_link_as_given_is_said_near_the_top_and_in_the_instructions():
     """In contribute_submit's description before any kind's form, and in the server's
-    instructions inside what a client keeps of them (Claude Code cuts near 4K)."""
+    instructions WHOLE inside what a client keeps of them (budget.INSTRUCTIONS)."""
     from app.mcp import server
     desc = staging.describe_submit()
     at = desc.index(staging.AS_GIVEN)
@@ -58,8 +58,9 @@ def test_submit_the_link_as_given_is_said_near_the_top_and_in_the_instructions()
         assert words in staging.AS_GIVEN
     assert "BEFORE calling" not in desc
     said = server._instructions()
-    assert staging.AS_GIVEN in said and said.index(staging.AS_GIVEN) < 3000
-    assert "`contribute_submit`" in said[:said.index(staging.AS_GIVEN)]
+    at = said.index(staging.AS_GIVEN)
+    assert at + len(staging.AS_GIVEN) <= budget.INSTRUCTIONS
+    assert "`contribute_submit`" in said[:at]
 
 
 # --------------------------------------------------------------------------- 2. the listing

@@ -11,7 +11,7 @@ hardcoded in logic or prose.
 from __future__ import annotations
 
 from ..food_security import cropmonitor
-from . import climate_indices, enso_forecast, registry
+from . import budget, climate_indices, enso_forecast, registry
 
 
 def scope_miss(spec: dict, countries, bounds=None):
@@ -769,32 +769,40 @@ def _undeclared_params(params: dict, spec: dict) -> str | None:
 
 
 def describe() -> str:
-    """The tool description, GENERATED from the registry — so it can never drift
-    from what is actually registered, and no feed name is hardcoded in prose."""
-    avail, pending = [], []
-    for name, spec in sorted(registry.FEEDS.items()):
-        params = ", ".join(f"{k}: {v}" for k, v in (spec.get("params") or params_doc(spec)).items())
-        if spec.get("status") == "available":
-            avail.append(f"  - `{name}` ({spec.get('source')}) — {spec.get('description','')}"
-                         f" params: {{{params}}}")
-        else:
-            pending.append(f"  - `{name}` — DECLARED GAP: {spec.get('reason')}")
+    """The tool description, GENERATED from the registry: the subjects and every feed's
+    NAME, never a hardcoded feed (budget.names: whole while the text has room). Each feed's
+    brief, its params and the reason behind a declared gap live in platform_capabilities."""
+    rows = sorted(registry.FEEDS.items())
+    avail = [n for n, s in rows if s.get("status") == "available"]
+    pending = [n for n, s in rows if s.get("status") != "available"]
+    titles = [s.get("title") or n for n, s in rows if s.get("status") == "available"]
+    more = "more (platform_capabilities(section='feeds'))"
     return (
-        "CURRENT CLIMATE AND CROP DATA, live from the source — use this INSTEAD OF A "
-        "WEB SEARCH for these numbers. Every value arrives with its source, its date "
-        "and how it was validated. Covers: "
-        + "; ".join(s.get("title") or n for n, s in sorted(registry.FEEDS.items())
-                    if s.get("status") == "available") + ".\n\n"
-        "`dataset` names the feed and `params` carries its arguments — both come from "
-        "the registry, so new feeds appear here without a tool change.\n\n"
-        "Available now:\n" + ("\n".join(avail) or "  (none)") +
-        "\n\nRegistered but not yet available (asking returns why):\n" +
-        ("\n".join(pending) or "  (none)") +
-        "\n\nReturns: {status, dataset, as_of, count, summary, records, passport}. The "
+        "CURRENT CLIMATE, CROP AND HAZARD DATA, live from the source — use this INSTEAD OF A "
+        "WEB SEARCH for these numbers. Every value arrives with its source, its date and how "
+        "it was validated. Covers: " + (budget.names(titles, sep="; ", more=more)
+                                        or "no feed is available yet") + ".\n\n"
+        "`dataset` names the feed and `params` carries its arguments — both come from the "
+        "registry, so new feeds and approved tables appear here without a tool change; a param "
+        "a feed does not take is declined with the accepted list (`limit` passes everywhere).\n\n"
+        f"Available now ({len(avail)}): " + (budget.names((f"`{n}`" for n in avail), more=more)
+                                             or "none") + ".\n"
+        f"Registered but not yet available ({len(pending)}; asking returns why): "
+        + (budget.names((f"`{n}`" for n in pending), more=more) or "none") + ".\n"
+        "Each feed's brief, its params and the reason behind a declared gap: "
+        "platform_capabilities (feeds), or the resource servirplatform://capabilities/feeds.\n\n"
+        "Returns: {status, dataset, as_of, count, summary, records, passport}. The "
         "passport carries source, validation, residency, the literal upstream query, "
         "and `stale_data` with a note when served from last-good cache (never present "
         "stale data as live). status \"empty\" -> the feed answered but has no rows; "
-        "\"declined\" -> `note` plus the upstream's own alternatives.")
+        "\"declined\" -> `note` plus the upstream's own alternatives. Rows are capped to "
+        "the reply budget, the most recent kept, and `shown` says how many of how many. NO "
+        "ARITHMETIC: quote the records as returned, never total, average, count, rank or score "
+        "them yourself. A dataset's own note on how its fields combine ('sum hectares') says "
+        "what adds up; it is not a request to add them up in the answer. A figure no pack "
+        "computes is a calculation to suggest (no result) for the user to accept or reject, "
+        "then to offer as a method (contribute_submit kind=method), so the platform computes "
+        "and cites it for everyone.")
 
 
 def query(dataset: str, params: dict | None = None) -> dict:

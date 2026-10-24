@@ -14,6 +14,9 @@ from ..llm import MissingAPIKey
 from ..rag.store import CorpusError
 from . import context, layers as layers_step, loop, methods_step, packs, store, vectors as vectors_step
 
+# Persisted with the pack for the embed and the replay, never returned to the model.
+NOT_RETURNED = ("viz", "layers_area", "vectors_area")
+
 
 def assemble(country: str | None = None, crop: str | None = None,
              focus: str | None = None, pack: str | None = None,
@@ -187,16 +190,19 @@ def assemble(country: str | None = None, crop: str | None = None,
     # The viz payload is PERSISTED for the embed resolver, never returned inline:
     # 850 KB of hazard polygons in a tool result is 850 KB in the consumer LLM's
     # context, paying tokens to carry pixels it cannot see (adversarial review).
-    response = {k: v for k, v in pack_body.items() if k not in ("viz", "layers_area", "vectors_area")}
+    response = {k: v for k, v in pack_body.items() if k not in NOT_RETURNED}
     if "viz" in pack_body:
         response["viz_recorded"] = ("map payload recorded with the pack — rendered "
                                     "by the hazard_map embed for this receipt")
     return {"status": "ok", "pack_id": pack_id,
-            # pack-level contributor guidance, read at the moment of use
-            **({"usage_notes": packs.text(spec, "usage_notes")}
-               if packs.text(spec, "usage_notes") else {}),
             "answer_status": loop.PACK_IS_NOT_AN_ANSWER,
             "next_step": loop.after_assemble(pack_id, pack_body["required_sections"],
                                              gaps_citation_n=gaps_cit["n"]),
+            # pack-level contributor guidance, read at the moment of use
+            **({"usage_notes": packs.text(spec, "usage_notes")}
+               if packs.text(spec, "usage_notes") else {}),
+            # Seen live: a model averaged a pack's rows itself. One contextual line; the
+            # rule in full is in the instructions and the tool's description.
+            "no_arithmetic": loop.NO_ARITHMETIC,
             **response,
             "your_next_output": loop.YOUR_NEXT_OUTPUT.format(pack_id=pack_id)}

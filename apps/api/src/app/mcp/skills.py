@@ -37,6 +37,10 @@ def bundle(name: str) -> str:
                 "honestly rather than served empty.")
     parts = [f"<!-- servirplatform skill bundle: {name} — SKILL.md plus every "
              "reference and asset it declares it needs -->"]
+    from . import instructions
+    rule = instructions.home_text(f"skill:{name}")     # the platform rule this skill serves
+    if rule:
+        parts.append(f"\n\n> PLATFORM RULE. {rule}")
     files = [root / "SKILL.md"]
     for sub in ("references", "assets"):
         d = root / sub
