@@ -288,8 +288,9 @@ def test_ops_are_derived_from_the_package_and_their_fields_reach_the_form():
     assert text == recode.FIELDS["recode"] and "AS IT LANDS" in text and "ask the contributor" in text
     assert "recode" in staging._RASTER_KNOWN and "recode" not in staging.VECTOR_FIELDS["optional"]
     assert "preview" in staging.RASTER_FIELDS["optional"] and "preview" in staging.VECTOR_FIELDS["optional"]
-    desc = staging.describe_submit()
-    assert "recode (for a CLASS map" in desc and "preview (true to see what WOULD land" in desc
+    form = staging.form("raster")["fields"]["optional"]       # the form, served on demand
+    assert form["recode"].startswith("for a CLASS map")
+    assert form["preview"].startswith("true to see what WOULD land")
 
 
 def test_a_preparation_field_says_what_it_is_for_on_the_wrong_kind_or_namespace(env):

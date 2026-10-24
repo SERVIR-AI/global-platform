@@ -343,7 +343,7 @@ def test_the_op_is_registered_from_its_module_and_its_field_reaches_the_vector_f
         assert f"'{name}' ({p['host']}{p['path']})" in text
     assert "ask the contributor" in text and "api_points" not in staging._RASTER_KNOWN
     assert "not_features" in prepare.SITUATIONS
-    assert "api_points (for a POINT layer" in staging.describe_submit()
+    assert staging.form("vector")["fields"]["optional"]["api_points"].startswith("for a POINT layer")
 
 
 # --------------------------------------------------------------------------- 2. GBIF, the real case

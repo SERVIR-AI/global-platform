@@ -345,7 +345,7 @@ def test_rasterise_is_registered_and_its_field_reaches_the_form(env):
     assert rasterise.STEP in prepare.ORDER and not rasterise.NEEDS_INPUT
     assert staging.RASTER_FIELDS["optional"]["rasterise"] == rasterise.FIELDS["rasterise"]
     assert "rasterise" in staging._RASTER_KNOWN and "rasterise" not in staging.VECTOR_FIELDS["optional"]
-    assert "rasterise (for a POLYGON map" in staging.describe_submit()
+    assert staging.form("raster")["fields"]["optional"]["rasterise"].startswith("for a POLYGON map")
     assert "declined" in prepare.SITUATIONS
 
 

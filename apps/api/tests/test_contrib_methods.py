@@ -343,8 +343,9 @@ def test_the_skill_travels_with_the_platform():
     assert "contribute-logic" in skills.available()
     text = skills.bundle("contribute-logic")
     assert "Contribute logic as a method" in text and "Their words, not yours" in text
-    guide = staging.describe_submit()
-    assert "method — how:" in guide and methods.SKILL in guide
+    assert methods.SKILL in staging.describe_submit()          # the core names the skill
+    form = staging.form("method")                             # the form carries the how
+    assert form["how"] == methods.METHOD_FIELDS["guide"] and methods.SKILL in form["how"]
 
 
 # --------------------------------------------------------------------------- finding them
@@ -410,7 +411,7 @@ def test_a_lookup_of_a_methods_input_names_the_method_and_its_call(env, log):
     _units(env)
     staging.submit("method", _threshold())
     out = loop.with_entry_hint(feeds.query("test_restoration_units", {"limit": 5}))
-    assert list(out)[:2] == ["status", "for_a_governed_answer"]
+    assert list(out).index("for_a_governed_answer") < list(out).index("records")
     named = out["for_a_governed_answer"]["methods_reading"]
     log("OUTPUT", f"named: {named}")
     assert [m["method"] for m in named] == ["restorable_above_threshold"]

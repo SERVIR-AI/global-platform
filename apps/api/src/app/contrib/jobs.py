@@ -423,6 +423,8 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
     """staging.submit in the background: its result when it is done within
     grp_prep_wait_seconds, else {status: preparing, contribution_id: <job id>, ...}."""
     caller = caller or identity.current()
+    if manifest is None:                   # a form request: nothing to fetch, no job row
+        return staging.submit(kind, manifest, caller)
     digest = hashlib.sha256(json.dumps([kind, manifest], sort_keys=True, default=str)
                             .encode()).hexdigest()
     try:

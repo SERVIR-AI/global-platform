@@ -541,6 +541,6 @@ def test_concurrent_submissions_never_overshoot_the_cap(gate, monkeypatch, log):
 
 # ------------------------------------------------------------- 15. description
 def test_the_amend_text_names_every_vector_family():
-    text = staging.describe_submit()
+    text = staging.form("amend")["fields"]["required"]["layer"]    # the form, on demand
     assert "a vector layer (points, lines or polygons)" in text
-    assert "or a point layer" not in text
+    assert "or a point layer" not in text and "or a point layer" not in staging.describe_submit()

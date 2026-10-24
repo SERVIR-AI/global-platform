@@ -298,7 +298,8 @@ def test_mosaic_is_registered_and_its_field_reaches_the_form():
     text = staging.RASTER_FIELDS["optional"]["mosaic"]
     assert text == mosaic.FIELDS["mosaic"] and "'auto'" in text and "ASK the contributor" in text
     assert "mosaic" in staging._RASTER_KNOWN and "mosaic" not in staging.VECTOR_FIELDS["optional"]
-    assert "mosaic (for a raster delivered as TILES" in staging.describe_submit()
+    assert staging.form("raster")["fields"]["optional"]["mosaic"].startswith(
+        "for a raster delivered as TILES")
     assert "zip_of_rasters" in prepare.SITUATIONS
 
 

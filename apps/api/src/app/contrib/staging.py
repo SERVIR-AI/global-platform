@@ -41,6 +41,13 @@ def _missing(k: str) -> str:
 
 
 KINDS = ("document", "table", "feed", "raster", "vector", "weights", "amend", "method")
+FORM_CALL = ("contribute_submit(kind=<kind>) with no manifest returns that kind's form and "
+             "stores nothing")
+
+
+def _unknown_kind(kind: str) -> str:
+    return (f"unknown kind {kind!r} — over the MCP you can contribute: " + ", ".join(KINDS)
+            + " (packs stay on the developer path)")
 STATUSES = ("pending", "approved", "rejected", "withdrawn", "failed")
 PENDING_CAP = 20               # open contributions per contributor
 # Submissions per contributor per rolling hour: GRP_CONTRIB_HOURLY_CAP (config.py).
@@ -2659,39 +2666,48 @@ def _unland_method(rec: dict) -> dict:
 
 
 _KINDS = {
-    "document": {"validate": _validate_document, "prepare": _prepare_document,
+    "document": {"what": "a PDF, DOCX or TXT report or a Google Doc, for a pack's library",
+                 "validate": _validate_document, "prepare": _prepare_document,
                  "stage": _stage_document, "land": _land_document,
                  "retire": _retire_document, "unland": _unland_document,
                  "fields": DOCUMENT_FIELDS,
                  "title": lambda m: str(m.get("title") or "untitled document")},
-    "table": {"validate": _validate_table, "prepare": _prepare_table,
+    "table": {"what": "a CSV of values, as a link or the text itself",
+              "validate": _validate_table, "prepare": _prepare_table,
               "stage": _stage_table, "land": _land_table, "retire": _retire_table,
               "unland": _unland_feed, "fields": TABLE_FIELDS,
               "title": lambda m: f"{m.get('title') or 'untitled table'} ({m.get('dataset')})"},
-    "feed": {"validate": _validate_feed, "prepare": _prepare_feed,
+    "feed": {"what": "a live API, index series or map service",
+             "validate": _validate_feed, "prepare": _prepare_feed,
              "stage": _stage_feed, "land": _land_feed, "retire": _retire_feed,
              "unland": _unland_feed, "fields": FEED_FIELDS,
              "title": lambda m: f"{m.get('title') or 'untitled feed'} ({m.get('dataset')})"},
-    "raster": {"validate": _validate_raster, "prepare": _prepare_raster,
+    "raster": {"what": "a GeoTIFF or GDAL-readable grid: a hazard, class, measure or population layer",
+               "validate": _validate_raster, "prepare": _prepare_raster,
                "stage": _stage_raster, "land": _land_raster, "retire": _retire_raster,
                "unland": _unland_raster, "fields": RASTER_FIELDS,
                "prep": {"source": _raster_prep_source, "finish": _raster_prep_finish},
                "preview": lambda m, p: _preview_raster(m, p),
                "title": lambda m: f"{m.get('title') or 'untitled layer'} ({m.get('layer')})"},
-    "vector": {"validate": _validate_vector, "prepare": _prepare_vector,
+    "vector": {"what": "points, lines or polygons: sites, rivers, boundaries, an official map",
+               "validate": _validate_vector, "prepare": _prepare_vector,
                "stage": _stage_vector, "land": _land_vector, "retire": _retire_vector,
                "unland": _unland_vector, "fields": VECTOR_FIELDS,
                "preview": lambda m, p: _preview_vector(m, p),
                "title": lambda m: f"{m.get('title') or 'untitled point layer'} ({m.get('layer')})"},
-    "weights": {"validate": _validate_weights, "prepare": _prepare_weights,
+    "weights": {"what": "vulnerability weights for one hazard",
+                "validate": _validate_weights, "prepare": _prepare_weights,
                 "stage": _stage_weights, "land": _land_weights, "retire": _retire_weights,
                 "unland": _unland_weights, "fields": WEIGHTS_FIELDS,
                 "title": lambda m: f"vulnerability weights for {m.get('hazard')}"},
-    "amend": {"validate": _validate_amend, "prepare": _prepare_amend,
+    "amend": {"what": "a correction of an approved contribution's record",
+              "validate": _validate_amend, "prepare": _prepare_amend,
               "stage": _stage_amend, "land": _land_amend, "retire": _retire_amend,
               "unland": _unland_amend, "fields": AMEND_FIELDS,
               "title": lambda m: f"correction of the record of {m.get('layer')}"},
-    "method": {"validate": _validate_method, "prepare": _prepare_method,
+    "method": {"what": "a formula, threshold, index or rule that packs compute and cite; how: "
+                       + _methods.SKILL,
+               "validate": _validate_method, "prepare": _prepare_method,
                "stage": _stage_method, "land": _land_method, "retire": _retire_method,
                "unland": _unland_method, "fields": _methods.METHOD_FIELDS,
                "preview": lambda m, p: {"method": m.get("method"), "runs_in": m.get("packs"),
@@ -2701,6 +2717,55 @@ _KINDS = {
                                         "sample": p.get("sample")},
                "title": lambda m: f"{m.get('title') or 'untitled method'} ({m.get('method')})"},
 }
+
+
+# What the tool's core description has no room for, said on the form it applies to.
+_FORM_NOTES = {
+    "feed": ("A feed is test-queried once before it is accepted, so a wrong index name or dead "
+             "URL is refused with the adapter's reason."),
+    "raster": "A raster is fetched and verified against its declared contract before it is accepted.",
+    "amend": "`amend` corrects an approved layer's record, never its file or contract.",
+}
+
+
+def _review_words() -> str:
+    """Who reviews, in the deployment's own mode — the form's share of the core description."""
+    from ..config import get_settings
+    if get_settings().grp_auto_approve:
+        return ("Human review is switched off here, not removed: a clean submission lands at once "
+                "(if landing fails it is left {status: staged, auto_approve: why} for a reviewer). "
+                "A licence that restricts redistribution (no redistribution, not without written "
+                "permission, all rights reserved — non-commercial alone is fine) waits for a human "
+                "reviewer.")
+    return ("A clean submission is STAGED and served to its contributor and reviewers on every "
+            "query path — search, inventory, feeds, evidence packs — under the same relevance "
+            "ranking as any other source, until a reviewer approves it.")
+
+
+def form(kind: str) -> dict:
+    """A kind's form on demand, from the row the gate validates against: its fields, what
+    the server prepares for it, whether it previews. Nothing is stored."""
+    if kind not in _KINDS:
+        return {"status": "declined", "kind": kind, "problems": [_unknown_kind(kind)],
+                "forms": FORM_CALL}
+    spec = _KINDS[kind]
+    try:
+        prepares = sorted(prepare.fields(kind))
+    except Exception:
+        prepares = []
+    out = {"status": "form", "kind": kind, "what": spec.get("what", ""),
+           "fields": spec["fields"], "preview": "preview" in spec,
+           **({"how": spec["fields"]["guide"]} if spec["fields"].get("guide") else {}),
+           "next": (f"contribute_submit(kind={kind!r}, manifest={{...the required fields...}})"
+                    + (" — preview: true first shows what would land and stores nothing"
+                       if "preview" in spec else "")),
+           "note": ("Declared fields (title, description, source, licence, vintage, countries) "
+                    "are the CONTRIBUTOR'S OWN WORDS: missing one, ask and stop; never compose "
+                    "it, and never submit before they answer. " + AS_GIVEN + " " + _review_words()
+                    + (" " + _FORM_NOTES[kind] if kind in _FORM_NOTES else ""))}
+    if prepares:
+        out["prepares"] = prepares
+    return out
 
 
 # --------------------------------------------------------------------------- records
@@ -2913,15 +2978,15 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
     elif isinstance(manifest, dict) and "kind" in manifest:
         manifest = {k: v for k, v in manifest.items() if k != "kind"}
     if manifest is None:
+        if kind in _KINDS:
+            return form(kind)                     # the form on demand; nothing stored
         return {"status": "declined", "kind": kind,
                 "problems": ["missing manifest — a mapping of provenance fields, or the same "
-                             "as YAML/JSON text with a top-level `kind`"]}
+                             "as YAML/JSON text with a top-level `kind`"]
+                            + ([_unknown_kind(kind)] if kind else []),
+                "forms": FORM_CALL}
     if kind not in _KINDS:
-        return {"status": "declined", "kind": kind,
-                "problems": [f"unknown kind {kind!r} — over the MCP you can contribute: "
-                             + ", ".join(KINDS)
-                             + " (feeds, tables and rasters are coming; packs stay on the "
-                             "developer path)"]}
+        return {"status": "declined", "kind": kind, "problems": [_unknown_kind(kind)]}
     spec = _KINDS[kind]
     preview = False
     if isinstance(manifest, dict) and "preview" in manifest:
@@ -3535,70 +3600,56 @@ AS_GIVEN = ("SUBMIT THE LINK THE PERSON GAVE, AS IT IS — a Drive folder, a zip
 
 
 def describe_submit() -> str:
+    """The tool's core, inside budget.TOOL_DESCRIPTION: the gate, the hand-back rule, the
+    kinds, how to get a form, what comes back. Each kind's form is served on demand (form)."""
     from ..config import get_settings
     auto = get_settings().grp_auto_approve
-    lines = ["Contribute a source to the platform from this conversation — no server access, "
-             "no config files. The submission is validated against the same gate the "
-             "platform's own contribution commands use. "
-             + ("This deployment AUTO-APPROVES: a clean submission lands at once and is live "
-                "for every caller, and its record and every citation built on it say that no "
-                "human reviewed it. (Human review is switched off here, not removed.) Two "
-                "things still wait for a human reviewer, and the reply says which: a declared "
-                "licence that restricts redistribution (no redistribution, not without "
-                "written permission, all rights reserved — non-commercial alone is fine), and "
-                "a document whose text holds two or more e-mail addresses."
+    kinds = "; ".join(f"{k} ({_KINDS[k].get('what', '')})" for k in KINDS)
+    lines = ["Contribute a source or logic to the platform from this conversation — no server "
+             "access, no config files; the platform's own gate validates it. "
+             + ("This deployment AUTO-APPROVES: a clean submission lands at once for every "
+                "caller, and its record and every citation built on it say that no human "
+                "reviewed it. Two things still wait for a reviewer, and the reply says which: "
+                "a licence that restricts redistribution (non-commercial alone is fine) and a "
+                "document holding two or more e-mail addresses."
                 if auto else
-                "A clean one is STAGED: stored for review and served to you (and to "
-                "reviewers) on every query path — search, inventory, feeds, evidence packs — "
-                "under the same relevance ranking as any other source, so you test exactly "
-                "what an analyst will see. It goes live for everyone only when a reviewer "
-                "approves it."),
+                "A clean one is STAGED: stored for review and served to you (and to reviewers) "
+                "on every query path under the same ranking as any other source, so you test "
+                "exactly what an analyst will see; it goes live for everyone only when a "
+                "reviewer approves it."),
              "",
              AS_GIVEN,
              "",
-             "kind: one of " + ", ".join(KINDS) + ".",
-             "manifest: the provenance fields for that kind. Ask the contributor only for what "
-             "the source does not state; do not invent provenance — 'unvalidated' is an honest "
-             "value, a guessed publisher is not."]
-    for kind in KINDS:
-        fields = _KINDS[kind]["fields"]
-        lines.append(f"\n{kind} — required: " + "; ".join(f"{k} ({v})" for k, v in fields["required"].items()))
-        lines.append(f"{kind} — optional: " + "; ".join(f"{k} ({v})" for k, v in fields["optional"].items()))
-        if fields.get("guide"):
-            lines.append(f"{kind} — how: {fields['guide']}")
-    lines += ["",
-              ("Returns {status: approved, contribution_id, preview, landing, review, next} — "
-               "live now for every caller (if landing fails it is left {status: staged, "
-               "auto_approve: why} for a reviewer) — or "
-               if auto else
-               "Returns {status: staged, contribution_id, preview{doc_id,...}, next} (the record "
-               "then shows status pending in contribute_status until a reviewer decides) or ")
-              + "{status: declined, problems: [...]} naming every problem at once — fix them all "
-              "and resubmit. Work that outlasts the call (a big download, a preparation) answers "
-              "{status: preparing, contribution_id, message}: it goes on on the server — keep "
-              "checking with contribute_status and that contribution_id until it finishes (each "
-              "check waits a while for the result), tell the person it is still being prepared, "
-              "don't end your answer while it is; never resubmit it. "
-              "A url must answer with the FILE: a login page, a bot challenge or "
-              "a web page about the file is declined in words, with what to do (usually: "
-              "download it and share it from Google Drive, Anyone with the link). Each "
-              "contributor may submit "
-              + (f"{_cap_words()} per hour" if _cap_words() else "without an hourly cap")
-              + ". Rules: contributions never overwrite an existing source; a "
-              "document already in the library is declined by its doc_id; a table's or feed's "
-              "dataset name must be new; `amend` corrects an approved layer's record, never its "
-              "file or contract. A contribution is taken back with contribute_status(action="
-              "'withdraw') by the person who submitted it — pending or already approved; an "
-              "approved one stops being served to anyone, and packs and receipts already built "
-              "on it stay replayable. A feed is test-queried once before it is accepted, so a wrong "
-              "index name or dead URL is refused with the adapter's reason. A raster is fetched "
-              "and verified against its declared contract before it is accepted. "
-              + ("Accepted, a table or feed is queried with feeds_query(dataset) and a raster is "
-                 "readable by every pack at once."
-                 if auto else
-                 "A staged table or feed is queried with feeds_query(dataset) like any feed and "
-                 "appears under `staged_feeds` in platform_capabilities for its owner; staged, a "
-                 "raster is a layer the packs read for its owner.")]
+             "kind: one of " + kinds + ".",
+             "manifest: that kind's provenance fields. THE FORM: " + FORM_CALL + " — {status: "
+             "form, fields: {required, optional}, how}; manifest={} returns it with every missing "
+             "field named. Never invent provenance — 'unvalidated' is an honest value, a guessed "
+             "publisher is not.",
+             "",
+             ("Returns {status: approved, contribution_id, preview, landing, review, next} — "
+              "live now for every caller — or "
+              if auto else
+              "Returns {status: staged, contribution_id, preview{doc_id,...}, next} (pending in "
+              "contribute_status until a reviewer decides) or ")
+             + "{status: declined, problems: [...]} naming every problem at once — fix them all "
+             "and resubmit. Work that outlasts the call answers {status: preparing, "
+             "contribution_id, message}: keep checking contribute_status with that id until it "
+             "finishes (tell the person it is still being prepared; never resubmit). A url must "
+             "answer with the FILE: a login page, a bot challenge or a page about the file is "
+             "declined in words with what to do (usually: download it and share it from Google "
+             "Drive, Anyone with the link). Each contributor may submit "
+             + (f"{_cap_words()} per hour" if _cap_words() else "without an hourly cap")
+             + ". Rules: nothing overwrites an existing source — a document already in the "
+             "library is declined by its doc_id, a dataset name must be new, `amend` corrects "
+             "an approved layer's record, never its file; a feed is test-queried and a raster "
+             "checked against its contract before acceptance; contribute_status("
+             "action='withdraw') takes one back; packs and receipts built on it stay replayable. "
+             + ("Accepted, a table or feed answers feeds_query(dataset) and a raster is "
+                "readable by every pack at once."
+                if auto else
+                "Staged, a table or feed answers feeds_query(dataset) for its owner "
+                "(`staged_feeds` in platform_capabilities); a staged raster is a layer the "
+                "packs read for its owner.")]
     lines.append(_prep_words())
     return "\n".join(lines)
 
@@ -3620,15 +3671,15 @@ def _prep_words() -> str:
     able = [k for k in KINDS if "preview" in _KINDS[k]]
     said = ("PREPARATION is the server's: when a file is not yet in shape ("
             + "; ".join(f"{k}: {', '.join(f)}" for k, f in by_kind.items())
-            + "), fill the field — ask the contributor only for a real choice (an area, what a "
-              "code means) — and the platform does the work at ingest and records each step; "
-              "a decline that this can resolve names the field and its value. "
+            + "), fill the field — ask the contributor only for a real choice (an area, a "
+              "code's meaning) — and the platform does the work at ingest, recording each step; "
+              "a decline this can resolve names the field and its value. "
             if by_kind else "")
     if itself:
         said += ("When nothing in it is a person's choice (" + ", ".join(itself) + ": a Drive "
                  "FOLDER link for a vector, a service's query read whole, ...), the platform "
-                 "applies the field BY ITSELF and the reply says so: prepared_automatically "
-                 "[{fields, why}] and a `message` — tell the contributor what was done in its "
-                 "words; the stored manifest keeps the fields. ")
+                 "applies the field BY ITSELF and says so: prepared_automatically [{fields, why}] "
+                 "and a `message`: tell the contributor what was done, in its words; the stored "
+                 "manifest keeps the fields. ")
     return ("\n" + said + f"preview: true ({' and '.join(able)}) returns {{status: preview, "
             "would_land} — classes, features, extent and stored bytes — and stores nothing.")

@@ -337,7 +337,8 @@ def test_the_op_is_derived_from_its_module_and_its_fields_reach_the_vector_form(
         assert staging.VECTOR_FIELDS["optional"][f] == text
         assert f not in staging._RASTER_KNOWN
     assert "ASK them, never guess" in from_folder.FIELDS["shapefile_crs"]
-    assert "from_folder (true when `url` is a Google Drive FOLDER link" in staging.describe_submit()
+    assert staging.form("vector")["fields"]["optional"]["from_folder"].startswith(
+        "true when `url` is a Google Drive FOLDER link")
 
 
 # --------------------------------------------------------------------------- 2. the decline
