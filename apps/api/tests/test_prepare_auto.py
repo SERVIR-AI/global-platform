@@ -251,7 +251,7 @@ def test_the_hooks_are_found_on_the_op_modules_like_the_rest():
     assert staging.VECTOR_FIELDS["optional"]["cut"] == clip.FIELDS["cut"]
     assert "ASK them, never set it unasked" in clip.FIELDS["cut"]
     assert "cut" not in staging._RASTER_KNOWN
-    said = staging.describe_submit()
+    said = staging.describe_params()["manifest"]
     assert ("When nothing in it is a person's choice (api_points, from_folder, mosaic, recode, "
             "clip: a Drive FOLDER link") in said and "prepared_automatically" in said
 

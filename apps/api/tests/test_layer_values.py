@@ -326,7 +326,7 @@ def test_the_tool_takes_layers(log):
     tools = {t.name: t for t in asyncio.run(mcp.list_tools())}
     props = tools["assemble_pack"].parameters["properties"]
     assert "layers" in props
-    assert "LAYER VALUES" in tools["assemble_pack"].description
+    assert "LAYER VALUES" in props["layers"]["description"]          # how to call: in the parameter
 
 
 def test_review_fixes_hold(world, monkeypatch, log):

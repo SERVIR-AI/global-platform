@@ -24,9 +24,31 @@ def _tools():
     return {t.name: (t.description or "") for t in asyncio.run(mcp.list_tools())}
 
 
+def _params() -> dict:
+    """{tool: {parameter: description}} as a client reads them, from tools/list."""
+    async def read():
+        from fastmcp import Client
+        async with Client(mcp) as c:
+            return {t.name: {k: v.get("description") or "" for k, v in
+                             (t.input_schema.get("properties") or {}).items()}
+                    for t in await c.list_tools()}
+    return asyncio.run(read())
+
+
+def _pages() -> dict:
+    """{tool: its parameters page} from servirplatform://how-to-use/parameters/<tool>, read as a
+    client reads a resource."""
+    async def read():
+        from fastmcp import Client
+        async with Client(mcp) as c:
+            return {t.name: (await c.read_resource(instructions.PARAMETERS.format(tool=t.name)))[0].text
+                    for t in await c.list_tools()}
+    return asyncio.run(read())
+
+
 def _served() -> dict:
     """Every surface a section may be homed on, read as a client would (every published
-    prompt rendered with its defaults)."""
+    prompt rendered with its defaults); a tool serves its description and its parameters'."""
     async def read():
         from fastmcp import Client
         async with Client(mcp) as c:
@@ -37,7 +59,9 @@ def _served() -> dict:
             return guide, prompts
     guide, prompts = asyncio.run(read())
     out = {"instructions": instructions.compose(), instructions.GUIDE: guide, **prompts}
-    out.update({f"tool:{k}": v for k, v in _tools().items()})
+    params = _params()
+    out.update({f"tool:{k}": "\n\n".join([v, *[d for d in params.get(k, {}).values() if d]])
+                for k, v in _tools().items()})
     out.update({f"skill:{n}": skills.bundle(n) for n in skills.SERVED})
     return out
 
@@ -146,6 +170,7 @@ def test_a_contributed_stack_moves_the_count_and_names_itself_at_its_home(lc_env
     log("OUTPUT", core[:260])
     assert "2 stacks" in core and "Testland" not in core
     assert "Testland" in desc and len(desc) <= budget.TOOL_DESCRIPTION
+    assert "landcover_testland (mangrove extent; Testland" in registry.assemble_params()["stack"]
     assert "Testland mangrove extent" in instructions.how_to_use()
     assert len(core) <= budget.INSTRUCTIONS_CORE and len(instructions.compose()) <= budget.INSTRUCTIONS
 
@@ -239,7 +264,7 @@ def test_search_words_lead_the_reshaped_descriptions(log):
     descriptions that were cut open with the words a question is routed on, and still name
     every pack and every kind (derived)."""
     tools = _tools()
-    heads = {"assemble_pack": ("START HERE", "INSTEAD OF A WEB SEARCH"),
+    heads = {"assemble_pack": ("COMPUTED, CITED EVIDENCE", "INSTEAD OF A WEB SEARCH"),
              "feeds_query": ("live from the source", "INSTEAD OF A WEB SEARCH"),
              "contribute_submit": ("Contribute a source or logic", "gate")}
     for name, words in heads.items():
@@ -253,6 +278,138 @@ def test_search_words_lead_the_reshaped_descriptions(log):
         assert f"{kind} (" in tools["contribute_submit"]
     assert staging.AS_GIVEN in tools["contribute_submit"] and staging.FORM_CALL in tools["contribute_submit"]
     log("CHECK", "first lines carry the routing words; packs and kinds all named")
+
+
+def test_every_description_says_what_it_answers_and_when_not_to_use_it(log):
+    """G14: a client that defers tools reads no instructions, only names and descriptions. Every
+    tool's opening (first 1,500 chars) says when NOT to use it and names the sibling tool."""
+    tools = _tools()
+    for name, desc in tools.items():
+        head = desc[:1500]
+        at = head.lower().find("not for")
+        assert at >= 0, name
+        assert any(other in head[at:] for other in tools if other != name), name
+    log("CHECK", f"{len(tools)} descriptions say when not to use them, naming the sibling")
+
+
+def test_the_rules_ride_where_they_apply(log):
+    """Every tool is described through the one seam, and the short form of each rule it carries
+    is in its served description; together <= ~500 chars a tool."""
+    from app.mcp.server import RIDES
+    tools = _tools()
+    assert set(RIDES) == set(tools)
+    for name, keys in RIDES.items():
+        assert set(keys) <= set(instructions.SHORT), name
+        for k in keys:
+            assert instructions.SHORT[k] in tools[name], (name, k)
+        assert len(instructions.rules(keys)) <= 520, name
+    for name in ("assemble_pack", "feeds_query", "corpus_search"):
+        assert set(RIDES[name]) == {"loop", "no_arithmetic", "platform_sources"}, name
+    for name in ("ui_design", "ui_catalog", "ui_component", "ui_embed", "publish_answer", "record_receipt"):
+        assert "hard_limit" in RIDES[name], name
+    assert "platform_sources" in RIDES["contribute_submit"]
+    log("OUTPUT", {n: len(instructions.rules(k)) for n, k in RIDES.items()})
+
+
+def test_parameters_carry_the_how_to_call_detail_and_the_guide_holds_it_whole(log):
+    """How to call moved out of the descriptions into each parameter's own description, every
+    one of them described, each inside budget.PARAM_DESCRIPTION and served whole on its tool's
+    parameters page, which the guide names."""
+    tools, params, pages = _tools(), _params(), _pages()
+    guide = _served()[instructions.GUIDE]
+    assert instructions.PARAMETERS in guide and guide.index("## The rules, in full") < guide.index(
+        "## Every tool's parameters")
+    for name, said in params.items():
+        assert not said or f"`{name}`" in guide.split("## Every tool's parameters")[1], name
+        for p, d in said.items():
+            assert d, (name, p)
+            assert len(d) <= budget.PARAM_DESCRIPTION, (name, p, len(d))
+            assert " ".join(d.split()) in pages[name], (name, p)
+    a = params["assemble_pack"]
+    assert "LAYER VALUES" in a["layers"] and "What a layer's values state" in a["layers"]
+    assert "VECTOR LAYERS" in a["vectors"] and "overlaps count once" in a["within"]
+    assert "ADJUSTED by the requester" in a["override"] and "EPSG:4326" in a["geometry"]
+    assert "stats.assets" in a["map_layer"] and "servirplatform://pack/" in a["detail"]
+    for pid, sp in packs.PACKS.items():
+        assert f"`{pid}`" in a["pack"], pid
+        for k, doc in (sp.get("target_doc") or {}).items():
+            assert k not in a or doc in a[k], (pid, k)
+    for gone in ("LAYER VALUES", "VECTOR LAYERS", "detail='full'"):
+        assert gone not in tools["assemble_pack"], gone
+    f = params["feeds_query"]["params"]
+    assert "`limit` passes everywhere" in f and "declined with the accepted list" in f
+    m = params["contribute_submit"]["manifest"]
+    assert "PREPARATION" in m and "preview: true" in m and "CONTRIBUTOR'S OWN WORDS" in m
+    assert "PREPARATION" not in tools["contribute_submit"]
+    assert "VERBATIM" in params["publish_answer"]["draft"] and "daisyui" in params["ui_design"]["format"]
+    log("OUTPUT", {n: sum(len(d) for d in s.values()) for n, s in params.items()})
+
+
+# Clauses the descriptions said before how-to-call moved into each parameter (G14): each is still
+# served where a client reads that tool — its description, a parameter, or the guide.
+MOVED = {
+    "compose_run": ("Use this tool when you have no model credentials or nowhere to run code",),
+    "resolve_place_time": ("which are small enough to answer quickly",
+                           "Pass whichever half your question has"),
+    "feeds_query": ("so the platform computes and cites it for everyone",
+                    "a param a feed does not take is declined with the accepted list"),
+    "publish_answer": ("VERBATIM and in full", "do not write your own '## Sources'"),
+    "corpus_search": ("searches the wrong shelf",),
+    "corpus_document": ("A doc_id from another pack's citation needs that pack",),
+    "assemble_pack": ("LAYER VALUES", "VECTOR LAYERS", "overlaps count once", "ADJUSTED by the requester"),
+    "contribute_status": ("removal stops future use, it does not rewrite history",),
+}
+
+
+def test_the_clauses_moved_out_of_the_descriptions_are_still_served(log):
+    """Every clause pinned in MOVED is served at its tool (description or a parameter) or in the
+    guide: a later rewrite cannot drop one silently."""
+    served = _served()
+    for name, clauses in MOVED.items():
+        where = (served[f"tool:{name}"] + "\n" + served[instructions.GUIDE]).casefold()
+        for c in clauses:
+            assert c.casefold() in " ".join(where.split()), (name, c)
+    log("CHECK", f"{sum(map(len, MOVED.values()))} moved clauses still served")
+
+
+def test_the_texts_agree_on_the_first_call_and_the_lookup_rows(log):
+    """The instructions name start_here as what fills assemble_pack's target (one first call,
+    said one way); feeds_query leads with the subjects people ask; a lookup's hint says its rows
+    stay out of a receipted brief."""
+    tools = _tools()
+    assert "start_here(question) fills it" in instructions.core()
+    assert tools["feeds_query"].startswith("CURRENT CLIMATE, CROP AND HAZARD DATA")
+    assert "keep it out of a receipted brief" in loop.ENTRY_HINT["note"]
+    assert len(loop.ENTRY_HINT["note"]) <= budget.NOTE_CHARS
+
+
+def test_an_extension_pack_routes_through_the_same_seam(monkeypatch, log):
+    """A row-only pack: its `use_for` joins assemble_pack's routing lead and its target docs the
+    parameters; one declaring no `use_for` is still named with its targets, never skipped."""
+    gather = (lambda *a, **k: ([], [], None))
+    monkeypatch.setitem(packs.PACKS, "reef", {
+        "display_name": "Reef Platform", "target_keys": ("place", "year"),
+        "target_doc": {"place": "a reef site name", "year": "a survey year"},
+        "use_for": "coral cover and bleaching on surveyed reefs", "gather": gather,
+        "sections": lambda *a: []})
+    monkeypatch.setitem(packs.PACKS, "bare", {
+        "display_name": "Bare Platform", "target_keys": ("hazard",), "target_doc": {"hazard": "a bare hazard"},
+        "gather": gather, "sections": lambda *a: []})
+    desc, params = registry.describe_assemble(), registry.assemble_params()
+    log("OUTPUT", desc[:400])
+    assert "coral cover and bleaching on surveyed reefs" in desc.split("\n\n")[0]
+    assert "reef: a reef site name" in params["place"] and "reef: a survey year" in params["year"]
+    assert "`bare` (hazard)" in desc and "`bare`" in params["pack"]
+    assert "bare: a bare hazard" in params["hazard"]
+
+
+def test_a_contributed_boundary_layer_reaches_the_texts_with_no_code_change(sites, log):  # noqa: F811
+    """A contributed named polygon layer: resolve_place_time's description names it among the
+    places, and assemble_pack's `vectors` parameter among the layers it measures."""
+    tools, params = _tools(), _params()
+    log("OUTPUT", tools["resolve_place_time"][:400])
+    assert "Sprint sites (test)" in tools["resolve_place_time"]
+    assert "sprint_sites" in params["assemble_pack"]["vectors"]
 
 
 def test_a_form_request_returns_the_kinds_required_fields(monkeypatch, log):
@@ -644,20 +801,20 @@ def test_the_place_list_is_grouped_by_size_and_whole_at_its_resource(sites, monk
 
 
 def test_the_rule_lives_upstream_and_replies_carry_one_line(log):
-    """The long no-arithmetic rule is in the instructions' core and in the two descriptions a
-    model reads before rows or figures; every reply carries one line under NOTE_CHARS."""
+    """The long no-arithmetic rule is in the instructions' core, its short form in every
+    description a model reads before rows or figures; every reply carries one line under NOTE_CHARS."""
     tools = _tools()
-    for name in ("assemble_pack", "feeds_query"):
+    for name in ("assemble_pack", "feeds_query", "corpus_search"):
+        assert instructions.SHORT["no_arithmetic"] in tools[name], name
         assert "NO ARITHMETIC" in tools[name] and "accept or reject" in tools[name], name
     assert "NO ARITHMETIC BY DEFAULT" in instructions.core()
     assert len(loop.NO_ARITHMETIC) <= budget.NOTE_CHARS
     assert loop.ENTRY_HINT["no_arithmetic"] == loop.NO_ARITHMETIC
     # MGV-529: a contributed feed's usage note ("sum hectares") rides every feeds_query reply;
     # the counter-rule is where that note is read, in the core, and in the reply line
-    assert ("A dataset's own note on how its fields combine ('sum hectares') says what adds up; "
-            "it is not a request to add them up in the answer.") in tools["feeds_query"]
-    assert "'sum hectares'" in instructions.core() and "'sum hectares'" in loop.NO_ARITHMETIC
+    assert "'sum hectares'" in tools["feeds_query"] and "contribute_submit kind=method" in tools["feeds_query"]
     assert "computes and cites it for everyone" in tools["feeds_query"]
+    assert "'sum hectares'" in instructions.core() and "'sum hectares'" in loop.NO_ARITHMETIC
     for key, line in loop.ENTRY_HINT.items():
         if isinstance(line, str):
             assert len(line) <= budget.NOTE_CHARS, key
@@ -728,7 +885,7 @@ def test_every_text_stays_inside_its_budget_as_contributions_grow(lc_env, monkey
     assert len(full) <= budget.INSTRUCTIONS and len(core) <= budget.INSTRUCTIONS_CORE
     assert not caplog.messages, caplog.messages
     desc = DESCRIBERS["assemble_pack"]()
-    assert "platform_capabilities(section='coverage')" in desc and "START HERE" in desc
+    assert "platform_capabilities(section='coverage')" in desc and "COMPUTED, CITED EVIDENCE" in desc
     cov = registry.capabilities(available_tools=["platform_capabilities"])["coverage"]
     blob = json.dumps(cov, ensure_ascii=False)
     for row in rows.values():

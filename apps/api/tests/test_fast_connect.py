@@ -271,6 +271,35 @@ def live_like(tmp_path, monkeypatch):
     return reg
 
 
+# What else live held on 2026-10-26, when its assemble_pack text counted 'MapBiomas' away:
+# fourteen more countries with data and a place-qualified earthquake hazard.
+MORE_COUNTRIES = ["Laos", "Malaysia", "Singapore", "Brunei", "Timor-Leste", "Belize", "Honduras",
+                  "Nicaragua", "El Salvador", "Mexico", "Tanzania", "Somalia", "Colombia",
+                  "Guinea-Bissau"]
+
+
+@pytest.fixture
+def live_squeezed(tmp_path, monkeypatch):
+    """The live-like registry with live's other countries and its Taiwan earthquake hazard."""
+    reg = live_sized(tmp_path, LIVE_STACKS)
+    conf = reg["settings"]
+    cat, schema = (json.loads(conf[k].read_text()) for k in ("tiffs_config_path", "raster_schema_path"))
+    cat["hazard_earthquake_taiwan_rp475"] = {
+        "title": "Earthquake hazard, 1-in-475 year PGA on rock, Taiwan", "countries": ["Taiwan"],
+        "role": "hazard", "source": "a national seismic hazard model", "license": "CC-BY-4.0",
+        "vintage": "2024", "local_path": "hazard_earthquake_taiwan_rp475.tif", "contributed": True}
+    schema["layers"]["hazard_earthquake_taiwan_rp475"] = {"dtype": "float32", "valid_min": 0,
+                                                          "valid_max": 2, "units": "g"}
+    for k, v in (("tiffs_config_path", cat), ("raster_schema_path", schema)):
+        conf[k].write_text(json.dumps(v))
+    for i, c in enumerate(MORE_COUNTRIES):
+        reg["vectors"][f"more_layer_{i:02d}"] = {
+            "title": f"Protected areas ({c}, WDPA) set {i}", "geometry": "polygons", "countries": [c],
+            "bbox": [-85.3, 9.9, -84.7, 10.3], "local_path": f"vectors/more_layer_{i:02d}.geojson"}
+    install(reg, monkeypatch.setattr, monkeypatch.setitem)
+    return reg
+
+
 # --------------------------------------------------------------------------- the client's view
 def _connect() -> tuple[str, dict, float]:
     """(instructions, {tool: description}, ms) as a client connecting now is served: the
@@ -287,6 +316,19 @@ def _connect() -> tuple[str, dict, float]:
     return asyncio.run(go())
 
 
+def _connect_params() -> dict:
+    """{tool: {parameter: description}} from tools/list, as a client connecting now reads them."""
+    from fastmcp import Client
+    from app.mcp.server import mcp
+
+    async def go():
+        async with Client(mcp, mode="legacy") as c:
+            return {t.name: {k: v.get("description") or "" for k, v in
+                             (t.input_schema.get("properties") or {}).items()}
+                    for t in await c.list_tools()}
+    return asyncio.run(go())
+
+
 def _routing(desc: str) -> str:
     return desc.split("\n\n")[0]
 
@@ -297,23 +339,26 @@ def test_every_text_fits_a_live_sized_registry_with_no_overrun(live, caplog, log
     both of theirs, built the way a refresh builds them and served through the handshake."""
     from app.mcp import budget, instructions, server
     with caplog.at_level(logging.WARNING, logger="app.mcp.budget"):
-        instr, descs = server.LIVE.build()
+        instr, descs, params = server.LIVE.build()
         core = instructions.core()
     sizes = {n: len(d) for n, d in descs.items()}
     log("OUTPUT", f"{sizes}; instructions {len(instr):,}, core {len(core):,}")
-    assert set(descs) == set(server.DESCRIBERS)
+    assert set(descs) == set(server.DESCRIBERS) and set(params) == set(server.PARAMS)
     assert all(n <= budget.TOOL_DESCRIPTION for n in sizes.values()), sizes
+    assert all(len(t) <= budget.PARAM_DESCRIPTION for s in params.values() for t in s.values())
     assert len(instr) <= budget.INSTRUCTIONS and len(core) <= budget.INSTRUCTIONS_CORE
     assert not caplog.messages, caplog.messages
     said, tools, _ms = _connect()
     assert said == instr and all(tools[n] == d for n, d in descs.items())
+    served = _connect_params()
+    assert all(served[n][p] == t for n, s in params.items() for p, t in s.items())
 
 
 def test_the_routing_paragraph_names_the_countries_products_and_hazards(live, log):
     """Countries, product families and hazards keep their names; feeds and publishers go to a
     count with where each is named, and no citation-style publisher is ever said whole."""
     from app.mcp import server
-    _instr, descs = server.LIVE.build()
+    _instr, descs, _params = server.LIVE.build()
     first = _routing(descs["assemble_pack"])
     log("OUTPUT", f"{len(first):,} chars: {first}")
     every = set(COUNTRIES) | {c for _sid, _t, cs, *_ in STACKS for c in cs}
@@ -323,8 +368,9 @@ def test_the_routing_paragraph_names_the_countries_products_and_hazards(live, lo
     for h in HAZARDS:
         assert h in first, h
     assert "flood at 10- to 500-year return periods" in first
-    assert "Live feeds: " in first and "(feeds_query)" in first
-    assert "publishers (platform_capabilities(section='coverage'))" in first
+    whole = descs["assemble_pack"]                    # feeds and publishers follow the routing
+    assert "Live feeds: " in whole and "(feeds_query)" in whole
+    assert "publishers (platform_capabilities(section='coverage'))" in whole
     assert not any(p in d for p in PUBLISHERS for d in descs.values())
 
 
@@ -532,7 +578,7 @@ def test_the_live_stack_titles_route_by_product_family(live_like, caplog, log):
     word and an untitled stack shows no id."""
     from app.mcp import packs, server
     with caplog.at_level(logging.WARNING, logger="app.mcp.budget"):
-        _instr, descs = server.LIVE.build()
+        _instr, descs, _params = server.LIVE.build()
     first = _routing(descs["assemble_pack"])
     products, _countries = packs._lc_maps()
     log("OUTPUT", f"{len(descs['assemble_pack']):,} chars; products {products}; {first}")
@@ -546,11 +592,32 @@ def test_the_live_stack_titles_route_by_product_family(live_like, caplog, log):
     assert "landcover_br_gmw" not in json.dumps(descs)
 
 
+def test_a_squeezed_live_registry_still_names_every_product_and_country(live_squeezed, caplog, log):
+    """G14: with how-to-call in the parameters, assemble_pack's routing paragraph names every map
+    product family (MapBiomas among them) and every country (Ecuador among them); every
+    description and parameter fits, nothing logged as over, and `stack` names the stacks."""
+    from app.mcp import budget, packs, registry, server
+    with caplog.at_level(logging.WARNING, logger="app.mcp.budget"):
+        _instr, descs, params = server.LIVE.build()
+    first = _routing(descs["assemble_pack"])
+    products, _ = packs._lc_maps()
+    log("OUTPUT", f"{len(descs['assemble_pack']):,} chars; MapBiomas at {first.find('MapBiomas')}, "
+                  f"Ecuador at {first.find('Ecuador')}; {first[:700]}")
+    assert "MapBiomas" in first and "Ecuador" in first and "Taiwan" in first
+    assert not [p for p in products if p not in first]
+    assert not [c for c in registry.countries() if c not in first]
+    assert all(len(d) <= budget.TOOL_DESCRIPTION for d in descs.values())
+    assert all(len(t) <= budget.PARAM_DESCRIPTION for s in params.values() for t in s.values())
+    assert not caplog.messages, caplog.messages
+    assert "landcover_ec_mapbiomas (MapBiomas" in params["assemble_pack"]["stack"]
+    assert first.lower().index("not for") < 700 and "feeds_query" in first[:700]
+
+
 @pytest.mark.parametrize("n", [2, 3])
 def test_more_packs_keep_the_routing_names_and_the_grammar(live_like, monkeypatch, caplog, n, log):
     """Two or three more packs with keywords as long as a real pack's: each routing list still
-    names its first two, never 'and 0 more' or '1 more <plural>'; two fit, three may overrun but
-    say so in the log."""
+    names its first two, never 'and 0 more' or '1 more <plural>'; each pack's head (before its
+    colon) leads with the others', its detail after every head; everything fits, nothing logged."""
     from app.mcp import budget, packs, server
     for pid, kw, keys in EXTRA_PACKS[:n]:
         monkeypatch.setitem(packs.PACKS, pid, {
@@ -558,19 +625,41 @@ def test_more_packs_keep_the_routing_names_and_the_grammar(live_like, monkeypatc
             "target_doc": {k: "x" for k in keys}, "keywords": (lambda kw=kw: kw),
             "gather": lambda *a, **k: ([], [], None), "sections": lambda *a: []})
     with caplog.at_level(logging.WARNING, logger="app.mcp.budget"):
-        _instr, descs = server.LIVE.build()
+        _instr, descs, _params = server.LIVE.build()
     d = descs["assemble_pack"]
     first = _routing(d)
     log("OUTPUT", f"{n} more packs: {len(d):,} chars, logged {caplog.messages}; {first}")
     for name, text in descs.items():
         assert not re.search(r"\b0 more\b|\b1 more \w+s\b", text), name
     for words in ("maize", "Kenya and Zambia", "Global Mangrove Watch, HKH land cover",
-                  "Afghanistan, Pakistan", "flood, flashflood", "Southeast Asia", *[k for _p, k, _t in EXTRA_PACKS[:n]]):
+                  "Afghanistan, Pakistan", "flood, flashflood", "Southeast Asia",
+                  *[k.split(": ")[0] for _p, k, _t in EXTRA_PACKS[:n]]):
         assert words in first, words
-    if n == 2:
-        assert len(d) <= budget.TOOL_DESCRIPTION and not caplog.messages
-    else:
-        assert len(d) <= budget.TOOL_DESCRIPTION or any("assemble_pack" in m for m in caplog.messages)
+    heads_end = max(first.index(k.split(": ")[0]) for _p, k, _t in EXTRA_PACKS[:n])
+    assert all(first.index(k.split(": ")[1]) > heads_end for _p, k, _t in EXTRA_PACKS[:n])
+    assert len(d) <= budget.TOOL_DESCRIPTION and not caplog.messages
+
+
+@pytest.mark.parametrize("n", [6, 9])
+def test_many_packs_keep_the_products_countries_and_when_not_to(live_squeezed, monkeypatch, caplog, n, log):
+    """Six or nine extension packs with keywords and a use_for as long as a real pack's: assemble_pack
+    still names MapBiomas and Ecuador, says what it is not for within its first 600 chars, and fits
+    with nothing logged (the packs' use_for and detail are counted, never the routing heads)."""
+    from app.mcp import budget, packs, server
+    for i in range(n):
+        pid, kw, keys = EXTRA_PACKS[i % len(EXTRA_PACKS)]
+        monkeypatch.setitem(packs.PACKS, f"{pid}{i}", {
+            "display_name": f"{pid.title()} {i} Platform", "target_keys": keys,
+            "target_doc": {k: "x" for k in keys}, "keywords": kw,
+            "use_for": f"{kw.split(': ')[1][:60]} for a place and a date, pack {i}",
+            "gather": lambda *a, **k: ([], [], None), "sections": lambda *a: []})
+    with caplog.at_level(logging.WARNING, logger="app.mcp.budget"):
+        _instr, descs, _params = server.LIVE.build()
+    d = descs["assemble_pack"]
+    log("OUTPUT", f"{n} packs: {len(d):,} chars, 'Not for' at {d.find('Not for')}, MapBiomas at "
+                  f"{d.find('MapBiomas')}, Ecuador at {d.find('Ecuador')}; logged {caplog.messages}")
+    assert "MapBiomas" in d and "Ecuador" in d and d.find("Not for") < 600
+    assert all(len(t) <= budget.TOOL_DESCRIPTION for t in descs.values()) and not caplog.messages
 
 
 def test_feeds_query_names_each_feed_with_its_dataset_and_every_pending_one(live, log):
@@ -578,7 +667,7 @@ def test_feeds_query_names_each_feed_with_its_dataset_and_every_pending_one(live
     call takes; every pending id survives (asking returns why); the rest is counted with where
     every one is named."""
     from app.mcp import budget, registry, server
-    _instr, descs = server.LIVE.build()
+    _instr, descs, _params = server.LIVE.build()
     f = descs["feeds_query"]
     avail = {n: s for n, s in registry.FEEDS.items() if s.get("status") == "available"}
     own = [n for n, s in avail.items() if not s.get("contributed")]

@@ -330,7 +330,7 @@ def test_a_drive_listing_that_answers_5xx_is_asked_once_more(env, monkeypatch, f
 
 # --------------------------------------------------------------------------- 6. PREPARATION
 def test_the_preparation_summary_lists_the_raster_clip_derived_from_the_forms():
-    desc = staging.describe_submit()
+    desc = staging.describe_params()["manifest"]
     raster = desc.split("when a file is not yet in shape (raster: ", 1)[1].split(";", 1)[0].split(", ")
     derived = sorted(set(prepare.fields("raster"))
                      | (prepare._own_fields("raster") & prepare.all_fields()))

@@ -221,7 +221,8 @@ ENTRY_HINT = {
     "note": ("These are raw lookup results — evidence, not a governed answer. Answering a "
              "user's question with them? Go through the loop: assemble_pack (the call below) "
              "gathers the pack's evidence with its declared gaps and mints the pack_id "
-             "publish_answer needs to gate and receipt your brief."),
+             "publish_answer needs to gate and receipt your brief. A row read here is not in "
+             "the pack: keep it out of a receipted brief."),
     "call": {"tool": "assemble_pack",
              "args": {"<the pack's target params, e.g.>": _packs.target_shapes(),
                       "focus": "<what the user actually asked>"}},
@@ -280,4 +281,16 @@ def with_entry_hint(result: dict) -> dict:
     pointer = {"method_first": METHOD_FIRST, "methods_reading": reading} if reading else {}
     if result.get("status") != "ok":
         return {**result, **pointer} if pointer else result
-    return {"status": "ok", "for_a_governed_answer": {**pointer, **ENTRY_HINT}, **result}
+    line = measured_by(result)
+    first = {"measured_by_pack": line} if line else {}
+    return {"status": "ok", "for_a_governed_answer": {**first, **pointer, **ENTRY_HINT}, **result}
+
+
+def measured_by(result: dict) -> str | None:
+    """The one line rows of a product a pack measures from its maps carry: which pack, the call,
+    what the rows are (start.steer); None when none, and a lookup never fails on it."""
+    try:
+        from . import start
+        return start.steer(result)
+    except Exception:
+        return None

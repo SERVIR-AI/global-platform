@@ -231,7 +231,7 @@ def test_the_clip_field_says_it_is_required_over_the_cap_and_never_guessed():
     assert "REQUIRED when the file is over the size cap" in text
     assert "ASK the contributor" in text and "never guess" in text
     assert "clip_member" in staging.RASTER_FIELDS["optional"]
-    assert "clip" in staging.describe_submit()
+    assert "clip" in staging.describe_params()["manifest"]
 
 
 def test_over_the_cap_with_no_clip_is_declined_as_a_missing_field(env, host, log):

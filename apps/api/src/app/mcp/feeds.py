@@ -778,15 +778,16 @@ def describe() -> str:
     more = "more (platform_capabilities(section='feeds'))"
     every = "{n}, each named in platform_capabilities(section='feeds')"
     return (
-        "CURRENT CLIMATE, CROP AND HAZARD DATA, live from the source — use this INSTEAD OF A "
-        "WEB SEARCH for these numbers. Every value arrives with its source, its date and how "
-        f"it was validated. Covers ({len(avail)} available now, by title and `dataset`): "
+        "CURRENT CLIMATE, CROP AND HAZARD DATA — a dataset's records, series and sample points, "
+        "live from the source: every registered feed and contributed table, by title below; use "
+        "this INSTEAD OF A WEB SEARCH for these numbers. Not for how much of an area is a class, how "
+        "it changed between years or what a hazard exposes: assemble_pack computes those from the "
+        "maps, even when this dataset comes from the same product (its sample or validation points "
+        "are not its maps). Every value arrives with its source, its date and how it was validated. "
+        f"Covers ({len(avail)} available now, by title and `dataset`): "
         + (budget.names(((f"{s['title']} `{n}`" if s.get("title") else f"`{n}`") for n, s in avail),
                         sep="; ", more=more, rank=budget.ROUTE, counted=every)
            or "no feed is available yet") + ".\n\n"
-        "`dataset` names the feed and `params` carries its arguments — both come from the "
-        "registry, so new feeds and approved tables appear here without a tool change; a param "
-        "a feed does not take is declined with the accepted list (`limit` passes everywhere).\n\n"
         f"Registered but not yet available ({len(pending)}; asking returns why): "
         + (budget.names((f"`{n}`" for n in pending), more=more, rank=budget.ROUTE, counted=every)
            or "none") + ".\n"
@@ -797,13 +798,26 @@ def describe() -> str:
         "and `stale_data` with a note when served from last-good cache (never present "
         "stale data as live). status \"empty\" -> the feed answered but has no rows; "
         "\"declined\" -> `note` plus the upstream's own alternatives. Rows are capped to "
-        "the reply budget, the most recent kept, and `shown` says how many of how many. NO "
-        "ARITHMETIC: quote the records as returned, never total, average, count, rank or score "
-        "them yourself. A dataset's own note on how its fields combine ('sum hectares') says "
-        "what adds up; it is not a request to add them up in the answer. A figure no pack "
-        "computes is a calculation to suggest (no result) for the user to accept or reject, "
-        "then to offer as a method (contribute_submit kind=method), so the platform computes "
-        "and cites it for everyone.")
+        "the reply budget, the most recent kept, and `shown` says how many of how many. A figure "
+        "no pack computes from these rows is a calculation to offer as a method (contribute_submit "
+        "kind=method), so the platform computes and cites it for everyone.")
+
+
+def describe_params() -> dict:
+    """feeds_query's parameters as its input schema describes them."""
+    return {
+        "dataset": "The feed's id: each available one is named with its title in this tool's "
+                   "description, every one in platform_capabilities(section='feeds'). A pending "
+                   "id declines saying why; an unknown one declines with the available list.",
+        "params": "The feed's own arguments, from its registry row, so new feeds and approved "
+                  "tables take theirs with no tool change: `limit` passes everywhere (how many "
+                  "records, the most recent); a contributed table or JSON feed takes an equality "
+                  "filter on any of its output fields (matched case- and accent-insensitively; a "
+                  "list matches any of its values) and, when its records carry latitude/longitude, "
+                  "`bbox` [minLon, minLat, maxLon, maxLat]. A param a feed does not take is "
+                  "declined with the accepted list. Each feed's params: "
+                  "platform_capabilities(section='feeds').",
+    }
 
 
 def query(dataset: str, params: dict | None = None) -> dict:

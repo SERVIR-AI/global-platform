@@ -3616,13 +3616,18 @@ AS_GIVEN = ("SUBMIT THE LINK THE PERSON GAVE, AS IT IS — a Drive folder, a zip
 
 
 def describe_submit() -> str:
-    """The tool's core, inside budget.TOOL_DESCRIPTION: the gate, the hand-back rule, the
-    kinds, how to get a form, what comes back. Each kind's form is served on demand (form)."""
+    """The tool's core, inside budget.TOOL_DESCRIPTION: when to use it, the gate, the hand-back
+    rule, the kinds, what comes back. A kind's form is served on demand; the manifest's fields
+    and what the server prepares are in describe_params()."""
     from ..config import get_settings
     auto = get_settings().grp_auto_approve
     kinds = "; ".join(f"{k} ({_KINDS[k].get('what', '')})" for k in KINDS)
     lines = ["Contribute a source or logic to the platform from this conversation — no server "
-             "access, no config files; the platform's own gate validates it. "
+             "access, no config files; the platform's own gate validates it. Use it when the "
+             "person gives you a source (a file, folder, table, API, map service or document "
+             "link) or a calculation to add, or names one the platform does not serve (ask them "
+             "for its link first); not for reading data (feeds_query, assemble_pack) or checking "
+             "a submission (contribute_status). "
              + ("This deployment AUTO-APPROVES: a clean submission lands at once for every "
                 "caller, and its record and every citation built on it say that no human "
                 "reviewed it. Two things still wait for a reviewer, and the reply says which: "
@@ -3666,8 +3671,21 @@ def describe_submit() -> str:
                 "Staged, a table or feed answers feeds_query(dataset) for its owner "
                 "(`staged_feeds` in platform_capabilities); a staged raster is a layer the "
                 "packs read for its owner.")]
-    lines.append(_prep_words())
     return "\n".join(lines)
+
+
+def describe_params() -> dict:
+    """contribute_submit's parameters as its input schema describes them: the kind, and the
+    manifest with the contributor's own fields and what the server prepares (contrib/prepare)."""
+    return {"kind": "Which kind of contribution, each named in this tool's description with what "
+                    "it takes. kind alone, with no manifest, returns that kind's form and stores "
+                    "nothing: read it before asking the person anything.",
+            "manifest": "That kind's provenance fields, as its form names them (manifest={} returns "
+                        "it with every missing field named). Declared fields (title, description, "
+                        "source, licence, vintage, countries) are the CONTRIBUTOR'S OWN WORDS: "
+                        "missing one, ASK and stop; never compose them or submit before they "
+                        "answer — 'unvalidated' is an honest value, a guessed publisher is not. "
+                        + _prep_words().strip()}
 
 
 def _prep_words() -> str:

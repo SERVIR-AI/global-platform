@@ -303,8 +303,8 @@ def test_the_view_renders_the_measure_fields_and_its_script_parses(tmp_path):
 # ------------------------------------------------------------ 4. the tool texts
 def test_assemble_pack_says_what_a_measure_returns_from_the_schema(monkeypatch, log):
     from app.graph.geo import schema
-    d = registry.describe_assemble()
-    line = d[d.index("What a layer's values state"):d.index("VECTOR LAYERS")]
+    d = registry.assemble_params()["layers"]
+    line = d[d.index("What a layer's values state"):]
     log("OUTPUT", line[:400])
     assert "measure_<name>: mean, p10 / median / p90" in line and "TOTAL over the area" in line
     assert "landcover_<name>" in line and "km² and share of the area per class" in line
@@ -313,12 +313,12 @@ def test_assemble_pack_says_what_a_measure_returns_from_the_schema(monkeypatch, 
     rows = schema.namespaces()
     monkeypatch.setattr(schema, "namespaces", lambda: {**rows, "canopy": {"prefix": "canopy_", "values": "amount"}})
     monkeypatch.setitem(packs.PACKS, "toy", {"target_keys": ("site",), "class_split_doc": "its habitat map"})
-    d = registry.describe_assemble()
+    d = registry.assemble_params()["layers"]
     assert "canopy_<name>" in d and "toy: its habitat map" in d
     monkeypatch.setitem(packs.PACKS, "land-cover", {k: v for k, v in packs.PACKS["land-cover"].items()
                                                     if k != "class_split_doc"})
     monkeypatch.delitem(packs.PACKS, "toy")
-    assert "by_class_of" not in registry.describe_assemble()
+    assert "by_class_of" not in registry.assemble_params()["layers"]
 
 
 def test_the_risk_region_is_read_from_its_maps(monkeypatch, log):

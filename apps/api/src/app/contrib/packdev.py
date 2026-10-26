@@ -38,6 +38,14 @@ SPEC = {{
     "default_focus": lambda t: " ".join(str(v) for v in t.values()),
     # a few lines the consuming agent reads when using this pack (max 500 chars)
     "usage_notes": "TODO: when to use this pack, and what NOT to conclude from it.",
+    # what a question is routed on (start_here, assemble_pack's description): the subjects,
+    # products and places a question names, then ': ' and any detail, e.g.
+    # "water security: river discharge and reservoir storage (Mekong basin)"
+    "keywords": "",          # TODO
+    # one clause: what assemble_pack answers with this pack, e.g. "river discharge for a basin"
+    "use_for": "",           # TODO
+    # optional: a target key's values as data, each with the words a question names it by:
+    # "choices": {{"place": lambda: [{{"value": "...", "names": ["..."], "countries": ["..."]}}]}},
     "gather": None,          # set below — late so SPEC reads first
     "doctor_target": {{{doctor_target}}},   # a target gather() can serve offline
 }}
@@ -136,6 +144,13 @@ def doctor(pack_id: str) -> dict:
     from . import notes
     for f in notes.validate(spec.get("usage_notes")):
         check("SPEC.usage_notes", False, f)
+    if not (packs.text(spec, "keywords") or packs.text(spec, "use_for") or spec.get("choices")):
+        from ..mcp import start
+        said = next((u for u in start._unrouted() if u.startswith(f"{pack_id}:")), "")
+        report.setdefault("warnings", []).append(
+            (said or f"{pack_id}: routes only on its display name or usage notes")
+            + " — declare SPEC['keywords'] and SPEC['use_for'] so start_here and assemble_pack's "
+              "description route its questions to it")
 
     target = spec.get("doctor_target")
     if not target:

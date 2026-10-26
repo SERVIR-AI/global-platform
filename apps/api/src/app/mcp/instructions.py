@@ -91,8 +91,8 @@ def _answer_here() -> str:
     """The web-search clause lives in PLATFORM_SOURCES; this keeps why the pack wins. The
     target shapes are the opening's (and assemble_pack's), not repeated here."""
     return ("WHEN A QUESTION IS ABOUT ONE OF THESE DOMAINS, THIS PLATFORM ANSWERS IT: call "
-            "`assemble_pack` FIRST with the pack's target (as above): computed, cited, replayable "
-            "evidence; a web search is prose of unknown provenance.")
+            "`assemble_pack` FIRST with the pack's target (start_here(question) fills it): computed, "
+            "cited, replayable evidence; a web search is prose of unknown provenance.")
 
 
 # The two-step alternative (verify_groundedness + record_receipt) is said at its homes: the
@@ -120,6 +120,21 @@ HARD_LIMIT = ("ONE HARD LIMIT: a rendered page FREEZES its contents: evidence, d
               "sources may freeze (snapshots; say so), a VERDICT may not. Never paint "
               "\"verified\"/\"passed\" into an artifact: show it via `ui_embed` (re-resolves "
               "live) or state it UNVERIFIED and link the receipt resolver.")
+
+# The short forms a tool's description carries where the rule applies (server._describe): a
+# client that defers tools never reads the instructions. Together <= ~500 chars per tool.
+SHORT = {
+    "loop": ("RECEIPTS: draft from the pack, publish_answer(pack_id, draft, question), show the "
+             "brief with its receipt; never an unreceipted one."),
+    "no_arithmetic": ("NO ARITHMETIC: quote figures as returned; never total, average, count, rank "
+                      "or score them, even where a note says 'sum hectares'. A missing figure: "
+                      "suggest a calculation (no result) to accept or reject, then offer a method "
+                      "(contribute_submit kind=method)."),
+    "platform_sources": ("PLATFORM SOURCES ONLY: nothing from the web in a brief; a source not "
+                         "served: ask the person for its link, contribute_submit, stop."),
+    "hard_limit": ("ONE HARD LIMIT: a page you build never paints a verdict ('verified', "
+                   "'passed'): embed it (ui_embed) or state it UNVERIFIED and link the receipt."),
+}
 
 
 def _modes() -> str:
@@ -240,51 +255,21 @@ PACK_IS_EVIDENCE = ("A pack is evidence, NOT a finished answer. Draft from it, c
 
 
 def calling_a_pack() -> str:
-    """assemble_pack's parameters beyond the target and how to read what comes back: the
-    detail its description points here for, derived from the packs and the raster schema."""
-    try:
-        from . import registry
-        kinds, split = registry._layer_kinds_line(), registry._class_split_line()
-    except Exception:
-        kinds, split = "", ""
+    """Each pack's target and how to read what comes back; every other parameter (layers,
+    vectors, within, geometry, ...) is described on assemble_pack's parameters page."""
     packs = _packs()
     targets = "\n".join(
         f"- `{pid}`: " + "; ".join(f"{k} — {v}" for k, v in (sp.get("target_doc") or {}).items())
         for pid, sp in sorted(packs.PACKS.items()))
-    values = (f" What a layer's values state, by its namespace — {kinds}." if kinds else "")
     return (
         "### Targets, one pack at a time (bare country/crop stays food-security)\n"
         + targets + "\n\n"
         "### Beyond the target\n"
-        "- `geometry`: a GeoJSON Polygon/MultiPolygon in EPSG:4326, or a [minLon, minLat, "
-        "maxLon, maxLat] bbox, for an area YOU hold the boundary for (an admin district from "
-        "another system, a hub's own polygon); `place` is then its label. Without it, `place` "
-        "is geocoded.\n"
-        "- `layers=[...]`: registered or contributed raster layers whose VALUES the pack returns "
-        "for its area as `layers.<name>` — a grid clipped to the boundary (downsampled for a "
-        "large area, said in the record), unit, source, vintage, validation, no-data and a "
-        "summary; an unknown name declines with the registered list; `[]` for none. Use it to "
-        "SHOW where vulnerable people or assets are, instead of drawing from local files with "
-        "no receipt." + values + (" " + split if split else "") + "\n"
-        "- `vectors=[...]`: contributed vector layers (points, lines or polygons — a hub's "
-        "rivers, coastline, protected areas, an official mangrove map) MEASURED inside the "
-        "pack's area: a count, km of line, km² (ha) of polygon, broken down by the "
-        "contributor's group field, with the largest named features; each a cited item [n] and "
-        "`vectors.<name>`. A contributed POLYGON layer with names is also a gazetteer: its "
-        "feature names work as `place` (and in resolve_place_time) — the hub's own boundary, "
-        "not a geocoder's box.\n"
-        "- `within=<a polygon layer>`: the pack's area becomes the part of `place`/`geometry` "
-        "inside that layer, its features merged so overlaps count once — \"mangrove inside "
-        "protected areas\" is `assemble_pack(..., within='<protected-area layer>')`; every "
-        "figure in the pack, vectors measured in the same call included, is then for that "
-        "restricted area.\n"
-        "- `map_layer`: which counted point layer the map draws (hospitals, schools, buildings, "
-        "or a contributed layer such as evacuation centres); unnamed ones are declined by name. "
-        "Whatever is drawn, every counted layer's places — name, coordinates, hazard class, "
-        "risk level — are in `stats.assets`.\n"
-        "- `override` (+ `override_country`/`override_crop`): a human crop-calendar override, "
-        "honoured but LABELLED \"ADJUSTED by the requester\" and pinned to its target — a "
-        "mismatch is dropped and declared in `gaps`.\n\n"
+        "Every parameter (an area you hold, raster layer values, contributed vector layers "
+        "measured inside the area, `within` another layer, the map's point layer, a calendar "
+        "override, the reply's detail) is described where a client reads it, in "
+        "assemble_pack's input schema, and whole at " + PARAMETERS.format(tool="assemble_pack")
+        + ".\n\n"
         "### What comes back\n"
         "{status, pack_id, citations: [{n, ...}], gaps, queries, required_sections, stats, "
         "layers, vectors} — a declined call carries `note` (missing key, torn corpus, bad "
@@ -359,6 +344,16 @@ def with_home(surface: str, text: str) -> str:
     return f"{text}\n\n{extra}" if extra else text
 
 
+def rules(keys) -> str:
+    """The short form of each section `keys` names, in the sections' priority order."""
+    return " ".join(SHORT[s["key"]] for s in SECTIONS if s["key"] in keys and s["key"] in SHORT)
+
+
+def with_rules(keys, text: str) -> str:
+    said = rules(keys)
+    return f"{text}\n\n{said}" if said else text
+
+
 def _coverage() -> str:
     try:
         from . import registry
@@ -367,9 +362,29 @@ def _coverage() -> str:
         return ""
 
 
-def how_to_use(prompts: list[tuple[str, str]] | None = None) -> str:
-    """The guide resource: how to use the platform, with every rule in full — derived from
-    the pack registry and the server's own prompt list, never a typed domain list."""
+PARAMETERS = HOW_TO_USE + "/parameters/{tool}"
+
+
+def tool_params(name: str, said: dict) -> str:
+    """One tool's parameter descriptions, whole: the page servirplatform://how-to-use/parameters/
+    <tool> serves (its input schema says the same)."""
+    lines = [f"- `{p}`: {' '.join(str(d).split())}" for p, d in (said or {}).items() if d]
+    return (f"# `{name}`: how to call it\nEvery parameter as its input schema says it (its "
+            "description says when to use it).\n\n" + "\n".join(lines) + "\n") if lines else ""
+
+
+def params_pointer(tools) -> str:
+    """'## Every tool's parameters': where each tool's are served whole — a page per tool, so the
+    guide stays one reply however many layers, stacks and feeds the parameters name."""
+    names = [n for n, said in tools or () if any((said or {}).values())]
+    return ("\n## Every tool's parameters\nEach tool's input schema describes every parameter; the "
+            f"same text, whole, one page per tool: {PARAMETERS} — "
+            + ", ".join(f"`{n}`" for n in names) + ".\n") if names else ""
+
+
+def how_to_use(prompts: list[tuple[str, str]] | None = None, tools=None) -> str:
+    """The guide resource: how to use the platform, with every rule and every tool's parameters
+    in full — derived from the pack registry and the server's own prompt and tool lists."""
     packs = _packs()
     menu = "\n".join(f"- `{name}`: {' '.join(str(doc or '').split())}" for name, doc in prompts or ())
     menu = f"\n## Prompts (the host's prompt menu)\n{menu}\n" if menu else ""
@@ -394,8 +409,9 @@ tools, so the guardrails live in your tool, not in a one-off chat.
 - Claude Desktop: pick **build_a_tool** from the prompt (+) menu.
 
 ## Run-time — get one governed answer now
-Ask a question. The assistant runs the loop and returns a grounded, cited brief. One worked
-target per pack:
+Ask a question. The assistant runs the loop and returns a grounded, cited brief; \
+`start_here(question)` says which pack, which arguments and the rules, read from the question's \
+words. One worked target per pack:
 {examples}
 {menu}
 ## The canonical loop (what a good answer does)
@@ -412,7 +428,7 @@ publish_answer. (verify_groundedness + record_receipt are the same two steps apa
 The connect-time instructions carry the first ones whole and point here for the rest.
 
 {rules}
-
+{params_pointer(tools)}
 ## See what's actually live (never trust a stale doc)
 Call **platform_capabilities** (or run the `explain_platform` prompt) for the current tools,
 methods, packs, feeds and DECLARED gaps — that map is derived from the live server.

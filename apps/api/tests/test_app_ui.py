@@ -122,7 +122,7 @@ def test_assemble_pack_tells_a_model_to_prefer_it_over_web_search(log):
     from app.mcp import registry
     d = registry.describe_assemble()
     log("CHECK", d.splitlines()[0][:70])
-    assert "START HERE" in d and "INSTEAD OF A WEB SEARCH" in d
+    assert "COMPUTED, CITED EVIDENCE" in d and "INSTEAD OF A WEB SEARCH" in d
     assert "what is MISSING" in d          # says what a web search cannot give
 
 

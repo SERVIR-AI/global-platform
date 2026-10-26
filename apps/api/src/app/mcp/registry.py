@@ -947,56 +947,141 @@ def _named(name: str, text: str) -> bool:
     return re.search(rf"(?<!\w){re.escape(name)}(?!\w)", text, re.IGNORECASE) is not None
 
 
-def _keywords() -> str:
-    return "; ".join(packs.text(sp, "keywords") for _, sp in sorted(packs.PACKS.items())
-                     if packs.text(sp, "keywords"))
+def _tiers() -> tuple[list[str], list[tuple[str, bool]]]:
+    """(each pack's routing head, each pack's (detail, typed as one string)): its `keywords` split
+    at the first ': ' — subjects, products, hazards, crops and places before it; class, asset and
+    other detail after."""
+    heads, details = [], []
+    for _pid, sp in sorted(packs.PACKS.items()):
+        head, _sep, detail = packs.text(sp, "keywords").partition(": ")
+        if head.strip():
+            heads.append(head.strip())
+        if detail.strip():
+            details.append((detail.strip(), not callable(sp.get("keywords"))))
+    return heads, details
+
+
+def _detail(text: str, typed: bool) -> str:
+    """A pack's detail at budget.LIST: a hook's lists count themselves; a typed string stays whole
+    while it fits that rank's cap, else is left out (every name is in the coverage section)."""
+    cap = budget.current_cap(budget.LIST, len(text)) if typed else None
+    return text if cap is None or len(text) <= cap else ""
+
+
+def routing_words() -> str:
+    """The subjects a question routes on, in a user's words: every pack's routing head (its
+    subjects, products, hazards, crops and places), the countries no pack names, then each pack's
+    detail (classes, assets), first to go."""
+    heads, details = _tiers()
+    with budget.capped({r: 0 for r in (budget.LIST, budget.FEED, budget.SOURCE)}):
+        named = "; ".join(_tiers()[0])      # what the packs' routing heads name, at any cap
+    also = budget.names([c for c in countries() if not _named(c, named)], rank=budget.PLACE,
+                        more="more countries")
+    more = [d for d in (_detail(d, typed) for d, typed in details) if d]
+    return ("; ".join(heads) or "this platform's domains") + (f"; data also covers {also}" if also else "") \
+        + (f"; in detail: {'; '.join(more)}" if more else "")
 
 
 def _assemble_text() -> str:
-    """The first line names the subjects in a user's words from every pack row's `keywords`
-    (a model picks a tool from its first line), then the countries no pack names; the live
-    feeds and publishers, ranked first to go, close it."""
-    kws = _keywords()
-    with budget.capped({r: 0 for r in (budget.LIST, budget.FEED, budget.SOURCE)}):
-        named = _keywords()                 # what the packs' routing lists name, at any cap
-    also = budget.names([c for c in countries() if not _named(c, named)], rank=budget.PLACE,
-                        more="more countries")
-    kinds = _layer_kinds_line()
-    defaults = "; ".join(f"{pid}: {sp['default_layers_doc']}"
-                         for pid, sp in sorted(packs.PACKS.items()) if sp.get("default_layers_doc"))
+    """What it answers and what not first (no derived list before 'Not for'), then the subjects in
+    a user's words (routing_words()), each pack row's `use_for` (budget.ROUTE), the live feeds and
+    publishers (ranked first to go); how to call it is in the input schema."""
+    uses = [packs.text(sp, "use_for") for _, sp in sorted(packs.PACKS.items()) if packs.text(sp, "use_for")]
+    use = budget.names(uses, sep="; ", rank=budget.ROUTE, more=f"more ({COVERAGE_CALL})")
+    sources = sources_line()
     return (
-        "START HERE for any question about " + (kws or "this platform's domains") + ". "
-        "ANSWER IT FROM GOVERNED EVIDENCE, NOT A WEB SEARCH: this platform computes the "
-        "figures, cites every source with its date and validation level, lists what is "
-        "MISSING, and mints a replayable receipt. Use it INSTEAD OF A WEB SEARCH for those "
-        "subjects. " + (f"Data also covers {also}. " if also else "") + sources_line() + "\n\n"
-        "Assembles a deterministic, citable EVIDENCE PACK (no LLM runs here) and mints a "
+        "COMPUTED, CITED EVIDENCE FROM THE PLATFORM'S MAPS AND DATA, even when asked 'according to' a "
+        "map product named here (it reads that product's own maps). Not for a dataset's own records, "
+        "series or sample points (feeds_query), documents (corpus_search) or a place lookup alone "
+        "(resolve_place_time). Covers " + routing_words() + ". Answers " + (f"{use}; " if use else "")
+        + "and the values of any registered raster layer or contributed vector layer over an area. "
+        "Use it INSTEAD OF A WEB SEARCH for any of these: it computes the figures, cites every "
+        "source with its date and validation level, lists what is MISSING and mints a replayable "
+        "receipt.\n\n"
+        + (f"{sources}\n\n" if sources else "")
+        + "Assembles a deterministic, citable EVIDENCE PACK (no LLM runs here) and mints a "
         "pack_id: numbered citations, declared gaps, and the exact section headers your draft "
-        "must use; each result names its next call (publish_answer gates your draft and mints "
-        "the receipt). DOMAIN PACKS and their target params — pass the ones for your question "
-        "(bare country/crop stays food-security): "
+        "must use; each result names its next call. DOMAIN PACKS and their target params — pass "
+        "the ones for your question (bare country/crop stays food-security; start_here(question) "
+        "fills them from the question's words): "
         + "; ".join(f"`{pid}` ({', '.join(sp['target_keys'])})"
                     for pid, sp in sorted(packs.PACKS.items()))
-        + ". Every parameter and how to read a pack: servirplatform://how-to-use. NO "
-        "ARITHMETIC: quote the pack's cited figures, never total, average, count, rank or "
-        "score them yourself; a missing figure is a calculation to suggest (no result) to "
-        "accept or reject, then to offer as a method. Budgeted reply: a spilled section "
-        "names its resource; detail='full' returns all.\n\n"
-        "LAYER VALUES, for any pack with an area: `layers` gives each registered raster "
-        "layer's VALUES over that area — a clipped grid with unit, source, vintage, validation, "
-        "no-data and one citation [n] of its summary. By default a pack returns the layers its "
-        "own computation rests on" + (f" ({defaults})" if defaults else "")
-        + "; layers=[...] names any registered or contributed layer (an unknown name declines "
-        "with the list); layers=[] for none. "
-        + (f"What a layer's values state, by its namespace — {kinds}. " if kinds else "")
-        + _class_split_line() + "\n\n"
-        "VECTOR LAYERS, for any pack with an area: vectors=[...] names contributed vector "
-        "layers (points, lines or polygons) to MEASURE inside the pack's boundary — a count, "
-        "km of line, km² (ha) of polygon, by group field, with the largest named features — "
-        "each a cited item [n] in `vectors.<name>`; a named POLYGON layer's feature names also "
-        "work as `place`. within=<a polygon layer> restricts ANY pack's area to the inside of "
-        "that layer (overlaps counted once). Contributed layers so far: "
-        + (budget.names(sorted(_contributed_vector_names()), more=f"more ({COVERAGE_CALL})",
-                        counted="{n} (" + COVERAGE_CALL + ")") or "none yet")
-        + ". Every name each pack covers: platform_capabilities(section='coverage')."
+        + ". How to call each parameter: its own description in this tool's input schema, and "
+        "servirplatform://how-to-use; every name each pack covers: " + COVERAGE_CALL + "."
     )
+
+
+# assemble_pack's parameters beyond the packs' targets, as its input schema describes them.
+_AREA_PARAMS = {
+    "focus": "What the person asked, in their words: it steers which documents and evidence the "
+             "pack gathers.",
+    "min_severity": "The lowest hazard class counted as exposed, 1-5 (default 1).",
+    "override": "A human crop-calendar override, a list of {season, planting: [m, m], harvest: "
+                "[m, m]}: honoured but LABELLED \"ADJUSTED by the requester\" and pinned to its "
+                "target (override_country / override_crop) — a mismatch is dropped and declared "
+                "in `gaps`.",
+    "override_country": "Pins `override` to its country: one that does not match the target "
+                        "drops it, declared in `gaps` (a swap never applies silently).",
+    "override_crop": "Pins `override` to its crop: one that does not match the target drops it, "
+                     "declared in `gaps` (a swap never applies silently).",
+    "geometry": "For an area YOU hold the boundary for (an admin district from another system, a "
+                "hub's own polygon): a GeoJSON Polygon/MultiPolygon in EPSG:4326, or a [minLon, "
+                "minLat, maxLon, maxLat] bbox; `place` is then its label. Without it, `place` is "
+                "resolved: a contributed boundary's feature name first (resolve_place_time("
+                "list='all') lists them), else the geocoder.",
+    "map_layer": "Which counted point layer the map draws (hospitals, schools, buildings, or a "
+                 "contributed layer such as evacuation centres); unnamed ones are declined by "
+                 "name. Whatever is drawn, every counted layer's places — name, coordinates, "
+                 "hazard class, risk level — are in `stats.assets`.",
+    "within": "A contributed polygon layer: the pack's area becomes the part of `place`/"
+              "`geometry` inside it, its features merged so overlaps count once — \"mangrove "
+              "inside protected areas\" is within='<protected-area layer>'; every figure in the "
+              "pack, vectors measured in the same call included, is then for that restricted "
+              "area. Works for ANY pack with an area.",
+    "detail": "'concise' (default): the reply fits a client's budget — a section that would not "
+              "fit is replaced by a pointer naming its resource (servirplatform://pack/<pack_id>/"
+              "<section>); 'full': every section, unshaped. Either way the call gathers a new pack.",
+}
+
+
+def assemble_params() -> dict:
+    """assemble_pack's parameters as its input schema describes them: each target key in every
+    pack row's own words (and values), the area extras, LAYER VALUES and VECTOR LAYERS derived
+    from the raster schema, the packs and the vector registry; the guide serves them whole."""
+    claims: dict = {}
+    for pid, sp in sorted(packs.PACKS.items()):
+        values = sp.get("target_values") or {}
+        for k, doc in (sp.get("target_doc") or {}).items():
+            more = values.get(k)
+            more = (more() if callable(more) else more) if more else ""
+            claims.setdefault(k, []).append(f"{pid}: {doc}" + (f"; {more}" if more else ""))
+    out = {k: "Pack target — " + " | ".join(v) + "." for k, v in claims.items()}
+    out["pack"] = ("Which domain pack: one of " + ", ".join(f"`{pid}`" for pid in sorted(packs.PACKS))
+                   + " (their target params: DOMAIN PACKS in this tool's description). Omit it and "
+                     "the target params given pick the pack (bare country/crop stays food-security).")
+    out.update(_AREA_PARAMS)
+    kinds, split = _layer_kinds_line(), _class_split_line()
+    defaults = "; ".join(f"{pid}: {sp['default_layers_doc']}"
+                         for pid, sp in sorted(packs.PACKS.items()) if sp.get("default_layers_doc"))
+    out["layers"] = (
+        "LAYER VALUES, for any pack with an area: registered or contributed raster layers whose "
+        "VALUES the pack returns over its area as `layers.<name>` — a grid clipped to the boundary "
+        "(downsampled for a large area, said in the record) with unit, source, vintage, "
+        "validation, no-data and one citation [n] of its summary. By default a pack returns the "
+        "layers its own computation rests on" + (f" ({defaults})" if defaults else "")
+        + "; name any registered or contributed layer (an unknown name declines with the "
+          "registered list); [] for none. Use it to SHOW where vulnerable people or assets are, "
+          "instead of drawing from local files with no receipt."
+        + (f" What a layer's values state, by its namespace — {kinds}." if kinds else "")
+        + (f" {split}" if split else "")).strip()
+    out["vectors"] = (
+        "VECTOR LAYERS, for any pack with an area: contributed vector layers (points, lines or "
+        "polygons — a hub's rivers, coastline, protected areas, an official mangrove map) "
+        "MEASURED inside the pack's area: a count, km of line, km² (ha) of polygon, broken down "
+        "by the contributor's group field, with the largest named features; each a cited item "
+        "[n] in `vectors.<name>`. A contributed POLYGON layer with names is also a gazetteer: its "
+        "feature names work as `place` (and in resolve_place_time) — the hub's own boundary, not "
+        "a geocoder's box. Contributed layers so far: "
+        + (budget.names(sorted(_contributed_vector_names()), more=f"more ({COVERAGE_CALL})",
+                        counted="{n} (" + COVERAGE_CALL + ")") or "none yet") + ".")
+    return out

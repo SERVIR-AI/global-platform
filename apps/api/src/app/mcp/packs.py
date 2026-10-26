@@ -301,19 +301,17 @@ def _risk_covers() -> str:
 
 
 def _risk_keywords() -> str:
+    """The hazards and where they are mapped first (what a question routes on), the assets after."""
     where = _risk_where()
-    return (f"hazard exposure and risk: {_risk_asset_words()} in {_risk_hazard_words()} zones"
-            + (f" ({where})" if where else ""))
+    return (f"hazard exposure and risk in {_risk_hazard_words()} zones"
+            + (f" ({where})" if where else "") + f": {_risk_asset_words()}")
 
 
 def _fs_coverage() -> tuple[str, str]:
-    from . import registry
-    try:
-        c = registry.coverage()
-    except Exception:
-        c = {}
-    crops = budget.names(c.get("crops") or [], more="more crops", rank=budget.ROUTE) or "crop"
-    where = (budget.names(c.get("countries") or [], last=" and ", more="more countries",
+    """(crops, countries) in words from the library and the crop calendar (_fs_values): the same
+    list start_here routes on, so a calendar crop is named before any document lands."""
+    crops = budget.names(_fs_values("crops"), more="more crops", rank=budget.ROUTE) or "crop"
+    where = (budget.names(_fs_values("countries"), last=" and ", more="more countries",
                           rank=budget.PLACE) or "the countries hubs contribute documents for")
     return crops, where
 
@@ -345,8 +343,10 @@ def _fs_keywords() -> str:
     return f"food security, {crops} outlooks, El Niño / ENSO and IOD drivers ({where})"
 
 
+@budget.once
 def _lc_classes() -> list[str]:
-    """Every class name in the registered stacks' legends, each once, the most shared first."""
+    """Every class name in the registered stacks' legends, each once, the most shared first
+    (read once per rebuild: every render of a fitted text asks for it)."""
     try:
         from ..land_cover.synthesis import _fold, landcover_stacks
         rows = landcover_stacks()
@@ -474,27 +474,33 @@ def _brand(word: str) -> bool:
     return any(ch.isupper() for ch in word[1:]) or any(ch.isdigit() or ch == "_" for ch in word)
 
 
-def _families(named: list[tuple[str, list[str]]]) -> list[str]:
-    """[(product, its countries)] -> one name per product family, the broadest first: products
-    sharing a coined first word (else their first two words) are one family, named by the
-    words they all open with ('MapBiomas Collection 4.0', 'MapBiomas land cover' -> 'MapBiomas')."""
-    fams: dict = {}                           # key -> [words, stacks, countries, first seen]
-    for name, cs in named:
+def _family_groups(named: list[tuple[str, list[str]]]) -> list[tuple[str, list[int]]]:
+    """[(product, its countries)] -> [(family, indices of its products)], broadest first: products
+    sharing a coined first word (else their first two words) are one family, named by the words they
+    all open with ('MapBiomas Collection 4.0', 'MapBiomas land cover' -> 'MapBiomas')."""
+    fams: dict = {}                           # key -> [words, stacks, countries, first seen, members]
+    for i, (name, cs) in enumerate(named):
         words = name.split()
         key = " ".join(w.casefold() for w in (words[:1] if _brand(words[0]) else words[:2]))
-        f = fams.setdefault(key, [words, 0, [], len(fams)])
+        f = fams.setdefault(key, [words, 0, [], len(fams), []])
         n = 0
         while n < min(len(f[0]), len(words)) and f[0][n].casefold() == words[n].casefold():
             n += 1
         f[0] = f[0][:n]
         f[1] += 1
         f[2] += [c for c in cs if c not in f[2]]
+        f[4].append(i)
     out = []
-    for words, _n, _cs, _i in sorted(fams.values(), key=lambda f: (-len(f[2]), -f[1], f[3])):
+    for words, _n, _cs, _i, members in sorted(fams.values(), key=lambda f: (-len(f[2]), -f[1], f[3])):
         while len(words) > 1 and words[-1].casefold() in _TRAILING:
             words = words[:-1]
-        out.append(" ".join(words))
+        out.append((" ".join(words), members))
     return out
+
+
+def _families(named: list[tuple[str, list[str]]]) -> list[str]:
+    """One name per product family, the broadest first (_family_groups)."""
+    return [name for name, _members in _family_groups(named)]
 
 
 def _lc_maps() -> tuple[list[str], list[str]]:
@@ -516,15 +522,135 @@ def _lc_maps() -> tuple[list[str], list[str]]:
 
 
 def _lc_keywords() -> str:
-    """Classes counted before the maps and countries a question is routed on (budget.LIST)."""
+    """'subjects from the maps <products> (<countries>): <classes>' — the routing head before the
+    colon, the classes (budget.LIST, counted before the maps are) after it."""
     classes = budget.names(_lc_classes(), more="more classes", keep=3) or "land-cover classes"
     products, countries = _lc_maps()
     maps = budget.names(products, more="more maps", rank=budget.ROUTE)
     where = budget.names(countries, more="more countries", rank=budget.PLACE)
-    tail = (f"maps: {maps}" + (f" ({where})" if where else "") if maps else
-            f"maps over {where}" if where else "no land-cover stack is registered yet")
-    return (f"land cover: {classes}, land-cover change, deforestation and forest gain, "
-            f"fire detections; {tail}")
+    subj = "land cover, land-cover change, deforestation and forest gain, fire detections"
+    head = (f"{subj} from the maps {maps}" + (f" ({where})" if where else "") if maps else
+            f"{subj} from maps over {where}" if where else
+            f"{subj} (no land-cover stack is registered yet)")
+    return f"{head}: {classes}"
+
+
+def span(years) -> str:
+    """'1990-2025', '2021', or '' for no years."""
+    ys = sorted(int(y) for y in years or ())
+    return (f"{ys[0]}-{ys[-1]}" if len(ys) > 1 else str(ys[0])) if ys else ""
+
+
+@budget.once
+def _lc_stack_choices() -> list[dict]:
+    """Each registered land-cover stack as `stack` takes it (a `choices` row): the words a
+    question names it by (its product family, its product), countries, years, extent, and the
+    `classes` its legend then takes."""
+    try:
+        from ..land_cover.synthesis import landcover_stacks
+        from ..graph.geo import stacks as _stacks
+        rows = landcover_stacks()
+    except Exception:
+        rows = {}
+    out, named = [], []
+    for sid, row in rows.items():
+        cs = [str(c) for c in (row.get("countries") or []) if str(c).strip()]
+        title = str(row.get("title") or "").strip()
+        try:
+            ys = sorted(int(y) for y in _stacks.years(row))
+        except Exception:
+            ys = []
+        try:
+            box = _stacks.bounds(sid, row)
+        except Exception:
+            box = None
+        product = map_product(title, cs) if title else ""
+        if product:
+            named.append(((product, cs), len(out)))
+        out.append({"value": sid, "product": product, "names": [product] if product else [],
+                    "words": title, "countries": cs, "years": ys, "bbox": box,
+                    "contributed": bool(row.get("contributed")),
+                    "values": {"classes": [str(v) for v in (row.get("legend") or {}).values()]}})
+    for family, members in _family_groups([p for p, _i in named]):
+        for m in members:
+            row = out[named[m][1]]
+            if family.casefold() != row["product"].casefold():
+                row["names"].insert(0, family)
+    return out
+
+
+def _lc_stack_values() -> str:
+    """Each registered stack as `stack` takes it, with its product, countries and years, the
+    contributed ones newest first (budget.LIST: counted past what fits, so the stack landed last is
+    never the one counted away; every one is in the coverage section)."""
+    said, rows = [], _lc_stack_choices()
+    for c in [c for c in reversed(rows) if c.get("contributed")] + [c for c in rows if not c.get("contributed")]:
+        parts = [p for p in (c["product"], ", ".join(c["countries"]), span(c["years"])) if p]
+        said.append(f"{c['value']} ({'; '.join(parts)})" if parts else c["value"])
+    if not said:
+        return ""
+    return "registered stacks: " + budget.names(
+        said, sep=", ", more="more stacks (platform_capabilities(section='coverage'))",
+        counted="{n} stacks (platform_capabilities(section='coverage'))")
+
+
+@budget.once
+def _risk_hazard_choices() -> list[dict]:
+    """Each hazard map the catalog serves as `hazard` takes it (its stem), named by its hazard
+    words and, for a return period, 'N-year <hazard>'; synthetic demonstration layers left out."""
+    import re
+    from ..graph.geo import tiffs
+    try:
+        cat, cov = tiffs.catalog(), risk_coverage()
+    except Exception:
+        return []
+    out = []
+    for k, row in cat.items():
+        row = row or {}
+        if (not k.startswith("hazard_") or row.get("internal") or row.get("kind") == "stack"
+                or _is_synthetic(row)):
+            continue
+        stem = k[len("hazard_"):]
+        m = re.match(r"^(.*)_rp(\d+)$", stem)
+        word = _hazard_word(m.group(1) if m else stem, row)
+        plain = re.sub(r"\s*\([^()]*\)$", "", word)
+        rp = m.group(2) if m else None
+        c = cov.get(k) or {}
+        out.append({"value": stem,
+                    "product": word + (f" at a {rp}-year return period" if rp else ""),
+                    "names": [plain] + ([f"{rp}-year {plain}", f"1-in-{rp}"] if rp else []),
+                    "words": str(row.get("title") or ""), "countries": list(c.get("countries") or []),
+                    "bbox": c.get("bounds")})
+    return out
+
+
+@budget.once
+def _fs_values(key: str) -> list[str]:
+    """The food-security library's crops or countries and the calendar's, each once."""
+    from . import registry
+    try:
+        said = list(registry.coverage().get(key) or [])
+    except Exception:
+        said = []
+    try:
+        from ..food_security import calendar
+        cal = calendar.load() or {}
+        more = ([str(c) for c in cal] if key == "countries" else
+                [str(k) for crops in cal.values() for k in (crops or {})])
+    except Exception:
+        more = []
+    seen = {s.casefold() for s in said}
+    for v in more:
+        v = v.replace("_", " ")
+        if v.casefold() not in seen:
+            seen.add(v.casefold())
+            said.append(v.title() if key == "countries" and v.islower() else v)
+    return said
+
+
+def _fs_choices(key: str) -> list[dict]:
+    return [{"value": v, "product": v, "names": [v],
+             "countries": [v] if key == "countries" else []} for v in _fs_values(key)]
 
 
 def target_shapes(sep: str = " | ") -> str:
@@ -623,6 +749,8 @@ def _risk_manifest() -> dict:
 # id -> the pack row. `target_keys` name the assemble_pack parameters that select
 # this pack; `build_target` validates them into the generic target dict every
 # downstream consumer (record, publish, embeds) reads instead of country/crop.
+# `choices` {key: callable -> [{value, product, names, words, countries, years, bbox, values}]}:
+# a key's values as data, each with the words a question names it by (start_here routes on them).
 PACKS: dict[str, dict] = {
     "food-security": {
         "display_name": "Food Security Platform",
@@ -637,6 +765,10 @@ PACKS: dict[str, dict] = {
         "covers": lambda: _fs_covers(),
         "audience": "food-security analysts, hub teams and ministry advisors deciding whether to act months ahead",
         "keywords": lambda: _fs_keywords(),
+        # what assemble_pack is used for with this pack, said in its description's routing lead
+        "use_for": "crop outlooks and the climate drivers behind them",
+        # a target key's values, each with the words a question names it by (start_here)
+        "choices": {"crop": lambda: _fs_choices("crops"), "country": lambda: _fs_choices("countries")},
         "default_focus": lambda t: f"{t.get('country', '')} {t.get('crop', '')}".strip(),
         "doctor_target": {"country": "kenya", "crop": "maize"},
         # receipt components whose lanes fit this pack's evidence (record.render_with offers them)
@@ -660,6 +792,8 @@ PACKS: dict[str, dict] = {
         "covers": lambda: _risk_covers(),
         "audience": "disaster-risk and preparedness planners and the hubs that support them",
         "keywords": lambda: _risk_keywords(),
+        "use_for": "people and assets exposed to a hazard, and their risk levels",
+        "choices": {"hazard": lambda: _risk_hazard_choices()},
         "default_focus": lambda t: f"{t.get('hazard', '')} exposure in {t.get('place', '')}".strip(),
         "default_layers_doc": "its recipe's vulnerability layers",
         "doctor_target": {"place": "battambang", "hazard": "flood"},
@@ -679,10 +813,16 @@ PACKS: dict[str, dict] = {
                        "year": "a mapped year, e.g. 2022 — may be left out when the call only "
                                "measures vectors=[...] or layers=[...]; outside every stack such "
                                "a call still answers, for the area alone",
-                       "year_to": "optional later year — adds change and transitions",
+                       "year_to": "optional later year — adds change and transitions between the two "
+                                  "years ('since 2020': year=2020, year_to=the stack's latest year)",
                        "classes": "optional class names to detail, e.g. [\"Forest\"]",
                        "stack": "optional: which registered stack to read when more than one "
-                                "covers the place (the pack names the alternatives in its gaps)"},
+                                "covers the place (the pack names the alternatives in its gaps); a "
+                                "question naming a product ('according to ...') is read from that "
+                                "product's stack"},
+        # a target key's accepted values, derived, appended to its parameter's description
+        "target_values": {"stack": lambda: _lc_stack_values()},
+        "choices": {"stack": lambda: _lc_stack_choices()},
         "gather": _gather_land_cover,
         "sections": _lc_sections,
         "corpus": "land-cover",
@@ -697,6 +837,8 @@ PACKS: dict[str, dict] = {
         "covers": lambda: _lc_covers(),
         "audience": "foresters, land-use and conservation planners, and the hubs that map land cover",
         "keywords": lambda: _lc_keywords(),
+        "use_for": "class areas, and change and transitions between years from the maps (which "
+                   "class became which)",
         "subjects": ["land cover by class", "forest, cropland, grassland and built-up change "
                      "between mapped years"],
         "where": _lc_where,

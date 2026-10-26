@@ -299,9 +299,10 @@ def payload(hazard: str | None = None) -> dict:
 
 
 def describe() -> str:
-    return ("The vulnerability weights behind every risk level: what each hazard's recipe "
+    return ("THE VULNERABILITY WEIGHTS behind every risk level: what each hazard's recipe "
             "weighs today, who last changed it and why, and which vulnerability layers a "
-            "weight may name.\n\n"
+            "weight may name. Use it when someone questions how risk is WEIGHTED or wants to "
+            "propose a change; not for the risk figures themselves (assemble_pack).\n\n"
             "In a host that renders MCP Apps this opens a picker with a slider per layer "
             "that keeps the shares summing to 1, and a box for the reason. Proposing from "
             "it calls contribute_submit(kind='weights'), "
@@ -312,5 +313,11 @@ def describe() -> str:
                "force for everyone only after a reviewer approves. ")
             + "Elsewhere it is a plain reading of the recipe; contribute "
             "the same way by calling contribute_submit yourself.\n\n"
-            "Pass a hazard name to open on it. Returns {hazard, hazards, recipes, "
-            "available_layers, adjusted, staged_for_you, crossing_rule}.")
+            "Returns {hazard, hazards, recipes, available_layers, adjusted, staged_for_you, "
+            "crossing_rule}.")
+
+
+def describe_params() -> dict:
+    """risk_weights' parameter as its input schema describes it."""
+    return {"hazard": "Open the picker on this hazard; the reply lists every hazard with a "
+                      "recipe as `hazards`."}

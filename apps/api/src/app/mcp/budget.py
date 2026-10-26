@@ -19,6 +19,9 @@ INSTRUCTIONS = 4096
 INSTRUCTIONS_CORE = 2048
 # A tool description loaded upfront; tool search matches only this much of one.
 TOOL_DESCRIPTION = 4096
+# One parameter's description in a tool's input schema (how to call it): no client cut is
+# documented, so half a description, which a derived name list is counted to fit.
+PARAM_DESCRIPTION = 2048
 # A tool description loaded through tool search (on by default).
 # A text reply over 50,000 chars is saved to a file and the model sees a 2 KB preview; 20% margin.
 REPLY_CHARS = 40000
@@ -191,6 +194,18 @@ def fit(kind: str, build: Callable[[], str], limit: int) -> str:
     if not ok:
         check(kind, text, limit)
     return text
+
+
+def fit_each(kind: str, build: Callable[[], dict], limit: int) -> dict:
+    """build() -> {name: text}, each text fitted to `limit` on its own (fitted()), so one long
+    list never counts another's names away; inside one snapshot(), each one still over logged."""
+    with snapshot():
+        out = build()
+        for name in [n for n, v in out.items() if len(str(v)) > limit]:
+            out[name], ok = fitted(lambda n=name: build()[n], lambda t: len(str(t)) <= limit)
+            if not ok:
+                check(f"{kind} {name}", str(out[name]), limit)
+    return out
 
 
 # --------------------------------------------------------------------------- one look per rebuild

@@ -457,18 +457,27 @@ def describe() -> str:
         "FINISH AN ANSWER — call this before you show the user a brief. One call: "
         "it gates your draft against the evidence pack and, only if it passes, mints "
         "the replayable receipt and returns the components that display the evidence "
-        "chain.\n\n"
+        "chain. Not for checking a draft without a receipt (verify_groundedness) or "
+        "resolving a receipt already minted (record_receipt).\n\n"
         "This is the LAST step of the canonical loop (assemble_pack -> you draft -> "
         "publish_answer). Showing a brief without it means the answer was never "
         "checked for citations that do not exist in the pack, has no receipt, and "
         "cannot be replayed or shared.\n\n"
-        "Pass the draft VERBATIM and in full — it is hashed, so the receipt can prove "
-        "which exact text passed. Cite pack items as [n], use the pack's "
-        "required_sections as your headers, and do not write your own '## Sources'.\n\n"
         "Returns: {status, passed, report_id, receipt_id, public_resolver, sources, "
         "evidence_freshness, claim_scope, render_with, next_step}. status \"blocked\" "
         "-> the gate refused it: `failures` says why, NO receipt is minted, and the "
         "draft must not be shown. Use verify_groundedness / record_receipt directly "
-        "only if you need the two steps separately. The reply is budgeted: a section it "
-        "spills names its resource (servirplatform://receipt/<id>/<section>); "
-        "detail='full' returns everything.")
+        "only if you need the two steps separately.")
+
+
+def describe_params() -> dict:
+    """publish_answer's parameters as its input schema describes them."""
+    return {
+        "pack_id": "The pack_id assemble_pack minted: the evidence the draft was written from.",
+        "draft": "The brief, VERBATIM and in full — it is hashed, so the receipt can prove which "
+                 "exact text passed. Cite pack items as [n], use the pack's required_sections as "
+                 "your headers, and do not write your own '## Sources'.",
+        "question": "The person's question, verbatim: the receipt records what was asked.",
+        "detail": "'concise' (default): the reply is budgeted — a section it spills names its "
+                  "resource (servirplatform://receipt/<id>/<section>); 'full' returns everything.",
+    }

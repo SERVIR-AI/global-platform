@@ -300,24 +300,33 @@ def component(name: str, **variants) -> dict:
 def describe_component() -> str:
     t = tokens()
     have = sorted(p.stem for p in (theme_path().parent / "ui_recipes").glob("*.html"))
-    return ("Get the READY-BUILT markup for a component instead of writing UI from "
-            "scratch. Returns self-contained HTML+CSS styled with the platform's "
-            "--grp-* custom properties, plus its data contract and guardrail.\n\n"
+    return ("READY-BUILT MARKUP for a UI component, and the SERVIR brand assets every page on "
+            "this platform carries — instead of writing UI from scratch. Not for showing a "
+            "verdict (ui_embed) or the colour and type tokens alone (ui_design). Returns "
+            "self-contained HTML+CSS styled with the platform's --grp-* custom properties, plus "
+            "its data contract and guardrail.\n\n"
             "Authored now: " + (", ".join(f"`{h}`" for h in have) or "(none)") +
             ".\nSee ui_catalog for every catalogued component and its trust class; one "
             "not yet authored declines as not-implemented rather than pretending.\n\n"
             "ALSO SERVES BRAND ASSETS from the live design file, which is how you get the "
-            "SERVIR identity every UI on this platform must carry. Pass a set name from "
-            "`ui_catalog.design_file_components` and narrow it with `treatment` and "
-            "`layout`, and you get a rendered SVG url.\n"
-            "  treatment: Primary | Black | Grayscale | Reversed Color | Reversed Mono\n"
-            "             (use a Reversed treatment on a dark ground)\n"
-            "  layout:    Horizontal | Stacked   (Lockup only)\n"
-            "e.g. ui_component(name=\"SERVIR/Logo/Lockup\", treatment=\"Reversed Mono\", "
-            "layout=\"Horizontal\"). An ambiguous or unknown value DECLINES and lists the "
-            "real variants. Rendered urls EXPIRE (~30 days): download, do not hotlink.\n\n"
+            "SERVIR identity every UI on this platform must carry: pass a set name from "
+            "`ui_catalog.design_file_components`, narrowed by `treatment` and `layout`, and "
+            "you get a rendered SVG url. Rendered urls EXPIRE (~30 days): download, do not "
+            "hotlink.\n\n"
             "receipt_bound components must render UNVERIFIED unless fed a payload "
             "resolved from the platform — there is no 'passed' input.")
+
+
+def describe_component_params() -> dict:
+    """ui_component's parameters as its input schema describes them."""
+    return {"name": "A component ui_catalog lists (authored ones are named in this tool's "
+                    "description), or a brand-asset set name from "
+                    "`ui_catalog.design_file_components`, e.g. \"SERVIR/Logo/Lockup\".",
+            "treatment": "A brand asset's treatment: Primary | Black | Grayscale | Reversed Color "
+                         "| Reversed Mono (use a Reversed treatment on a dark ground). An "
+                         "ambiguous or unknown value DECLINES and lists the real variants.",
+            "layout": "Horizontal | Stacked (Lockup only), e.g. ui_component(name=\"SERVIR/Logo/"
+                      "Lockup\", treatment=\"Reversed Mono\", layout=\"Horizontal\")."}
 
 
 def embed(component: str, receipt_id: str | None = None, place: str | None = None) -> dict:
@@ -366,10 +375,11 @@ def describe_embed() -> str:
     pending = [f"  - `{k}` — {v.get('status', 'not embeddable yet')}"
                for k, v in sorted(comps.items())
                if v.get("delivery") == "embed" and not v.get("embeddable")]
-    return ("Embed a LIVE platform component in a PAGE YOU ARE WRITING — our "
+    return ("EMBED A LIVE PLATFORM COMPONENT in a PAGE YOU ARE WRITING — our "
             "component, running our code, resolving its own state. Use this instead of "
             "a copied recipe whenever a verdict is shown: an embed cannot be handed a "
-            "'passed' flag and cannot freeze one into your markup.\n\n"
+            "'passed' flag and cannot freeze one into your markup. Not for a chat reply or "
+            "inert chrome like source cards (ui_component).\n\n"
             "FOR WEB PAGES AND APPS ONLY — never paste the iframe into a chat reply. "
             "Chat hosts forbid external frames (CSP frame-src 'self'), so in chat it "
             "renders as a blank box; there the evidence panel already displays beside "
@@ -379,10 +389,20 @@ def describe_embed() -> str:
               "(ui_component) only for inert chrome like source cards.")
 
 
+def describe_embed_params() -> dict:
+    """ui_embed's parameters as its input schema describes them."""
+    return {"component": "One of the embeddable components this tool's description lists.",
+            "receipt_id": "For a component bound to a receipt: the receipt it re-resolves at "
+                          "view time.",
+            "place": "For a component bound to a place: the place name it resolves at view time."}
+
+
 def describe_design() -> str:
     t = tokens()
-    return (f"Get the platform design language (theme `{t['id']}` {t['version']}, built on "
-            f"the {t['brand']['name']} identity) so you do NOT invent a colour scheme.\n\n"
+    return (f"THE PLATFORM'S DESIGN LANGUAGE (theme `{t['id']}` {t['version']}, built on "
+            f"the {t['brand']['name']} identity): colour, type and the trust conventions, so a "
+            "page you build does NOT invent a colour scheme. Not for ready-built markup "
+            "(ui_component) or a live verdict (ui_embed).\n\n"
             "Colour and type are read LIVE from the SERVIR Design System in Figma when it is "
             "reachable, so you get what the designers currently ship. `design_source` always "
             "states which you got: `figma-live` (with file, version and last_modified) or "
@@ -395,7 +415,6 @@ def describe_design() -> str:
             "(--grp-* custom properties for any stack), `daisyui_theme` (Tailwind/daisyUI), "
             "plus `trust_rules`, `semantic`, `validation_levels` and `voice` — the honesty "
             "conventions that must travel with the styling.\n\n"
-            "`format`: all (default) | tokens | css | daisyui.\n"
             f"RULE: {t['trust_rules']['success_reserved_for']} — success/verified styling is "
             "reserved for server-verified state; default is "
             f"'{t['trust_rules']['default_state']}'.\n"
@@ -403,13 +422,19 @@ def describe_design() -> str:
             "from ui_component('platform_header'); the logo ships embedded in the markup.")
 
 
+def describe_design_params() -> dict:
+    """ui_design's parameter as its input schema describes it."""
+    return {"format": "all (default) | tokens | css | daisyui."}
+
+
 def describe_catalog() -> str:
     t = tokens()
     comps = {k: v for k, v in (t.get("components") or {}).items() if k != "note"}
     lines = [f"  - `{k}` ({v.get('trust_class')}, delivery: {v.get('delivery')})"
              for k, v in sorted(comps.items())]
-    return ("List the ready-built UI components you can use instead of writing them "
-            "from scratch. Each entry states its TRUST CLASS and how it is delivered.\n\n"
+    return ("THE READY-BUILT UI COMPONENTS you can use instead of writing them from scratch, "
+            "each with its TRUST CLASS and how it is delivered. Use it before writing any UI; not "
+            "for a component's markup (ui_component) or a live verdict (ui_embed).\n\n"
             + "\n".join(lines) +
             "\n\nreceipt_bound = the component shows a verdict, so it binds to a server "
             "id and cannot be handed a 'passed' flag. input = it emits a human judgement "

@@ -269,6 +269,9 @@ class Settings(BaseSettings):
     grp_contrib_allow_private_hosts: bool = False
     # Optional Mattermost incoming-webhook URL; unset = no notifications.
     grp_mattermost_webhook: str = ""
+    # Serve the connect-time instructions at initialize (GRP_SERVE_INSTRUCTIONS). Off: none, as
+    # claude.ai and Claude Desktop connectors see it — a local client then tests that path.
+    grp_serve_instructions: bool = True
 
 
 @lru_cache
