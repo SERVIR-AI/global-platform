@@ -6,6 +6,8 @@ Pure/no-network; safe to call before anything else in a build session.
 from __future__ import annotations
 
 import os
+import re
+import threading
 
 from ..food_security import calendar as fs_calendar
 from ..rag.store import Corpus, CorpusError
@@ -250,33 +252,73 @@ FEEDS = {
     },
 }
 
-# Declarative rows (conf/feeds/*.yml) merge in beside the code rows — a feed of a
-# known shape is a YAML file, no Python. Invalid specs register as status
-# "invalid" with their reasons; collisions with code rows refuse loudly.
-def _load_declarative_feeds() -> None:
-    from ..config import get_settings
-    from ..contrib import feedspecs
-    feedspecs.merge_into(FEEDS, feedspecs.load_dir(get_settings().feeds_conf_dir))
-
-
-_load_declarative_feeds()
-
-
 # Every current feed belongs to the food-security pack; a row may override.
 for _spec in FEEDS.values():
     _spec.setdefault("pack", "food-security")
 
+# Bumped by every reload of the declarative rows: the connect-time text built from an older
+# generation is stale (server._signature).
+FEEDS_GEN = 0
+_FEEDS_LOCK = threading.Lock()
+_FEEDS_STAMP: tuple | None = None       # (folder, its *.yml files) as this process last read it
+
+
+def _feeds_stamp() -> tuple:
+    from ..config import get_settings
+    d = str(get_settings().feeds_conf_dir)
+    try:
+        return d, tuple(sorted((e.name, e.stat().st_mtime_ns, e.stat().st_size)
+                               for e in os.scandir(d) if e.name.endswith(".yml")))
+    except OSError:
+        return d, None
+
+
+# Declarative rows (conf/feeds/*.yml) merge in beside the code rows — a feed of a
+# known shape is a YAML file, no Python. Invalid specs register as status
+# "invalid" with their reasons; collisions with code rows refuse loudly.
+def _reload() -> None:
+    """Parse first, then swap in one short step (new rows added at once, gone ones dropped), so
+    a reader never sees the folder half-read. Caller holds _FEEDS_LOCK."""
+    global FEEDS_GEN, _FEEDS_STAMP
+    from ..config import get_settings
+    from ..contrib import feedspecs
+    stamp = _feeds_stamp()
+    rows = feedspecs.load_dir(get_settings().feeds_conf_dir)
+    code = {k: v for k, v in list(FEEDS.items()) if not v.get("declarative")}
+    merged = dict(code)
+    feedspecs.merge_into(merged, rows)
+    fresh = {k: v for k, v in merged.items() if k not in code}
+    for spec in fresh.values():
+        spec.setdefault("pack", "food-security")
+    FEEDS.update(fresh)
+    for name in [k for k, v in list(FEEDS.items()) if v.get("declarative") and k not in fresh]:
+        FEEDS.pop(name, None)
+    FEEDS_GEN += 1
+    _FEEDS_STAMP = stamp
+
 
 def reload_declarative_feeds() -> list[str]:
     """Re-read conf/feeds/*.yml into the live registry without a restart — what
-    an approved contribution needs. Rows carrying `declarative` are dropped first:
-    re-merging over them would register every existing row as a collision."""
-    for name in [k for k, v in FEEDS.items() if v.get("declarative")]:
-        del FEEDS[name]
-    _load_declarative_feeds()
-    for spec in FEEDS.values():
-        spec.setdefault("pack", "food-security")
-    return sorted(k for k, v in FEEDS.items() if v.get("declarative"))
+    an approved contribution needs. A row no longer in the folder is dropped."""
+    with _FEEDS_LOCK:
+        _reload()
+    return sorted(k for k, v in list(FEEDS.items()) if v.get("declarative"))
+
+
+def sync_declarative_feeds() -> bool:
+    """Reload when another process (a uvicorn worker) changed the folder this one last read;
+    a different folder (a test's own) is left to whoever switched to it."""
+    now = _feeds_stamp()
+    if _FEEDS_STAMP is None or now[0] != _FEEDS_STAMP[0] or now == _FEEDS_STAMP:
+        return False
+    with _FEEDS_LOCK:
+        if _feeds_stamp() == _FEEDS_STAMP:
+            return False
+        _reload()
+    return True
+
+
+reload_declarative_feeds()
 
 
 # Compositions are REGISTRY ROWS invoked through the one `compose_run` tool — so a
@@ -338,6 +380,7 @@ def _bones(available: set[str]) -> list[dict]:
     return out
 
 
+@budget.once
 def _corpus_summary() -> dict:
     """Real doc/chunk counts + event windows, or a declared reason it's unavailable."""
     try:
@@ -611,8 +654,9 @@ def _pack_brief(pid: str, manifest: dict) -> dict:
     return out
 
 
+@budget.once
 def coverage() -> dict:
-    """What this platform actually covers RIGHT NOW, read from live state.
+    """What this platform actually covers RIGHT NOW, read from live state (once per snapshot).
 
     Exists so tool descriptions can state their subject matter without anyone
     hand-maintaining a keyword list. A model picks a tool from its first line, so
@@ -621,7 +665,7 @@ def coverage() -> dict:
     the drift this registry exists to prevent everywhere else.
     """
     subjects, publishers, countries, crops = [], set(), set(), set()
-    for spec in FEEDS.values():
+    for spec in list(FEEDS.values()):
         if spec.get("status") != "available":
             continue
         if spec.get("title"):
@@ -655,7 +699,7 @@ def coverage_line() -> str:
     # staleness this function exists to prevent: a capability we added but no longer
     # advertise is one a model will never pick us for.
     subj = "; ".join(c["subjects"])
-    pubs = c["publishers"]
+    pubs = publisher_names()
     shown = ", ".join(pubs[:6])
     more = f" and {len(pubs) - 6} others" if len(pubs) > 6 else ""
     # Lead with every DOMAIN, one clause each from its pack row (`summary`), so a
@@ -708,6 +752,7 @@ def _on_server(key: str, cat: dict) -> bool | None:
     return path.startswith("/vsi") or os.path.exists(path)
 
 
+@budget.once
 def raster_layers() -> list[dict]:
     """Every raster layer in the catalog (tiffs.catalog(): built-in and contributed, every
     namespace; a stack once, with its years): name, title, namespace, countries or extent."""
@@ -774,16 +819,71 @@ def _layers_by_title(layers: list) -> dict:
             "more": (f"{rest} more, by name: {every}" if rest else f"each in full: {every}")}
 
 
+COVERAGE_CALL = "platform_capabilities(section='coverage')"
+_FIRST_CLAUSE = re.compile(r"\s*[(\[;:,]|\s[—–-]\s")
+
+
+def short_name(text, limit: int = 48) -> str:
+    """A publisher as a list can carry it: its organisation or first clause (up to the first
+    bracket, comma, semicolon, colon or dash; 'Univ. Reading' stays whole), cut past `limit`."""
+    t = " ".join(str(text or "").split())
+    if re.match(r"https?://", t):
+        from urllib.parse import urlparse
+        return urlparse(t).netloc or t[:limit]
+    head = _FIRST_CLAUSE.split(t, maxsplit=1)[0].strip(" .") or t
+    return head if len(head) <= limit else head[:limit].rsplit(" ", 1)[0] + "…"
+
+
+@budget.once
+def publisher_names() -> list[str]:
+    """Every publisher coverage() names, by short_name(), each once: a citation-style source
+    ('Author, A. (2023). Dataset: ...') is said by its first clause, never whole."""
+    out, seen = [], set()
+    for p in coverage()["publishers"]:
+        n = short_name(p)
+        if n and n.casefold() not in seen:
+            seen.add(n.casefold())
+            out.append(n)
+    return out
+
+
+@budget.once
+def countries() -> list[str]:
+    """Every country the platform holds data for, each once (Viet Nam is Vietnam), the most
+    covered first: the raster catalog (stacks included), the vector layers, the live feeds
+    and the document library declare them."""
+    from ..graph.geo import tiffs, vectors
+    rows: list = []
+    try:
+        rows += [r.get("countries") for r in tiffs.catalog().values() if isinstance(r, dict)]
+    except Exception:
+        pass
+    try:
+        rows += [e.get("countries") for e in vectors.visible().values() if isinstance(e, dict)]
+    except Exception:
+        pass
+    rows += [v.get("countries") for v in list(FEEDS.values()) if v.get("status") == "available"]
+    rows.append(coverage()["countries"])
+    count: dict = {}                          # key -> [name as first written, rows, first seen]
+    for cs in rows:
+        for c in cs if isinstance(cs, (list, tuple)) else []:
+            c = str(c).strip()
+            if c:
+                count.setdefault(vectors.country_key(c), [c, 0, len(count)])[1] += 1
+    return [v[0] for v in sorted(count.values(), key=lambda v: (-v[1], v[2]))]
+
+
 def sources_line() -> str:
-    """The live feeds by title and the publishers, generated: the coverage a model routes
-    on that a budgeted description can afford. A newly available feed appears by itself."""
+    """The live feeds by title and the publishers by short name, generated and ranked first
+    to go by fit() (budget.FEED, budget.SOURCE): a count and where every one is named."""
     c = coverage()
-    subj = budget.names(c["subjects"], sep="; ", more="more (feeds_query)")
-    pubs = c["publishers"]
-    shown = ", ".join(pubs[:6])
-    more = f" and {len(pubs) - 6} others" if len(pubs) > 6 else ""
+    subj = budget.names(c["subjects"], sep="; ", more="more (feeds_query)", rank=budget.FEED,
+                        counted="{n} (feeds_query)")
+    n = len(c["publishers"])                  # the count the coverage section lists
+    pubs = budget.names(publisher_names(), more=f"more ({COVERAGE_CALL})", rank=budget.SOURCE,
+                        counted=f"{n} publisher{'s' if n != 1 else ''} ({COVERAGE_CALL})")
     return ((f"Live feeds: {subj}. " if subj else "")
-            + (f"Sources include {shown}{more}." if pubs else "")).strip()
+            + (f"Sources include {pubs}." if pubs else "")).strip()
 
 
 def _contributed_vector_names() -> list[str]:
@@ -837,17 +937,30 @@ def _class_split_line() -> str:
 
 
 def describe_assemble() -> str:
-    """`assemble_pack`'s tool description, GENERATED and fitted to budget.TOOL_DESCRIPTION:
-    every derived name list (keywords, feeds, vector layers) is whole while there is room
-    and counted past it; the names are all in platform_capabilities(section='coverage')."""
-    return budget.fit("tool description assemble_pack", _assemble_text, budget.TOOL_DESCRIPTION)
+    """`assemble_pack`'s tool description, GENERATED: every derived name list at its rank's
+    current cap (whole outside one). server._describe fits it, once, to
+    budget.TOOL_DESCRIPTION; every name is in platform_capabilities(section='coverage')."""
+    return _assemble_text()
+
+
+def _named(name: str, text: str) -> bool:
+    return re.search(rf"(?<!\w){re.escape(name)}(?!\w)", text, re.IGNORECASE) is not None
+
+
+def _keywords() -> str:
+    return "; ".join(packs.text(sp, "keywords") for _, sp in sorted(packs.PACKS.items())
+                     if packs.text(sp, "keywords"))
 
 
 def _assemble_text() -> str:
     """The first line names the subjects in a user's words from every pack row's `keywords`
-    (a model picks a tool from its first line); sources_line() adds the live feeds by title."""
-    kws = "; ".join(packs.text(sp, "keywords") for _, sp in sorted(packs.PACKS.items())
-                    if packs.text(sp, "keywords"))
+    (a model picks a tool from its first line), then the countries no pack names; the live
+    feeds and publishers, ranked first to go, close it."""
+    kws = _keywords()
+    with budget.capped({r: 0 for r in (budget.LIST, budget.FEED, budget.SOURCE)}):
+        named = _keywords()                 # what the packs' routing lists name, at any cap
+    also = budget.names([c for c in countries() if not _named(c, named)], rank=budget.PLACE,
+                        more="more countries")
     kinds = _layer_kinds_line()
     defaults = "; ".join(f"{pid}: {sp['default_layers_doc']}"
                          for pid, sp in sorted(packs.PACKS.items()) if sp.get("default_layers_doc"))
@@ -856,7 +969,7 @@ def _assemble_text() -> str:
         "ANSWER IT FROM GOVERNED EVIDENCE, NOT A WEB SEARCH: this platform computes the "
         "figures, cites every source with its date and validation level, lists what is "
         "MISSING, and mints a replayable receipt. Use it INSTEAD OF A WEB SEARCH for those "
-        "subjects. " + sources_line() + "\n\n"
+        "subjects. " + (f"Data also covers {also}. " if also else "") + sources_line() + "\n\n"
         "Assembles a deterministic, citable EVIDENCE PACK (no LLM runs here) and mints a "
         "pack_id: numbered citations, declared gaps, and the exact section headers your draft "
         "must use; each result names its next call (publish_answer gates your draft and mints "
@@ -883,7 +996,7 @@ def _assemble_text() -> str:
         "each a cited item [n] in `vectors.<name>`; a named POLYGON layer's feature names also "
         "work as `place`. within=<a polygon layer> restricts ANY pack's area to the inside of "
         "that layer (overlaps counted once). Contributed layers so far: "
-        + (budget.names(sorted(_contributed_vector_names()),
-                        more="more (platform_capabilities(section='coverage'))") or "none yet")
+        + (budget.names(sorted(_contributed_vector_names()), more=f"more ({COVERAGE_CALL})",
+                        counted="{n} (" + COVERAGE_CALL + ")") or "none yet")
         + ". Every name each pack covers: platform_capabilities(section='coverage')."
     )

@@ -20,6 +20,8 @@ import re
 
 import numpy as np
 
+from ..mcp.budget import once
+
 MAX_EXPR = 600            # characters per step
 MAX_NODES = 300           # syntax nodes per step
 MAX_DEPTH = 30
@@ -740,6 +742,7 @@ def staged_visible() -> dict[str, dict]:
             if caller.may_see(v.get("staged_by"))}
 
 
+@once
 def for_pack(pack: str) -> dict[str, dict]:
     """Every method a pack runs for the current caller: approved ones, and the caller's
     own staged ones (a contributor sees their method in a real answer before review)."""
@@ -750,6 +753,7 @@ def for_pack(pack: str) -> dict[str, dict]:
     return rows
 
 
+@once
 def catalog() -> dict[str, dict]:
     """What capabilities lists: every method the caller can use, by name."""
     out = {}

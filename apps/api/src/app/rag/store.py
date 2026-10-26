@@ -99,6 +99,11 @@ def _matches(meta: dict, filters: dict) -> bool:
 _LOADED: dict[str, tuple] = {}
 
 
+def corpus_dir(name: str) -> Path:
+    """Where the library `name` keeps its files (written atomically: the directory changes)."""
+    return Path(get_settings().cache_dir) / "rag" / name
+
+
 class Corpus:
     """A named, bounded document library."""
 
@@ -108,7 +113,7 @@ class Corpus:
         from .embed import get_embedder  # keeps store importable without llm deps
         self.name = name
         self.embedder = embedder or get_embedder()
-        self.dir = Path(get_settings().cache_dir) / "rag" / name
+        self.dir = corpus_dir(name)
         self._lock = _corpus_lock(name)
         self._chunks: list[dict] = []
         self._matrix: np.ndarray | None = None

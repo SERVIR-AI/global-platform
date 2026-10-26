@@ -27,7 +27,7 @@ def _shape(sp: dict) -> str:
 
 def _feeds_bound(pid: str) -> int:
     from . import registry
-    return sum(1 for v in registry.FEEDS.values()
+    return sum(1 for v in list(registry.FEEDS.values())
                if v.get("status") == "available" and v.get("pack") == pid)
 
 
@@ -313,14 +313,14 @@ def pointers() -> str:
 
 
 def _fitted() -> tuple[str, str]:
-    """(tier 1, the whole text) under the first budget.CAPS that fits both budgets; the
-    tightest when none does (compose() logs it)."""
-    for cap in budget.CAPS:
-        with budget.capped(cap):
-            t1, t2 = tier(1), tier(2)
-        out = "\n\n".join(p for p in (t1, t2, pointers()) if p)
-        if len(t1) <= budget.INSTRUCTIONS_CORE and len(out) <= budget.INSTRUCTIONS:
-            break
+    """(tier 1, the whole text) with the most names that fit both budgets (budget.fitted); the
+    tightest when nothing does (compose() logs it). Live state is read once (budget.snapshot)."""
+    def render():
+        t1 = tier(1)
+        return t1, "\n\n".join(p for p in (t1, tier(2), pointers()) if p)
+    with budget.snapshot():
+        (t1, out), _ok = budget.fitted(render, lambda r: len(r[0]) <= budget.INSTRUCTIONS_CORE
+                                       and len(r[1]) <= budget.INSTRUCTIONS)
     return t1, out
 
 

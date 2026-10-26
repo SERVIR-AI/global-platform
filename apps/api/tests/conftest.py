@@ -181,3 +181,20 @@ def _fresh_feed_caches():
     feeds._TABLE_CACHE.clear()
     feeds._URL_CHECKS.clear()
     yield
+
+
+@pytest.fixture(autouse=True)
+def _connect_text_settles():
+    """Each test is served connect-time text built under its own state: before and after it,
+    a background rebuild in flight is waited for and the served text dropped (the server
+    rebuilds it in line on the next request)."""
+    import sys
+
+    def settle():
+        server = sys.modules.get("app.mcp.server")
+        if server is not None:
+            server.LIVE.wait()
+            server.LIVE.invalidate()
+    settle()
+    yield
+    settle()

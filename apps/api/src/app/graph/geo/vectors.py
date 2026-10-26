@@ -27,6 +27,8 @@ import numpy as np
 from shapely.geometry import shape
 from shapely.ops import unary_union
 
+from ...mcp.budget import once
+
 # WGS 84. Areas are computed on (lon, AUTHALIC latitude) with the authalic radius —
 # the sphere of the ellipsoid's own area, reached by an equal-area map — so they are
 # the ellipsoid's areas, not the sphere's (which run +0.41% at 10° N); stacks.py
@@ -95,9 +97,10 @@ def unregister(layer: str) -> None:
             _save(reg)
 
 
+@once
 def visible() -> dict:
     """Landed layers plus the staged ones THIS caller may see. Same visibility rule
-    as staged rasters: contributor and reviewers, nobody else."""
+    as staged rasters: contributor and reviewers, nobody else. Read once per snapshot."""
     out = dict(landed())
     try:
         from ...contrib import staging
@@ -124,6 +127,9 @@ _COUNTRY_ALIASES = {"vietnam": "viet nam", "laos": "lao pdr", "lao people's demo
 def _country_key(name) -> str:
     k = " ".join(str(name or "").lower().replace("_", " ").split())
     return _COUNTRY_ALIASES.get(k, k)
+
+
+country_key = _country_key        # one country however it is written (Viet Nam / Vietnam)
 
 
 def country_matches(declared, country) -> bool:

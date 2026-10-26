@@ -105,6 +105,12 @@ def text(spec: dict, key: str) -> str:
 
 
 def _risk_hazard_words() -> str:
+    words = _risk_hazards()
+    return budget.names(words, more="more hazards", rank=budget.ROUTE) if words else "mapped hazards"
+
+
+@budget.once
+def _risk_hazards() -> list[str]:
     """The hazards the catalog serves, in words: return-period floods collapsed to
     one clause, synthetic demonstration layers left out."""
     import re
@@ -112,7 +118,7 @@ def _risk_hazard_words() -> str:
     try:
         cat = tiffs.catalog()
     except Exception:
-        return "mapped hazards"
+        return []
     stems, rps = [], []
     for k, row in cat.items():
         if not k.startswith("hazard_") or (row or {}).get("internal") or _is_synthetic(row or {}):
@@ -120,19 +126,38 @@ def _risk_hazard_words() -> str:
         stem = k[len("hazard_"):]
         m = re.match(r"^(.*)_rp(\d+)$", stem)
         if m:
-            rps.append((m.group(1), int(m.group(2))))
+            rps.append((_hazard_word(m.group(1), row), int(m.group(2))))
             continue
-        if stem not in stems:
-            stems.append(stem)
+        word = _hazard_word(stem, row)
+        if word not in stems:
+            stems.append(word)
     words = list(stems)
     by_base: dict = {}
     for base, n in rps:
         by_base.setdefault(base, []).append(n)
     for base, ns in by_base.items():
-        words.append(f"{base} at {min(ns)}- to {max(ns)}-year return periods")
-    return budget.names(words, more="more hazards") if words else "mapped hazards"
+        words.append(f"{base} at {min(ns)}- to {max(ns)}-year return periods" if min(ns) != max(ns)
+                     else f"{base} at a {ns[0]}-year return period")
+    return words
 
 
+def _hazard_word(stem: str, row) -> str:
+    """A hazard layer's stem in words: a place-qualified stem keeps the words its title has and
+    says its row's countries once ('earthquake_taiwan' -> 'earthquake (Taiwan)', 'cr_flood' titled
+    'Flood depth' -> 'flood (Costa Rica)')."""
+    import re
+    words = [w for w in stem.split("_") if w]
+    if len(words) < 2:
+        return stem
+    row = row or {}
+    cs = [str(c) for c in (row.get("countries") or []) if str(c).strip()]
+    title = str(row.get("title") or "").casefold()
+    plain = [w for w in words if w.casefold() not in {c.casefold() for c in cs}] or words
+    kept = [w for w in plain if re.search(rf"(?<![a-z]){re.escape(w.casefold())}(?![a-z])", title)]
+    return " ".join(kept or plain) + (f" ({', '.join(cs)})" if cs else "")
+
+
+@budget.once
 def risk_coverage() -> dict:
     """Where the risk pack's hazard maps reach, from the catalog — never a typed
     region: {layer: {title, bounds [w, s, e, n] or None, countries}}. Bounds are the
@@ -177,19 +202,23 @@ def _in_risk_region(entry: dict, cov: dict) -> bool:
     return not boxes or not isinstance(bbox, (list, tuple))
 
 
-def _risk_assets() -> list[str]:
-    """What can be counted under a hazard: people when a count grid is landed, the
-    built-in OSM classes, and every contributed point layer inside the region the
-    hazard maps cover, by its title. A Costa Rica occurrence layer was being offered
-    as a hazard-exposure asset for Southeast Asia."""
-    from ..graph.geo import registry as geo_registry, tiffs, vectors
-    words = []
+def _risk_builtin_assets() -> list[str]:
+    """People when a count grid is landed, then the built-in OSM classes."""
+    from ..graph.geo import tiffs
     try:
-        if any(k.startswith("population_") for k in tiffs.catalog()):
-            words.append("people")
+        people = any(k.startswith("population_") for k in tiffs.catalog())
     except Exception:
-        pass
-    words += ["roads", "schools", "hospitals", "buildings"]
+        people = False
+    return (["people"] if people else []) + ["roads", "schools", "hospitals", "buildings"]
+
+
+@budget.once
+def _risk_assets() -> list[str]:
+    """What can be counted under a hazard: the built-in assets, and every contributed point
+    layer inside the region the hazard maps cover, by its title. A Costa Rica occurrence
+    layer was being offered as a hazard-exposure asset for Southeast Asia."""
+    from ..graph.geo import registry as geo_registry, vectors
+    words = _risk_builtin_assets()
     try:
         vis = vectors.visible()
         cov = risk_coverage()
@@ -202,10 +231,17 @@ def _risk_assets() -> list[str]:
 
 
 def _risk_asset_words() -> str:
-    return budget.names(_risk_assets(), last=" and ", more="more asset layers")
+    """The built-in assets always; the contributed ones as fit() has room (budget.LIST)."""
+    return budget.names(_risk_assets(), last=" and ", more="more asset layers",
+                        keep=len(_risk_builtin_assets()))
 
 
 def _risk_where() -> str:
+    return budget.names(_risk_places(), sep="; ", more="more regions", rank=budget.PLACE)
+
+
+@budget.once
+def _risk_places() -> list[str]:
     """Where the risk pack's hazard maps reach, in words, from risk_coverage(): each
     map's declared countries; else the region its title's brackets open with when
     other maps' titles share it ('Flood hazard (Southeast Asia)', '10-year flood
@@ -217,7 +253,7 @@ def _risk_where() -> str:
     try:
         cov, cat = risk_coverage(), tiffs.catalog()
     except Exception:
-        return ""
+        return []
 
     def bracket(title):
         m = re.search(r"\(([^()]+)\)\s*$", str(title or ""))
@@ -238,7 +274,7 @@ def _risk_where() -> str:
                  f"lon {box[0]:.1f} to {box[2]:.1f}, lat {box[1]:.1f} to {box[3]:.1f}" if box else "")
         if where and where not in places:
             places.append(where)
-    return budget.names(places, sep="; ", more="more regions")
+    return places
 
 
 def _risk_summary() -> str:
@@ -276,8 +312,9 @@ def _fs_coverage() -> tuple[str, str]:
         c = registry.coverage()
     except Exception:
         c = {}
-    crops = ", ".join(c.get("crops") or []) or "crop"
-    where = " and ".join(c.get("countries") or []) or "the countries hubs contribute documents for"
+    crops = budget.names(c.get("crops") or [], more="more crops", rank=budget.ROUTE) or "crop"
+    where = (budget.names(c.get("countries") or [], last=" and ", more="more countries",
+                          rank=budget.PLACE) or "the countries hubs contribute documents for")
     return crops, where
 
 
@@ -308,6 +345,24 @@ def _fs_keywords() -> str:
     return f"food security, {crops} outlooks, El Niño / ENSO and IOD drivers ({where})"
 
 
+def _lc_classes() -> list[str]:
+    """Every class name in the registered stacks' legends, each once, the most shared first."""
+    try:
+        from ..land_cover.synthesis import _fold, landcover_stacks
+        rows = landcover_stacks()
+    except Exception:
+        return []
+    shared, named = {}, {}
+    for row in rows.values():
+        for _k, lab in sorted(((int(k), v) for k, v in (row.get("legend") or {}).items()),
+                              key=lambda kv: kv[0]):
+            f = _fold(str(lab))
+            named.setdefault(f, str(lab).lower())
+            shared[f] = shared.get(f, 0) + 1
+    order = list(named)
+    return [named[f] for f in sorted(named, key=lambda f: (-shared[f], order.index(f)))]
+
+
 def _lc_stacks_words() -> tuple[str, str]:
     """(classes, where) from the registered stacks: the class names most stacks share,
     and each stack by title, span and class count, grouped by the countries its row
@@ -315,38 +370,32 @@ def _lc_stacks_words() -> tuple[str, str]:
     moment it lands. Every contributed legend run together read as one product's
     seventy classes."""
     try:
-        from ..land_cover.synthesis import _fold, landcover_stacks
+        from ..land_cover.synthesis import landcover_stacks
         from ..graph.geo import stacks as _stacks
         rows = landcover_stacks()
     except Exception:
         rows = {}
     if not rows:
         return "land-cover classes", "no land-cover stack is registered yet"
-    shared, named, groups = {}, {}, {}
+    groups = {}
     for sid, row in rows.items():
-        legend = [str(v) for _k, v in sorted(((int(k), v) for k, v in (row.get("legend") or {}).items()),
-                                             key=lambda kv: kv[0])]
-        for lab in legend:
-            f = _fold(lab)
-            named.setdefault(f, lab.lower())
-            shared[f] = shared.get(f, 0) + 1
+        n_leg = len(row.get("legend") or {})
         try:
             ys = _stacks.years(row)
             span = (f"{min(ys)}-{max(ys)}" if min(ys) != max(ys) else str(ys[0])) if ys else ""
         except Exception:
             span = ""
         title = str(row.get("title") or sid)
-        n_cls = f"{len(legend)} class{'' if len(legend) == 1 else 'es'}"
+        n_cls = f"{n_leg} class{'' if n_leg == 1 else 'es'}"
         countries = ", ".join(str(c) for c in (row.get("countries") or []) if str(c).strip())
         groups.setdefault(countries, []).append(
             title + (f", {span}" if span and span not in title else "")
             + (f" ({n_cls})" if n_cls not in title else ""))
-    order = list(named)
-    top = sorted(named, key=lambda f: (-shared[f], order.index(f)))[:10]
-    classes = ", ".join(named[f] for f in top) + (
-        " and the other classes of each stack's own legend" if len(named) > len(top) else "")
+    ranked = _lc_classes()
+    classes = ", ".join(ranked[:10]) + (
+        " and the other classes of each stack's own legend" if len(ranked) > 10 else "")
     where = budget.names(((f"{c}: " if c else "") + ", ".join(titles) for c, titles in groups.items()),
-                         sep="; ", more="more stacks")
+                         sep="; ", more="more stacks", rank=budget.ROUTE)
     return classes, where
 
 
@@ -396,10 +445,86 @@ def _lc_covers() -> str:
             + (f", {len(countries)} countr{'y' if len(countries) == 1 else 'ies'}" if countries else ""))
 
 
+# Words a product name never ends on once its years and sizes are gone ('masks 1985 and 2014').
+_TRAILING = {"and", "or", "to", "of", "the", "for", "in", "on", "at", "by", "with", "from", "/",
+             "-", "–", "—", "&", "+"}
+
+
+def map_product(title: str, countries=()) -> str:
+    """A map's product as a question names it: its title's first clause without its own
+    countries, years, cell size or version ('MapBiomas Brazil 10 m land cover, Collection 4'
+    -> 'MapBiomas land cover'), at most 48 chars, never ending on 'and'."""
+    import re
+    head = re.split(r"\s[—–-]\s|[(,;:\[]", str(title or ""), maxsplit=1)[0]
+    for c in countries:
+        head = re.sub(rf"(?<!\w){re.escape(str(c))}(?!\w)", " ", head, flags=re.IGNORECASE)
+    head = re.sub(r"\b(?:19|20)\d\d(?:\s*[-–]\s*(?:19|20)?\d\d)?\b", " ", head)
+    head = re.sub(r"\b\d+(?:\.\d+)?\s?k?m\b|\bv\d+(?:\.\d+)*\b", " ", head, flags=re.IGNORECASE)
+    words = head.split()
+    while len(" ".join(words)) > 48:
+        words.pop()
+    while words and words[-1].casefold() in _TRAILING:
+        words.pop()
+    return " ".join(words) or str(title or "")[:48]
+
+
+def _brand(word: str) -> bool:
+    """A word that names a product by itself: an acronym or coined name (MapBiomas, ESA,
+    GWL_FCS30D), not a plain word ('Global', 'Mangrove')."""
+    return any(ch.isupper() for ch in word[1:]) or any(ch.isdigit() or ch == "_" for ch in word)
+
+
+def _families(named: list[tuple[str, list[str]]]) -> list[str]:
+    """[(product, its countries)] -> one name per product family, the broadest first: products
+    sharing a coined first word (else their first two words) are one family, named by the
+    words they all open with ('MapBiomas Collection 4.0', 'MapBiomas land cover' -> 'MapBiomas')."""
+    fams: dict = {}                           # key -> [words, stacks, countries, first seen]
+    for name, cs in named:
+        words = name.split()
+        key = " ".join(w.casefold() for w in (words[:1] if _brand(words[0]) else words[:2]))
+        f = fams.setdefault(key, [words, 0, [], len(fams)])
+        n = 0
+        while n < min(len(f[0]), len(words)) and f[0][n].casefold() == words[n].casefold():
+            n += 1
+        f[0] = f[0][:n]
+        f[1] += 1
+        f[2] += [c for c in cs if c not in f[2]]
+    out = []
+    for words, _n, _cs, _i in sorted(fams.values(), key=lambda f: (-len(f[2]), -f[1], f[3])):
+        while len(words) > 1 and words[-1].casefold() in _TRAILING:
+            words = words[:-1]
+        out.append(" ".join(words))
+    return out
+
+
+def _lc_maps() -> tuple[list[str], list[str]]:
+    """(product families, countries) of the registered land-cover stacks, each once — what a
+    land-cover question is routed on (budget.ROUTE, budget.PLACE): the family covering the most
+    countries first; an untitled stack adds its countries, never its id."""
+    try:
+        from ..land_cover.synthesis import landcover_stacks
+        rows = landcover_stacks()
+    except Exception:
+        rows = {}
+    named, countries = [], []
+    for row in rows.values():
+        cs = [str(c) for c in (row.get("countries") or []) if str(c).strip()]
+        if str(row.get("title") or "").strip():
+            named.append((map_product(row["title"], cs), cs))
+        countries += [c for c in cs if c not in countries]
+    return _families(named), countries
+
+
 def _lc_keywords() -> str:
-    classes, _where = _lc_stacks_words()
+    """Classes counted before the maps and countries a question is routed on (budget.LIST)."""
+    classes = budget.names(_lc_classes(), more="more classes", keep=3) or "land-cover classes"
+    products, countries = _lc_maps()
+    maps = budget.names(products, more="more maps", rank=budget.ROUTE)
+    where = budget.names(countries, more="more countries", rank=budget.PLACE)
+    tail = (f"maps: {maps}" + (f" ({where})" if where else "") if maps else
+            f"maps over {where}" if where else "no land-cover stack is registered yet")
     return (f"land cover: {classes}, land-cover change, deforestation and forest gain, "
-            f"fire detections ({budget.names(dict.fromkeys(_lc_where()), sep='; ', more='more')})")
+            f"fire detections; {tail}")
 
 
 def target_shapes(sep: str = " | ") -> str:

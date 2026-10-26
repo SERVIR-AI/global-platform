@@ -10,6 +10,9 @@ import math
 import yaml
 
 from ...config import get_settings
+from ...mcp.budget import once
+
+_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
 
 def _doc():
@@ -82,13 +85,19 @@ def role_for(name):
     return None
 
 
+@once
 def namespaces():
     """{role: rule} for the namespaces a contributed raster may take (`namespaces` in
     conf/raster_schema.yml): its prefix, what its cells hold, whether it needs a legend,
     how a projected file is re-gridded. A schema that declares none (a stripped test or
     deployment schema) falls back to the platform's shipped table — the namespaces are
     data, never a list typed into code."""
-    rows = _doc().get("namespaces") or _shipped().get("namespaces")
+    try:                    # only the hand schema declares them (contributions add layers)
+        with open(get_settings().raster_schema_path) as f:
+            hand = yaml.load(f, Loader=_LOADER) or {}
+    except FileNotFoundError:
+        hand = {}
+    rows = hand.get("namespaces") or _shipped().get("namespaces")
     return {str(k): dict(v or {}) for k, v in (rows or {}).items()}
 
 

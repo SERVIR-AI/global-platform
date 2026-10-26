@@ -9,9 +9,14 @@ from __future__ import annotations
 from typing import Any
 
 import base64
+import contextvars
 import inspect
 import builtins
+import logging
 import os
+import threading
+import time
+from pathlib import Path
 
 from fastmcp import FastMCP
 from fastmcp.server.middleware import Middleware
@@ -21,6 +26,8 @@ from . import (app_ui, assemble, auth, budget, compose, context, feeds, fetch, i
                loop, weights_ui,
                publish, record, registry, resolve, shape, store, ui, verify)
 from ..config import get_settings
+
+log = logging.getLogger(__name__)
 
 
 def _transport_security() -> dict:
@@ -71,6 +78,7 @@ def _instructions() -> str:
     return instructions.compose()
 
 
+_STARTED = time.perf_counter()
 INSTRUCTIONS = _instructions()
 
 # Host, port, transport security and statelessness are no longer constructor
@@ -101,69 +109,178 @@ mcp = FastMCP("servirplatform", instructions=INSTRUCTIONS, icons=_brand_icons(),
 # tool name -> the function that writes its description from live state. One map feeds the
 # decorator AND _LiveText, so a generated description is never frozen at import.
 DESCRIBERS: dict[str, Any] = {}
+_BUILT: dict[str, str] = {}             # the text each tool registered with at import
 
 
 def _describe(name: str, fn) -> str:
     """Register `fn` as the tool's live describer (plus every instruction section homed on
-    the tool), fitted to budget.TOOL_DESCRIPTION — derived name lists counted past what fits,
-    an overrun logged — and return today's text."""
+    the tool), fitted ONCE, here, to budget.TOOL_DESCRIPTION — derived name lists counted past
+    what fits, by rank, an overrun logged — and return today's text."""
     def live() -> str:
         return budget.fit(f"tool description {name}",
                           lambda: instructions.with_home(f"tool:{name}", fn()),
                           budget.TOOL_DESCRIPTION)
     DESCRIBERS[name] = live
-    return live()
+    _BUILT[name] = live()
+    return _BUILT[name]
+
+
+def _signature() -> tuple:
+    """(path, mtime, size) of where contributions land: every conf file or directory the
+    settings name, the vector registry and each pack's document library, and the feed rows'
+    generation. A change makes the cached text stale before its TTL (which catches the rest)."""
+    from ..graph.geo import vectors
+    from ..rag.store import corpus_dir
+    from . import packs
+    s = get_settings()
+    cache = str(s.cache_dir)
+    paths = [p for p in vars(s).values() if isinstance(p, Path) and not str(p).startswith(cache)]
+    paths += [Path(cache) / vectors.REGISTRY] + [corpus_dir(str(sp["corpus"]))
+                                                 for sp in packs.PACKS.values() if sp.get("corpus")]
+    out = []
+    for p in paths:
+        try:
+            st = os.stat(p)
+            out.append((str(p), st.st_mtime_ns, st.st_size))
+        except OSError:
+            out.append((str(p), None, None))
+    return (*out, ("feeds generation", registry.FEEDS_GEN))
+
+
+def _sync_feeds() -> None:
+    try:
+        registry.sync_declarative_feeds()
+    except Exception:
+        log.exception("feeds: conf/feeds could not be re-read; serving the rows already held")
 
 
 class _LiveText(Middleware):
-    """Connect-time text that follows the platform's state. Every description built
-    from live state (packs, stacks, contributed layers, feeds) is regenerated for each
-    new connection rather than frozen at process start; a 30-second cache keeps a
-    burst of reconnects cheap."""
-    TTL = 30.0
+    """Connect-time text served from memory (a client drops a server slow to connect): built at
+    startup and served at once on every handshake and tools/list; stale (TTL, or a contribution
+    store changed), ONE background thread rebuilds it. Invalidated: rebuilt in line."""
+    TTL = 300.0                         # a backstop: _signature() catches contributions at once
 
     def __init__(self):
-        self._at = 0.0
+        self._at = 0.0                  # monotonic time of the last build; 0.0: none to serve
         self._instr = None
         self._descs: dict = {}
+        self._sig = None
+        self._gen = 0                   # bumped by invalidate(): an older build is dropped
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+
+    def build(self) -> tuple[str | None, dict]:
+        """(instructions, {tool: description}) from live state, each source read once."""
+        descs = {}
+        with budget.snapshot():
+            for name, fn in DESCRIBERS.items():
+                try:
+                    descs[name] = fn()
+                except Exception:         # keep the last text served rather than fail a listing
+                    log.exception("connect-time text: the %s description failed to build", name)
+                    if self._descs.get(name):
+                        descs[name] = self._descs[name]
+            try:
+                instr = _instructions()
+            except Exception:
+                log.exception("connect-time text: the instructions failed to build")
+                instr = None
+        return instr, descs
+
+    def rebuild(self, why: str = "asked") -> None:
+        """Build in a context of its own (no caller, no caps), swap it in, log it once. A feed
+        another worker landed is read in first (registry.sync_declarative_feeds)."""
+        _sync_feeds()
+        gen, sig, t0 = self._gen, _signature(), time.perf_counter()
+        instr, descs = contextvars.Context().run(self.build)
+        ms = (time.perf_counter() - t0) * 1000
+        if gen != self._gen:
+            return                        # invalidated while building: the next request rebuilds
+        self._descs = descs
+        if instr:
+            self._instr = mcp.instructions = instr      # sessions created from now on
+        self._sig, self._at = sig, time.monotonic()
+        (log.warning if ms > budget.REBUILD_MS else log.info)(
+            "connect-time text rebuilt in %.0f ms (%s): %d descriptions, instructions %s chars",
+            ms, why, len(descs), f"{len(instr or ''):,}")
+
+    def seed(self, instr: str, descs: dict, ms: float) -> None:
+        """What import built is served from the first request: no rebuild needed."""
+        self._instr, self._descs = instr, dict(descs)
+        self._sig, self._at = _signature(), time.monotonic()
+        log.info("connect-time text built at startup in %.0f ms: %d descriptions, instructions "
+                 "%s chars", ms, len(descs), f"{len(instr):,}")
+
+    def invalidate(self) -> None:
+        """Drop the cached text: the next request builds it in line."""
+        self._gen += 1
+        self._at = 0.0
+
+    def wait(self, timeout: float | None = None) -> None:
+        """Until a background rebuild in flight has finished."""
+        t = self._thread
+        if t is not None:
+            t.join(timeout)
+
+    def _background(self, why: str) -> None:
+        try:
+            self.rebuild(why)
+        except Exception:
+            log.exception("connect-time text: background rebuild failed; serving the last text")
 
     def _fresh(self) -> None:
-        import time
-        if self._instr is not None and time.monotonic() - self._at < self.TTL:
+        """Serve now; rebuild in line only when nothing was ever built."""
+        if self._at == 0.0:
+            self.rebuild("nothing built yet")
             return
-        descs = {}
-        for name, fn in DESCRIBERS.items():
-            try:
-                descs[name] = fn()
-            except Exception:                 # keep the registered text rather than fail a listing
-                pass
+        why = ("older than its TTL" if time.monotonic() - self._at >= self.TTL else
+               "a contribution store changed" if _signature() != self._sig else None)
+        if why is None:
+            return
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                return
+            self._thread = threading.Thread(target=self._background, args=(why,),
+                                            name="connect-text-rebuild", daemon=True)
+            self._thread.start()
+
+    def _handshake(self, result):
+        """The served instructions in a handshake reply: this session's options were built
+        before the request reached us."""
+        instr = self._instr
+        if not instr or result is None:
+            return result
+        if isinstance(result, dict):
+            return {**result, "instructions": instr}
         try:
-            self._instr = _instructions()
+            return result.model_copy(update={"instructions": instr}) \
+                if hasattr(result, "instructions") else result
         except Exception:
-            self._instr = None
-        self._descs = descs
-        self._at = time.monotonic()
+            return result
 
     async def on_initialize(self, context, call_next):
         self._fresh()
         if self._instr:
             mcp.instructions = self._instr          # sessions created from now on
-        result = await call_next(context)
-        # This session's options were built before the request reached us: put the
-        # fresh text into the reply itself.
-        if self._instr and result is not None and hasattr(result, "instructions"):
-            try:
-                result = result.model_copy(update={"instructions": self._instr})
-            except Exception:
-                pass
-        return result
+        return self._handshake(await call_next(context))
+
+    async def on_discover(self, context, call_next):
+        """The modern handshake (server/discover) carries the same served text."""
+        self._fresh()
+        return self._handshake(await call_next(context))
+
+    async def on_call_tool(self, context, call_next):
+        """A feed another worker landed or retired is this worker's too before a tool reads it."""
+        _sync_feeds()
+        return await call_next(context)
 
     async def on_list_tools(self, context, call_next):
         tools = await call_next(context)
         self._fresh()
+        descs = self._descs
         out = []
         for t in tools:
-            d = self._descs.get(getattr(t, "name", None))
+            d = descs.get(getattr(t, "name", None))
             out.append(t.model_copy(update={"description": d}) if d and d != t.description else t)
         return out
 
@@ -805,7 +922,11 @@ def main() -> None:
             **_http_transport())
 
 
-mcp.add_middleware(_LiveText())
+# The connect-time text import built is what the first request is served; it refreshes
+# off the request path from then on (_LiveText).
+LIVE = _LiveText()
+LIVE.seed(INSTRUCTIONS, _BUILT, (time.perf_counter() - _STARTED) * 1000)
+mcp.add_middleware(LIVE)
 mcp.add_middleware(_ErrorBudget())
 
 

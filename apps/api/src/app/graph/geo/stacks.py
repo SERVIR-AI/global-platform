@@ -21,6 +21,7 @@ import rasterio.warp
 from shapely.geometry import shape
 
 from . import tiffs
+from ...mcp.budget import once
 
 # The authalic radius: a sphere of this radius has the ellipsoid's total area, but not
 # its area between two parallels — at 10 N the sphere overstates a pixel by ~0.41%, at
@@ -41,8 +42,9 @@ def _q(lat_rad):
                              - (1 / (2 * _E)) * np.log((1 - _E * s) / (1 + _E * s)))
 
 
+@once
 def rows():
-    """{stack_id: stack row} for every `kind: stack` row in the catalog."""
+    """{stack_id: stack row} for every `kind: stack` row in the catalog (once per snapshot)."""
     return {k: v for k, v in tiffs.catalog().items() if v.get("kind") == "stack"}
 
 

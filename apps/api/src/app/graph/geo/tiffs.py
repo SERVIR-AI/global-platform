@@ -7,6 +7,7 @@ import os
 import yaml
 
 from ...config import get_settings
+from ...mcp.budget import once
 
 _BASE: dict = {}        # the merged, expanded hand + contributed catalog, keyed by both files' (mtime, size)
 _LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
@@ -43,13 +44,14 @@ def _base():
     return cat
 
 
+@once
 def catalog(include_staged: bool = True):
     """Hand-authored rows + contributed rows (conf/tiffs.contrib.yml — machine-
     owned, written only by the contribution gate; contrib cannot shadow) + the
     STAGED layers the current caller may see (contrib/staging.py: a contributor
     previews their own layer; nobody else sees it until approval). Returns a new
     top-level dict each call (callers add or replace keys; rows are shared and
-    never edited in place)."""
+    never edited in place); read once per budget.snapshot()."""
     cat = dict(_base())
     if include_staged:
         try:

@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 
 from ..config import get_settings
+from .budget import once
 
 _APP_WEB = Path(__file__).resolve().parents[4] / "web" / "src"
 
@@ -26,8 +27,9 @@ def theme_path() -> Path:
     return Path(get_settings().crop_calendar_path).parent / "ui_theme.json"
 
 
+@once
 def tokens() -> dict:
-    """The canonical token JSON — what an LLM reasons over.
+    """The canonical token JSON — what an LLM reasons over (read once per budget.snapshot()).
 
     `GRP_PUBLIC_BASE` overrides where trust chrome resolves. The committed theme
     carries LOCALHOST values because that is right for development — but the file
