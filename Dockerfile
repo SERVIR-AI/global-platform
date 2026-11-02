@@ -11,7 +11,7 @@
 # without this an arm64 build host produces an image that dies on boot.
 
 # ---- web: the embed host, built to static files ----
-FROM --platform=linux/amd64 node:22-slim@sha256:4b150b48b4116e2a22f2c39cc27025fbf4f153e2078fd3b14d159fdb5c7279da AS web
+FROM --platform=linux/amd64 node:26-slim@sha256:e4db4c914bf8ad241bd24804fc25d272d89bad97e68cdc8a1414862790a02c39 AS web
 WORKDIR /w
 COPY apps/web/package.json apps/web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
