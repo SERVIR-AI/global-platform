@@ -27,7 +27,7 @@ FROM --platform=linux/amd64 python:3.12-slim@sha256:b18b261e1b4974b4f321451ad525
 ARG LITESTREAM_VERSION=0.3.13
 ARG LITESTREAM_SHA256=eb75a3de5cab03875cdae9f5f539e6aedadd66607003d9b1e7a9077948818ba0
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl \
+ && apt-get install -y --no-install-recommends ca-certificates curl libexpat1 \
  && curl -fsSL -o /tmp/litestream.tar.gz \
       "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-v${LITESTREAM_VERSION}-linux-amd64.tar.gz" \
  && echo "${LITESTREAM_SHA256}  /tmp/litestream.tar.gz" | sha256sum -c - \
@@ -52,6 +52,9 @@ COPY pyproject.toml uv.lock ./
 COPY apps/api/pyproject.toml apps/api/pyproject.toml
 RUN uv sync --frozen --no-dev --no-install-workspace --package global-risk-api \
  && rm -rf /root/.cache/uv
+# The native wheels must load here, not at the first request: rasterio needs libexpat1
+# from the base image, and a base-image bump that drops it fails this layer, not the boot.
+RUN /app/.venv/bin/python -c "import rasterio, shapely, numpy, fastmcp, uvicorn"
 
 # Layout mirrors the repo so config.py's repo-root-relative defaults resolve unchanged
 # (/app/conf, /app/cache): no path rewriting, no drift from local.
