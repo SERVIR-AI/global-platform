@@ -108,7 +108,10 @@ def test_the_core_rules_sit_inside_the_first_2048(log):
     for rule in CORE_RULES:
         assert rule in kept, rule
     full = instructions.compose()
-    at = [full.index(instructions.section_text(s["key"])) for s in instructions.SECTIONS
+    # The first 40 chars of a section read the same whether compose() had to cap the pack
+    # names or not (a clean checkout with no cache/ has longer counts and caps); the
+    # order is what this checks, not the rendering mode.
+    at = [full.index(instructions.section_text(s["key"])[:40]) for s in instructions.SECTIONS
           if s["tier"] < 3]
     assert at == sorted(at), "tier-1/2 sections out of their declared order"
     assert full.index(instructions.pointers()) > max(at)
