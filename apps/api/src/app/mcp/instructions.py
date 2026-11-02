@@ -81,7 +81,7 @@ def _opening() -> str:
     found them over), pack names and shapes only, counted past the cap."""
     n = len(_packs().PACKS)
     lines = pack_lines(detailed=budget.current_cap() is None)
-    return (f"The Global Risk Platform is a GOVERNED TOOLKIT for decision support, not a chatbot: "
+    return (f"The SERVIR Global Platform is a GOVERNED TOOLKIT for decision support, not a chatbot: "
             f"{n} domain pack{'s' if n != 1 else ''} — "
             + budget.names(lines, sep="; ", more="more (platform_capabilities)") + ". "
             + COVERAGE)
@@ -394,7 +394,7 @@ def how_to_use(prompts: list[tuple[str, str]] | None = None, tools=None) -> str:
         + ", ".join(f"{k}={v!r}" for k, v in (sp.get("doctor_target") or {}).items()) + ")`"
         for pid, sp in packs.PACKS.items() if sp.get("doctor_target"))
     rules = "\n\n".join(f"### {s['title']}\n{_text(s)}" for s in SECTIONS)
-    return f"""# How to use the Global Risk Platform
+    return f"""# How to use the SERVIR Global Platform
 
 A **governed toolkit** for decision support across {len(packs.PACKS)} domain packs — {names} — \
 not a chatbot. Every insight carries its evidence, declines say why, and a groundedness gate \

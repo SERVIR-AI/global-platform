@@ -1,7 +1,7 @@
 {
   "id": "grp",
   "version": "v0",
-  "description": "The Global Risk Platform design language, built on the official SERVIR identity (styleguide/). Single source of truth: the web app imports generated artifacts from this file, and ui.design serves it. Edit here, regenerate — never hand-edit the generated files.",
+  "description": "The SERVIR Global Platform design language, built on the official SERVIR identity (styleguide/). Single source of truth: the web app imports generated artifacts from this file, and ui.design serves it. Edit here, regenerate — never hand-edit the generated files.",
   "brand": {
     "name": "SERVIR",
     "source": "styleguide/identity-guidelines.png + SERVIR_Style_guide/ (2026 identity)",
@@ -194,7 +194,7 @@
     "retrieved_uncited": "retrieved, not cited by any claim"
   },
   "product": {
-    "platform_name": "SERVIR Global Risk Platform",
+    "platform_name": "SERVIR Global Platform",
     "rule": "Every UI built on this platform MUST show the platform header: the SERVIR logo plus the DOMAIN name (e.g. 'Food Security Platform'). Get the domain's display_name from the pack manifest. A hub's own branding sits alongside, never replacing the attribution.",
     "resolver": {
       "base": "http://localhost:8001",

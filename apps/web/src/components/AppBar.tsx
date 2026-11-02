@@ -8,7 +8,7 @@ const AppBar: FC = () => (
     <div className="flex items-center gap-3 min-w-0">
       <div className="flex gap-2 shrink-0">
         <TrafficCone />
-        <span>Global Risk Platform</span>
+        <span>SERVIR Global Platform</span>
       </div>
       <a
         href="https://www.servirglobal.net/"

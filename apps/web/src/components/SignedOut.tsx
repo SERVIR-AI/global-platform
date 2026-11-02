@@ -15,7 +15,7 @@ const SignedOut: FC = () => {
         </span>
         <div className="text-lg font-semibold">Sign in to continue</div>
         <p className="text-sm text-zinc-500 leading-relaxed">
-          The Global Risk Platform is private — sign in to ask questions, upload data and view risk
+          The SERVIR Global Platform is private — sign in to ask questions, upload data and view risk
           maps.
         </p>
         <button type="button" className="btn btn-primary mt-1" onClick={() => login()}>

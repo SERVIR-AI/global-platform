@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""grp-login — get a Global Risk Platform token from a terminal.
+"""grp-login — get a SERVIR Global Platform token from a terminal.
 
 The platform's API and MCP take the same bearer token that Claude gets when it logs
 you in. This does that login from a shell, with nothing but the standard library:
@@ -42,7 +42,7 @@ TOKEN_FILE = os.path.join(HOME, "token.json")
 SCOPE = "openid profile email offline_access"
 # Cloudflare in front of the issuer bans Python's default user-agent outright
 # ("browser_signature_banned"); a tool should say what it is anyway.
-UA = "grp-login/1.0 (Global Risk Platform CLI; +https://servirplatform.sig-gis.com/runbook/)"
+UA = "grp-login/1.0 (SERVIR Global Platform CLI; +https://servirplatform.sig-gis.com/runbook/)"
 
 
 # ----------------------------------------------------------------- plumbing
@@ -118,7 +118,7 @@ def client_id(meta: dict, override: str | None) -> str:
     if not reg:
         _die("no cached client and the issuer offers no registration — pass --client-id")
     status, out = _post(reg, body={
-        "client_name": "grp-login (Global Risk Platform CLI)",
+        "client_name": "grp-login (SERVIR Global Platform CLI)",
         "grant_types": ["urn:ietf:params:oauth:grant-type:device_code",
                         "authorization_code", "refresh_token"],
         # Registration insists on a redirect and a response type; the device
