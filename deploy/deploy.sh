@@ -10,6 +10,12 @@
 # — it is the default one.
 set -euo pipefail
 
+# The image is CODE ONLY (2 Nov 2026): the corpus, rasters and contributed catalogs are
+# mounted at run time, never baked. Set DATA_BUCKET to a bucket laid out like cache/
+# (rag/, tiffs/, ...) and it is mounted at /app/cache; without it the service boots
+# with no library and no layers, which is a smoke test, not a demo.
+DATA_BUCKET="${DATA_BUCKET:-}"
+
 PROJECT="${PROJECT:?set PROJECT=<gcp-project-id>}"
 REGION="${REGION:-us-central1}"
 SERVICE="${SERVICE:-servirplatform}"
@@ -48,8 +54,16 @@ gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
   --member="serviceAccount:${RUNTIME_SA}" --role="roles/storage.objectAdmin" \
   --project "$PROJECT" >/dev/null
 
+DATA_FLAGS=()
+if [ -n "$DATA_BUCKET" ]; then
+  DATA_FLAGS=(--add-volume="name=data,type=cloud-storage,bucket=${DATA_BUCKET}"
+              --add-volume-mount="volume=data,mount-path=/app/cache")
+else
+  echo "WARNING: DATA_BUCKET unset: deploying with no corpus and no layers (code only)." >&2
+fi
+
 echo "==> deploying ${SERVICE} to ${REGION}"
-gcloud run deploy "$SERVICE" \
+gcloud run deploy "$SERVICE" "${DATA_FLAGS[@]}" \
   --project "$PROJECT" \
   --region "$REGION" \
   --source . \

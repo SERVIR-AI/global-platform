@@ -119,7 +119,7 @@ jobs:
 
       - name: The product is the SERVIR Global Platform in every file a reader sees
         run: |
-          if git grep -n -i -e 'global risk platform' -- ':!uv.lock' ':!**/package-lock.json'; then
+          if git grep -n -i -e '[g]lobal risk platform' -- ':!uv.lock' ':!**/package-lock.json'; then
             echo "::error::Write 'SERVIR Global Platform'. Risk is one of its three domain packs, not its name."
             exit 1
           fi

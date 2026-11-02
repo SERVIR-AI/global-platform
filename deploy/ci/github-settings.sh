@@ -39,9 +39,12 @@ say "3. secret scanning, push protection, Dependabot security updates"
 gh api -X PATCH "repos/${REPO}" --input - --jq '.security_and_analysis' <<'JSON'
 {"security_and_analysis": {
   "secret_scanning": {"status": "enabled"},
-  "secret_scanning_push_protection": {"status": "enabled"},
-  "dependabot_security_updates": {"status": "enabled"}}}
+  "secret_scanning_push_protection": {"status": "enabled"}}}
 JSON
+# Dependabot alerts and security updates are not properties of the repository
+# PATCH; each has its own endpoint (204, no body).
+gh api -X PUT "repos/${REPO}/vulnerability-alerts"
+gh api -X PUT "repos/${REPO}/automated-security-fixes"
 
 say "4. ruleset on the default branch: ${RULESET_NAME}"
 # actor_id 5 with actor_type RepositoryRole is the repository admin role.

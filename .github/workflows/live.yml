@@ -22,10 +22,6 @@ jobs:
     permissions:
       contents: read
       issues: write
-    env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -33,6 +29,10 @@ jobs:
 
       - name: Are provider keys configured?
         id: keys
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
         run: |
           if [ -z "${OPENAI_API_KEY}${ANTHROPIC_API_KEY}${GOOGLE_API_KEY}" ]; then
             echo "::notice::No provider keys in repository secrets; the live suite is skipped."
@@ -60,6 +60,9 @@ jobs:
           IRI_LIVE: "1"
           CROPMONITOR_LIVE: "1"
           SYNTHESIS_LIVE: "1"
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
         run: uv run --frozen pytest -q -p no:cacheprovider --durations=20
 
       - name: Open or update the "live suite failed" issue

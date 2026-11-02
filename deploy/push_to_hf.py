@@ -2,8 +2,10 @@
 """Assemble and upload the platform to a Hugging Face Space (Docker SDK).
 
 Uploads through huggingface_hub rather than git, so large files are handled
-without a local git-lfs install. Only what the MCP needs is shipped — notably
-NOT cache/tiffs (1.8GB of rasters this deployment does not serve).
+without a local git-lfs install. The image is CODE ONLY (2 Nov 2026): no corpus
+and no rasters ship with it, so the Space serves no library until it gets
+persistent storage with the data under CACHE_DIR. What ships is exactly what
+the Dockerfile copies.
 
     HF_TOKEN=hf_... python deploy/push_to_hf.py <owner>/<space-name>
 """
@@ -28,7 +30,9 @@ TREE: list[tuple[str, str]] = [
     ("apps/api/pyproject.toml", "apps/api/pyproject.toml"),
     ("apps/api/src", "apps/api/src"),
     ("conf", "conf"),
-    ("cache/rag/food-security", "cache/rag/food-security"),
+    (".claude/skills/trace-emit", ".claude/skills/trace-emit"),
+    (".claude/skills/trace-visualize", ".claude/skills/trace-visualize"),
+    (".claude/skills/contribute-logic", ".claude/skills/contribute-logic"),
     ("deploy/entrypoint.sh", "deploy/entrypoint.sh"),
     ("deploy/litestream.yml", "deploy/litestream.yml"),
     ("deploy/hf-space-README.md", "README.md"),

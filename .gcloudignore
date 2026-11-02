@@ -1,32 +1,44 @@
-# What gcloud uploads as build context for 'gcloud run deploy --source .'. gcloud reads
-# this file and not .dockerignore, so it mirrors .dockerignore line for line.
-*
-!pyproject.toml
-!uv.lock
-!apps/api/pyproject.toml
-!apps/api/src
-!apps/web/package.json
-!apps/web/package-lock.json
-!apps/web/index.html
-!apps/web/src
-!apps/web/public
-!apps/web/tsconfig.json
-!apps/web/tsconfig.app.json
-!apps/web/tsconfig.node.json
-!apps/web/vite.config.ts
-!conf
-!deploy
-!.claude/skills/trace-emit
-!.claude/skills/trace-visualize
+# What gcloud uploads as build context for 'gcloud run deploy --source .'. gcloud does
+# not read .dockerignore and follows gitignore rules, where a child cannot be re-included
+# under an excluded parent, so this is a block-list of everything the Dockerfile never
+# copies. Keep it in step with .dockerignore.
+.git
+.gitignore
+.github
+.venv
+**/.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+**/node_modules
+apps/web/dist
+apps/api/tests
+apps/api/scripts
+scripts
 
-# Runtime data the contribution gate owns: mounted on the host, never baked.
+# Runtime data: mounted on the host, never a build input.
+cache
 conf/*.contrib.yml
 conf/.contrib.lock
 conf/methods
 
-# Never, anywhere in the context.
-**/__pycache__
-**/*.pyc
+# Local-only: secrets, documents, data drops, scratch.
 **/.env
 **/.env.*
+docs
+styleguide
+grp_mvp
+MangroveData
+landcover
+mural
+feedback
+BUILD_PLAN.md
+CLAUDE.md
+gitleaks-report.json
+*.pdf
+*.xlsx
+*.csv
+*.md
+e2e_*.json
 **/.DS_Store

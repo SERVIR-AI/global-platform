@@ -62,6 +62,7 @@ COPY deploy ./deploy
 # deployed server declines them as not installed.
 COPY .claude/skills/trace-emit ./.claude/skills/trace-emit
 COPY .claude/skills/trace-visualize ./.claude/skills/trace-visualize
+COPY .claude/skills/contribute-logic ./.claude/skills/contribute-logic
 COPY --from=web /w/dist ./web
 
 # One non-root user. The gate writes conf/*.contrib.yml and everything under cache/ at
@@ -70,7 +71,7 @@ COPY --from=web /w/dist ./web
 RUN chmod +x ./deploy/entrypoint.sh \
  && mkdir -p /app/cache/mcp /app/cache/rag \
  && groupadd --gid 1000 app \
- && useradd --uid 1000 --gid 1000 --no-create-home --shell /usr/sbin/nologin app \
+ && useradd --uid 1000 --gid 1000 --create-home --shell /usr/sbin/nologin app \
  && chown -R app:app /app/cache /app/conf
 
 # The commit this image was built from, baked at build time and reported on /api/health
