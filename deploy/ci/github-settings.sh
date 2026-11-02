@@ -21,6 +21,10 @@
 #      gate meant for a team.
 set -euo pipefail
 
+# gh pages its output through $PAGER when run from a terminal; an editor-style pager opens
+# a blank buffer on an empty 204 reply and looks like a hang. Never page here, never prompt.
+export GH_PAGER=cat GH_PROMPT_DISABLED=1
+
 REPO="${REPO:-SERVIR-AI/global-platform}"
 RULESET_NAME="main: merge gate"
 
