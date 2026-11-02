@@ -1,0 +1,79 @@
+# The live suite, on a clock and on demand. Tests that call real providers (RAG_LIVE,
+# IRI_LIVE, CROPMONITOR_LIVE, SYNTHESIS_LIVE) skip in ci.yml so a pull request never needs
+# a key; here they run with keys from repository secrets, weekly, and a failure opens or
+# updates one issue instead of paging anyone. With no keys configured the run is skipped,
+# not failed, so the workflow can exist before the secrets do.
+name: live
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 20 * * 0"   # Sundays, 20:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    name: live suite
+    if: github.repository == 'SERVIR-AI/global-platform'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: write
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Are provider keys configured?
+        id: keys
+        run: |
+          if [ -z "${OPENAI_API_KEY}${ANTHROPIC_API_KEY}${GOOGLE_API_KEY}" ]; then
+            echo "::notice::No provider keys in repository secrets; the live suite is skipped."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        if: steps.keys.outputs.present == 'true'
+        with:
+          version: "0.11.13"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install from the lockfile
+        if: steps.keys.outputs.present == 'true'
+        run: uv sync --locked
+
+      - name: Run the suite with the live flags on
+        if: steps.keys.outputs.present == 'true'
+        env:
+          RAG_LIVE: "1"
+          IRI_LIVE: "1"
+          CROPMONITOR_LIVE: "1"
+          SYNTHESIS_LIVE: "1"
+        run: uv run --frozen pytest -q -p no:cacheprovider --durations=20
+
+      - name: Open or update the "live suite failed" issue
+        if: failure()
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const title = "live suite failed";
+            const url = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `The clocked live suite failed on ${new Date().toISOString().slice(0, 10)}: ${url}`;
+            const { data: open } = await github.rest.issues.listForRepo({ ...context.repo, state: "open", labels: "live-suite" });
+            const existing = open.find((i) => i.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: existing.number, body });
+            } else {
+              await github.rest.issues.create({ ...context.repo, title, body, labels: ["live-suite"] });
+            }

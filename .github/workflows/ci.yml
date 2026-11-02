@@ -1,0 +1,258 @@
+# Level 1 of the delivery design: every pull request and every push to main or a sprint
+# branch is linted, tested and built; a push also publishes ONE amd64 image to GHCR by
+# digest with a signed provenance attestation, then boots that exact image and checks
+# that /api/health reports the commit it was built from.
+#
+# Rules this file keeps: the token is read-only except in the publish job; every action
+# is pinned to a commit; no secret beyond GITHUB_TOKEN is read; nothing here can reach
+# a host (the hosts pull, at Level 2).
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main, "sprint/**"]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One run per ref. A newer push to a pull request cancels the older run; a push to a
+  # branch never cancels, because the publish job may be mid-way through pushing an image.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  UV_VERSION: "0.11.13"          # the uv the image installs with (Dockerfile)
+  RUFF_VERSION: "0.17.3"
+  PYRIGHT_VERSION: "1.1.414"
+  ACTIONLINT_PY_VERSION: "1.7.12.25"
+  IMAGE: ghcr.io/servir-ai/global-platform
+
+jobs:
+  python:
+    name: python (${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.12 is the image's Python; 3.11 is what the production venv still runs, kept
+        # for the first weeks and dropped once the host runs the image.
+        python: ["3.12", "3.11"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install from the lockfile (fails when pyproject and uv.lock disagree)
+        run: uv sync --locked
+
+      - name: ruff (syntax errors and pyflakes; the rule set lives in pyproject.toml)
+        run: uvx "ruff@${RUFF_VERSION}" check apps/api --output-format=github
+
+      - name: Tests (the hermetic suite; live tests skip without RAG_LIVE and friends)
+        run: uv run --frozen pytest -x -q -p no:cacheprovider --durations=15
+
+      - name: ruff format, measured (advisory until the baseline reformat lands)
+        if: matrix.python == '3.12'
+        run: |
+          n=$(uvx "ruff@${RUFF_VERSION}" format --check apps/api 2>/dev/null | grep -c '^Would reformat' || true)
+          echo "ruff format: ${n} files would be reformatted (advisory)" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: pyright, measured (advisory until the error count reaches zero)
+        if: matrix.python == '3.12'
+        run: |
+          uv run --frozen --with "pyright==${PYRIGHT_VERSION}" pyright apps/api/src --outputjson > pyright.json || true
+          python3 - <<'EOF' | tee -a "$GITHUB_STEP_SUMMARY"
+          import json
+          s = json.load(open("pyright.json"))["summary"]
+          print(f"pyright: {s['errorCount']} errors, {s['warningCount']} warnings in {s['filesAnalyzed']} files (advisory)")
+          EOF
+
+  web:
+    name: web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: apps/web/.nvmrc
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install from the lockfile
+        run: npm ci --no-audit --no-fund
+
+      - name: Tests
+        run: npm test
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build (type-checks first)
+        run: npm run build
+
+  hygiene:
+    name: hygiene
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The product is the SERVIR Global Platform in every file a reader sees
+        run: |
+          if git grep -n -i -e 'global risk platform' -- ':!uv.lock' ':!**/package-lock.json'; then
+            echo "::error::Write 'SERVIR Global Platform'. Risk is one of its three domain packs, not its name."
+            exit 1
+          fi
+
+      - name: Runtime data, local documents and secrets stay out of git
+        run: |
+          tracked=$(git ls-files -- cache docs conf/methods 'conf/*.contrib.yml' conf/.contrib.lock CLAUDE.md BUILD_PLAN.md)
+          envs=$(git ls-files | grep -E '(^|/)\.env(\..+)?$' | grep -v -E '\.env\.example$' || true)
+          if [ -n "${tracked}${envs}" ]; then
+            echo "::error::These paths are runtime data or local-only and must not be tracked:"
+            printf '%s\n%s\n' "${tracked}" "${envs}"
+            exit 1
+          fi
+
+      - name: No tracked file over 5 MB (data goes through the contribution gate, not git)
+        run: |
+          big=$(git ls-files -z | xargs -0 stat -c '%s %n' | awk '$1 > 5242880')
+          if [ -n "${big}" ]; then
+            echo "::error::Tracked files over 5 MB:"; echo "${big}"; exit 1
+          fi
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Workflows are valid (actionlint)
+        run: uvx --from "actionlint-py==${ACTIONLINT_PY_VERSION}" actionlint -color
+
+  image:
+    name: image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build the image once, amd64, from the Dockerfile every target runs
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
+          cache-from: type=gha,scope=image
+          cache-to: type=gha,mode=max,scope=image
+
+  publish:
+    name: publish (image by digest, with provenance)
+    if: github.event_name == 'push'
+    needs: [python, web, hygiene, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          # sha-<short> is the release id Level 2 deploys by digest; the branch tag is a
+          # pointer for people; v* tags carry the semver.
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+          labels: |
+            org.opencontainers.image.title=SERVIR Global Platform
+            org.opencontainers.image.description=The governed MCP server, its REST twin and the web app in one image
+
+      - id: build
+        name: Push the image (the warm cache from the image job makes this an export, not a rebuild)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
+          cache-from: type=gha,scope=image
+          cache-to: type=gha,mode=max,scope=image
+          sbom: true
+          provenance: mode=max
+
+      - name: Sign the provenance (SLSA Build L2) and store it with the package
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Boot the published digest and check that /api/health names this commit
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SHA: ${{ github.sha }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          docker run -d --name smoke -p 8080:8080 \
+            -e GRP_ALLOW_ANONYMOUS=1 -e GRP_ALLOW_EPHEMERAL_RECEIPTS=1 \
+            "${IMAGE}@${DIGEST}"
+          for _ in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:8080/api/health -o health.json; then break; fi
+            sleep 2
+          done
+          cat health.json; echo
+          python3 -c "import json, os, sys; h = json.load(open('health.json')); sys.exit(0 if h.get('status') == 'ok' and h.get('commit') == os.environ['SHA'] else 1)"
+          {
+            echo "published ${IMAGE}@${DIGEST}"
+            echo "tags:"; echo "${TAGS}"
+            echo "verify: gh attestation verify oci://${IMAGE}@${DIGEST} --owner SERVIR-AI"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          docker rm -f smoke
+
+      - name: Container log, when the smoke test failed
+        if: failure()
+        run: docker logs smoke 2>&1 | tail -n 60 || true
