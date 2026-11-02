@@ -18,7 +18,6 @@ import numpy as np
 import rasterio
 import rasterio.features
 import rasterio.warp
-from shapely.geometry import shape
 
 from . import tiffs
 from ...mcp.budget import once

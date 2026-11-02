@@ -298,7 +298,7 @@ def component(name: str, **variants) -> dict:
 
 
 def describe_component() -> str:
-    t = tokens()
+    tokens()                      # the theme must load before the markup is described
     have = sorted(p.stem for p in (theme_path().parent / "ui_recipes").glob("*.html"))
     return ("READY-BUILT MARKUP for a UI component, and the SERVIR brand assets every page on "
             "this platform carries — instead of writing UI from scratch. Not for showing a "

@@ -6,7 +6,6 @@ underlying sources. Thin over mcp.store.
 
 from __future__ import annotations
 
-import re
 from datetime import datetime, timezone
 
 from . import feeds, loop, store, ui

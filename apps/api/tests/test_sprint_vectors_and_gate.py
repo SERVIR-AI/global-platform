@@ -389,7 +389,6 @@ def test_the_stack_that_has_the_year_is_read_when_several_cover_the_area(binary_
     """Two stacks cover the same bay; the first registered holds only 2014. A 1996
     question reads the second, names the first as an alternative, and a year no
     stack holds declines naming each stack's years."""
-    s = get_settings()
     conf = tmp_path / "conf"
     data = tmp_path / "data"
     PX, LEFT, TOP = binary_stack["PX"], binary_stack["LEFT"], binary_stack["TOP"]
@@ -458,7 +457,7 @@ def test_a_factor_table_bound_to_land_cover_multiplies_class_areas_and_change(bi
     ha = p["stats"]["classes_km2"]["Mangrove"] * 100          # stats round to 0.1 km2 (10 ha)
     # stats round ha to 0.1 and value is computed from the unrounded area
     assert abs(soil["ha"] - ha) <= 10 and abs(soil["value"] - soil["ha"] * 386) < 386 * 0.1
-    assert f"× 386 t C/ha" in text and "= " in text and "low-high range for this factor, 351-424" in text
+    assert "× 386 t C/ha" in text and "= " in text and "low-high range for this factor, 351-424" in text
     assert "loss" in text and "gain" in text and "not an emission estimate" in text
     assert "1 row(s) named classes not in this legend" in text      # the seagrass row
     assert soil["value_lost"] > 0 and soil["value_gained"] > 0
@@ -553,7 +552,6 @@ def test_vector_measures_reach_the_evidence_view_and_replay_verifies_them(binary
     view = record.replay_view({"receipt_id": "r1", "pack_id": p["pack_id"]})
     assert view["vectors_verified"] == {"test_lines": True}
     # the layer gone: the replay says so instead of claiming verification
-    removal_result = {"removed": False}
     from app.graph.geo import vectors as _v
     _v.unregister("test_lines")
     view = record.replay_view({"receipt_id": "r1", "pack_id": p["pack_id"]})

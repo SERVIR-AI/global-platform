@@ -38,7 +38,7 @@ def test_invalid_specs_register_visibly_not_silently(tmp_path, log):
     log("OUTPUT", rows["bad"]["reason"][:100])
     assert rows["bad"]["status"] == "invalid"
     assert "spec failures" in rows["bad"]["reason"]
-    out = feeds.query("bad") if "bad" in registry.FEEDS else None
+    feeds.query("bad") if "bad" in registry.FEEDS else None
     # not merged into the live registry here — decline shape is covered below
 
 

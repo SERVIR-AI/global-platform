@@ -28,3 +28,23 @@ dev = [
     "pytest>=9.1.1",
     "global-risk-api",
 ]
+
+[tool.ruff]
+# Formatting is not enforced yet (210 files differ from ruff's style); the lint gate is
+# real defects only. Widen the selection one rule family at a time, fixes in the same PR.
+line-length = 120
+extend-exclude = ["apps/web", "cache", "MangroveData"]
+
+[tool.ruff.lint]
+select = ["E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test modules import fixtures by name and take them again as parameters.
+"apps/api/tests/**" = ["F401", "F811"]
+
+[tool.pyright]
+include = ["apps/api/src"]
+pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "standard"

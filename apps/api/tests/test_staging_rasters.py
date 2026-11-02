@@ -132,7 +132,7 @@ def test_rejection_retires_the_file_and_leaves_the_catalog_untouched(env, log):
 
 
 def test_staged_layers_survive_a_restart(env, log):
-    out = staging.submit("raster", _manifest(), OWNER)
+    staging.submit("raster", _manifest(), OWNER)
     staging.STAGED_RASTERS.clear()
     staging._STAGED_LOADED = False
     key = _as(OWNER, lambda: tiffs.resolve("demoheat"))

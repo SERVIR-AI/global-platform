@@ -669,7 +669,7 @@ def test_a_vulnerability_map_drawn_as_polygons_in_utm_is_read_by_the_risk_pack(
     assert [s["op"] for s in st] == ["fetch", "rasterise"] and st[0]["sha256"] == _sha(raw)
     assert st[1]["inputs"]["classes"] == {"Bajo": 1, "Muy alto": 5}
     assert st[1]["inputs"]["resolution"] == {"given": "100 m", "degrees": 0.0008983}
-    x0, y0 = st[1]["inputs"]["grid"]["transform"][2], st[1]["inputs"]["grid"]["transform"][5]
+    x0 = st[1]["inputs"]["grid"]["transform"][2]
     assert abs(x0 / 0.0008983 - round(x0 / 0.0008983)) < 1e-6         # on the lattice
     assert any("reprojected from EPSG:32648" in n for n in row["prepared"])
     p = assemble.assemble(pack="risk", place="Toyville", hazard="toyflood", geometry=RISK_POLY,

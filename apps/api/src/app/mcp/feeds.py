@@ -10,6 +10,8 @@ hardcoded in logic or prose.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from ..food_security import cropmonitor
 from . import budget, climate_indices, enso_forecast, registry
 
@@ -223,7 +225,7 @@ def _classify_bands(v: float, bands: list) -> str | None:
 
 
 
-def _landed_table(recorded: str) -> _Path:
+def _landed_table(recorded: str) -> Path:
     """Where a contributed table actually lives ON THIS HOST.
 
     The spec records the path as it was at contribution time. An absolute one is
@@ -651,11 +653,7 @@ def _adapt_generic_csv(params: dict, spec: dict) -> dict:
     latitude/longitude columns. Anything else is declined with the accepted list:
     a filter silently ignored returned five United States rows to a question
     about Costa Rica, status ok."""
-    import csv as _csv
-    import hashlib as _hashlib
-    import io as _io
 
-    from ..contrib import tables as _tables
 
     fetch = spec["fetch"]
     params = dict(params or {})
@@ -849,7 +847,6 @@ def query(dataset: str, params: dict | None = None) -> dict:
     if spec.get("contributed") or spec.get("staged_by"):
         # A contributed upstream is re-checked on every read: the address the
         # contributor named must still be a public one (contrib/fetch_policy.py).
-        from ..contrib import fetch_policy
         url = (spec.get("fetch") or {}).get("url")
         problems = _checked_url(url) if url else []
         if problems:

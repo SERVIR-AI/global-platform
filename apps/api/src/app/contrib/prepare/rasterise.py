@@ -423,7 +423,7 @@ def run(ctx):
         if absent:
             notes.append(f"rasterise.classes lists {', '.join(absent[:20])}"
                          + (f" and {len(absent) - 20} more" if len(absent) > 20 else "")
-                         + f", which no polygon of the layer carries")
+                         + ", which no polygon of the layer carries")
     if other["no_value"]:
         notes.append(f"{other['no_value']:,} polygon(s) with no {field} were left out (their "
                      f"cells are {fill})")

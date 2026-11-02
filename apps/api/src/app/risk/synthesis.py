@@ -79,7 +79,6 @@ def _effective_weights(aoi, hz, weights) -> tuple[dict, list]:
     so the citation can state the effective weight and the coverage behind it —
     population cover was 1.6% of one real AOI, against a nominal 0.40.
     """
-    import numpy as np
     import rasterio
     adir = os.path.dirname(aoi["admin"])
     with rasterio.open(aoi[hz]) as h:
@@ -306,7 +305,6 @@ def _layer_is_silent(clip_path: str) -> bool:
     """True when the clipped hazard holds no cell above 0 — the layer says nothing
     about this area, which is not the same as saying the area is safe."""
     try:
-        import numpy as np
         import rasterio
         with rasterio.open(clip_path) as src:
             return not bool((src.read(1) > 0).any())

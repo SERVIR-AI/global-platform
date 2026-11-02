@@ -212,7 +212,7 @@ def fetch(url: str) -> bytes:
             else:
                 r.raise_for_status()
                 return r.content
-        except requests.exceptions.SSLError as exc:
+        except requests.exceptions.SSLError:
             if not any(h in url for h in _BROKEN_TLS_HOSTS):
                 raise                              # unexpected TLS failure: refuse, like the route
             print(f"  WARN unverified TLS (known-broken chain): {url}")

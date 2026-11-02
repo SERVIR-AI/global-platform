@@ -18,7 +18,6 @@ The lifecycle below mirrors app_ui.py, which paid for it: the View must OPEN wit
 
 from __future__ import annotations
 
-import json
 
 from . import ui
 

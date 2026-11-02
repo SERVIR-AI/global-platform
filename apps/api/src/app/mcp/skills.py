@@ -12,7 +12,6 @@ everything it needs — serving the front page alone would be an incomplete tool
 
 from __future__ import annotations
 
-from pathlib import Path
 
 from ..config import _REPO_ROOT
 

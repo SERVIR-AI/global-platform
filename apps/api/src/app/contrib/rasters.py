@@ -543,7 +543,7 @@ def _legend_problem(m: dict) -> list[str]:
         hexes = [v for v in (colors.values() if isinstance(colors, dict) else [])
                  if not re.fullmatch(r"#[0-9a-fA-F]{6}", str(v).strip())]
         if not isinstance(colors, dict) or bad or hexes:
-            return [f"colors must map a legend class (its number or its label) to '#rrggbb' — "
+            return ["colors must map a legend class (its number or its label) to '#rrggbb' — "
                     + (f"{bad} name no class of the legend; " if bad else "")
                     + (f"{hexes} are not '#rrggbb'; " if hexes else "")
                     + "the legend: " + ", ".join(f"{k}: {v}" for k, v in legend.items())]

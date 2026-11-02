@@ -209,7 +209,6 @@ class Reader:
         lon/lat), from one feature asked for.
         The attribute keeps every page in the same order: the link's own sortBy (None: it
         stands), else one naming each feature once; None when the layer has none."""
-        from . import PrepRefused
         path = self.ctx.fetch(with_params(base, {size_key: 1}))
         size = self.ctx.steps.pop()["bytes"]           # a look at the attributes, no input
         members: dict = {}

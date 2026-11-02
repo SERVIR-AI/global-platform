@@ -1572,7 +1572,7 @@ def available_vulnerability_layers() -> list[str]:
 
 
 def _validate_weights(manifest) -> list[str]:
-    from ..graph.geo import combine, tiffs
+    from ..graph.geo import tiffs
     if not isinstance(manifest, dict):
         return ["manifest must be a mapping with hazard, weights and rationale"]
     m = dict(manifest)
@@ -1865,7 +1865,6 @@ def _prepare_vector(m: dict) -> dict:
     taken = _vector_taken(m["layer"])
     if taken:
         raise Declined(taken)
-    from ..config import get_settings
     cap = _other_cap()
     made = None
     try:
@@ -2138,7 +2137,6 @@ def _amend_target(layer: str):
         if layer in rows and isinstance(rows[layer], dict):
             row = dict(rows[layer])
             try:
-                from ..graph.geo import schema as _schema
                 doc = yaml.safe_load(get_settings().raster_schema_contrib_path.read_text()) or {}
                 row["units"] = ((doc.get("layers") or {}).get(layer) or {}).get("units")
             except Exception:
@@ -3243,7 +3241,6 @@ def _landed_state(rec: dict) -> dict:
     kind, m = rec.get("kind"), rec.get("manifest") or {}
     try:
         if kind == "document":
-            from ..rag.store import Corpus
             from . import sources
             corpus, why = sources._corpus_for(m.get("pack") or "food-security")
             if corpus is None:

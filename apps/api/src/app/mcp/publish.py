@@ -227,7 +227,6 @@ def _panel_map(pack: dict) -> dict | None:
     viz = pack.get("viz")
     if not viz:
         return None
-    hl = viz.get("hazard_layer") or {}
     m = {"place": viz.get("place"), "hazard": viz.get("hazard"),
          # a pack may say what the drawn layer IS instead of letting the panel
          # assume a hazard (the land-cover pack draws classes, not severities)
