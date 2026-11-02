@@ -1,13 +1,22 @@
 # SERVIR Global Platform
 
-The SERVIR Global Platform is a governed **MCP server** for decision support. Hubs
-connect the AI assistant they already use (Claude Desktop, Claude Code or any MCP client)
-and ask questions in three domains: **food security**, **disaster risk** and **land
-cover**. The platform computes the evidence itself, the assistant writes the answer, and a
-deterministic gate checks the answer against that evidence before it gets a **receipt**
-anyone can open. No LLM runs on the evidence path. The model is told to do no arithmetic
-of its own on platform data, and the gate accepts only one kind it can check: a share of a
-cited total that states both figures.
+The SERVIR Global Platform is a governed **MCP server** for decision support in three
+domains: **food security**, **disaster risk** and **land cover**. Hubs connect the AI
+assistant they already use (Claude Desktop, Claude Code or any MCP client) and use it in
+three ways:
+
+- **Ask.** The platform computes the evidence, the assistant writes the answer, and a
+  deterministic gate checks the answer against that evidence before it gets a **receipt**
+  anyone can open. No LLM runs on the evidence path, and the model is told to do no
+  arithmetic of its own on platform data.
+- **Build.** The same tools are the data source for dashboards, reports and apps. A tool
+  built with the platform calls it live, so a verdict is never frozen into a page.
+- **Contribute.** Data and logic enter through one **contribution gate** that fetches,
+  prepares, checks and lands them. A landed layer, feed, document or method is served to
+  every pack with no code change.
+
+Every reply carries its **provenance**: the source behind each figure, a trace of what the
+platform did, and a receipt whose verdict re-resolves live.
 
 The same FastAPI app also serves a REST API (the receipt resolver, contributions) and a
 React web app with embeddable live views, all from one origin.
@@ -39,6 +48,19 @@ question → start_here → assemble_pack → the client's LLM drafts, citing [n
 `compose_run` runs the same loop on the server with a configured LLM, for callers that
 have no model of their own.
 
+## Provenance
+
+- **The receipt** (`/api/resolve/receipt/<id>`, public) holds the question, the evidence
+  pack and the SHA-256 of the exact text that passed. It attests that the text traces to
+  the evidence, not that the sources are right. Its verdict is re-resolved on every view,
+  so a page that embeds it through `ui_embed` never shows a stale "passed".
+- **The trace** on every `publish_answer` reply says how the loop ran: the gather timed on
+  the pack, the gate and the mint timed at publish, and the client's drafting step declared
+  as outside the platform, so the attestation boundary is stated rather than implied.
+- **The sources.** Every figure in a pack carries a numbered citation with its publisher,
+  licence and vintage as the contributor declared them, and the receipt's evidence view can
+  render a provenance graph from the pack back to each source.
+
 ## Domain packs
 
 | Pack | Target | Evidence |
@@ -67,6 +89,19 @@ The server also exposes four prompts (`build_a_tool`, `run_analysis`, `contribut
 return inline. Tool descriptions are generated from the live registries and fitted to a
 character budget (`apps/api/src/app/mcp/budget.py`), so they always name what is actually
 served.
+
+## Build with it
+
+Asked to build a tool, dashboard or report, an assistant writes source files into the
+builder's own project that call these tools at run time; it never pastes a frozen answer
+into a page. The `build_a_tool` prompt carries the rules. The `ui_*` tools supply the
+pieces: `ui_catalog` says who the platform is for and what a view may show, `ui_design`
+the brand tokens, `ui_component` ready-built markup (source cards, the groundedness strip,
+a decline card), and `ui_embed` live views that re-resolve a receipt, so a verdict is never
+painted into a page. A figure the platform does not compute is not computed in the page
+either: the assistant proposes it as a method through the contribution gate. The served
+skills in [Agent skills](#agent-skills) cover that method, emitting an execution trace from
+the new backend, and rendering one.
 
 ## Contributing data and logic
 
@@ -121,7 +156,9 @@ apps/
 └── web/                      React 19 + Vite + OpenLayers: web app, ?embed= views, runbook
 conf/                         catalogs and contracts as data: tiffs.yml, raster_schema.yml, feeds/, ui_theme.json …
                               (*.contrib.yml are written by the contribution gate; never edit them by hand)
-deploy/                       container deployment (Cloud Run): deploy.sh, entrypoint.sh, litestream.yml
+deploy/                       container deployment: deploy.sh (Cloud Run), entrypoint.sh, litestream.yml,
+                              ci/github-settings.sh (the repository settings as code)
+.github/                      CI: workflows/ci.yml, workflows/live.yml (weekly live suite), dependabot.yml
 cache/                        runtime state, not in git: rasters, vectors, corpora, cache/mcp/grp.db (SQLite)
 ```
 
@@ -180,15 +217,25 @@ GRP_RUN_SLOW=1 uv run pytest                               # + slow real-data an
 cd apps/web && npm test && npm run lint && npm run build   # frontend: unit tests (vitest), lint, type-check and build
 ```
 
-There is no CI pipeline yet, so run the suite before every release.
+Every pull request, and every push to `main` or a `sprint/*` branch, runs the same gate on
+GitHub Actions (`.github/workflows/ci.yml`): ruff and the suite on Python 3.12 and 3.11,
+the web gate on Node 22, hygiene checks (product name, no runtime data in git, file size,
+actionlint) and an amd64 image build. A push also publishes the image to
+`ghcr.io/servir-ai/global-platform` by digest with signed provenance, then boots it and
+checks that `/api/health` reports the commit. Dependabot bumps dependencies weekly, and
+`deploy/ci/github-settings.sh` holds the repository settings as code (the ruleset on
+`main`, read-only tokens, pinned actions, secret scanning).
 
 ## Deploy
 
-- **Container (Cloud Run):** `Dockerfile` and `deploy/deploy.sh`. One uvicorn process,
-  capped at one instance on purpose, with Litestream replicating the SQLite store
-  (`cache/mcp/grp.db`) to GCS. `deploy/entrypoint.sh` refuses to boot unless OAuth is
-  configured (or `GRP_ALLOW_ANONYMOUS=1`) and receipts are replicated (or
-  `GRP_ALLOW_EPHEMERAL_RECEIPTS=1`). Rasters are not baked into the image.
+- **Container:** CI builds `Dockerfile` and publishes
+  `ghcr.io/servir-ai/global-platform:sha-<commit>`. The image is code only: rasters, the
+  document library and the contributed catalogs are mounted at run time (`cache/` and
+  `conf/*.contrib.yml`), never baked. `deploy/deploy.sh` runs it on Cloud Run, one
+  instance on purpose, with Litestream replicating the SQLite store (`cache/mcp/grp.db`)
+  to GCS and `DATA_BUCKET` mounted at `/app/cache`. `deploy/entrypoint.sh` refuses to
+  boot unless OAuth is configured (or `GRP_ALLOW_ANONYMOUS=1`) and receipts are
+  replicated (or `GRP_ALLOW_EPHEMERAL_RECEIPTS=1`).
 - **VM:** run the same app under uvicorn behind a TLS-terminating proxy; no deploy script
   ships for this yet. Receipts, packs and contribution records live in `cache/mcp/grp.db`,
   and approved contributions also write `conf/*.contrib.yml` and data under `cache/`, so
