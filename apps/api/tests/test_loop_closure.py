@@ -321,7 +321,11 @@ def test_the_panel_is_capability_gated_analytics(log):
 @pytest.fixture(scope="module")
 def risk_pack():
     """The risk pack always DECLARES gaps (no corpus, no vintages...) — the pack
-    where the citable-gaps contract is always exercised."""
+    where the citable-gaps contract is always exercised. It needs the real Battambang
+    flood raster: without it assemble() would try to download one, so skip instead."""
+    from app.config import get_settings
+    if not (get_settings().tiffs_dir / "hazard_flood.tif").exists():
+        pytest.skip("needs cache/tiffs/hazard_flood.tif (the Battambang flood raster)")
     return assemble.assemble(pack="risk", place="battambang", hazard="flood")
 
 

@@ -8,6 +8,7 @@ in test_food_security_live.py (opt-in, CROPMONITOR_LIVE=1).
 """
 
 import json
+import os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -422,8 +423,8 @@ def test_cache_writes_are_atomic(fs_env, tmp_path, monkeypatch):
     """Writers go through temp-file + os.replace, so a reader can never observe a
     partial cache file."""
     replaced = []
-    real_replace = cropmonitor.os.replace
-    monkeypatch.setattr(cropmonitor.os, "replace",
+    real_replace = os.replace
+    monkeypatch.setattr(os, "replace",
                         lambda src, dst: (replaced.append((str(src), str(dst))),
                                           real_replace(src, dst))[1])
     cropmonitor._layer_index()
