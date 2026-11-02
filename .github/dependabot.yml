@@ -41,3 +41,10 @@ updates:
       interval: weekly
     cooldown:
       default-days: 3
+    # The two base images are deliberate pins (Node 22 matches .nvmrc and engines; Python 3.12
+    # matches CI): Dependabot keeps their digests fresh and leaves the major version to a person.
+    ignore:
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
