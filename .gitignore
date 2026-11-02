@@ -58,3 +58,6 @@ gitleaks-report.json
 conf/.contrib.lock
 # contributed methods: machine-written by the contribution gate
 conf/methods/
+
+# machine-owned catalogs the contribution gate rewrites at runtime: runtime data, like conf/methods/
+conf/*.contrib.yml
