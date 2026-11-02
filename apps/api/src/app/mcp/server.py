@@ -25,6 +25,7 @@ from . import (app_ui, assemble, auth, budget, compose, context, feeds, fetch, i
                loop, weights_ui,
                publish, record, registry, resolve, shape, start, store, tooltext, ui, verify)
 from ..config import get_settings
+from .. import __version__
 
 log = logging.getLogger(__name__)
 
@@ -107,8 +108,8 @@ def _brand_icons() -> list[Icon]:
     return out
 
 
-mcp = FastMCP("servirplatform", instructions=INSTRUCTIONS if _serving() else None, icons=_brand_icons(),
-              website_url=get_settings().grp_public_url.strip() or None)
+mcp = FastMCP("servirplatform", version=__version__, instructions=INSTRUCTIONS if _serving() else None,
+              icons=_brand_icons(), website_url=get_settings().grp_public_url.strip() or None)
 
 # tool name -> the function that writes its description (DESCRIBERS) or its parameters'
 # (PARAMS) from live state. One map feeds the decorator AND _LiveText: nothing frozen at import.
@@ -713,7 +714,7 @@ async def _served_params() -> list[tuple[str, dict]]:
 
 @mcp.resource("servirplatform://how-to-use", mime_type="text/markdown")
 async def how_to_use() -> str:
-    """How to use the Global Risk Platform (human-readable) — attach/open in the host. Each
+    """How to use the SERVIR Global Platform (human-readable) — attach/open in the host. Each
     tool's parameters are a page of their own (tool_parameters), named here."""
     guide = instructions.how_to_use([(p.name, p.description) for p in await mcp.list_prompts()],
                                     await _served_params())

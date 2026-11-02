@@ -31,7 +31,7 @@ if _settings_for_banner().grp_contrib_allow_private_hosts:
     print("GRP_CONTRIB_ALLOW_PRIVATE_HOSTS is ON — contributions may fetch from private addresses. "
           "Development only; never run a deployed host this way.")
 from .mcp.server import _http_transport, mcp
-from . import web_auth
+from . import __version__, web_auth
 
 log = logging.getLogger(__name__)
 
@@ -236,7 +236,7 @@ def create_app() -> FastAPI:
     """Build the app: CORS, the /api router, the /mcp transport, and the web app."""
     settings = get_settings()
 
-    app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=_lifespan)
+    app = FastAPI(title=settings.app_name, version=__version__, lifespan=_lifespan)
     _timestamp_uvicorn_logs()
 
     # Standard-app login (web_auth.py): built only when the OAuth switch and a

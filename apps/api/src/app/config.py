@@ -34,6 +34,12 @@ class Settings(BaseSettings):
 
     # --- Service ---
     app_name: str = "servirplatform-api"
+    # --- Build identity ---
+    # The image bakes GRP_BUILD_COMMIT at build time; the deployer sets GRP_IMAGE_DIGEST to
+    # the digest it resolved. /api/health reports both, so what is running is confirmed
+    # over HTTPS instead of by reading the host. Both are empty on a checkout.
+    grp_build_commit: str = ""
+    grp_image_digest: str = ""
     # Origins allowed to call the API from a browser. Accepts `*`, a
     # comma-separated list, or a JSON array.
     # localhost and 127.0.0.1 are DIFFERENT origins to a browser: omitting either
