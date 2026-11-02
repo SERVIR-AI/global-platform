@@ -1,36 +1,34 @@
-# Build context = what the MCP needs and nothing else.
-# cache/ is 2GB, of which 1.8GB is flood/risk tiffs that this deployment does not
-# serve; only the RAG corpus is shipped. Allow-list rather than block-list so a
-# new cache subdir can never silently balloon the image.
-cache/*
-!cache/rag
+# Build context = exactly what the Dockerfile copies and nothing else. Allow-list: every
+# path is excluded unless named here, so a new cache subdirectory, a backup, a planning
+# document or a secret can never enter the image by omission. .gcloudignore mirrors this
+# file because gcloud does not read it.
+*
+!pyproject.toml
+!uv.lock
+!apps/api/pyproject.toml
+!apps/api/src
+!apps/web/package.json
+!apps/web/package-lock.json
+!apps/web/index.html
+!apps/web/src
+!apps/web/public
+!apps/web/tsconfig.json
+!apps/web/tsconfig.app.json
+!apps/web/tsconfig.node.json
+!apps/web/vite.config.ts
+!conf
+!deploy
+!.claude/skills/trace-emit
+!.claude/skills/trace-visualize
 
-# Runtime record-state. Must NOT ship: a baked grp.db would shadow the replica
-# restored at boot and resurrect stale receipts over the live institution.
-cache/rag/**/*.tmp
+# Runtime data the contribution gate owns: mounted on the host, never baked.
+conf/*.contrib.yml
+conf/.contrib.lock
+conf/methods
 
-.git
-.gitignore
-.venv
-**/.venv
+# Never, anywhere in the context.
 **/__pycache__
 **/*.pyc
-.pytest_cache
-**/node_modules
-apps/web/dist
-
-# Local-only: secrets, planning docs, scratch artifacts, demo captures.
 **/.env
 **/.env.*
-docs/
-styleguide/
-grp_mvp/
-BUILD_PLAN.md
-gitleaks-report.json
-*.pdf
-*.xlsx
-e2e_*.json
 **/.DS_Store
-
-# local rollback copy of the pre-Vertex corpus — never ships
-cache/rag/*.openai-backup

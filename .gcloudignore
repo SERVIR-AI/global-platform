@@ -1,42 +1,32 @@
-# What gcloud uploads as build context. Deliberately does NOT inherit .gitignore.
-#
-# The corpus (cache/rag) is gitignored but MUST ship — it is the evidence the
-# platform retrieves from. If .gitignore were inherited, `gcloud run deploy
-# --source .` would silently upload without it and corpus_search would return
-# nothing: a demo that looks broken rather than one that errors.
+# What gcloud uploads as build context for 'gcloud run deploy --source .'. gcloud reads
+# this file and not .dockerignore, so it mirrors .dockerignore line for line.
+*
+!pyproject.toml
+!uv.lock
+!apps/api/pyproject.toml
+!apps/api/src
+!apps/web/package.json
+!apps/web/package-lock.json
+!apps/web/index.html
+!apps/web/src
+!apps/web/public
+!apps/web/tsconfig.json
+!apps/web/tsconfig.app.json
+!apps/web/tsconfig.node.json
+!apps/web/vite.config.ts
+!conf
+!deploy
+!.claude/skills/trace-emit
+!.claude/skills/trace-visualize
 
-.git
-.gitignore
-.venv
-**/.venv
+# Runtime data the contribution gate owns: mounted on the host, never baked.
+conf/*.contrib.yml
+conf/.contrib.lock
+conf/methods
+
+# Never, anywhere in the context.
 **/__pycache__
 **/*.pyc
-.pytest_cache
-**/node_modules
-apps/web/dist
-
-# 1.8GB of flood/risk rasters this deployment does not serve.
-cache/tiffs
-cache/traces
-cache/siem-reap
-cache/phnom-penh
-cache/chiang-mai
-cache/cropmonitor
-cache/draw-*
-# Runtime record-state: a baked grp.db would shadow the replica restored at boot.
-cache/mcp
-
 **/.env
 **/.env.*
-docs/
-styleguide/
-grp_mvp/
-BUILD_PLAN.md
-gitleaks-report.json
-*.pdf
-*.xlsx
-e2e_*.json
 **/.DS_Store
-
-# local rollback copy of the pre-Vertex corpus — never ships
-cache/rag/*.openai-backup
