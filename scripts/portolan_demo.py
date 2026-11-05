@@ -157,7 +157,19 @@ def _personas(state: Path, cache: str, fga_url: str, port: int) -> None:
     print()
 
 
+DEMO_CATALOG = "https://data.source.coop/737847/grp-scratch/portolan/catalog.json"
+
+
 def cmd_serve(a) -> int:
+    if a.demo:                                      # the team demo, as one word
+        a.catalog = a.catalog or DEMO_CATALOG
+        a.remove_layer = a.remove_layer or ["hazard_flood_rp100"]
+        a.fga_url = a.fga_url or "http://127.0.0.1:8090"
+        a.review = True
+        a.background = True
+    if not a.catalog:
+        print("serve needs --catalog <catalog.json URL or path>, or --demo")
+        return 2
     state = Path(a.state).resolve()
     prepared = _prepare_state(state, a.remove_layer)
     env = {**os.environ,
@@ -372,8 +384,10 @@ def main(argv=None) -> int:
     s = sub.add_parser("push"); s.add_argument("--root", required=True)
     s.add_argument("--dest", default="s3://737847/grp-scratch/portolan/"); s.add_argument("--profile", default="source-coop")
     s.add_argument("--dry-run", action="store_true")
-    s = sub.add_parser("serve"); s.add_argument("--catalog", required=True); s.add_argument("--port", type=int, default=8027)
-    s.add_argument("--state", default=str(REPO / "cache" / ".portolan-demo")); s.add_argument("--remove-layer", action="append", default=[])
+    s = sub.add_parser("serve"); s.add_argument("--catalog", default=""); s.add_argument("--port", type=int, default=8027)
+    s.add_argument("--state", default="/tmp/servir-demo"); s.add_argument("--remove-layer", action="append", default=[])
+    s.add_argument("--demo", action="store_true", help="the team demo preset: Source catalog, flood layer removed "
+                                                       "locally, OpenFGA on 8090, review on, background")
     s.add_argument("--read-through", action="store_true"); s.add_argument("--background", action="store_true")
     s.add_argument("--fga-url", default="", help="OpenFGA server (turns the authorization store on)")
     s.add_argument("--review", action="store_true", help="hold contributions for a reviewer (auto-approve off)")
