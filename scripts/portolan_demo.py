@@ -117,6 +117,46 @@ def _prepare_state(state: Path, remove: list[str]) -> dict:
             "published": str(state / "published")}
 
 
+PERSONAS = {"contributor": ("demo_contrib", "a hub analyst who uploads a layer (hub mekong; also a reviewer, "
+                                            "so the self-approval refusal can be shown)"),
+            "reviewer": ("demo_reviewer", "the platform reviewer"),
+            "analyst_mekong": ("demo_a1", "an analyst in the contributor's hub (mekong)"),
+            "analyst_lower": ("demo_a2", "an analyst in another hub (lower)")}
+
+
+def _personas(state: Path, cache: str, fga_url: str, port: int) -> None:
+    """The operator's one-time setup for the user-journey demo: roles and hub membership
+    as tuples in the store the server will use, and one Claude Code MCP config per
+    person, each carrying that person's dev identity. Written BEFORE the server starts,
+    so both sides read the same store and model ids."""
+    os.environ["GRP_FGA_URL"] = fga_url
+    os.environ["CACHE_DIR"] = cache
+    from app import authz
+    ids = authz.bootstrap()
+    authz.write([(f"user:{PERSONAS['reviewer'][0]}", "reviewer", authz.PLATFORM),
+                 (f"user:{PERSONAS['contributor'][0]}", "reviewer", authz.PLATFORM),
+                 (f"user:{PERSONAS['contributor'][0]}", "member", "hub:mekong"),
+                 (f"user:{PERSONAS['analyst_mekong'][0]}", "member", "hub:mekong"),
+                 (f"user:{PERSONAS['analyst_lower'][0]}", "member", "hub:lower"),
+                 ("user:local-dev", "operator", authz.PLATFORM)])
+    pdir = state / "personas"
+    pdir.mkdir(exist_ok=True)
+    lines = []
+    for name, (ident, what) in PERSONAS.items():
+        cfg = {"mcpServers": {"servir": {"type": "http", "url": f"http://127.0.0.1:{port}/mcp",
+                                         "headers": {"x-grp-dev-identity": ident}}}}
+        (pdir / f"{name}.json").write_text(json.dumps(cfg, indent=2))
+        lines.append(f"{name:15s} {ident:14s} {what}\n"
+                     f"{'':15s} claude --mcp-config {pdir / (name + '.json')} --strict-mcp-config")
+    _say("personas (operator setup)", store=ids,
+         hubs={"mekong": ["demo_contrib", "demo_a1"], "lower": ["demo_a2"]},
+         reviewers=["demo_reviewer", "demo_contrib"], operator="local-dev (no header)")
+    print("\n   Open one Claude Code session per person, from an EMPTY directory:\n")
+    for line in lines:
+        print("   " + line.replace("\n", "\n   "))
+    print()
+
+
 def cmd_serve(a) -> int:
     state = Path(a.state).resolve()
     prepared = _prepare_state(state, a.remove_layer)
@@ -136,6 +176,8 @@ def cmd_serve(a) -> int:
          warmed_areas=prepared["bundles"], mcp_url=f"http://127.0.0.1:{a.port}/mcp",
          authorization=(f"OpenFGA at {a.fga_url}" if a.fga_url else "off"),
          review="human review (auto-approve off)" if a.review else "auto-approve on")
+    if a.fga_url and a.personas:
+        _personas(state, prepared["cache"], a.fga_url, a.port)
     cmd = [sys.executable, "-m", "uvicorn", "app.main:app", "--app-dir", str(SRC),
            "--host", "127.0.0.1", "--port", str(a.port)]
     if a.background:
@@ -335,6 +377,8 @@ def main(argv=None) -> int:
     s.add_argument("--read-through", action="store_true"); s.add_argument("--background", action="store_true")
     s.add_argument("--fga-url", default="", help="OpenFGA server (turns the authorization store on)")
     s.add_argument("--review", action="store_true", help="hold contributions for a reviewer (auto-approve off)")
+    s.add_argument("--no-personas", dest="personas", action="store_false",
+                   help="skip the demo personas (roles, hubs, one Claude Code config per person)")
     s = sub.add_parser("run"); s.add_argument("--url", default="http://127.0.0.1:8027/mcp")
     s.add_argument("--layer", default="hazard_flood_rp100"); s.add_argument("--place", default="Battambang, Cambodia")
     s.add_argument("--hazard", default="flood"); s.add_argument("--pack", default="risk"); s.add_argument("--question")

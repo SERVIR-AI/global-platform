@@ -2779,6 +2779,16 @@ def form(kind: str) -> dict:
                     + (" " + _FORM_NOTES[kind] if kind in _FORM_NOTES else ""))}
     if prepares:
         out["prepares"] = prepares
+    from .. import authz
+    if authz.enabled():                   # who may see it: the contributor's choice, every kind
+        out["sharing"] = {
+            "visibility": ("optional: who may see the contribution once approved — private "
+                           "(you, reviewers), hub (every member of your hub), platform (every "
+                           "signed-in caller; the default), public (everyone, including anonymous "
+                           "callers). ASK the contributor; never choose for them."),
+            "share_users": "optional: user ids to grant in addition to the level",
+            "share_hubs": "optional: hub ids to grant in addition to the level",
+            "later": "contribute_share(contribution_id, action='visibility'|'grant'|'revoke') changes it"}
     return out
 
 
