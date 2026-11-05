@@ -145,6 +145,13 @@ def assemble(country: str | None = None, crop: str | None = None,
                                        trace, extras)
     layer_block, layer_area = layers_step.attach(spec, target, stats, citations, gaps,
                                                  layers, extras)
+    # A published catalog (GRP_CATALOG_URL) that could not be read is a declared gap
+    # in every pack: the layers it holds are stale or missing, said, never skipped.
+    try:
+        from ..graph.geo import stac_catalog
+        gaps.extend(line for line in stac_catalog.gap_lines() if line not in gaps)
+    except Exception as exc:                 # the gap line itself never breaks a pack
+        gaps.append(f"published catalog status unknown ({type(exc).__name__}: {exc})")
     if layers is not None:
         target = {**target, "layers": [n for n in dict.fromkeys(
             str(x).strip() for x in layers) if n]}

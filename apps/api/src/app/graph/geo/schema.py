@@ -25,6 +25,15 @@ def _doc():
         layers.update({k: v for k, v in contrib.items() if k not in layers})
     except FileNotFoundError:
         pass
+    try:                                        # published catalogs: the third source
+        from . import stac_catalog
+        cat_layers, cat_stacks = stac_catalog.contracts()
+        layers = doc.setdefault("layers", {})
+        layers.update({k: v for k, v in cat_layers.items() if k not in layers})
+        stacks = doc.setdefault("stacks", {})
+        stacks.update({k: v for k, v in cat_stacks.items() if k not in stacks})
+    except Exception:
+        pass
     try:                                        # staged contracts, caller-scoped
         from ...contrib import staging
         layers = doc.setdefault("layers", {})

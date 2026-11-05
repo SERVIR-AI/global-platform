@@ -3090,7 +3090,8 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
         # citation all say that no human reviewed it. Landing failure leaves it
         # staged for a reviewer rather than pretending.
         try:
-            landing = spec["land"]({**rec, "auto_approved": True})
+            from . import portolan
+            landing = portolan.annotate(kind, spec["land"]({**rec, "auto_approved": True}))
         except Exception as exc:
             _notify(f"Auto-approve could not land {kind} {ident}: {exc}")
             return auto.said({**_public(rec), "status": "staged",
@@ -3531,7 +3532,8 @@ def approve(contribution_id: str, caller: identity.Caller | None = None,
         return {"status": "declined",
                 "note": f"contribution {contribution_id} is {rec['status']}, not pending"}
     try:
-        landing = _KINDS[rec["kind"]]["land"](rec)
+        from . import portolan
+        landing = portolan.annotate(rec["kind"], _KINDS[rec["kind"]]["land"](rec))
     except Declined as exc:
         return {"status": "declined", "note": f"landing failed: {exc}"}
     except Exception as exc:

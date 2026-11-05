@@ -279,6 +279,27 @@ class Settings(BaseSettings):
     # claude.ai and Claude Desktop connectors see it — a local client then tests that path.
     grp_serve_instructions: bool = True
 
+    # --- Published catalogs (STAC 1.1 in the Portolan layout) ---
+    # Where the gate PUBLISHES approved raster layers as a Portolan catalog
+    # (GRP_PORTOLAN_ROOT, a local directory; empty = off). The landed row and its
+    # contract stay the system of record; the catalog is the published form other
+    # people and tools read. Only approved, openly licensed layers go there.
+    grp_portolan_root: str = ""
+    # The `host` provider every Portolan collection must name, with a contact.
+    grp_portolan_host_name: str = "SERVIR Global Platform"
+    grp_portolan_host_url: str = "https://github.com/SERVIR-AI/global-platform"
+    grp_portolan_host_email: str = ""
+    # Published catalogs this server READS as a third, non-shadowing source of raster
+    # layers (GRP_CATALOG_URL: comma-separated catalog.json URLs or local paths).
+    # A root that cannot be read is a declared gap in every pack, never a fallback.
+    grp_catalog_url: str = ""
+    # Mirror a catalog layer's file into tiffs_dir on first use, verified against its
+    # file:checksum (GRP_CATALOG_MIRROR=1, the default); 0 opens it in place over
+    # HTTP range requests (/vsicurl/), for measurement.
+    grp_catalog_mirror: bool = True
+    # Re-check a catalog root for changes at most this often (seconds).
+    grp_catalog_refresh_seconds: float = 60
+
 
 @lru_cache
 def get_settings() -> Settings:

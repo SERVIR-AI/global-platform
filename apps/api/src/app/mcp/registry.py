@@ -572,6 +572,10 @@ def capabilities(available_tools=None, available_prompts=None,
         # raster layer in the catalog, whole, built-in and contributed alike.
         "coverage": coverage_by_name(layers),
         "raster_layers": layers,
+        # Published catalogs this server reads (GRP_CATALOG_URL): each root's state,
+        # since when, and what it holds. A root that cannot be read is listed as
+        # such here and declared as a gap in every pack, never dropped.
+        "catalog_sources": _catalog_sources(),
         "tools_available": tools,
         # Payload-carried on purpose: connect-time INSTRUCTIONS lose to whatever
         # rides the tool results (measured — render_with was honored to the letter
@@ -737,6 +741,23 @@ def coverage_by_name(layers=None) -> dict:
                             "servirplatform://places")}
 
 
+def _catalog_sources() -> list[dict]:
+    """The published catalogs this server reads, with each root's state (capabilities
+    never crash on a catalog: an unreadable one is reported, not raised)."""
+    try:
+        from ..graph.geo import stac_catalog, tiffs
+        out = stac_catalog.status()
+        if out:
+            local = {k for k, v in tiffs.catalog().items() if not (v or {}).get("stac")}
+            shadowed = stac_catalog.shadowed(local)
+            if shadowed:
+                out.append({"note": "catalog layers a local row already names (the local "
+                                    "row wins)", "shadowed_by_local": shadowed})
+        return out
+    except Exception as exc:
+        return [{"state": "error", "detail": f"{type(exc).__name__}: {exc}"}]
+
+
 def _on_server(key: str, cat: dict) -> bool | None:
     """Whether a layer's file is here (a download_url or remote /vsi path counts as fetchable);
     None when its row names no file. A listing never claims a file this server lacks."""
@@ -791,6 +812,9 @@ def raster_layers() -> list[dict]:
             item["file"] = "missing on this server"
         if row.get("contributed"):
             item["contributed"] = True
+        if row.get("stac"):
+            item["source"] = "catalog"
+            item["catalog"] = row["stac"].get("root")
         out.append(item)
     # contributed first: no pack summary names them; then by namespace and name
     return sorted(out, key=lambda i: (not i.get("contributed"), i["namespace"], i["name"]))

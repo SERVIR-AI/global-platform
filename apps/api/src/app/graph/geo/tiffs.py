@@ -29,7 +29,8 @@ def _base():
     of a question's wall time."""
     settings = get_settings()
     hand, contrib = settings.tiffs_config_path, settings.tiffs_contrib_path
-    key = (str(hand), _stamp(hand), str(contrib), _stamp(contrib))
+    from . import stac_catalog
+    key = (str(hand), _stamp(hand), str(contrib), _stamp(contrib), stac_catalog.stamp())
     hit = _BASE.get("cat")
     if hit and hit[0] == key:
         return hit[1]
@@ -39,6 +40,9 @@ def _base():
         with open(contrib) as f:
             rows = yaml.load(f, Loader=_LOADER) or {}
         cat.update({k: v for k, v in rows.items() if k not in cat})
+    # Published catalogs (STAC in the Portolan layout, GRP_CATALOG_URL): the third
+    # source, after the hand and contributed rows; it cannot shadow either.
+    cat.update({k: v for k, v in stac_catalog.rows().items() if k not in cat})
     _expand_stacks(cat)
     _BASE["cat"] = (key, cat)
     return cat

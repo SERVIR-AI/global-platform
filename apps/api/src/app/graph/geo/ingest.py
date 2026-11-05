@@ -1044,6 +1044,19 @@ def source_raster(layer="hazard_flood"):
         if meta.get("kind") == "stack":
             raise ValueError(f"{layer} is a stack of yearly rasters, not one file — "
                              "name a year (stacks.layer_for)")
+        if meta.get("stac"):           # a published-catalog row: mirrored once, or read in place
+            from . import stac_catalog
+            dest = os.path.join(settings.tiffs_dir, os.path.basename(meta["local_path"]))
+            if settings.grp_catalog_mirror or not str(meta.get("path", "")).startswith("/vsi"):
+                return stac_catalog.mirror(layer, meta, dest)
+            if not stac_catalog.remote_allowed(meta["path"]):
+                raise RuntimeError(f"{layer}: its file {meta['stac'].get('href')} lies outside "
+                                   "every configured catalog root; refused")
+            stac_catalog.apply_remote_env()
+            emit({"kind": "download", "what": "source_raster", "api": "published catalog",
+                  "layer": layer, "url": meta["stac"].get("href"), "mode": "read-through",
+                  "was_cached": False})
+            return meta["path"]
         if meta.get("path"):           # a stack year: opened where it lives, never copied
             return meta["path"]
         fname = os.path.basename(meta["local_path"])
