@@ -213,6 +213,23 @@ def test_an_unreachable_store_refuses_everything(env, file_host, monkeypatch, lo
     assert declined["status"] == "declined" and "did not answer" in declined["problems"][0]
 
 
+def test_a_replaced_store_is_followed_without_a_restart(env):
+    """Another process (the demo runner, the operator CLI) may re-create the store while this
+    server keeps running; the live client must follow the saved ids, not the dead store."""
+    rev = ("user:user_rev", "reviewer", authz.PLATFORM)
+    assert authz.check(*rev)
+    old = authz.ids()
+    authz._state_path().unlink()                      # as if the store were wiped and re-made elsewhere
+    new = authz.bootstrap()                           # writes a fresh store id to authz.json
+    assert new["store_id"] != old["store_id"]
+    authz._CLIENT.clear()
+    authz._CLIENT.update({"c": object(), "url": str(get_settings().grp_fga_url).rstrip("/"), "ids": old})
+    assert authz.ids() == new                        # the stale client was dropped for the saved ids
+    assert not authz.check(*rev)                      # the new store has no tuples yet: false, not an error
+    authz.write([rev])
+    assert authz.check(*rev)
+
+
 def test_with_the_store_off_sharing_is_declined_in_words(env, file_host, monkeypatch):
     """GRP_FGA_URL unset keeps today's behaviour, and a sharing request says why it
     cannot be honoured instead of pretending."""

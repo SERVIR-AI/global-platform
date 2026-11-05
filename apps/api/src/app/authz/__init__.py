@@ -156,15 +156,20 @@ def bootstrap(force_model: bool = False) -> dict:
 
 
 def _fga():
-    """One sync client per process, bound to the store and model."""
+    """One sync client per process, bound to the store and model.
+
+    Rebuilt whenever the saved ids change: another process (the demo runner, the operator
+    CLI) may restart the store and bootstrap it again while this server keeps running.
+    Holding on to the old store would fail every check closed from then on.
+    """
     from openfga_sdk import ClientConfiguration
     from openfga_sdk.sync import OpenFgaClient
     url = str(get_settings().grp_fga_url).rstrip("/")
     with _LOCK:
         c = _CLIENT.get("c")
-        if c is not None and _CLIENT.get("url") == url:
-            return c
         ids = _ids()
+        if c is not None and _CLIENT.get("url") == url and _CLIENT.get("ids") == ids:
+            return c
         if not ids["store_id"] or not ids["model_id"]:
             ids = bootstrap()
         c = OpenFgaClient(ClientConfiguration(api_url=url, store_id=ids["store_id"],
@@ -185,6 +190,9 @@ def _guard(fn, *a, **kw):
     except AuthzUnavailable:
         raise
     except Exception as exc:
+        # The store may have been replaced under us; the next call rebuilds the client.
+        with _LOCK:
+            _CLIENT.clear()
         raise AuthzUnavailable(f"authorization store: {type(exc).__name__}: {exc}") from exc
 
 

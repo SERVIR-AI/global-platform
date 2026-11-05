@@ -160,6 +160,30 @@ def _personas(state: Path, cache: str, fga_url: str, port: int) -> None:
 DEMO_CATALOG = "https://data.source.coop/737847/grp-scratch/portolan/catalog.json"
 
 
+def _listening(port: int) -> bool:
+    import socket
+    with socket.socket() as s:
+        s.settimeout(0.5)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def _healthy(port: int, proc, seconds: int) -> bool:
+    """True once /api/health answers; False if the process dies first (port taken, import error)."""
+    import time
+    import urllib.request
+    for _ in range(seconds * 2):
+        if proc.poll() is not None:
+            return False
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1) as r:
+                if r.status == 200:
+                    return True
+        except Exception:
+            pass
+        time.sleep(0.5)
+    return proc.poll() is None
+
+
 def cmd_serve(a) -> int:
     if a.demo:                                      # the team demo, as one word
         a.catalog = a.catalog or DEMO_CATALOG
@@ -171,6 +195,14 @@ def cmd_serve(a) -> int:
         print("serve needs --catalog <catalog.json URL or path>, or --demo")
         return 2
     state = Path(a.state).resolve()
+    if _listening(a.port):
+        # Preparing would wipe the db and re-create the store UNDER the server that is still
+        # running the old code; it would then fail every authorization check closed.
+        pidfile = state / "server.pid"
+        print(f"   a server already listens on 127.0.0.1:{a.port}; stop it first, then rerun:\n"
+              f"      kill $(cat {pidfile})" if pidfile.exists() else
+              f"   a server already listens on 127.0.0.1:{a.port}; stop it first, then rerun.")
+        return 3
     prepared = _prepare_state(state, a.remove_layer)
     env = {**os.environ,
            "CACHE_DIR": prepared["cache"], "TIFFS_DIR": prepared["tiffs"],
@@ -195,6 +227,9 @@ def cmd_serve(a) -> int:
     if a.background:
         log = open(state / "server.log", "ab")
         proc = subprocess.Popen(cmd, env=env, stdout=log, stderr=subprocess.STDOUT, cwd=str(REPO))
+        if not _healthy(a.port, proc, seconds=90):
+            print(f"   the server did not come up (exit {proc.poll()}); see {state / 'server.log'}")
+            return 4
         (state / "server.pid").write_text(str(proc.pid))
         _say("serve", pid=proc.pid, log=str(state / "server.log"))
         return 0
