@@ -24,6 +24,7 @@ dependencies = [
     "mcp>=2.1",
     "google-auth>=2.35",
     "fastmcp>=4.0.0",
+    "openfga-sdk>=0.10.5",
 ]
 
 [dependency-groups]

@@ -572,6 +572,19 @@ def contribute_status(contribution_id: str | None = None, action: str = "show",
     return _staging.status(contribution_id, offset=offset)
 
 
+@mcp.tool(description=(
+    "Who may see a contribution you own: action='show' lists its visibility (private, hub, "
+    "platform, public), its hub and its grants; action='visibility' with visibility=<level> sets "
+    "the level (hub=<id> names the hub for level 'hub'); action='grant' or 'revoke' with user=<id> "
+    "or hub=<id> shares with one person or a whole hub. Staged contributions stay visible to you "
+    "and reviewers only until approval; a level or grant takes effect on approval. Needs the "
+    "platform's authorization store; without it every approved layer is served to every caller."))
+def contribute_share(contribution_id: str, action: str = "show", visibility: str | None = None,
+                     hub: str | None = None, user: str | None = None) -> dict:
+    """The contributor's own access decisions, as data in the authorization store."""
+    return _staging.share(contribution_id, action=action, visibility=visibility, hub=hub, user=user)
+
+
 @mcp.tool(description=_describe("contribute_review", tooltext.review, (), tooltext.review_params))
 def contribute_review(action: str = "list", contribution_id: str | None = None,
                       note: str | None = None, status_filter: str = "pending",

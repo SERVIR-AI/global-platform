@@ -128,10 +128,14 @@ def cmd_serve(a) -> int:
            "GRP_CATALOG_URL": a.catalog, "GRP_CATALOG_MIRROR": "0" if a.read_through else "1",
            "GRP_PORTOLAN_ROOT": prepared["published"],
            "GRP_OAUTH_ENABLED": "0", "GRP_MCP_TRANSPORT": "http",
-           "GRP_CONTRIB_ALLOW_PRIVATE_HOSTS": "1"}
+           "GRP_CONTRIB_ALLOW_PRIVATE_HOSTS": "1",
+           "GRP_AUTO_APPROVE": "0" if a.review else "1",
+           **({"GRP_FGA_URL": a.fga_url} if a.fga_url else {})}
     _say("serve", state=str(state), catalog=a.catalog, removed_locally=a.remove_layer,
          mode="read-through (/vsicurl/)" if a.read_through else "mirror on first use (checksum verified)",
-         warmed_areas=prepared["bundles"], mcp_url=f"http://127.0.0.1:{a.port}/mcp")
+         warmed_areas=prepared["bundles"], mcp_url=f"http://127.0.0.1:{a.port}/mcp",
+         authorization=(f"OpenFGA at {a.fga_url}" if a.fga_url else "off"),
+         review="human review (auto-approve off)" if a.review else "auto-approve on")
     cmd = [sys.executable, "-m", "uvicorn", "app.main:app", "--app-dir", str(SRC),
            "--host", "127.0.0.1", "--port", str(a.port)]
     if a.background:
@@ -145,14 +149,14 @@ def cmd_serve(a) -> int:
 
 # --- run: a real MCP client ----------------------------------------------------------------
 
-async def _mcp(url: str, calls):
+async def _mcp(url: str, calls, headers: dict | None = None):
     from mcp import ClientSession
     from mcp.client import streamable_http as sh
     try:
         import httpx2 as httpx
     except ImportError:
         import httpx
-    client = sh.create_mcp_http_client()
+    client = sh.create_mcp_http_client(headers=headers)
     client.timeout = httpx.Timeout(900.0, connect=30.0)
     async with sh.streamable_http_client(url, http_client=client) as streams:
         read, write = streams[0], streams[1]
@@ -193,8 +197,11 @@ def _draft(pack: dict, question: str, failures=None) -> str:
     prompt = (f"Question: {question}\n\nWrite a short decision brief with exactly these sections, "
               f"each as a markdown heading in this order: {', '.join(sections)}. Every factual sentence "
               "cites one of the numbered citations below as [n], using only numbers that exist. Use only "
-              "facts and numbers that appear in the evidence; quote figures exactly as given; where the "
-              "evidence declares a gap, say so in the matching section. No introduction, no closing.\n\n"
+              "facts and numbers that appear in the evidence. HARD RULE on figures: write a figure only "
+              "if you copy it character for character from a citation's text or from STATS (same digits, "
+              "same separators, no rounding, no unit conversion, no 'about', no totals you computed); "
+              "prefer the platform's own computed figures in STATS over figures quoted in documents; "
+              "where the evidence declares a gap, say so in the matching section. No introduction, no closing.\n\n"
               + (f"A previous draft was rejected by the groundedness gate for these reasons; fix every one:\n"
                  f"{json.dumps(failures, default=str)[:4000]}\n\n" if failures else "")
               + "CITATIONS:\n" + numbered + "\n\nSTATS:\n" + json.dumps(pack.get("stats"), default=str)[:20000]
@@ -326,6 +333,8 @@ def main(argv=None) -> int:
     s = sub.add_parser("serve"); s.add_argument("--catalog", required=True); s.add_argument("--port", type=int, default=8027)
     s.add_argument("--state", default=str(REPO / "cache" / ".portolan-demo")); s.add_argument("--remove-layer", action="append", default=[])
     s.add_argument("--read-through", action="store_true"); s.add_argument("--background", action="store_true")
+    s.add_argument("--fga-url", default="", help="OpenFGA server (turns the authorization store on)")
+    s.add_argument("--review", action="store_true", help="hold contributions for a reviewer (auto-approve off)")
     s = sub.add_parser("run"); s.add_argument("--url", default="http://127.0.0.1:8027/mcp")
     s.add_argument("--layer", default="hazard_flood_rp100"); s.add_argument("--place", default="Battambang, Cambodia")
     s.add_argument("--hazard", default="flood"); s.add_argument("--pack", default="risk"); s.add_argument("--question")

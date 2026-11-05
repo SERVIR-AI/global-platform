@@ -300,6 +300,20 @@ class Settings(BaseSettings):
     # Re-check a catalog root for changes at most this often (seconds).
     grp_catalog_refresh_seconds: float = 60
 
+    # --- Authorization (app/authz: OpenFGA) ---
+    # The OpenFGA server this platform asks (GRP_FGA_URL, e.g. http://127.0.0.1:8080;
+    # empty = off: today's two-state visibility and the GRP_REVIEWERS list). When set,
+    # roles, hub membership, per-dataset visibility and sharing are relationship
+    # tuples in that store, every check fails CLOSED when the store is unreachable,
+    # and the store and model ids are created on first use and kept in
+    # <cache_dir>/mcp/authz.json unless pinned here.
+    grp_fga_url: str = ""
+    grp_fga_store_id: str = ""
+    grp_fga_model_id: str = ""
+    # The visibility a contribution gets when its manifest names none:
+    # private | hub | platform | public.
+    grp_default_visibility: str = "platform"
+
 
 @lru_cache
 def get_settings() -> Settings:

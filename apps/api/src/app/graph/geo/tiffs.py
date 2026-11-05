@@ -67,6 +67,16 @@ def catalog(include_staged: bool = True):
                     cat[k] = staging.amended_row(k, cat[k])
         except Exception:                       # the catalog never fails on staging
             pass
+    # A landed contribution the caller may not view (visibility level, hub, share —
+    # the authorization store's answer) is simply not in their catalog: unknown, not
+    # declined, so nothing says it exists. Rows with no contribution id are built-in.
+    try:
+        from ...contrib import identity
+        caller = identity.current()
+        cat = {k: v for k, v in cat.items()
+               if not (v or {}).get("contribution_id") or caller.may_view(v["contribution_id"])}
+    except Exception:                           # no caller (CLI, tests): everything
+        pass
     return cat
 
 

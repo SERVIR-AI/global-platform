@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 import re
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from ...config import get_settings
@@ -20,12 +20,31 @@ _LAYER = re.compile(r"[a-z0-9_]+")
 
 
 @router.get("/raster/{slug}/{layer}.tif")
-def raster(slug: str, layer: str) -> FileResponse:
-    """Stream a clipped hazard raster (EPSG:4326). 404 if the place wasn't queried yet."""
+def raster(slug: str, layer: str, request: Request) -> FileResponse:
+    """Stream a clipped hazard raster (EPSG:4326). 404 if the place wasn't queried yet,
+    and 404 too when the layer is a contribution this caller may not view: the bytes
+    are refused by the same answer the tools give, and nothing says the layer exists."""
     if not _SLUG.fullmatch(slug) or not _LAYER.fullmatch(layer):
         raise HTTPException(status_code=400, detail="invalid raster id")
     cache = os.path.realpath(str(get_settings().cache_dir))
     path = os.path.realpath(os.path.join(cache, slug, f"{layer}.tif"))
     if not path.startswith(cache + os.sep) or not os.path.exists(path):
         raise HTTPException(status_code=404, detail="raster not found — query that place/hazard first")
+    if not _may_view(layer, request):
+        raise HTTPException(status_code=404, detail="raster not found — query that place/hazard first")
     return FileResponse(path, media_type="image/tiff", filename=f"{slug}_{layer}.tif")
+
+
+def _may_view(layer: str, request: Request) -> bool:
+    """A built-in layer: always. A contributed one: what the authorization store says
+    for the caller the request's headers identify (everyone, when the store is off)."""
+    from ...contrib import identity
+    from ...graph.geo import tiffs
+    try:
+        row = tiffs._base().get(layer) or {}
+    except Exception:
+        return True
+    cid = row.get("contribution_id")
+    if not cid:
+        return True
+    return identity.from_headers(request.headers).may_view(str(cid))

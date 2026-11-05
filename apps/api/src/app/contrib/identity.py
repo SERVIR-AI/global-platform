@@ -53,6 +53,53 @@ class Caller:
         and to reviewers, nobody else. Unstaged (no owner) is visible to all."""
         return not staged_by or self.is_reviewer or self.id == staged_by
 
+    def may_view(self, contribution_id: str | None) -> bool:
+        """May this caller see a LANDED contribution? Always, unless the authorization
+        store (GRP_FGA_URL) is on; then only what the store lists as viewable for them:
+        approved and granted (by visibility level or a share), or their own to preview.
+        An unreachable store means no: nothing is served on a guess."""
+        if not contribution_id:
+            return True
+        from .. import authz
+        if not authz.enabled():
+            return True
+        return str(contribution_id) in _visible_for(self)
+
+    @property
+    def hubs(self) -> list[str]:
+        from .. import authz
+        if not authz.enabled() or self.source == "anonymous":
+            return []
+        return _hubs_for(self)
+
+
+def _memo(key, compute):
+    """Inside a request's budget snapshot the store is asked once per caller; outside
+    one (a REST route, the CLI) every call asks afresh. A store that cannot answer
+    yields the empty answer: nothing is served on a guess."""
+    from .. import authz
+    from ..mcp import budget
+    memo = budget._MEMO.get()
+    if memo is not None and key in memo:
+        return memo[key]
+    try:
+        out = compute()
+    except authz.AuthzUnavailable:
+        out = set() if key[0] == "visible" else []
+    if memo is not None:
+        memo[key] = out
+    return out
+
+
+def _visible_for(caller) -> set[str]:
+    from .. import authz
+    return _memo(("visible", caller.id, caller.source), lambda: authz.visible_datasets(caller))
+
+
+def _hubs_for(caller) -> list[str]:
+    from .. import authz
+    return _memo(("hubs", caller.id, caller.source), lambda: authz.hubs_of(caller))
+
 
 # Set explicitly by tests and by the CLI; every MCP call resolves lazily from the
 # request instead, so nothing has to be threaded through the tool signatures.
@@ -88,6 +135,12 @@ def _from_dev_header() -> str | None:
 def _is_reviewer(cid: str, label: str, source: str) -> bool:
     if source == "anonymous" or cid == ANONYMOUS:
         return False                      # nobody in particular, whatever the list says
+    from .. import authz
+    if authz.enabled():                   # a role is a tuple in the store, never a list here
+        try:
+            return authz.check(f"user:{cid}", "reviewer", authz.PLATFORM)
+        except authz.AuthzUnavailable:
+            return False                  # fail closed: no store, no reviewer
     listed = {r.strip().lower() for r in get_settings().grp_reviewers if r.strip()}
     if listed:
         return cid.lower() in listed or label.lower() in listed
@@ -109,6 +162,25 @@ def resolve() -> Caller:
     else:
         # OAuth on and no token (REST paths, background work), or an OPEN
         # deployment: nobody in particular. Never a reviewer, never an owner.
+        cid = label = ANONYMOUS
+        source = "anonymous"
+    return Caller(cid, label, _is_reviewer(cid, label, source), source)
+
+
+def from_headers(headers) -> Caller:
+    """The caller behind a REST request, from its headers: the dev-identity header on a
+    dev box, else nobody in particular (the REST twin verifies bearers on its own
+    routes; a data download under OAuth resolves here through the bearer's subject
+    only when that route verified it first)."""
+    settings = get_settings()
+    dev_box = not settings.grp_oauth_enabled and not settings.grp_allow_anonymous
+    get = getattr(headers, "get", None) or (lambda k, d=None: d)
+    dev = get(DEV_HEADER) or get(DEV_HEADER.title()) or get(DEV_HEADER.upper())
+    dev = dev.strip() if isinstance(dev, str) and dev.strip() else None
+    if dev_box:
+        cid = label = dev or LOCAL_DEV
+        source = "dev-header" if dev else "local-dev"
+    else:
         cid = label = ANONYMOUS
         source = "anonymous"
     return Caller(cid, label, _is_reviewer(cid, label, source), source)

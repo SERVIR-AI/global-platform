@@ -1064,6 +1064,12 @@ def source_raster(layer="hazard_flood"):
     except ValueError as exc:          # not a tiffs.yml layer -> treat as a catalog filename/stem
         if "is a stack" in str(exc):
             raise
+        # A contributed layer the caller's catalog does not show is one they may not
+        # view: naming it by file name must not serve it either. The row is checked
+        # on the unfiltered catalog, so the answer is the same "unknown" the catalog gave.
+        hidden = (tiffs._base().get(layer) or {}).get("contribution_id")
+        if hidden:
+            raise ValueError(f"unknown tiff layer: {layer}") from None
         fname = layer if layer.endswith(".tif") else f"{layer}.tif"
         fallback_url = None
     path = os.path.join(settings.tiffs_dir, fname)

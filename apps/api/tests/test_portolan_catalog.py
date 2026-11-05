@@ -35,6 +35,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(s, "tiffs_contrib_path", tmp_path / "tiffs.contrib.yml")
     monkeypatch.setattr(s, "raster_schema_contrib_path", tmp_path / "raster_schema.contrib.yml")
     monkeypatch.setattr(s, "tiffs_dir", str(tmp_path / "tiffs"))
+    monkeypatch.setattr(s, "cache_dir", tmp_path / "cache")
     monkeypatch.setattr(s, "grp_portolan_root", str(tmp_path / "published"))
     monkeypatch.setattr(s, "grp_catalog_url", "")
     monkeypatch.setattr(s, "grp_catalog_mirror", True)
