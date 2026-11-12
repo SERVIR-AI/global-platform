@@ -10,6 +10,8 @@ from typing import Any
 
 import base64
 import contextvars
+
+import anyio
 import builtins
 import logging
 import os
@@ -18,6 +20,7 @@ import time
 from pathlib import Path
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware
 from mcp.types import Icon
 
@@ -25,6 +28,7 @@ from . import (app_ui, assemble, auth, budget, compose, context, feeds, fetch, i
                loop, weights_ui,
                publish, record, registry, resolve, shape, start, store, tooltext, ui, verify)
 from ..config import get_settings
+from ..contrib import identity
 from .. import __version__
 
 log = logging.getLogger(__name__)
@@ -84,7 +88,23 @@ def _serving() -> bool:
 
 
 _STARTED = time.perf_counter()
-INSTRUCTIONS = _instructions()
+# Text served to every caller is built as nobody in particular, in a context of its own: it
+# names only what anyone may see (a hub's restricted layers stay out of shared descriptions),
+# and a store outage met while building stays out of the request contexts that follow.
+NOBODY = identity.Caller(identity.ANONYMOUS, identity.ANONYMOUS, False, "anonymous")
+
+
+def _as_nobody(fn):
+    def run():
+        token = identity.bind(NOBODY)
+        try:
+            return fn()
+        finally:
+            identity.unbind(token)
+    return contextvars.Context().run(run)
+
+
+INSTRUCTIONS = _as_nobody(_instructions)
 
 # Host, port, transport security and statelessness are no longer constructor
 # arguments: they belong to whoever builds the ASGI app or runs the transport, so
@@ -133,8 +153,8 @@ def _describe(name: str, fn, rules: tuple = (), params=None) -> str:
     if params is not None:
         PARAMS[name] = lambda: budget.fit_each(f"parameter of {name}:", params,
                                                budget.PARAM_DESCRIPTION)
-        _PARAMS_BUILT[name] = PARAMS[name]()
-    _BUILT[name] = live()
+        _PARAMS_BUILT[name] = _as_nobody(PARAMS[name])
+    _BUILT[name] = _as_nobody(live)
     return _BUILT[name]
 
 
@@ -197,6 +217,13 @@ class _LiveText(Middleware):
         """(instructions, {tool: description}, {tool: {parameter: description}}) from live
         state, each source read once."""
         descs, params = {}, {}
+        nobody = identity.bind(NOBODY)       # shared text: what anyone may see
+        try:
+            return self._build(descs, params)
+        finally:
+            identity.unbind(nobody)
+
+    def _build(self, descs: dict, params: dict) -> tuple[str | None, dict, dict]:
         with budget.snapshot():
             for out, kept, makers, what in ((descs, self._descs, DESCRIBERS, "description"),
                                             (params, self._params, PARAMS, "parameters")):
@@ -336,6 +363,70 @@ class _ErrorBudget(Middleware):
             name = getattr(getattr(context, "message", None), "name", "?")
             budget.check(f"tool error {name}", str(exc), budget.ERROR_CHARS)
             raise
+
+
+class _Roles(Middleware):
+    """A tool tagged with a role is listed for, and callable by, a caller who holds that role;
+    the tags on the tools are the only record of which tool needs what, and each tag is a
+    platform relation the store answers for. Decided on every request, because the connect-time
+    text is built as nobody and served to all."""
+
+    @staticmethod
+    def _missing(caller, tool) -> set[str]:
+        """The tagged roles this caller does not hold. 'reviewer' is the caller's own answer (the
+        GRP_REVIEWERS list when the store is off); any other tag is asked of the store, and one
+        the store cannot vouch for is a role not held, so an unknown requirement hides a tool."""
+        from .. import authz
+        missing = set()
+        for tag in tool.tags:
+            if tag == "reviewer":
+                held = caller.is_reviewer
+            elif authz.enabled():
+                try:
+                    held = authz.check(authz.user_key(caller), tag, authz.PLATFORM)
+                except authz.AuthzUnavailable:
+                    held = False
+            else:
+                held = False
+            if not held:
+                missing.add(tag)
+        return missing
+
+    def _decide(self, tools):
+        """(caller, {tool name: roles missing}, the store's outage reason) for the tagged tools, in
+        the worker thread: the store is asked synchronously, and the loop must not wait on it."""
+        from .. import authz
+        caller = identity.current()
+        return caller, {t.name: self._missing(caller, t) for t in tools if t.tags}, authz.outage()
+
+    @staticmethod
+    def _refusal(name: str, caller, missing: set[str], why: str | None) -> str:
+        role = f"{name} needs the {' and '.join(sorted(missing))} role"
+        if why:
+            return (f"{role}, and whether {caller.label} holds it cannot be confirmed: the authorization "
+                    f"store did not answer ({why}); refused until it does")
+        return f"{role}, which {caller.label} does not hold (identified by: {caller.source})"
+
+    async def on_request(self, context, call_next):
+        """Every request starts with no store outage on record."""
+        from .. import authz
+        authz.clear_outage()
+        return await call_next(context)
+
+    async def on_list_tools(self, context, call_next):
+        tools = await call_next(context)
+        _, missing, _ = await anyio.to_thread.run_sync(self._decide, tools)
+        return [t for t in tools if not missing.get(t.name)]
+
+    async def on_call_tool(self, context, call_next):
+        """A hidden tool is refused by name too, in words that say whose role is missing."""
+        name = getattr(getattr(context, "message", None), "name", None)
+        tool = await mcp.get_tool(name) if name else None
+        if tool is not None and tool.tags:
+            caller, missing, why = await anyio.to_thread.run_sync(self._decide, [tool])
+            if missing.get(name):
+                raise ToolError(self._refusal(name, caller, missing[name], why))
+        return await call_next(context)
 
 
 def _braced(text: str) -> str:
@@ -572,20 +663,16 @@ def contribute_status(contribution_id: str | None = None, action: str = "show",
     return _staging.status(contribution_id, offset=offset)
 
 
-@mcp.tool(description=(
-    "Who may see a contribution you own: action='show' lists its visibility (private, hub, "
-    "platform, public), its hub and its grants; action='visibility' with visibility=<level> sets "
-    "the level (hub=<id> names the hub for level 'hub'); action='grant' or 'revoke' with user=<id> "
-    "or hub=<id> shares with one person or a whole hub. Staged contributions stay visible to you "
-    "and reviewers only until approval; a level or grant takes effect on approval. Needs the "
-    "platform's authorization store; without it every approved layer is served to every caller."))
-def contribute_share(contribution_id: str, action: str = "show", visibility: str | None = None,
-                     hub: str | None = None, user: str | None = None) -> dict:
+@mcp.tool(description=_describe("contribute_share", tooltext.share, (), tooltext.share_params))
+def contribute_share(contribution_id: str | None = None, action: str = "show",
+                     visibility: str | None = None, hub: str | None = None,
+                     user: str | None = None) -> dict:
     """The contributor's own access decisions, as data in the authorization store."""
     return _staging.share(contribution_id, action=action, visibility=visibility, hub=hub, user=user)
 
 
-@mcp.tool(description=_describe("contribute_review", tooltext.review, (), tooltext.review_params))
+@mcp.tool(description=_describe("contribute_review", tooltext.review, (), tooltext.review_params),
+          tags={"reviewer"})
 def contribute_review(action: str = "list", contribution_id: str | None = None,
                       note: str | None = None, status_filter: str = "pending",
                       offset: int = 0) -> dict:
@@ -594,9 +681,9 @@ def contribute_review(action: str = "list", contribution_id: str | None = None,
         return shape.shape(_staging.review_list(status_filter=status_filter), "review",
                            offset=offset, again=("contribute_review(action='list', status_filter="
                                                  + _braced(repr(status_filter)) + ", offset={next})"))
-    if action not in ("approve", "reject", "remove"):
+    if action not in ("approve", "reject"):
         return {"status": "declined",
-                "note": f"unknown action {action!r} — list, approve, reject or remove"}
+                "note": f"unknown action {action!r} — list, approve or reject"}
     if not contribution_id:
         return {"status": "declined", "note": f"{action} needs a contribution_id"}
     if action == "approve":
@@ -856,6 +943,7 @@ def main() -> None:
 LIVE = _LiveText()
 LIVE.seed(INSTRUCTIONS, _BUILT, (time.perf_counter() - _STARTED) * 1000, params=_PARAMS_BUILT)
 mcp.add_middleware(LIVE)
+mcp.add_middleware(_Roles())
 mcp.add_middleware(_ErrorBudget())
 
 

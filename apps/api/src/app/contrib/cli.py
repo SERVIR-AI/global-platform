@@ -12,7 +12,7 @@
   uv run python -m app.contrib.cli review list [pending|approved|rejected|all]
   uv run python -m app.contrib.cli review show <contribution-id>
   uv run python -m app.contrib.cli review approve <contribution-id> [note]
-  uv run python -m app.contrib.cli review reject <contribution-id> <note>
+  uv run python -m app.contrib.cli review reject <contribution-id> <note>   # approved: taken down (here only)
 
 Prints results and exits non-zero if anything declined, so the command is
 honest in scripts too."""
@@ -38,7 +38,8 @@ def main(argv: list[str] | None = None) -> int:
         elif sub == "approve" and len(argv) > 2:
             out = staging.approve(argv[2], op, " ".join(argv[3:]) or None)
         elif sub == "reject" and len(argv) > 3:
-            out = staging.reject(argv[2], " ".join(argv[3:]), op)
+            # The one place an approved contribution is taken down: the server's own command line.
+            out = staging.reject(argv[2], " ".join(argv[3:]), op, take_down=True)
         else:
             print(__doc__)
             return 2

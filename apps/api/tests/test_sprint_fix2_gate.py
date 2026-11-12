@@ -265,16 +265,18 @@ def test_the_owner_withdraws_an_approved_layer_a_stranger_cannot(hub, auto, log)
     assert staging.submit("vector", _vector("test_wrong_pts"), OWNER)["status"] == "approved"
 
 
-def test_a_reviewer_removes_anyones_approved_table_and_says_so(hub, auto, log):
+def test_an_approved_table_is_taken_down_by_the_operator_not_over_mcp(hub, auto, log):
     out = staging.submit("table", _table("test_wrong_tbl"), OWNER)
     assert out["status"] == "approved" and "test_wrong_tbl" in registry.FEEDS
     cid = out["contribution_id"]
-    # a reviewer is pointed at the review action rather than told "unknown"
+    # a reviewer who is not the owner is pointed at the command line rather than told "unknown"
     told = staging.withdraw(cid, REVIEWER)
-    assert told["status"] == "declined" and "contribute_review(action='reject'" in told["note"]
+    assert told["status"] == "declined" and "command line" in told["note"]
     assert staging.reject(cid, "", REVIEWER)["status"] == "declined"     # a note is required
     assert staging.reject(cid, "not mine to remove", OTHER)["status"] == "declined"
-    rej = staging.reject(cid, "the factor is per plot, not per hectare", REVIEWER)
+    # Over MCP an approved contribution is not taken down; the operator path is the command line.
+    assert staging.reject(cid, "the factor is per plot, not per hectare", REVIEWER)["status"] == "declined"
+    rej = staging.reject(cid, "the factor is per plot, not per hectare", REVIEWER, take_down=True)
     log("OUTPUT", json.dumps(rej["unlanded"]))
     assert rej["status"] == "rejected" and rej["unlanded"]["dataset"] == "test_wrong_tbl"
     assert rej["decision_note"] == "removed after approval: the factor is per plot, not per hectare"
@@ -386,7 +388,7 @@ def test_a_withdrawn_stack_year_leaves_the_catalog_and_the_default_stack_choice(
         lc._pick_stack(box(*B))
 
 
-def test_a_reviewer_takes_down_an_approved_layer_any_pack_was_reading(lands, log):
+def test_the_operator_takes_down_an_approved_layer_any_pack_was_reading(lands, log):
     arr = np.tile((1000 + 10 * np.arange(20)).astype("int16"), (20, 1))
     out = _raster("measure_toy_agb", lands("agb.tif", arr, "int16"),
                   declared={"dtype": "int16", "valid_min": 0, "valid_max": 3000, "units": "Mg/ha",
@@ -395,7 +397,7 @@ def test_a_reviewer_takes_down_an_approved_layer_any_pack_was_reading(lands, log
     p = assemble.assemble(pack="risk", place="Toyville", hazard="toyflood", geometry=POLY,
                           layers=["measure_toy_agb"])
     assert "measure_toy_agb" in p["layers"]
-    rej = staging.reject(out["contribution_id"], "biomass is x10 twice", REVIEWER)
+    rej = staging.reject(out["contribution_id"], "biomass is x10 twice", REVIEWER, take_down=True)
     assert rej["status"] == "rejected" and rej["unlanded"]["catalog_row"] == "removed"
     assert "measure_toy_agb" not in tiffs.catalog()
     again = assemble.assemble(pack="risk", place="Toyville", hazard="toyflood", geometry=POLY,

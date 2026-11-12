@@ -254,3 +254,86 @@ def test_the_model_file_and_the_json_agree():
     assert {t["type"] for t in js["type_definitions"]} == types_dsl
     rel_js = {r for t in js["type_definitions"] for r in (t.get("relations") or {})}
     assert rel_js == rel_dsl
+
+
+def test_the_tool_list_differs_by_role_and_a_hidden_tool_is_refused_by_name(env, log):
+    """The review tool is listed for a reviewer and not for an analyst, decided per request
+    from the caller; the analyst calling it by name is refused in words that name them, and
+    the reviewer's call goes through."""
+    import asyncio
+    from fastmcp.exceptions import ToolError
+    from app.mcp import server
+
+    def names(who):
+        return {t.name for t in _as(who, lambda: asyncio.run(server.mcp.list_tools()))}
+
+    analyst, reviewer = names(A1), names(REVIEWER)
+    log("OUTPUT", f"reviewer sees, analyst does not: {sorted(reviewer - analyst)}")
+    assert "contribute_review" in reviewer and "contribute_review" not in analyst
+    assert analyst < reviewer and all(not t.tags for t in asyncio.run(server.mcp.list_tools()) if t.name in analyst)
+    with pytest.raises(ToolError) as refused:
+        _as(A1, lambda: asyncio.run(server.mcp.call_tool("contribute_review", {"action": "list"})))
+    log("OUTPUT", str(refused.value))
+    assert A1.label in str(refused.value) and "reviewer" in str(refused.value)
+    ok = _as(REVIEWER, lambda: asyncio.run(server.mcp.call_tool("contribute_review", {"action": "list"})))
+    assert ok.structured_content["status"] == "ok"
+
+
+def test_an_approved_contribution_is_not_taken_down_over_mcp_but_the_operator_can(env, file_host, log):
+    """Over MCP a reviewer's reject refuses an approved contribution in words and 'remove' is
+    no action; the operator's command line still takes it down, and the store forgets it."""
+    import asyncio
+    from app.contrib import cli
+    from app.mcp import server, store
+    cid = _submit(file_host, visibility="hub")["contribution_id"]
+    assert _as(REVIEWER, lambda: staging.approve(cid, REVIEWER))["status"] == "approved"
+    assert _sees(A1)
+
+    def review(**args):
+        return _as(REVIEWER, lambda: asyncio.run(
+            server.mcp.call_tool("contribute_review", args))).structured_content
+
+    kept = review(action="reject", contribution_id=cid, note="wrong units")
+    log("OUTPUT", kept["note"])
+    assert kept["status"] == "declined" and "command line" in kept["note"] and "withdraw" in kept["note"]
+    gone = review(action="remove", contribution_id=cid, note="wrong units")
+    assert gone["status"] == "declined" and "unknown action" in gone["note"]
+    assert store.load_contribution(cid)["status"] == "approved" and _sees(A1)
+    assert cli.main(["review", "reject", cid, "wrong units, taken down"]) == 0
+    rec = store.load_contribution(cid)
+    assert rec["status"] == "rejected" and rec["unlanded"]["removed"] is True
+    assert not _sees(A1) and authz.tuples(authz.dataset(cid)) == []
+
+
+def test_share_list_is_a_hubs_view_of_its_own_datasets(env, file_host, log):
+    """A hub's member lists the hub's contributions they may view, each with its visibility;
+    the other hub lists nothing, its own hubs or the named one; the owner's switch shows."""
+    cid = _submit(file_host, visibility="hub")["contribution_id"]
+    listing = lambda who, **kw: _as(who, lambda: staging.share(None, "list", caller=who, **kw))
+    staged = listing(OWNER)
+    assert staged["hubs"] == ["mekong"] and [r["status"] for r in staged["contributions"]] == ["pending"]
+    assert listing(A1)["contributions"] == []                 # staged: owner and reviewers only
+    _as(REVIEWER, lambda: staging.approve(cid, REVIEWER))
+    mine = listing(A1)
+    log("OUTPUT", mine)
+    assert mine["status"] == "ok" and mine["hubs"] == ["mekong"]
+    assert [(r["contribution_id"], r["kind"], r["status"], r["visibility"], r["hub"])
+            for r in mine["contributions"]] == [(cid, "raster", "approved", "hub", "mekong")]
+    assert mine["contributions"][0]["title"].startswith("Toy heat hazard")
+    assert listing(A2)["contributions"] == [] and listing(A2, hub="mekong")["contributions"] == []
+    _as(OWNER, lambda: staging.share(cid, "visibility", visibility="platform", caller=OWNER))
+    assert listing(A1)["contributions"][0]["visibility"] == "platform"
+    assert listing(A2)["contributions"] == []                 # viewable now, but not its hub's upload
+    assert staging.share(None, "visibility", visibility="hub", caller=OWNER)["status"] == "declined"
+
+
+def test_with_the_store_unreachable_the_review_refusal_names_the_store(env, monkeypatch, log):
+    """Fail closed with a reason: the queue is refused because the store did not answer, not
+    because the person is not a reviewer — resolved as the MCP resolves it, asking the store."""
+    import contextvars
+    monkeypatch.setattr(get_settings(), "grp_fga_url", "http://127.0.0.1:9")
+    authz._CLIENT.clear()
+    out = contextvars.copy_context().run(staging.review_list)    # one request's context, as served
+    log("OUTPUT", out["note"])
+    assert out["status"] == "declined" and "did not answer" in out["note"]
+    assert "not a reviewer" not in out["note"]
