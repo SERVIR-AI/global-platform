@@ -770,7 +770,7 @@ def describe() -> str:
     """The tool description, GENERATED from the registry: every feed by title and its callable
     `dataset` id, the platform's own first (budget.names, ROUTE: a named feed can be called),
     then the pending ids. Briefs, params and the reason behind a gap: platform_capabilities."""
-    rows = sorted(list(registry.FEEDS.items()), key=lambda r: (bool(r[1].get("contributed")), r[0]))
+    rows = sorted(registry.visible_feeds().items(), key=lambda r: (bool(r[1].get("contributed")), r[0]))
     avail = [(n, s) for n, s in rows if s.get("status") == "available"]
     pending = sorted(n for n, s in rows if s.get("status") != "available")
     more = "more (platform_capabilities(section='feeds'))"
@@ -822,20 +822,22 @@ def query(dataset: str, params: dict | None = None) -> dict:
     """Dispatch to the feed's adapter. Unknown / pending / unimplemented feeds all
     decline with a reason rather than a shrug."""
     params = params or {}
-    spec = registry.FEEDS.get(dataset)
+    rows = registry.visible_feeds()             # what this caller may read; the rest is unknown
+    spec = rows.get(dataset)
     if spec is None:
-        # A staged contribution serves ONLY to its owner and reviewers; to anyone
-        # else it is simply unknown (contrib/staging.py, the visibility rule).
+        # A staged contribution serves ONLY to its owner and reviewers, a landed one only
+        # to whom the authorization store admits; to anyone else it is simply unknown
+        # (contrib/staging.py, the visibility rule; registry.visible_feeds).
         from ..contrib import staging
         spec = staging.visible_staged_feed(dataset)
     if spec is None:
         return {"status": "declined", "note": f"unknown dataset {dataset!r}",
-                "available": sorted(k for k, v in registry.FEEDS.items()
+                "available": sorted(k for k, v in rows.items()
                                     if v.get("status") == "available")}
     if spec.get("status") != "available":
         return {"status": "declined", "dataset": dataset,
                 "note": f"{dataset}: {spec.get('reason', 'not available yet')}",
-                "available": sorted(k for k, v in registry.FEEDS.items()
+                "available": sorted(k for k, v in rows.items()
                                     if v.get("status") == "available")}
     adapter = ADAPTERS.get(spec.get("adapter"))
     if adapter is None:

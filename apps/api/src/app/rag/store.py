@@ -61,13 +61,30 @@ def _chunk(text: str, target: int = 1800) -> list[str]:
     return chunks
 
 
-def _visible(meta: dict) -> bool:
-    """The staged-contribution visibility rule, applied before any ranking so a
-    staged document can never leak through a score. Unstaged metadata is public."""
-    if not (meta or {}).get("staged_by"):
+def may_read(meta: dict | None, caller=None) -> bool:
+    """May `caller` (the current one when None) read a document carrying this metadata?
+    A STAGED document is its contributor's and the reviewers' (contrib/identity may_see);
+    a LANDED contribution is whoever the authorization store lists for it (may_view:
+    visibility level, hub, share), and one it hides is unknown, never declined. Metadata
+    with neither tag is public. Applied before any ranking, so nothing hidden can leak
+    through a score."""
+    meta = meta or {}
+    staged_by, cid = meta.get("staged_by"), meta.get("contribution_id")
+    if not staged_by and not cid:
         return True
+    if caller is None:
+        from ..contrib import identity
+        caller = identity.current()
+    return caller.may_see(staged_by) and caller.may_view(cid)
+
+
+def _reader():
+    """(who is reading, the snapshot to read under): one walk of the chunks resolves the
+    caller once and asks the authorization store once for them (contrib/identity memoises
+    its answer inside a budget snapshot), however many chunks it meets."""
     from ..contrib import identity
-    return identity.visible(meta)
+    from ..mcp import budget
+    return identity.current(), budget.snapshot()
 
 
 def _matches(meta: dict, filters: dict) -> bool:
@@ -295,8 +312,10 @@ class Corpus:
         if min_relevance is None:
             min_relevance = get_settings().rag_min_relevance
         k = max(int(k), 0)
-        idx = [i for i, c in enumerate(self._chunks)
-               if _matches(c["metadata"], filters) and _visible(c["metadata"])]
+        who, look = _reader()
+        with look:
+            idx = [i for i, c in enumerate(self._chunks)
+                   if _matches(c["metadata"], filters) and may_read(c["metadata"], who)]
         if not idx or k == 0:
             return []
         q = self.embedder.embed([query])[0]
@@ -313,8 +332,10 @@ class Corpus:
     def count(self, **filters) -> int:
         """Chunks surviving the filters (pre-similarity) — distinguishes
         'nothing matches your filters' from 'below threshold'."""
-        return sum(1 for c in self._chunks
-                   if _matches(c["metadata"], filters) and _visible(c["metadata"]))
+        who, look = _reader()
+        with look:
+            return sum(1 for c in self._chunks
+                       if _matches(c["metadata"], filters) and may_read(c["metadata"], who))
 
     def find(self, doc_id: str) -> dict | None:
         """One document by id REGARDLESS of visibility — for the contribution gate's
@@ -326,14 +347,17 @@ class Corpus:
 
     def documents(self) -> list[dict]:
         """The library as the CURRENT CALLER may see it: staged documents appear only
-        to their contributor and to reviewers (contrib/identity.py)."""
+        to their contributor and to reviewers, landed contributions only to whom the
+        authorization store admits (may_read)."""
         docs: dict[str, dict] = {}
-        for c in self._chunks:
-            if not _visible(c["metadata"]):
-                continue
-            entry = docs.setdefault(
-                c["doc_id"], {"doc_id": c["doc_id"], "chunks": 0, "metadata": c["metadata"]})
-            entry["chunks"] += 1
+        who, look = _reader()
+        with look:
+            for c in self._chunks:
+                if not may_read(c["metadata"], who):
+                    continue
+                entry = docs.setdefault(
+                    c["doc_id"], {"doc_id": c["doc_id"], "chunks": 0, "metadata": c["metadata"]})
+                entry["chunks"] += 1
         return list(docs.values())
 
 

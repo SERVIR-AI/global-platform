@@ -733,6 +733,15 @@ def reload() -> None:
     _LANDED["sig"] = None
 
 
+def landed_visible() -> dict[str, dict]:
+    """The approved methods the current caller may use: `landed()` less the ones the
+    authorization store does not list for them (visibility level, hub, share), the raster
+    catalog's rule — a hidden method is unknown, not declined. `landed()` itself stays
+    whole for the gate (name collisions, landing state)."""
+    from . import identity
+    return identity.viewable(landed())
+
+
 def staged_visible() -> dict[str, dict]:
     """Staged methods the current caller may see: its own, or all for a reviewer."""
     from . import identity, staging
@@ -746,7 +755,7 @@ def staged_visible() -> dict[str, dict]:
 def for_pack(pack: str) -> dict[str, dict]:
     """Every method a pack runs for the current caller: approved ones, and the caller's
     own staged ones (a contributor sees their method in a real answer before review)."""
-    rows = {k: v for k, v in landed().items() if pack in (v.get("packs") or [])}
+    rows = {k: v for k, v in landed_visible().items() if pack in (v.get("packs") or [])}
     for k, v in staged_visible().items():
         if k not in rows and pack in (v.get("packs") or []):
             rows[k] = v
@@ -757,7 +766,7 @@ def for_pack(pack: str) -> dict[str, dict]:
 def catalog() -> dict[str, dict]:
     """What capabilities lists: every method the caller can use, by name."""
     out = {}
-    for src, rows in (("approved", landed()), ("staged — awaiting review", staged_visible())):
+    for src, rows in (("approved", landed_visible()), ("staged — awaiting review", staged_visible())):
         for k, v in rows.items():
             out.setdefault(k, {"title": v.get("title"), "packs": v.get("packs"),
                                "inputs": {a: next(iter(r.values())) for a, r in (v.get("inputs") or {}).items()},
@@ -786,7 +795,7 @@ def input_spec(ds: str) -> dict | None:
     see included), or None."""
     from ..mcp import registry
     from . import staging
-    row = registry.FEEDS.get(ds)
+    row = registry.visible_feeds().get(ds)
     if row is not None and row.get("status") == "available":
         return row
     return staging.visible_staged_feed(ds)
@@ -803,7 +812,7 @@ def prepare(m: dict) -> dict:
         spec = input_spec(ds)
         if spec is None:
             from . import staging
-            names = [*registry.FEEDS, *staging.staged_feeds_for_caller()]
+            names = [*registry.visible_feeds(), *staging.staged_feeds_for_caller()]
             near = difflib.get_close_matches(ds, names, n=4)
             raise MethodError(f"input {alias!r} names {ds!r}, which is not a feed or table the "
                               "platform serves" + (f" — did you mean {', '.join(near)}?" if near

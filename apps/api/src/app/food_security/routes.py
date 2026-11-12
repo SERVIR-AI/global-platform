@@ -10,7 +10,7 @@ import socket
 from urllib.parse import urljoin, urlparse
 
 import requests
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from openai import OpenAIError
 from pydantic import BaseModel, Field, field_validator
@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field, field_validator
 from ..config import Provider, get_settings
 from ..llm import MissingAPIKey
 from ..rag import docloader
-from ..rag.store import Corpus, CorpusError
+from ..rag.store import Corpus, CorpusError, may_read
 from . import calendar as crop_calendar
 from . import cropmonitor, synthesis
 
@@ -290,26 +290,30 @@ def rag_documents() -> dict:
     return {"corpus": _CORPUS, "documents": len(items), "items": items}
 
 
-def _refuse_unless_visible(corpus: Corpus, doc_id: str) -> None:
-    """The staged-contribution visibility rule on the ARCHIVE path too: a staged
-    original is served to its contributor and reviewers; a rejected or withdrawn
-    preview (index rows gone, raw kept for replay) only to them as well."""
+def _refuse_unless_visible(corpus: Corpus, doc_id: str, request: Request | None = None) -> None:
+    """The contribution visibility rules on the ARCHIVE path too: a staged original is
+    served to its contributor and reviewers, a landed one to whom the authorization store
+    admits (may_read); a rejected or withdrawn preview (index rows gone, raw kept for
+    replay) only to its contributor and reviewers as well."""
     from ..contrib import identity
+    # The requester, from the request's headers; a direct call with no request (tests) reads the
+    # bound caller. Resolving with no request would be the box operator, who may view everything.
+    caller = identity.from_headers(request.headers) if request is not None else identity.current()
     found = corpus.find(doc_id)
     if found is not None:
-        if not identity.visible(found["metadata"]):
+        if not may_read(found["metadata"], caller):
             raise HTTPException(status_code=404, detail="unknown doc_id")
         return
     from ..mcp import store
     rec = next((r for r in store.list_contributions(kind="document")
                 if (r.get("preview") or {}).get("doc_id") == doc_id), None)
     if rec and rec.get("status") != "approved" \
-            and not identity.current().may_see(rec.get("contributor_id")):
+            and not caller.may_see(rec.get("contributor_id")):
         raise HTTPException(status_code=404, detail="unknown doc_id")
 
 
 @router.get("/rag/document/{doc_id}")
-def rag_document(doc_id: str):
+def rag_document(doc_id: str, request: Request = None):
     """Serve the archived original — the exact bytes the cited text was extracted
     from, immune to the source URL rotting or being overwritten upstream."""
     if not re.fullmatch(r"[0-9a-f]{16}", doc_id):
@@ -322,22 +326,21 @@ def rag_document(doc_id: str):
         # shareable proof; a dead link on one is the trace-back failing in the
         # place it matters most. Look the id up in the other libraries rather than
         # 404ing on an id the platform can plainly resolve.
-        other = _archived_elsewhere(doc_id)
+        other = _archived_elsewhere(doc_id, request)
         if other is not None:
             return other
-        _refuse_unless_visible(corpus, doc_id)
+        _refuse_unless_visible(corpus, doc_id, request)
         known = any(d["doc_id"] == doc_id for d in corpus.documents())
         raise HTTPException(status_code=404, detail=(
             "document is in the library but has no archived original (ingested before "
             "archiving existed) — re-ingest it, or fetch it from its source_url"
             if known else "unknown doc_id"))
-    _refuse_unless_visible(corpus, doc_id)
+    _refuse_unless_visible(corpus, doc_id, request)
     return FileResponse(path)
 
 
-def _archived_elsewhere(doc_id: str):
+def _archived_elsewhere(doc_id: str, request: Request | None = None):
     """The same document in another pack's library, if that is where it lives."""
-    from ..contrib import identity
     from ..mcp import packs
     for name in {p.get("corpus") for p in packs.PACKS.values() if p.get("corpus")}:
         if name == _CORPUS:
@@ -349,7 +352,9 @@ def _archived_elsewhere(doc_id: str):
         found = other.find(doc_id)
         if found is None:
             continue          # absent from the index is not permission
-        if not identity.visible(found["metadata"]):
+        from ..contrib import identity
+        caller = identity.from_headers(request.headers) if request is not None else identity.current()
+        if not may_read(found["metadata"], caller):
             continue
         path = other.raw_path(doc_id)
         if path is not None:

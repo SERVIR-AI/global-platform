@@ -264,7 +264,7 @@ def _pack_feeds(place, trace, gaps, hazard=None, country=None, bounds=None):
     """
     from ..contrib import staging
     from ..mcp import feeds, registry
-    rows = {k: v for k, v in registry.FEEDS.items()
+    rows = {k: v for k, v in registry.visible_feeds().items()
             if v.get("pack") == "risk" and v.get("status") == "available"}
     try:                      # a contributor's own staged feed previews here too
         rows.update({k: v for k, v in staging.visible_staged_feeds_for_pack("risk").items()

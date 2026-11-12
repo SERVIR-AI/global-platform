@@ -249,7 +249,7 @@ def _named_countries(q: dict, known: dict) -> list[str]:
 def _feeds() -> dict:
     """{dataset: row} for every available feed and the caller's visible staged ones."""
     from . import registry
-    rows = {k: v for k, v in list(registry.FEEDS.items()) if v.get("status") == "available"}
+    rows = {k: v for k, v in registry.visible_feeds().items() if v.get("status") == "available"}
     try:
         from ..contrib import staging
         for ds in staging.staged_feeds_for_caller():
@@ -1088,7 +1088,7 @@ def _lookup_text(result: dict) -> tuple[str, list[str], str]:
     ds = result.get("dataset")
     if ds:
         from . import registry
-        spec = registry.FEEDS.get(ds)
+        spec = registry.visible_feeds().get(ds)
         if spec is None:
             try:
                 from ..contrib import staging

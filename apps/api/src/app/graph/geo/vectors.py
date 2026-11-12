@@ -99,8 +99,11 @@ def unregister(layer: str) -> None:
 
 @once
 def visible() -> dict:
-    """Landed layers plus the staged ones THIS caller may see. Same visibility rule
-    as staged rasters: contributor and reviewers, nobody else. Read once per snapshot."""
+    """Landed layers plus the staged ones THIS caller may see, less the landed contributions
+    the authorization store does not list for them — the raster catalog's rules
+    (graph/geo/tiffs.catalog): staged, contributor and reviewers; landed, whoever its
+    visibility level, hub or a share admits. `landed()` stays whole for the gate. Read
+    once per snapshot."""
     out = dict(landed())
     try:
         from ...contrib import staging
@@ -110,7 +113,8 @@ def visible() -> dict:
                 out[k] = staging.amended_row(k, out[k])
     except Exception:
         pass
-    return out
+    from ...contrib import identity
+    return identity.viewable(out)
 
 
 def master_path(entry: dict) -> Path:

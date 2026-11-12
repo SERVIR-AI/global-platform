@@ -876,7 +876,7 @@ def _driver_citations(trace):
         return " | ".join(parts)[:budget]
 
     out, gaps = [], []
-    specs = {n: s for n, s in registry.FEEDS.items()
+    specs = {n: s for n, s in registry.visible_feeds().items()
              if s.get("status") == "available" and s.get("brief_role") == "driver"}
     try:          # a contributor's own STAGED driver previews AS a driver, not as a table
         from ..contrib import staging
@@ -998,7 +998,7 @@ def _pack_bound_sources(trace, gaps, country=None):
     """
     from ..contrib import staging
     from ..mcp import feeds, registry
-    rows = {n: sp for n, sp in registry.FEEDS.items()
+    rows = {n: sp for n, sp in registry.visible_feeds().items()
             if sp.get("status") == "available"
             and sp.get("pack", "food-security") == "food-security"
             and sp.get("brief_role") != "driver"}

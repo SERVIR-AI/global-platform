@@ -205,6 +205,15 @@ def cli_operator() -> Caller:
     return Caller(CLI_OPERATOR, CLI_OPERATOR, True, "cli")
 
 
-def visible(metadata: dict | None) -> bool:
-    """Visibility of one artefact's metadata to the current caller."""
-    return current().may_see((metadata or {}).get("staged_by"))
+def viewable(rows: dict) -> dict:
+    """`rows` less the landed contributions the current caller may not view. A row with no
+    contribution id is built in and stays; one the authorization store does not list for the
+    caller is simply absent, unknown rather than declined, so nothing says it exists. The store
+    answers once per pass, however many rows, and a store that cannot answer hides every
+    contributed row (may_view fails closed through _memo).
+    """
+    from ..mcp import budget
+    caller = current()
+    with budget.snapshot():
+        return {k: v for k, v in rows.items()
+                if not (v or {}).get("contribution_id") or caller.may_view(v["contribution_id"])}

@@ -321,6 +321,17 @@ def sync_declarative_feeds() -> bool:
 reload_declarative_feeds()
 
 
+@budget.once
+def visible_feeds() -> dict:
+    """`FEEDS` as the CURRENT CALLER may read it: every row but the landed contributions
+    the authorization store does not list for them (visibility level, hub, share), the
+    raster catalog's rule — a hidden feed or table is unknown, not declined, so nothing
+    says it exists. The dict itself stays whole for the gate (name collisions, landing
+    state, take-down). Read once per budget.snapshot()."""
+    from ..contrib import identity
+    return identity.viewable(dict(FEEDS))
+
+
 # Compositions are REGISTRY ROWS invoked through the one `compose_run` tool — so a
 # new pack/composition adds zero tools (the count discipline, ARCHITECTURE §2).
 COMPOSITIONS = {
@@ -463,7 +474,7 @@ def pack_manifest(pack_id: str = "food-security") -> dict:
             "feeds": {k: {"status": v["status"],
                           **({"source": v["source"]} if v.get("source") else {}),
                           **({"reason": v["reason"]} if v.get("reason") else {})}
-                      for k, v in FEEDS.items()
+                      for k, v in visible_feeds().items()
                       if v.get("pack", "food-security") == "food-security"},
         },
         "calendars": _calendars(),
@@ -606,7 +617,7 @@ def capabilities(available_tools=None, available_prompts=None,
         # large for a client to read whole; feeds_query returns any feed in full.
         "feeds_note": ("one summary per feed or table; feeds_query(dataset=...) returns its "
                        "records, its full passport and its parameters"),
-        "feeds": {k: _feed_brief(v) for k, v in FEEDS.items()},
+        "feeds": {k: _feed_brief(v) for k, v in visible_feeds().items()},
         # the caller's own staged contributions (reviewers: all) — queryable by
         # them alone until approved; never a platform feed to anyone else
         "staged_feeds": _staged_feeds(),
@@ -669,7 +680,7 @@ def coverage() -> dict:
     the drift this registry exists to prevent everywhere else.
     """
     subjects, publishers, countries, crops = [], set(), set(), set()
-    for spec in list(FEEDS.values()):
+    for spec in visible_feeds().values():
         if spec.get("status") != "available":
             continue
         if spec.get("title"):
@@ -678,8 +689,8 @@ def coverage() -> dict:
             publishers.add(spec["source"])
     try:
         corpus = Corpus(_FS_CORPUS)
-        for ch in corpus._chunks:
-            m = ch.get("metadata") or {}
+        for d in corpus.documents():         # what this caller may read, one row per document
+            m = d.get("metadata") or {}
             if m.get("staged_by"):          # a preview is nobody's coverage yet
                 continue
             countries.update(m.get("countries") or [])
@@ -886,7 +897,7 @@ def countries() -> list[str]:
         rows += [e.get("countries") for e in vectors.visible().values() if isinstance(e, dict)]
     except Exception:
         pass
-    rows += [v.get("countries") for v in list(FEEDS.values()) if v.get("status") == "available"]
+    rows += [v.get("countries") for v in visible_feeds().values() if v.get("status") == "available"]
     rows.append(coverage()["countries"])
     count: dict = {}                          # key -> [name as first written, rows, first seen]
     for cs in rows:
