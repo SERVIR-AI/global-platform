@@ -10,12 +10,30 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 
+from .. import authz
 from ..llm import MissingAPIKey
 from ..rag.store import CorpusError
 from . import context, layers as layers_step, loop, methods_step, packs, store, vectors as vectors_step
 
 # Persisted with the pack for the embed and the replay, never returned to the model.
 NOT_RETURNED = ("viz", "layers_area", "vectors_area")
+
+
+def shared_gaps(gaps: list) -> list:
+    """The gaps every pack declares after its gather, through this one seam, whatever the
+    pack: a published catalog (GRP_CATALOG_URL) that could not be read, and an
+    authorization store that did not answer while the catalog and the layers were read.
+    The readers below the pack fail closed by hiding every contributed layer, so without
+    this line the pack would look complete, minus evidence nobody was told about."""
+    try:
+        from ..graph.geo import stac_catalog
+        gaps.extend(line for line in stac_catalog.gap_lines() if line not in gaps)
+    except Exception as exc:                 # the gap line itself never breaks a pack
+        gaps.append(f"published catalog status unknown ({type(exc).__name__}: {exc})")
+    why = authz.outage()
+    if why:
+        gaps.append(f"authorization store did not answer ({why}): contributed layers are hidden "
+                    "from this pack until it does")
 
 
 def declined(note: str, coverage: bool = True, **extra) -> dict:
@@ -145,13 +163,7 @@ def assemble(country: str | None = None, crop: str | None = None,
                                        trace, extras)
     layer_block, layer_area = layers_step.attach(spec, target, stats, citations, gaps,
                                                  layers, extras)
-    # A published catalog (GRP_CATALOG_URL) that could not be read is a declared gap
-    # in every pack: the layers it holds are stale or missing, said, never skipped.
-    try:
-        from ..graph.geo import stac_catalog
-        gaps.extend(line for line in stac_catalog.gap_lines() if line not in gaps)
-    except Exception as exc:                 # the gap line itself never breaks a pack
-        gaps.append(f"published catalog status unknown ({type(exc).__name__}: {exc})")
+    shared_gaps(gaps)
     if layers is not None:
         target = {**target, "layers": [n for n in dict.fromkeys(
             str(x).strip() for x in layers) if n]}

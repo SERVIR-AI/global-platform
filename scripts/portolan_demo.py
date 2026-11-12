@@ -5,7 +5,9 @@
     check     validate that folder with the Portolan CLI, when one is installed
     push      print or run the `aws s3 sync` that puts the folder on Source Cooperative
     serve     start an ISOLATED platform server that reads the catalog as a third source,
-              with one layer removed from its local files so it can only come from the catalog
+              with one layer removed from its local files so it can only come from the catalog;
+              with --fga-url at 127.0.0.1 and nothing listening there, also a local OpenFGA on a
+              sqlite datastore in --state (roles, hubs and sharing survive a restart)
     run       a real MCP client against that server: capabilities, assemble_pack on the
               catalog-only layer, a real model draft, publish_answer, the receipt over REST
     query     DuckDB over the collection's items.parquet (needs the duckdb package)
@@ -18,6 +20,7 @@ import argparse
 import asyncio
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -71,7 +74,23 @@ def cmd_push(a) -> int:
 
 # --- serve: an isolated server that can only get one layer from the catalog --------------
 
-def _prepare_state(state: Path, remove: list[str]) -> dict:
+def _kept_store_ids(state: Path, fga_url: str) -> str | None:
+    """The saved authorization store ids (cache/mcp/authz.json) survive the wipe only when
+    they name the persisted local OpenFGA this serve starts again: its sqlite file is in
+    the state dir and the saved url is the one asked for. Fresh ids against that store
+    would make a new, empty store the server trusts while the roles sit in the old one."""
+    saved = state / "cache" / "mcp" / "authz.json"
+    if not (fga_url and (state / "openfga.db").exists() and saved.exists()):
+        return None
+    try:
+        text = saved.read_text()
+        same = str(json.loads(text).get("url", "")).rstrip("/") == fga_url.rstrip("/")
+    except (OSError, ValueError):
+        return None
+    return text if same else None
+
+
+def _prepare_state(state: Path, remove: list[str], fga_url: str = "") -> dict:
     """A separate conf, tiffs dir and cache for the demo server. The real repo cache and
     the contributed YAMLs are never touched; the removed layers exist nowhere locally."""
     import yaml
@@ -94,6 +113,7 @@ def _prepare_state(state: Path, remove: list[str]) -> dict:
         if f.name not in removed_files and not f.name.startswith("staged-"):
             os.symlink(f, tiffs / f.name)
     cache = state / "cache"
+    kept = _kept_store_ids(state, fga_url)
     if cache.exists():
         shutil.rmtree(cache)
     cache.mkdir()
@@ -104,6 +124,8 @@ def _prepare_state(state: Path, remove: list[str]) -> dict:
         if (REPO / "cache" / name).exists():
             shutil.copytree(REPO / "cache" / name, cache / name, symlinks=True)
     (cache / "mcp").mkdir()                               # receipts: a fresh database
+    if kept:
+        (cache / "mcp" / "authz.json").write_text(kept)   # the persisted store's ids
     bundles = 0
     for d in sorted((REPO / "cache").glob("*")):          # warmed areas, minus the removed clips
         if d.is_dir() and (d / "meta.json").exists():
@@ -114,7 +136,42 @@ def _prepare_state(state: Path, remove: list[str]) -> dict:
             bundles += 1
     (state / "published").mkdir(exist_ok=True)
     return {"conf": str(conf), "tiffs": str(tiffs), "cache": str(cache), "bundles": bundles,
-            "published": str(state / "published")}
+            "published": str(state / "published"), "store_ids": "kept" if kept else "fresh"}
+
+
+def _openfga(state: Path, fga_url: str) -> dict:
+    """The authorization store for a local demo: when --fga-url names this machine and
+    nothing answers there, start OpenFGA on the sqlite engine in the state dir, so the
+    roles, hubs and sharing written today are still there after a restart (the memory
+    engine forgets the store; the saved ids then name nothing and every check fails
+    closed). A store elsewhere, or one already listening, is left alone."""
+    from urllib.parse import urlsplit
+    u = urlsplit(fga_url)
+    host, port = u.hostname or "", u.port or 80
+    if host not in ("127.0.0.1", "localhost"):
+        return {"openfga": f"at {fga_url}, run elsewhere"}
+    if _listening(port):
+        return {"openfga": f"already listening at {fga_url}"}
+    exe = shutil.which("openfga")
+    if not exe:
+        return {"error": f"nothing answers at {fga_url} and the openfga binary is not installed "
+                         "(brew install openfga); without its store the server would refuse every "
+                         "authorization check, so it is not started"}
+    db, log_path = state / "openfga.db", state / "openfga.log"
+    engine = ["--datastore-engine", "sqlite", "--datastore-uri", f"file:{db}"]
+    # The schema has to exist before `run`; on a migrated database this is a no-op.
+    mig = subprocess.run([exe, "migrate", *engine], capture_output=True, text=True)
+    if mig.returncode != 0:
+        return {"error": f"openfga migrate failed ({mig.returncode}): {(mig.stderr or mig.stdout)[-800:]}"}
+    cmd = [exe, "run", *engine, "--http-addr", f"{host}:{port}", "--grpc-addr", f"{host}:{port + 1}",
+           "--playground-enabled=false", "--metrics-enabled=false"]
+    with open(log_path, "ab") as log:
+        proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)
+    (state / "openfga.pid").write_text(str(proc.pid))     # known before the wait, so a failed start can be stopped
+    if not _answers(f"{fga_url.rstrip('/')}/healthz", proc, seconds=20):
+        proc.terminate()
+        return {"error": f"OpenFGA did not come up (exit {proc.poll()}); see {log_path}"}
+    return {"openfga": f"started at {fga_url}, sqlite datastore {db}", "pid": proc.pid, "log": str(log_path)}
 
 
 PERSONAS = {"contributor": ("demo_contrib", "a hub analyst who uploads a layer (hub mekong; also a reviewer, "
@@ -122,13 +179,44 @@ PERSONAS = {"contributor": ("demo_contrib", "a hub analyst who uploads a layer (
             "reviewer": ("demo_reviewer", "the platform reviewer"),
             "analyst_mekong": ("demo_a1", "an analyst in the contributor's hub (mekong)"),
             "analyst_lower": ("demo_a2", "an analyst in another hub (lower)")}
+SERVER = "servir"                    # the mcpServers key: Claude Code names its tools mcp__<key>__<tool>
+
+
+def _fence(ident: str, withheld: list[str]) -> dict:
+    """Claude Code settings for one person: a PreToolUse hook on each tool the server does not
+    offer them, so a session talked into trying reads the reason in the client instead of
+    making the round trip. The server refuses the same call on its own (the store decides),
+    so this is the second fence. Which tools are withheld is read from the running server
+    (tools/list as the operator minus tools/list as the person), never typed here."""
+    hooks = []
+    for tool in withheld:
+        reason = f"{ident} is not offered {tool} on this platform: the server refuses it as well"
+        hooks.append({"matcher": f"mcp__{SERVER}__{tool}",
+                      "hooks": [{"type": "command", "command": f"echo {shlex.quote(reason)} >&2; exit 2"}]})
+    return {"hooks": {"PreToolUse": hooks} if hooks else {}}
+
+
+def _fences(state: Path, port: int) -> dict[str, list[str]]:
+    """Written once the server answers: for every persona, the tools the server lists for the
+    operator (no header) but not for them. Returns {persona: withheld tools}."""
+    url = f"http://127.0.0.1:{port}/mcp"
+    offered_all = set(asyncio.run(_mcp(url, []))["tools"])
+    pdir = state / "personas"
+    out = {}
+    for name, (ident, _) in PERSONAS.items():
+        offered = set(asyncio.run(_mcp(url, [], headers={"x-grp-dev-identity": ident}))["tools"])
+        out[name] = sorted(offered_all - offered)
+        (pdir / f"{name}.settings.json").write_text(json.dumps(_fence(ident, out[name]), indent=2))
+    return out
 
 
 def _personas(state: Path, cache: str, fga_url: str, port: int) -> None:
     """The operator's one-time setup for the user-journey demo: roles and hub membership
     as tuples in the store the server will use, and one Claude Code MCP config per
-    person, each carrying that person's dev identity. Written BEFORE the server starts,
-    so both sides read the same store and model ids."""
+    person, each carrying that person's dev identity, beside a settings file with that
+    person's fence. Written BEFORE the server starts, so both sides read the same store
+    and model ids; every write is idempotent, so a restart on the persisted store is
+    harmless."""
     os.environ["GRP_FGA_URL"] = fga_url
     os.environ["CACHE_DIR"] = cache
     from app import authz
@@ -139,18 +227,24 @@ def _personas(state: Path, cache: str, fga_url: str, port: int) -> None:
                  (f"user:{PERSONAS['analyst_mekong'][0]}", "member", "hub:mekong"),
                  (f"user:{PERSONAS['analyst_lower'][0]}", "member", "hub:lower"),
                  ("user:local-dev", "operator", authz.PLATFORM)])
+    # Who is a reviewer is the store's answer to the tuples just written (an operator tuple
+    # implies it too), not a second list kept beside them.
+    reviewers = {ident for ident, _ in PERSONAS.values()
+                 if authz.check(f"user:{ident}", "reviewer", authz.PLATFORM)}
     pdir = state / "personas"
     pdir.mkdir(exist_ok=True)
     lines = []
     for name, (ident, what) in PERSONAS.items():
-        cfg = {"mcpServers": {"servir": {"type": "http", "url": f"http://127.0.0.1:{port}/mcp",
-                                         "headers": {"x-grp-dev-identity": ident}}}}
+        cfg = {"mcpServers": {SERVER: {"type": "http", "url": f"http://127.0.0.1:{port}/mcp",
+                                       "headers": {"x-grp-dev-identity": ident}}}}
         (pdir / f"{name}.json").write_text(json.dumps(cfg, indent=2))
+        (pdir / f"{name}.settings.json").write_text(json.dumps({"hooks": {}}, indent=2))   # fences once the server answers
         lines.append(f"{name:15s} {ident:14s} {what}\n"
-                     f"{'':15s} claude --mcp-config {pdir / (name + '.json')} --strict-mcp-config")
+                     f"{'':15s} claude --mcp-config {pdir / (name + '.json')} "
+                     f"--settings {pdir / (name + '.settings.json')} --strict-mcp-config")
     _say("personas (operator setup)", store=ids,
          hubs={"mekong": ["demo_contrib", "demo_a1"], "lower": ["demo_a2"]},
-         reviewers=["demo_reviewer", "demo_contrib"], operator="local-dev (no header)")
+         reviewers=sorted(reviewers), operator="local-dev (no header)")
     print("\n   Open one Claude Code session per person, from an EMPTY directory:\n")
     for line in lines:
         print("   " + line.replace("\n", "\n   "))
@@ -167,15 +261,15 @@ def _listening(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
-def _healthy(port: int, proc, seconds: int) -> bool:
-    """True once /api/health answers; False if the process dies first (port taken, import error)."""
+def _answers(url: str, proc, seconds: int) -> bool:
+    """True once the url answers 200; False if the process dies first (port taken, import error)."""
     import time
     import urllib.request
     for _ in range(seconds * 2):
         if proc.poll() is not None:
             return False
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1) as r:
+            with urllib.request.urlopen(url, timeout=1) as r:
                 if r.status == 200:
                     return True
         except Exception:
@@ -203,7 +297,11 @@ def cmd_serve(a) -> int:
               f"      kill $(cat {pidfile})" if pidfile.exists() else
               f"   a server already listens on 127.0.0.1:{a.port}; stop it first, then rerun.")
         return 3
-    prepared = _prepare_state(state, a.remove_layer)
+    prepared = _prepare_state(state, a.remove_layer, a.fga_url)
+    store = _openfga(state, a.fga_url) if a.fga_url else {}
+    if store.get("error"):
+        print(f"   {store['error']}")
+        return 5
     env = {**os.environ,
            "CACHE_DIR": prepared["cache"], "TIFFS_DIR": prepared["tiffs"],
            "TIFFS_CONTRIB_PATH": f"{prepared['conf']}/tiffs.contrib.yml",
@@ -218,7 +316,8 @@ def cmd_serve(a) -> int:
     _say("serve", state=str(state), catalog=a.catalog, removed_locally=a.remove_layer,
          mode="read-through (/vsicurl/)" if a.read_through else "mirror on first use (checksum verified)",
          warmed_areas=prepared["bundles"], mcp_url=f"http://127.0.0.1:{a.port}/mcp",
-         authorization=(f"OpenFGA at {a.fga_url}" if a.fga_url else "off"),
+         authorization=(f"OpenFGA at {a.fga_url} ({store.get('openfga')}; store ids {prepared['store_ids']})"
+                        if a.fga_url else "off"),
          review="human review (auto-approve off)" if a.review else "auto-approve on")
     if a.fga_url and a.personas:
         _personas(state, prepared["cache"], a.fga_url, a.port)
@@ -227,11 +326,17 @@ def cmd_serve(a) -> int:
     if a.background:
         log = open(state / "server.log", "ab")
         proc = subprocess.Popen(cmd, env=env, stdout=log, stderr=subprocess.STDOUT, cwd=str(REPO))
-        if not _healthy(a.port, proc, seconds=90):
+        (state / "server.pid").write_text(str(proc.pid))     # known before the wait, so a failed start can be stopped
+        if not _answers(f"http://127.0.0.1:{a.port}/api/health", proc, seconds=90):
+            proc.terminate()
             print(f"   the server did not come up (exit {proc.poll()}); see {state / 'server.log'}")
             return 4
-        (state / "server.pid").write_text(str(proc.pid))
-        _say("serve", pid=proc.pid, log=str(state / "server.log"))
+        fences = _fences(state, a.port) if a.fga_url and a.personas else {}
+        _say("serve", pid=proc.pid, log=str(state / "server.log"),
+             stop_server=f"kill $(cat {state / 'server.pid'})",
+             **({"stop_openfga": f"kill $(cat {state / 'openfga.pid'})"}
+                if (state / "openfga.pid").exists() else {}),
+             **({"second_fence": {name: tools for name, tools in fences.items() if tools}} if fences else {}))
         return 0
     os.execvpe(cmd[0], cmd, env)
 
@@ -422,9 +527,11 @@ def main(argv=None) -> int:
     s = sub.add_parser("serve"); s.add_argument("--catalog", default=""); s.add_argument("--port", type=int, default=8027)
     s.add_argument("--state", default="/tmp/servir-demo"); s.add_argument("--remove-layer", action="append", default=[])
     s.add_argument("--demo", action="store_true", help="the team demo preset: Source catalog, flood layer removed "
-                                                       "locally, OpenFGA on 8090, review on, background")
+                                                       "locally, OpenFGA on 8090 (started here on sqlite when "
+                                                       "nothing listens), review on, background")
     s.add_argument("--read-through", action="store_true"); s.add_argument("--background", action="store_true")
-    s.add_argument("--fga-url", default="", help="OpenFGA server (turns the authorization store on)")
+    s.add_argument("--fga-url", default="", help="OpenFGA server (turns the authorization store on); a 127.0.0.1 "
+                                                 "url nobody answers is started here, sqlite datastore in --state")
     s.add_argument("--review", action="store_true", help="hold contributions for a reviewer (auto-approve off)")
     s.add_argument("--no-personas", dest="personas", action="store_false",
                    help="skip the demo personas (roles, hubs, one Claude Code config per person)")

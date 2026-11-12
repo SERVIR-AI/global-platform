@@ -17,8 +17,8 @@ The store and model are created on first use and their ids kept in
 from __future__ import annotations
 
 import json
-import os
 import threading
+from contextvars import ContextVar
 from pathlib import Path
 
 from ..config import get_settings
@@ -27,10 +27,36 @@ PLATFORM = "platform:servir"
 VISIBILITIES = ("private", "hub", "platform", "public")
 _LOCK = threading.RLock()
 _CLIENT: dict = {}
+# Why the store did not answer during the current request, or None. Readers below the
+# pack (identity._memo, the catalog filter) turn a refusal into "nothing contributed is
+# visible"; this is how the pack itself learns that happened, so it can say so instead of
+# looking complete. Set on every refusal, never cleared within a request: a later call
+# that succeeds does not bring back the rows an earlier one dropped.
+_OUTAGE: ContextVar[str | None] = ContextVar("authz_outage", default=None)
 
 
 class AuthzUnavailable(RuntimeError):
     """The authorization store could not answer: the caller is refused, not waved through."""
+
+
+def _unavailable(reason: str, cause: BaseException | None = None) -> AuthzUnavailable:
+    # The SDK's text runs to several hundred characters of urllib3 detail; one line of it is the reason.
+    reason = " ".join(reason.split())
+    reason = reason if len(reason) <= 200 else reason[:199] + "…"
+    _OUTAGE.set(reason)
+    exc = AuthzUnavailable(reason)
+    exc.__cause__ = cause
+    return exc
+
+
+def outage() -> str | None:
+    """The reason the store did not answer in this request, or None when it has."""
+    return _OUTAGE.get()
+
+
+def clear_outage() -> None:
+    """A request starts with no outage on record; the server calls this as each one begins."""
+    _OUTAGE.set(None)
 
 
 def enabled() -> bool:
@@ -131,15 +157,23 @@ def _save_ids(ids: dict) -> None:
     p.write_text(json.dumps({**ids, "url": get_settings().grp_fga_url}, indent=2))
 
 
+def _configuration(url: str, **ids):
+    """The SDK client settings: a store that hangs must not hold a tool call for the SDK's default
+    five minutes and three retries; a refused caller is the fail-closed answer after five seconds."""
+    from openfga_sdk import ClientConfiguration
+    from openfga_sdk.configuration import RetryParams
+    return ClientConfiguration(api_url=url, timeout_millisec=5000,
+                               retry_params=RetryParams(max_retry=1, min_wait_in_ms=100), **ids)
+
+
 def bootstrap(force_model: bool = False) -> dict:
     """Make sure a store and the model exist; returns {store_id, model_id}. Idempotent."""
-    from openfga_sdk import ClientConfiguration
     from openfga_sdk.models import CreateStoreRequest, WriteAuthorizationModelRequest
     from openfga_sdk.sync import OpenFgaClient
     url = str(get_settings().grp_fga_url).rstrip("/")
     ids = _ids()
     try:
-        with OpenFgaClient(ClientConfiguration(api_url=url)) as fga:
+        with OpenFgaClient(_configuration(url)) as fga:
             if not ids["store_id"]:
                 resp = fga.create_store(CreateStoreRequest(name="servir-global-platform"))
                 ids["store_id"] = resp.id
@@ -149,7 +183,7 @@ def bootstrap(force_model: bool = False) -> dict:
                 resp = fga.write_authorization_model(body)
                 ids["model_id"] = resp.authorization_model_id
     except Exception as exc:
-        raise AuthzUnavailable(f"authorization store at {url}: {type(exc).__name__}: {exc}") from exc
+        raise _unavailable(f"authorization store at {url}: {type(exc).__name__}: {exc}", exc)
     _save_ids(ids)
     _CLIENT.clear()
     return ids
@@ -162,7 +196,6 @@ def _fga():
     CLI) may restart the store and bootstrap it again while this server keeps running.
     Holding on to the old store would fail every check closed from then on.
     """
-    from openfga_sdk import ClientConfiguration
     from openfga_sdk.sync import OpenFgaClient
     url = str(get_settings().grp_fga_url).rstrip("/")
     with _LOCK:
@@ -172,8 +205,7 @@ def _fga():
             return c
         if not ids["store_id"] or not ids["model_id"]:
             ids = bootstrap()
-        c = OpenFgaClient(ClientConfiguration(api_url=url, store_id=ids["store_id"],
-                                              authorization_model_id=ids["model_id"]))
+        c = OpenFgaClient(_configuration(url, store_id=ids["store_id"], authorization_model_id=ids["model_id"]))
         _CLIENT.update({"c": c, "url": url, "ids": ids})
         return c
 
@@ -193,7 +225,50 @@ def _guard(fn, *a, **kw):
         # The store may have been replaced under us; the next call rebuilds the client.
         with _LOCK:
             _CLIENT.clear()
-        raise AuthzUnavailable(f"authorization store: {type(exc).__name__}: {exc}") from exc
+        raise _unavailable(f"authorization store: {type(exc).__name__}: {exc}", exc)
+
+
+def health() -> dict:
+    """Whether the store can answer, asked without touching it: OpenFGA's own /healthz, then
+    the saved store by id, two plain GETs of two seconds each, never a bootstrap. The reason
+    names no address or id, so the public health page can carry it.
+
+    store: off (GRP_FGA_URL unset) | ok | unreachable | store-missing (the saved id names
+    no store at that url, or no id was saved yet)."""
+    import urllib.error
+    import urllib.request
+    url = str(get_settings().grp_fga_url or "").strip().rstrip("/")
+    out = {"store": "off", "url": url or None, "store_id": None, "reason": None}
+    if not url:
+        return {**out, "reason": "GRP_FGA_URL is not set: two-state visibility, reviewers from GRP_REVIEWERS"}
+    store_id = _ids()["store_id"] or None
+    out["store_id"] = store_id
+    # A local store must not be probed through a configured proxy.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+    def failed(state: str, reason: str) -> dict:
+        return {**out, "store": state, "reason": reason}
+
+    try:
+        with opener.open(url + "/healthz", timeout=2):
+            pass
+    except Exception as exc:
+        return failed("unreachable", f"the authorization store did not answer: {type(exc).__name__}: {exc}")
+    if not store_id:
+        return failed("store-missing", "no store id is saved yet: run `python -m app.authz bootstrap`")
+    try:
+        with opener.open(f"{url}/stores/{store_id}", timeout=2):
+            pass
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return failed("store-missing", "the saved store id names no store there (its datastore was "
+                                           "replaced or wiped): restore it, or run `python -m app.authz "
+                                           "bootstrap` and write the roles again")
+        return failed("unreachable", f"the authorization store answered HTTP {exc.code} for the saved store")
+    except Exception as exc:
+        return failed("unreachable", f"authorization store at {url} did not answer for store {store_id}: "
+                                     f"{type(exc).__name__}: {exc}")
+    return {**out, "store": "ok"}
 
 
 # --- primitives -------------------------------------------------------------------------
@@ -258,6 +333,11 @@ def delete(items: list[tuple[str, str, str]]) -> int:
 
 
 # --- the platform's vocabulary --------------------------------------------------------
+
+def _as_user(text: str) -> str:
+    """A command-line user as the store spells it: a bare id becomes `user:<id>`, a typed one is kept."""
+    return text if ":" in text else f"user:{text}"
+
 
 def user_key(caller) -> str:
     """`user:<id>` for a person or service identity, `anon:guest` for nobody in particular."""
@@ -404,6 +484,8 @@ def main(argv=None) -> int:
                                 description="Operate the platform's authorization store (OpenFGA).")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("bootstrap", help="create the store and write the model; print the ids")
+    sub.add_parser("health", help="can the store answer? off | ok | unreachable | store-missing, "
+                                  "without creating anything; exit 0 only on ok")
     sub.add_parser("model", help="print the model as JSON")
     r = sub.add_parser("role", help="give or take a platform role")
     r.add_argument("role", choices=["operator", "reviewer", "contributor"])
@@ -426,6 +508,10 @@ def main(argv=None) -> int:
                                       "and approved tuples (idempotent)")
     m.add_argument("--visibility", default=None)
     a = p.parse_args(argv)
+    if a.cmd == "health":                     # answers for an off store too, so it comes first
+        h = health()
+        print(json.dumps(h))
+        return 0 if h["store"] == "ok" else 1
     if not enabled():
         print(json.dumps({"status": "off", "note": "set GRP_FGA_URL"}))
         return 2
@@ -443,11 +529,11 @@ def main(argv=None) -> int:
         n = delete(items) if a.remove else write(items)
         print(json.dumps({"changed": n, "tuples": tuples(f"hub:{a.hub}")}))
     elif a.cmd == "check":
-        print(json.dumps({"allowed": check(a.user, a.relation, a.object)}))
+        print(json.dumps({"allowed": check(_as_user(a.user), a.relation, a.object)}))
     elif a.cmd == "tuples":
         print(json.dumps(tuples(a.object)))
     elif a.cmd == "visible":
-        print(json.dumps(sorted(list_objects(a.user, "can_view", "dataset"))))
+        print(json.dumps(sorted(list_objects(_as_user(a.user), "can_view", "dataset"))))
     elif a.cmd == "migrate":
         from ..mcp import store
         n = 0

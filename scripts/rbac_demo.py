@@ -4,10 +4,13 @@
 OpenFGA. Four people, identified through the platform's own dev-identity header (OAuth
 off on a dev box), every decision made by the real store, every call a real MCP call:
 
+  0. the review tool is offered only to the people the store calls reviewers (tools/list per
+     person; the run FAILS if an analyst is offered it)
   1. the contributor uploads a real raster with visibility 'hub'
-  2. while staged, the other hub and the contributor's own hub do not see it
+  2. while staged, the other hub and the contributor's own hub do not see it; an analyst who
+     calls contribute_review approve directly anyway is refused in words
   3. the contributor, also a reviewer, cannot approve their own upload; the reviewer can
-  4. the owner's hub sees it and can build a receipt; the other hub and anonymous cannot,
+  4. the owner's hub sees it and can build a receipt; the other hub and a stranger cannot,
      at the tool and at the data URL alike
   5. the receipt records the store's decision per cited dataset
   6. the owner grants the other hub, which now sees it; then revokes, and it is gone
@@ -22,7 +25,6 @@ import argparse
 import asyncio
 import json
 import os
-import subprocess
 import sys
 import threading
 import time
@@ -33,6 +35,8 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "apps" / "api" / "src"))
 sys.path.insert(0, str(REPO / "scripts"))
 from portolan_demo import _mcp, _say, _unwrap, _draft  # noqa: E402
+
+REVIEW_TOOL = "contribute_review"    # the tool the provocation targets; the gated set itself is read from the server
 
 DEV_HEADER = "x-grp-dev-identity"
 PEOPLE = {"contributor": "demo_contrib", "analyst_mekong": "demo_a1", "analyst_lower": "demo_a2",
@@ -89,6 +93,25 @@ def main(argv=None) -> int:
     _say("0 operator setup (OpenFGA)", store=ids, roles="reviewer: demo_reviewer, demo_contrib",
          hubs={"mekong": ["demo_contrib", "demo_a1"], "lower": ["demo_a2"]})
 
+    # Who is a reviewer is the store's answer to the tuples just written, not a list here.
+    reviewers = {who for who, ident in PEOPLE.items()
+                 if authz.check(f"user:{ident}", "reviewer", authz.PLATFORM)}
+    analysts = sorted(set(PEOPLE) - reviewers)
+
+    def offered(person):
+        return set(asyncio.run(_mcp(a.url, [], headers=_hdr(person)))["tools"])
+    tools = {who: offered(who) for who in PEOPLE}
+    # The gated tools are what a reviewer is offered and an analyst is not: read, not typed.
+    gated = sorted(set.union(*(tools[r] for r in reviewers)) - set.intersection(*(tools[an] for an in analysts)))
+    _say("0b who is offered the gated tools (tools/list per person)", reviewers=sorted(reviewers), gated=gated,
+         offered={who: sorted(set(gated) & tools[who]) for who in PEOPLE},
+         tools_per_person={who: len(t) for who, t in tools.items()})
+    leaked = [who for who in analysts if set(gated) & tools[who]]
+    if leaked or not gated or REVIEW_TOOL not in gated:
+        _say("FAIL", reason=(f"{', '.join(leaked)}: not a reviewer by the store, yet offered a gated tool" if leaked
+                             else f"{REVIEW_TOOL} is not gated: the tool list must follow the store"))
+        return 1
+
     src = Path(a.file).resolve()
     srv = _serve_file(src, a.file_port)
     file_url = f"http://127.0.0.1:{a.file_port}/{src.name}"
@@ -128,10 +151,30 @@ def main(argv=None) -> int:
     _say("2 staged: who lists the layer", contributor=listed("contributor"), reviewer=listed("reviewer"),
          analyst_same_hub=listed("analyst_mekong"), analyst_other_hub=listed("analyst_lower"))
 
-    self_try, _ = _call(a.url, "contributor", "contribute_review", {"action": "approve", "contribution_id": cid})
+    # Provoked: an analyst calls the review tool directly, listed or not. The server's own
+    # fence answers; the client-side hook the serve step writes is only the second one.
+    for who in analysts:
+        try:
+            r, _ = _call(a.url, who, REVIEW_TOOL, {"action": "approve", "contribution_id": cid})
+        except Exception as exc:                     # a tool the transport itself refuses
+            r = {"status": "refused", "note": f"{type(exc).__name__}: {exc}"}
+        _say(f"2b provoked: {who} calls {REVIEW_TOOL} approve directly", status=r.get("status"),
+             note=(r.get("note") or r.get("text") or json.dumps(r, default=str))[:400])
+        if r.get("status") == "approved":
+            _say("FAIL", reason=f"{who} is not a reviewer by the store, yet approved contribution {cid}")
+            srv.shutdown()
+            return 1
+    still, _ = _call(a.url, "contributor", "contribute_status", {"contribution_id": cid})
+    _say("2c the contribution after the provocation", status=still.get("status"))
+    if still.get("status") == "approved":
+        _say("FAIL", reason=f"contribution {cid} was approved by a non-reviewer's direct call")
+        srv.shutdown()
+        return 1
+
+    self_try, _ = _call(a.url, "contributor", REVIEW_TOOL, {"action": "approve", "contribution_id": cid})
     _say("3a the owner is also a reviewer and tries to approve their own upload", status=self_try.get("status"),
          note=self_try.get("note"))
-    ok, s = _call(a.url, "reviewer", "contribute_review", {"action": "approve", "contribution_id": cid})
+    ok, s = _call(a.url, "reviewer", REVIEW_TOOL, {"action": "approve", "contribution_id": cid})
     pub_dir = Path(a.state).resolve() / "published" / a.layer
     _say("3b the reviewer approves; the publisher writes the Portolan collection on landing",
          status=ok.get("status"), seconds=s,
@@ -162,10 +205,13 @@ def main(argv=None) -> int:
         break
     if slug:
         data_url = f"{base}/api/raster/{slug}/{a.layer}.tif"
-        codes = {who: httpx.get(data_url, headers=_hdr(who) if who else {}, timeout=60).status_code
+        # The third probe is a dev-header identity nobody granted anything. A request with NO header
+        # is the box operator on a dev box (and anonymous only under OAuth), so it would answer 200 here.
+        stranger = {"x-grp-dev-identity": "nobody_in_particular"}
+        codes = {who: httpx.get(data_url, headers=_hdr(who) if who else stranger, timeout=60).status_code
                  for who in ("analyst_mekong", "analyst_lower", None)}
         _say("4c the data URL answers the same way", url=data_url, same_hub=codes["analyst_mekong"],
-             other_hub=codes["analyst_lower"], anonymous=codes[None])
+             other_hub=codes["analyst_lower"], stranger=codes[None])
     else:
         _say("4c the data URL", note="no clip path found in the pack trace; skipped")
 

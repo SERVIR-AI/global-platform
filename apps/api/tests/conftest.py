@@ -198,3 +198,13 @@ def _connect_text_settles():
     settle()
     yield
     settle()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_authz_outage():
+    """The store-outage flag is a ContextVar the server starts clean per request; a pytest process
+    has one context, so a test that provoked an outage must not leave it set for the next."""
+    from app import authz
+    authz._OUTAGE.set(None)
+    yield
+    authz._OUTAGE.set(None)
