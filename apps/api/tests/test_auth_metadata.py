@@ -152,6 +152,8 @@ def test_a_good_token_gets_in_and_every_wrong_one_does_not(server):
         assert present(signer.create_token(issuer="https://evil.example",
                                            audience=RESOURCE)) == 401
         assert present(signer.create_token(issuer=AUTHKIT, audience=f"{ORIGIN}/")) == 401
+        # a token minted for another resource server (RFC 8707) is refused by audience
+        assert present(signer.create_token(issuer=AUTHKIT, audience="https://other.example/mcp")) == 401
         assert present(forger.create_token(issuer=AUTHKIT, audience=RESOURCE)) == 401
 
 

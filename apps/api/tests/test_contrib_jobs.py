@@ -375,11 +375,18 @@ def test_a_slow_preparation_answers_preparing_then_status_gives_the_final_result
     assert out["status"] == "preparing" and out["kind"] == "raster"
     jid = out["contribution_id"]
     assert re.fullmatch(r"[0-9a-f]{16}", jid) and store.load_contribution(jid) is None
-    assert out["step"] == "fetching the source"         # the prepare Context's own step
-    assert re.fullmatch(r"the platform is still preparing this \(fetching the source, \d+ s so "
-                        r"far\); " + _keep_checking(jid), out["message"])
-    mid = _call("contribute_status", {"contribution_id": jid})
+    # The wait is 0.3 s of waiting, not a promise the job thread has reached the fetch by
+    # then: on a loaded runner it can still be at the first step. Follow it until it fetches.
+    assert out["step"] in ("checking the submission", "fetching the source")
+    mid = out
+    for _ in range(100):
+        if mid["step"] == "fetching the source":
+            break
+        time.sleep(0.1)
+        mid = _call("contribute_status", {"contribution_id": jid})
     assert mid["status"] == "preparing" and mid["step"] == "fetching the source"
+    assert re.fullmatch(r"the platform is still preparing this \(fetching the source, \d+ s so "
+                        r"far\); " + _keep_checking(jid), mid["message"])
     assert "queue_position" not in mid and mid["elapsed_s"] >= 0
     host.open("slow_coded.tif")
     final = _until(jid)

@@ -244,7 +244,7 @@ def methods_reading(dataset) -> list[dict]:
         return []
     try:
         from ..contrib import methods
-        rows = {**methods.staged_visible(), **methods.landed()}
+        rows = {**methods.staged_visible(), **methods.landed_visible()}
     except Exception:                              # a lookup never fails on its pointer
         return []
     out = []

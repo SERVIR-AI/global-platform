@@ -230,7 +230,9 @@ def _land_document(rec: dict) -> dict:
         raw, fname = fetch_policy.fetch(m["url"], max_bytes=_other_cap())
         fname = m.get("filename") or fname
     text = docloader.extract_text(raw, fname)
-    meta = _document_meta(m)
+    # The landed chunks keep the contribution id, so the corpus can hide a restricted document the
+    # way the catalog hides a restricted raster.
+    meta = _document_meta(m) | {"contribution_id": rec["contribution_id"], "contributed": True}
     note = _review_note(rec, "document")
     if note:
         meta["review"] = note
@@ -1064,7 +1066,8 @@ def _purge_clips(layer: str) -> int:
 def _raster_taken(layer: str) -> str | None:
     from ..graph.geo import tiffs
     _ensure_staged_loaded()
-    if layer in tiffs.catalog(include_staged=False) or layer in STAGED_RASTERS:
+    # every landed row, whoever asks: a name is taken even by a layer this caller may not view
+    if layer in tiffs._base() or layer in STAGED_RASTERS:
         return f"layer {layer!r} is already in the catalog — contributions add layers, they do not overwrite them"
     return None
 
@@ -2439,7 +2442,7 @@ def _unland_raster(rec: dict) -> dict:
     from ..graph.geo import tiffs
     from . import removal
     layer = (rec.get("manifest") or {}).get("layer")
-    cat = tiffs.catalog(include_staged=False)
+    cat = tiffs._base()                          # every landed row, whoever asks
     if layer not in cat:
         return {"removed": False, "note": f"{layer!r} is no longer in the catalog — nothing of "
                                           "it was being served"}
@@ -2779,6 +2782,16 @@ def form(kind: str) -> dict:
                     + (" " + _FORM_NOTES[kind] if kind in _FORM_NOTES else ""))}
     if prepares:
         out["prepares"] = prepares
+    from .. import authz
+    if authz.enabled():                   # who may see it: the contributor's choice, every kind
+        out["sharing"] = {
+            "visibility": ("optional: who may see the contribution once approved — private "
+                           "(you, reviewers), hub (every member of your hub), platform (every "
+                           "signed-in caller; the default), public (everyone, including anonymous "
+                           "callers). ASK the contributor; never choose for them."),
+            "share_users": "optional: user ids to grant in addition to the level",
+            "share_hubs": "optional: hub ids to grant in addition to the level",
+            "later": "contribute_share(contribution_id, action='visibility'|'grant'|'revoke') changes it"}
     return out
 
 
@@ -2787,7 +2800,7 @@ def form(kind: str) -> dict:
 _PUBLIC = ("contribution_id", "kind", "status", "title", "contributor_label",
            "created_at", "updated_at", "preview", "landing", "decision_note",
            "reviewer_label", "problems", "held_for_review", "unlanded",
-           "prepared_automatically")
+           "prepared_automatically", "sharing", "authz_pending")
 
 
 # A licence that keeps the platform from serving the data on: the platform hosts a
@@ -2937,11 +2950,26 @@ def _not_reviewer(caller: identity.Caller) -> dict:
     identity mechanism is an HTTP header no chat client can send, and nothing said
     so. A gate nobody can reach is not a gate, it is a wall.
     """
+    from .. import authz
     from ..config import get_settings
+    you = {"id": caller.id, "label": caller.label, "source": caller.source}
+    why = authz.outage()
+    if why:
+        # The store, not the person, said no: a reviewer told "you are not a reviewer" during
+        # an outage goes looking for a role they already hold.
+        return {"status": "declined",
+                "note": (f"the authorization store did not answer ({why}); reviewing is refused "
+                         f"until it does — whether {caller.label} is a reviewer cannot be "
+                         "confirmed"),
+                "you_are": you}
     s = get_settings()
     listed = [r.strip() for r in s.grp_reviewers if r.strip()]
     how = []
-    if listed:
+    if authz.enabled():
+        how.append("on this instance a reviewer is a role held in the authorization store, and "
+                   f"{caller.label!r} (identified by: {caller.source}) does not hold it; an "
+                   "operator grants it with `python -m app.authz role reviewer <id>`")
+    elif listed:
         how.append(f"this instance recognises {', '.join(listed)} as reviewers, and "
                    f"you are {caller.label!r} (identified by: {caller.source})")
         if not s.grp_oauth_enabled:
@@ -2960,7 +2988,7 @@ def _not_reviewer(caller: identity.Caller) -> dict:
     return {"status": "declined",
             "note": f"{caller.label} is not a reviewer. " + ". ".join(how) + ".",
             "reviewers_configured": listed or None,
-            "you_are": {"id": caller.id, "label": caller.label, "source": caller.source}}
+            "you_are": you}
 
 
 # --------------------------------------------------------------------------- API
@@ -2991,6 +3019,10 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
         kind = str(manifest.pop("kind"))
     elif isinstance(manifest, dict) and "kind" in manifest:
         manifest = {k: v for k, v in manifest.items() if k != "kind"}
+    # Who may see it is the contributor's choice, for every kind alike: taken off the
+    # manifest here (the kind validators know provenance fields only) and written to
+    # the authorization store once the record has its id.
+    sharing, manifest = _split_sharing(manifest)
     if manifest is None:
         if kind in _KINDS:
             return form(kind)                     # the form on demand; nothing stored
@@ -3064,6 +3096,9 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
         ident = store.save_contribution(rec)
         _release(slot)                                # the record counts from here
         slot = None
+        refused = _authz_submit(ident, caller, sharing)
+        if refused:
+            return {"status": "declined", "kind": kind, "contribution_id": ident, "problems": [refused]}
         rec = store.load_contribution(ident)
         try:
             preview = spec["stage"](rec, prepared)
@@ -3090,7 +3125,8 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
         # citation all say that no human reviewed it. Landing failure leaves it
         # staged for a reviewer rather than pretending.
         try:
-            landing = spec["land"]({**rec, "auto_approved": True})
+            from . import portolan
+            landing = portolan.annotate(kind, spec["land"]({**rec, "auto_approved": True}))
         except Exception as exc:
             _notify(f"Auto-approve could not land {kind} {ident}: {exc}")
             return auto.said({**_public(rec), "status": "staged",
@@ -3101,6 +3137,7 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
             "reviewer_label": "auto-approve (GRP_AUTO_APPROVE on — no human reviewed this)",
             "decision_note": "auto-approved: this deployment lands contributions without review",
             "preview": _landed_preview(rec.get("preview"))})
+        _authz_lifecycle("approve", ident)
         _notify(f"New {kind} contribution AUTO-APPROVED for {caller.label}: "
                 f"{rec['title']} (id {ident})")
         preview = dict(rec.get("preview") or {})
@@ -3272,7 +3309,7 @@ def _landed_state(rec: dict) -> dict:
         if kind == "raster":
             from ..graph.geo import tiffs
             layer = m.get("layer")
-            cat = tiffs.catalog(include_staged=False)
+            cat = tiffs._base()                  # served or not does not depend on who asks
             return {"live": layer in cat, "why": None if layer in cat else
                     f"no catalog row named {layer!r}"}
         if kind == "vector":
@@ -3327,14 +3364,18 @@ def _landed_state(rec: dict) -> dict:
 
 
 def reconcile(caller: identity.Caller | None = None) -> dict:
-    """Every APPROVED contribution, and whether the platform is actually serving it.
+    """Every APPROVED contribution the caller may view, and whether the platform is actually
+    serving it.
 
-    Open to anyone: an approved contribution is public, and "is what we approved
-    being used?" is a question a hub lead must be able to ask without being a
-    reviewer.
+    Open to anyone: "is what we approved being used?" is a question a hub lead must be able
+    to ask without being a reviewer. The caller sees the contributions the authorization
+    store lists for them, and no others: a restricted dataset is not enumerated here.
     """
+    from ..mcp import budget
     caller = caller or identity.current()
-    rows = store.list_contributions(status="approved")
+    with budget.snapshot():                      # the store answers once, not once per row
+        rows = [r for r in store.list_contributions(status="approved")
+                if caller.may_view(r.get("contribution_id"))]
     live, inert, unknown = [], [], []
     for r in rows:
         st = _landed_state(r)
@@ -3474,10 +3515,13 @@ def withdraw(contribution_id: str, caller: identity.Caller | None = None) -> dic
     caller = caller or identity.current()
     rec = store.load_contribution(contribution_id)
     if rec is not None and not caller.owns(rec["contributor_id"]) and caller.is_reviewer:
+        how = (("an approved contribution is taken down by an operator at the server's command "
+                "line (python -m app.contrib.cli review reject <id> <note>), or withdrawn by its "
+                "contributor") if rec["status"] == "approved" else
+               ("as a reviewer, reject it with contribute_review(action='reject', contribution_id="
+                f"{contribution_id!r}, note=<why, in words its contributor can act on>)"))
         return {"status": "declined",
-                "note": (f"contribution {contribution_id} is not yours to withdraw — as a reviewer, "
-                         f"take it down with contribute_review(action='reject', contribution_id="
-                         f"{contribution_id!r}, note=<why, in words its contributor can act on>)")}
+                "note": f"contribution {contribution_id} is not yours to withdraw — {how}"}
     if rec is not None and caller.source == "anonymous":
         return {"status": "declined",
                 "note": (f"contribution {contribution_id} cannot be withdrawn by an anonymous "
@@ -3494,6 +3538,7 @@ def withdraw(contribution_id: str, caller: identity.Caller | None = None) -> dic
         rec = store.update_contribution(contribution_id, {
             "status": "withdrawn", "unlanded": undone,
             "decision_note": f"withdrawn after approval by its contributor ({caller.label})"})
+        _authz_lifecycle("forget", contribution_id)
         _notify(f"Approved contribution WITHDRAWN by its contributor {caller.label}: "
                 f"{rec['title']} (id {contribution_id})")
         return {**_public(rec), "status": "withdrawn", "unlanded": undone,
@@ -3505,6 +3550,7 @@ def withdraw(contribution_id: str, caller: identity.Caller | None = None) -> dic
                          "approved contribution can be withdrawn")}
     retired = _KINDS[rec["kind"]]["retire"](rec)
     rec = store.update_contribution(contribution_id, {"status": "withdrawn", "retired": retired})
+    _authz_lifecycle("forget", contribution_id)
     return {**_public(rec), "status": "withdrawn", "retired": retired}
 
 
@@ -3530,8 +3576,12 @@ def approve(contribution_id: str, caller: identity.Caller | None = None,
     if rec["status"] != "pending":
         return {"status": "declined",
                 "note": f"contribution {contribution_id} is {rec['status']}, not pending"}
+    refusal = _authz_refuses(caller, "can_review", contribution_id)
+    if refusal:
+        return {"status": "declined", "note": refusal}
     try:
-        landing = _KINDS[rec["kind"]]["land"](rec)
+        from . import portolan
+        landing = portolan.annotate(rec["kind"], _KINDS[rec["kind"]]["land"](rec))
     except Declined as exc:
         return {"status": "declined", "note": f"landing failed: {exc}"}
     except Exception as exc:
@@ -3540,11 +3590,16 @@ def approve(contribution_id: str, caller: identity.Caller | None = None,
         "status": "approved", "landing": landing, "reviewer_id": caller.id,
         "reviewer_label": caller.label, "decision_note": note or "approved",
         "preview": _landed_preview(rec.get("preview"))})
+    _authz_lifecycle("approve", contribution_id)
     _notify(f"Contribution approved by {caller.label}: {rec['title']} (id {contribution_id})")
     return {**_public(rec), "status": "approved"}
 
 
-def reject(contribution_id: str, note: str, caller: identity.Caller | None = None) -> dict:
+def reject(contribution_id: str, note: str, caller: identity.Caller | None = None, *,
+           take_down: bool = False) -> dict:
+    """A pending contribution's preview is retired. An APPROVED one is taken down only with
+    `take_down`, which the operator's command line passes: over MCP nothing that landed is
+    deleted by a reviewer (its contributor withdraws it)."""
     caller = caller or identity.current()
     if not caller.is_reviewer:
         return _not_reviewer(caller)
@@ -3554,7 +3609,14 @@ def reject(contribution_id: str, note: str, caller: identity.Caller | None = Non
     if rec is None:
         return {"status": "declined", "note": f"unknown contribution {contribution_id!r}"}
     if rec["status"] == "approved":
-        # A reviewer takes down what landed — under auto-approve, what no human saw.
+        if not take_down:
+            return {"status": "declined",
+                    "note": (f"contribution {contribution_id} is approved, and an approved "
+                             "contribution is not taken down from here: its contributor withdraws it with "
+                             "contribute_status(action='withdraw'), or an operator takes it down at "
+                             "the server's command line (python -m app.contrib.cli review reject "
+                             "<id> <note>)")}
+        # The operator takes down what landed — under auto-approve, what no human saw.
         undone, why = _take_down(rec)
         if why:
             return {"status": "declined",
@@ -3563,6 +3625,7 @@ def reject(contribution_id: str, note: str, caller: identity.Caller | None = Non
             "status": "rejected", "unlanded": undone, "reviewer_id": caller.id,
             "reviewer_label": caller.label,
             "decision_note": f"removed after approval: {note}"})
+        _authz_lifecycle("forget", contribution_id)
         _notify(f"Approved contribution REMOVED by {caller.label}: {rec['title']} "
                 f"(id {contribution_id}) — {note}")
         return {**_public(rec), "status": "rejected", "unlanded": undone}
@@ -3574,8 +3637,164 @@ def reject(contribution_id: str, note: str, caller: identity.Caller | None = Non
     rec = store.update_contribution(contribution_id, {
         "status": "rejected", "retired": retired, "reviewer_id": caller.id,
         "reviewer_label": caller.label, "decision_note": note})
+    _authz_lifecycle("forget", contribution_id)
     _notify(f"Contribution rejected by {caller.label}: {rec['title']} (id {contribution_id}) — {note}")
     return {**_public(rec), "status": "rejected", "retired": retired}
+
+
+_SHARING_FIELDS = ("visibility", "share_users", "share_hubs")
+
+
+def _split_sharing(manifest):
+    """({visibility, share_users, share_hubs} as given, the manifest without them)."""
+    if not isinstance(manifest, dict):
+        return {}, manifest
+    sharing = {k: manifest[k] for k in _SHARING_FIELDS if k in manifest}
+    if not sharing:
+        return {}, manifest
+    for k in ("share_users", "share_hubs"):
+        v = sharing.get(k)
+        if isinstance(v, str):
+            sharing[k] = [s.strip() for s in v.split(",") if s.strip()]
+    return sharing, {k: v for k, v in manifest.items() if k not in _SHARING_FIELDS}
+
+
+def _authz_submit(ident: str, caller, sharing: dict) -> str | None:
+    """Write the new record's owner, hub, visibility and grants to the store; with the
+    store off, a sharing request is declined in words (nothing enforces it here)."""
+    from .. import authz
+    if not authz.enabled():
+        if sharing:
+            store.update_contribution(ident, {"status": "failed", "problems": [
+                "visibility and sharing need the authorization store (GRP_FGA_URL); "
+                "this deployment serves every approved layer to every caller"]})
+            return ("visibility and sharing need the authorization store (GRP_FGA_URL); "
+                    "this deployment serves every approved layer to every caller")
+        return None
+    try:
+        out = authz.on_submit(ident, caller, sharing.get("visibility"),
+                              sharing.get("share_users") or (), sharing.get("share_hubs") or ())
+    except ValueError as exc:
+        store.update_contribution(ident, {"status": "failed", "problems": [str(exc)]})
+        return str(exc)
+    except authz.AuthzUnavailable as exc:
+        store.update_contribution(ident, {"status": "failed", "problems": [str(exc)]})
+        return f"the authorization store did not answer, nothing was staged ({exc})"
+    store.update_contribution(ident, {"sharing": out})
+    return None
+
+
+def _authz_refuses(caller, relation: str, contribution_id: str) -> str | None:
+    """With the authorization store on, the one word on whether this caller may do
+    this to this dataset; the store's absence is a refusal, never a pass."""
+    from .. import authz
+    if not authz.enabled():
+        return None
+    try:
+        if authz.can(caller, relation, contribution_id):
+            return None
+    except authz.AuthzUnavailable as exc:
+        return f"refused: the authorization store did not answer ({exc})"
+    if relation == "can_review":
+        return (f"refused: {caller.label} may not review contribution {contribution_id} "
+                "(a reviewer cannot approve their own upload)")
+    return f"refused: {caller.label} may not {relation.replace('can_', '')} contribution {contribution_id}"
+
+
+def _authz_lifecycle(event: str, contribution_id: str) -> None:
+    """Keep the store in step with the record: approved tuples on approval, every
+    tuple gone on rejection or withdrawal. A store that cannot answer is logged on the
+    record, so the mismatch is visible and reconciled, never silent."""
+    from .. import authz
+    if not authz.enabled():
+        return
+    try:
+        if event == "approve":
+            authz.on_approve(contribution_id)
+        elif event == "forget":
+            authz.on_forget(contribution_id)
+        elif event == "revoke":
+            authz.on_revoke(contribution_id)
+    except authz.AuthzUnavailable as exc:
+        store.update_contribution(contribution_id, {"authz_pending": f"{event}: {exc}"})
+
+
+def _hub_datasets(caller: identity.Caller, hub: str | None) -> dict:
+    """Every contribution of a hub (named, else the caller's own hubs) that the caller may
+    view, with its visibility: the hub admin's view of what the hub uploaded, from the ledger
+    and the sharing each record carries. The store is asked twice, whatever the ledger holds."""
+    from .. import authz
+    try:
+        hubs = [hub] if hub else authz.hubs_of(caller)
+        visible = authz.visible_datasets(caller)
+    except authz.AuthzUnavailable as exc:
+        return {"status": "declined", "note": f"the authorization store did not answer ({exc})"}
+    if not hubs:
+        return {"status": "ok", "hubs": [], "contributions": [],
+                "note": "you belong to no hub — name one with hub=<id>"}
+    rows = []
+    for rec in store.list_contributions():
+        sharing = rec.get("sharing") if isinstance(rec.get("sharing"), dict) else {}
+        home = sharing.get("hub")        # a name as submitted, a list once re-read from the store
+        home = home if isinstance(home, list) else [home] if home else []
+        if not set(home) & set(hubs) or str(rec.get("contribution_id")) not in visible:
+            continue
+        rows.append({"contribution_id": rec["contribution_id"], "kind": rec.get("kind"),
+                     "title": rec.get("title"), "status": rec.get("status"),
+                     "visibility": sharing.get("visibility"), "hub": home[0]})
+    return {"status": "ok", "hubs": hubs, "contributions": rows,
+            "note": "what you may view of these hubs' uploads; contribute_share(contribution_id, "
+                    "action='visibility', visibility=<level>) switches one (its owner or an operator)"}
+
+
+def share(contribution_id: str | None, action: str = "show", visibility: str | None = None,
+          hub: str | None = None, user: str | None = None,
+          caller: identity.Caller | None = None) -> dict:
+    """The contributor decides who sees their dataset: its visibility level (private,
+    hub, platform, public), and grants to a named user or a whole hub. Only the owner
+    (or an operator) may change it; anyone who may view it may look, and 'list' is a
+    hub's view of every dataset of its own the caller may view."""
+    from .. import authz
+    caller = caller or identity.current()
+    if not authz.enabled():
+        return {"status": "declined", "note": "sharing needs the authorization store (GRP_FGA_URL); "
+                                               "this deployment serves every approved layer to every caller"}
+    if action == "list":
+        return _hub_datasets(caller, hub)
+    if not contribution_id:
+        return {"status": "declined", "note": f"{action} needs a contribution_id"}
+    rec = store.load_contribution(contribution_id)
+    if rec is None or not caller.may_view(contribution_id):
+        why = authz.outage()
+        if why:
+            return {"status": "declined", "note": f"the authorization store did not answer ({why}); "
+                                                   "sharing is refused until it does"}
+        return {"status": "declined", "note": f"unknown contribution {contribution_id!r}"}
+    try:
+        if action == "show":
+            return {"status": "ok", "sharing": authz.sharing(contribution_id)}
+        refusal = _authz_refuses(caller, "can_share", contribution_id)
+        if refusal:
+            return {"status": "declined", "note": refusal}
+        if action == "visibility":
+            out = authz.set_visibility(contribution_id, visibility or "", hub)
+        elif action == "grant":
+            if not (user or hub):
+                return {"status": "declined", "note": "grant needs a user or a hub"}
+            out = authz.grant(contribution_id, user=user, hub=hub)
+        elif action == "revoke":
+            if not (user or hub):
+                return {"status": "declined", "note": "revoke needs a user or a hub"}
+            out = authz.revoke(contribution_id, user=user, hub=hub)
+        else:
+            return {"status": "declined", "note": "action is one of: show, list, visibility, grant, revoke"}
+    except ValueError as exc:
+        return {"status": "declined", "note": str(exc)}
+    except authz.AuthzUnavailable as exc:
+        return {"status": "declined", "note": f"the authorization store did not answer ({exc})"}
+    store.update_contribution(contribution_id, {"sharing": out})
+    _notify(f"Sharing changed by {caller.label} on {rec['title']} (id {contribution_id}): {action}")
+    return {"status": "ok", "sharing": out}
 
 
 def _notify(text: str) -> None:

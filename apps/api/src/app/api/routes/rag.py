@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
-from ...rag.store import Corpus, CorpusError
+from ...rag.store import Corpus, CorpusError, may_read
 
 router = APIRouter(prefix="/rag")
 
@@ -31,8 +31,9 @@ def _corpus_or_404(corpus_name: str) -> Corpus:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-def _refuse_unless_visible(corpus: Corpus, doc_id: str) -> None:
-    """The staged-contribution visibility rule, in full.
+def _refuse_unless_visible(corpus: Corpus, doc_id: str, request: Request | None = None) -> None:
+    """The contribution visibility rules, in full: a staged document is its contributor's
+    and the reviewers', a landed one whoever the authorization store admits (may_read).
 
     Checking only the index metadata was not enough and leaked: a REJECTED or
     withdrawn contribution has its index rows removed while the raw original is
@@ -43,9 +44,12 @@ def _refuse_unless_visible(corpus: Corpus, doc_id: str) -> None:
     ledger is what decides.
     """
     from ...contrib import identity
+    # The requester, from the request's headers (the raster data URL does the same); a direct call
+    # with no request (tests) reads the bound caller. Resolving with no request would be the box operator.
+    caller = identity.from_headers(request.headers) if request is not None else identity.current()
     found = corpus.find(doc_id)
     if found is not None:
-        if not identity.visible(found["metadata"]):
+        if not may_read(found["metadata"], caller):
             raise HTTPException(status_code=404, detail="unknown doc_id")
         return
     from ...mcp import store
@@ -53,18 +57,18 @@ def _refuse_unless_visible(corpus: Corpus, doc_id: str) -> None:
                 if (r.get("preview") or {}).get("doc_id") == doc_id
                 or (r.get("landing") or {}).get("doc_id") == doc_id), None)
     if rec and rec.get("status") != "approved" \
-            and not identity.current().may_see(rec.get("contributor_id")):
+            and not caller.may_see(rec.get("contributor_id")):
         raise HTTPException(status_code=404, detail="unknown doc_id")
 
 
 @router.get("/{corpus_name}/document/{doc_id}")
-def archived_document(corpus_name: str, doc_id: str):
+def archived_document(corpus_name: str, doc_id: str, request: Request = None):
     """Serve the archived original — the exact bytes the cited text was extracted
     from, immune to the source URL rotting or being overwritten upstream."""
     if not re.fullmatch(r"[0-9a-f]{16}", doc_id):
         raise HTTPException(status_code=404, detail="unknown doc_id")
     corpus = _corpus_or_404(corpus_name)
-    _refuse_unless_visible(corpus, doc_id)
+    _refuse_unless_visible(corpus, doc_id, request)
     path = corpus.raw_path(doc_id)
     if path is None:
         known = any(d["doc_id"] == doc_id for d in corpus.documents())

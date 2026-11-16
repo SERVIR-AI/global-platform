@@ -27,7 +27,7 @@ def _shape(sp: dict) -> str:
 
 def _feeds_bound(pid: str) -> int:
     from . import registry
-    return sum(1 for v in list(registry.FEEDS.values())
+    return sum(1 for v in registry.visible_feeds().values()
                if v.get("status") == "available" and v.get("pack") == pid)
 
 

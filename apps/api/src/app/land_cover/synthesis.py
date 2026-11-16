@@ -1203,7 +1203,7 @@ def _bound_tables(countries, boundary, gaps, trace):
     can say so where its classes are this legend's."""
     from ..contrib import staging
     from ..mcp import feeds, registry
-    rows = {k: v for k, v in registry.FEEDS.items()
+    rows = {k: v for k, v in registry.visible_feeds().items()
             if v.get("pack") == PACK_ID and v.get("status") == "available"}
     try:
         rows.update({k: v for k, v in staging.visible_staged_feeds_for_pack(PACK_ID).items()

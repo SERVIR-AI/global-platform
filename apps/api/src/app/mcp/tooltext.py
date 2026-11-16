@@ -287,9 +287,10 @@ def status_params() -> dict:
                       "(auto-approved included) stops being served to every caller (its layer, "
                       "table, feed, document, recipe or correction leaves the platform and the "
                       "name is free to resubmit) and `unlanded` says what was undone. Only its "
-                      "contributor may withdraw it (a reviewer removes anyone's with "
-                      "contribute_review); packs and receipts already built on it stay "
-                      "replayable: removal stops future use, it does not rewrite history. "
+                      "contributor may withdraw it (nobody else over MCP: an operator takes "
+                      "anyone's down at the server's command line); packs and receipts already "
+                      "built on it stay replayable: removal stops future use, it does not rewrite "
+                      "history. "
                       "'audit': every APPROVED contribution and whether the platform is actually "
                       "serving it — `serving`, `inert` (approved, not served) or `unverifiable` "
                       "(not checked, with `why`); `note` counts each. Open to anyone, because an "
@@ -299,10 +300,39 @@ def status_params() -> dict:
             "offset": "Page on through older contributions: `more` says how many are left."}
 
 
+def share() -> str:
+    return ("WHO MAY SEE A CONTRIBUTION YOU OWN, as data in the platform's authorization store: its "
+            "visibility level (private, hub, platform, public), its hub and its grants to named people "
+            "or whole hubs; and a hub's view of its own uploads. Not for submitting (contribute_submit), "
+            "the review queue (contribute_review) or your own list (contribute_status).\n\n"
+            "Staged contributions stay visible to you and reviewers only until approval; a level or a "
+            "grant takes effect on approval. Only the owner (or an operator) changes a contribution's "
+            "sharing; anyone who may view it may look. Needs the authorization store: without it every "
+            "approved layer is served to every caller and this tool declines in words. Returns "
+            "{status, sharing|contributions, ...}; on a decline `note` says why.")
+
+
+def share_params() -> dict:
+    return {"contribution_id": "The contribution whose sharing to show or change: yours, or one you "
+                               "may view, to look. Not needed for action 'list'.",
+            "action": "'show' (default): its visibility, hub, grants and whether it is approved. "
+                      "'visibility' with visibility=<level> sets the level (hub=<id> names the hub "
+                      "for level 'hub'). 'grant' or 'revoke' with user=<id> or hub=<id> shares with "
+                      "one person or a whole hub, or takes that back. 'list' (hub=<id> optional, else "
+                      "your own hubs): every contribution of the hub you may view — contribution_id, "
+                      "kind, title, status, visibility — a hub admin's view of what the hub uploaded, "
+                      "switched one at a time with 'visibility'.",
+            "visibility": "With 'visibility': private | hub | platform | public.",
+            "hub": "A hub id: the hub for level 'hub', the hub to grant or revoke, or the hub to list.",
+            "user": "A user id to grant or revoke."}
+
+
 def review() -> str:
-    return ("THE REVIEW QUEUE — reviewers only (GRP_REVIEWERS); anyone else is declined: list "
-            "contributions with their previews, approve, reject or take one down. Not for your "
-            "own submissions (contribute_status) or submitting (contribute_submit).\n\n"
+    return ("THE REVIEW QUEUE — reviewers only (GRP_REVIEWERS, or the reviewer role in the "
+            "authorization store); anyone else is declined: list contributions with their previews, "
+            "approve or reject them. Nothing approved is taken down here: its contributor withdraws "
+            "it (contribute_status), or an operator takes it down at the server's command line. Not "
+            "for your own submissions (contribute_status) or submitting (contribute_submit).\n\n"
             "Packs and receipts already built on a contribution stay replayable. Returns "
             "{status, ...}; on a decline `note` says why. The list fits one reply: `shown` names "
             "the offset for the next page.")
@@ -313,11 +343,11 @@ def review_params() -> dict:
                       "its preview so you can test it exactly as the contributor did before "
                       "deciding. 'approve' with a contribution_id (optional note): lands it for "
                       "everyone through the same gate. 'reject' with a contribution_id and a "
-                      "note the contributor can act on: a pending one's preview is removed; an "
-                      "APPROVED one (auto-approved included) is taken down for every caller — "
-                      "`unlanded` says what was undone — and its record keeps the note. "
-                      "'remove': the same for an approved one.",
-            "contribution_id": "The contribution to approve, reject or remove.",
+                      "note the contributor can act on: a pending one's preview is removed and "
+                      "its record keeps the note; an APPROVED one (auto-approved included) is "
+                      "refused here — its contributor withdraws it, or an operator takes it down "
+                      "at the server's command line.",
+            "contribution_id": "The contribution to approve or reject.",
             "note": "Why — for a reject, words the contributor can act on; optional on approve.",
             "status_filter": "With list: pending (default) | approved | rejected | withdrawn | "
                              "failed | all.",

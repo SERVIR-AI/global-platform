@@ -323,6 +323,44 @@ def _claim_scope(pack: dict) -> str:
     return base
 
 
+def _access_decisions(pack: dict) -> dict:
+    """The authorization store's answer per cited contribution, for the publishing
+    caller, with the store and model ids (absent when the store is off)."""
+    from .. import authz
+    if not authz.enabled():
+        return {}
+    ids = [c.get("contribution_id") for c in pack.get("citations", []) if c.get("contribution_id")]
+    # a citation names its layer; the layer's row names its contribution
+    try:
+        from ..graph.geo import tiffs
+        rows = tiffs._base()
+        for c in pack.get("citations", []):
+            name = c.get("layer") if isinstance(c, dict) else None
+            cid = (rows.get(str(name)) or {}).get("contribution_id") if name else None
+            if cid:
+                ids.append(str(cid))
+        for name in (pack.get("target") or {}).get("layers") or []:
+            cid = (rows.get(str(name)) or {}).get("contribution_id")
+            if cid:
+                ids.append(str(cid))
+        stats = pack.get("stats") or {}
+        for key in ("hazard", "risk_layer", "displayed_layer", "drawn_layer"):
+            val = stats.get(key)
+            name = val.get("layer") if isinstance(val, dict) else val
+            cid = (rows.get(str(name)) or {}).get("contribution_id") if name else None
+            if cid:
+                ids.append(str(cid))
+    except Exception:
+        pass
+    if not ids:
+        return {}
+    from ..contrib import identity
+    try:
+        return {"access_decisions": authz.decisions(identity.current(), ids)}
+    except authz.AuthzUnavailable as exc:
+        return {"access_decisions": [{"error": f"the authorization store did not answer: {exc}"}]}
+
+
 def record(pack_id: str | None = None, report_id: str | None = None,
            receipt_id: str | None = None, question: str | None = None,
            with_insight: bool = False) -> dict:
@@ -361,6 +399,11 @@ def record(pack_id: str | None = None, report_id: str | None = None,
         "queries": pack.get("queries"), "gaps": pack.get("gaps"),
         **(gate_notes(report.get("checks")) if report else {}),
         "claim_scope": _claim_scope(pack),
+        # What the authorization store said about each cited contribution for the
+        # caller who published, with the store and model ids: the receipt can be
+        # replayed as "this model, this question, this answer" later, even after a
+        # grant changes. Absent when the store is off.
+        **_access_decisions(pack),
         "minted_at": datetime.now(timezone.utc).isoformat(),
         **({"staged_by": pack["staged_by"], "staged_note": pack.get("staged_note")}
            if pack.get("staged_by") else {}),

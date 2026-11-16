@@ -595,7 +595,9 @@ def test_the_guide_and_each_parameters_page_fit_one_reply(tmp_path, monkeypatch,
     with caplog.at_level(logging.WARNING, logger="app.mcp.budget"):
         guide, pages = asyncio.run(read())
     log("OUTPUT", f"guide {len(guide):,} chars; pages {max(len(p) for p in pages.values()):,} at most")
-    assert len(guide) <= budget.REPLY_CHARS and not caplog.messages
+    # "nothing logged" means no budget overrun: the rebuild-time note from app.mcp.server is machine load, not fit
+    budget_warnings = [r.getMessage() for r in caplog.records if r.name == "app.mcp.budget"]
+    assert len(guide) <= budget.REPLY_CHARS and not budget_warnings, budget_warnings
     assert all(len(p) <= budget.REPLY_CHARS for p in pages.values())
     assert "landcover_ec_mapbiomas" in pages["assemble_pack"]
 

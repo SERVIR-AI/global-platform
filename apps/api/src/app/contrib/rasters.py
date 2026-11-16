@@ -1026,6 +1026,16 @@ def _verify_and_land(manifest, dry_run, review, keep_prepared, prepared_before, 
     if note:
         landed["passport"]["overviews"] = note
         landed["overviews"] = note
+    # Published form (GRP_PORTOLAN_ROOT): the approved layer as a Portolan collection.
+    # A publish failure is a passport note; the landing itself already succeeded.
+    from . import portolan
+    try:
+        published = portolan.publish_raster(layer, row, decl, landed["file"])
+    except Exception as exc:
+        published = {"status": "failed", "note": f"{type(exc).__name__}: {exc}"}
+    if published.get("status") != "skipped":
+        landed["passport"]["published"] = published
+        landed["published"] = published
     return landed
 
 

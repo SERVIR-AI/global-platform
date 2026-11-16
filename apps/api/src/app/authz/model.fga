@@ -1,0 +1,38 @@
+model
+  schema 1.1
+
+type user
+
+type anon
+
+type platform
+  relations
+    define operator: [user]
+    define reviewer: [user] or operator
+    define contributor: [user, hub#member] or operator
+
+type hub
+  relations
+    define admin: [user]
+    define member: [user] or admin
+
+type dataset
+  relations
+    define platform: [platform]
+    define hub: [hub]
+    define owner: [user]
+    define approved: [user:*, anon:*]
+    define shared_user: [user]
+    define shared_hub: [hub#member]
+    define visibility_hub: [hub#member]
+    define visibility_platform: [user:*]
+    define visibility_public: [user:*, anon:*]
+    define reviewer: reviewer from platform
+    define operator: operator from platform
+    define grantee: shared_user or shared_hub or visibility_hub or visibility_platform or visibility_public
+    define approved_grantee: grantee and approved
+    define can_preview: owner or reviewer or operator
+    define can_view: can_preview or approved_grantee
+    define can_share: owner or operator
+    define can_review: reviewer but not owner
+    define can_edit: owner or operator

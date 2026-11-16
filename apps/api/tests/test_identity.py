@@ -68,12 +68,9 @@ def test_visibility_rule_owner_reviewer_nobody_else(log):
     reviewer = identity.Caller("r", "r", True, "bound")
     assert owner.may_see("a") and reviewer.may_see("a") and not other.may_see("a")
     assert other.may_see(None)  # unstaged is public
-    token = identity.bind(other)
-    try:
-        assert not identity.visible({"staged_by": "a"})
-        assert identity.visible({"title": "live doc"})
-    finally:
-        identity.unbind(token)
+    from app.rag.store import may_read
+    assert not may_read({"staged_by": "a"}, other)
+    assert may_read({"title": "live doc"}, other)
     log("OUTPUT", "owner/reviewer see staged; other does not; unstaged public")
 
 
