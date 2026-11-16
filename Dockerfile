@@ -19,7 +19,7 @@ COPY apps/web/ ./
 RUN npm run build
 
 # ---- runtime ----
-FROM --platform=linux/amd64 python:3.12-slim@sha256:b18b261e1b4974b4f321451ad5251ded85abb22c2b8b262da527dda1d031ab30
+FROM --platform=linux/amd64 python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
 
 # Litestream replicates SQLite continuously to object storage. Cloud Run's disk is
 # ephemeral, so without it a redeploy silently destroys every receipt ever minted.
