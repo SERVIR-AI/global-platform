@@ -29,6 +29,7 @@ _ATTESTED = ("title", "description", "source", "license", "vintage", "countries"
 REQUIRED = ("layer", "file", "title", "description", "source", "license",
             "vintage", "legend", "declared")
 _DECLARED_REQUIRED = ("dtype", "valid_min", "valid_max")
+_NAME = re.compile(r"[a-z][a-z0-9_]{2,79}")     # the name becomes a file name and a catalog key
 
 
 CLASS_MAX = 5     # the class contract every reader indexes by: 1..5, 0 = nodata
@@ -751,6 +752,10 @@ def validate_manifest(m: dict) -> list[str]:
             fails.append(f"missing required field '{k}'" + (_ATTEST if k in _ATTESTED else ""))
     if layer and not rule:
         fails.append("layer must be namespaced — the platform's namespaces: " + namespace_text())
+    for key in ("layer", "stack"):
+        if m.get(key) and not _NAME.fullmatch(str(m[key])):
+            fails.append(f"{key} must be lowercase letters, digits and underscores, starting with a "
+                         "letter, 3 to 80 characters — it becomes a file name")
     if rule.get("stack"):
         # One year of a yearly categorical STACK: the year names its stack so the
         # series' legend and years live once, and the layer name must be what the
@@ -979,7 +984,8 @@ def _verify_and_land(manifest, dry_run, review, keep_prepared, prepared_before, 
                 _drop_prepared()
                 return {"status": "declined", "verified": True, "failures": [conflict], "observed": obs}
 
-        dest = Path(settings.tiffs_dir) / f"{layer}.tif"
+        from ..graph.geo import tiffs
+        dest = Path(settings.tiffs_dir) / tiffs.file_name(layer)
         dest.parent.mkdir(parents=True, exist_ok=True)
         from ..graph.geo.ingest import atomic_path
         with atomic_path(str(dest)) as tmp:          # a reader never opens half a copy

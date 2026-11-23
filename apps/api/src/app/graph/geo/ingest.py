@@ -1070,7 +1070,7 @@ def source_raster(layer="hazard_flood"):
         hidden = (tiffs._base().get(layer) or {}).get("contribution_id")
         if hidden:
             raise ValueError(f"unknown tiff layer: {layer}") from None
-        fname = layer if layer.endswith(".tif") else f"{layer}.tif"
+        fname = tiffs.file_name(layer[:-4] if layer.endswith(".tif") else layer)
         fallback_url = None
     path = os.path.join(settings.tiffs_dir, fname)
     was_cached = os.path.exists(path)
@@ -1530,7 +1530,7 @@ def hazard_clip(aoi, layer, max_pixels=None):
     scaled to match, and the level is written into the clip's tags so a consumer
     can SAY what it read. Without a budget the window is read at full resolution."""
     adir = os.path.dirname(aoi["admin"])
-    clip = os.path.join(adir, f"{layer}.tif")
+    clip = os.path.join(adir, tiffs.file_name(layer))
     # Two callers clipping one layer into one area take turns, and the second reads
     # the first's clip. A cached clip that will not open (cut short before clips were
     # written whole) is clipped again rather than served.

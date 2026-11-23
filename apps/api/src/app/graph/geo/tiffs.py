@@ -115,6 +115,15 @@ def _expand_stacks(cat):
                         "description": row.get("description", ""), **inherited}
 
 
+def file_name(layer) -> str:
+    """`<layer>.tif`, for a name that is one file name. A name holding a path separator is a
+    path into some other folder, so it is refused as an unknown layer wherever it came from."""
+    name = str(layer or "")
+    if not name or name in (".", "..") or any(c in name for c in ("/", "\\", "\x00")):
+        raise ValueError(f"unknown tiff layer: {layer}")
+    return f"{name}.tif"
+
+
 def entry(layer):
     cat = catalog()
     if layer not in cat:
