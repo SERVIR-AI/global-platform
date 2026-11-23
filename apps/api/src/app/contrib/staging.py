@@ -1052,7 +1052,12 @@ def _purge_clips(layer: str) -> int:
     from ..config import get_settings
     settings = get_settings()
     n = 0
-    for clip in settings.cache_dir.glob(f"*/{layer}.tif"):
+    from ..graph.geo import tiffs as _tiffs
+    try:
+        name = _tiffs.file_name(layer)
+    except ValueError:                    # not a file name: no clip was ever written under it
+        return 0
+    for clip in settings.cache_dir.glob(f"*/{name}"):
         if clip.parent.resolve() == settings.tiffs_dir.resolve():
             continue
         try:

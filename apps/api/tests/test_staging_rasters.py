@@ -149,3 +149,51 @@ def test_remove_raster_purges_clips_too(env, log):
     log("OUTPUT", f"{gone['status']} clips_purged={gone.get('clips_purged')}")
     assert gone["status"] == "removed" and gone["clips_purged"] == 1
     assert not (env / "kep" / "hazard_demoheat.tif").exists()
+
+
+NOT_FILE_NAMES = ["hazard_../../escaped", "hazard_../../../escaped_further", "hazard_a/b", "hazard_a\\b",
+                  "hazard_UPPER", "hazard_with space", "hazard_dots.v2", "hazard_" + "x" * 90, "hazard_é"]
+
+
+@pytest.mark.parametrize("name", NOT_FILE_NAMES)
+def test_a_layer_name_that_is_not_a_plain_file_name_is_refused(env, name):
+    """A raster's name becomes a file name and a catalog key. Anything but lowercase letters,
+    digits and underscores is refused before a byte is fetched, and no file appears anywhere."""
+    def tifs():
+        return sorted(str(p) for p in env.parent.rglob("*.tif"))
+    before = tifs()
+    out = _as(OWNER, lambda: staging.submit("raster", _manifest(layer=name), OWNER))
+    assert out["status"] == "declined", out
+    assert any("layer must be lowercase" in p and "file name" in p for p in out["problems"]), out["problems"]
+    assert tifs() == before and not store.list_contributions()
+
+
+def test_a_stack_name_is_held_to_the_same_rule(env):
+    out = _as(OWNER, lambda: staging.submit(
+        "raster", _manifest(layer="landcover_../x_2020", stack="landcover_../x", year=2020), OWNER))
+    assert out["status"] == "declined"
+    assert any(p.startswith("stack must be lowercase") for p in out["problems"]), out["problems"]
+
+
+def test_a_name_with_a_path_in_it_never_becomes_a_file_path(env):
+    """The guard under the gate: wherever a layer name is turned into a file, a name that
+    holds a path separator is an unknown layer, even for a row that got in before the rule."""
+    from app.graph.geo import ingest
+    for name in ("../x", "a/b", "a\\b", "..", ".", ""):
+        with pytest.raises(ValueError, match="unknown tiff layer"):
+            tiffs.file_name(name)
+    assert tiffs.file_name("hazard_flood") == "hazard_flood.tif"
+    with pytest.raises(ValueError, match="unknown tiff layer"):
+        ingest.source_raster("../../somewhere/else")
+    assert staging._purge_clips("hazard_../../hazard_flood") == 0
+
+    (env / "tiffs").mkdir(exist_ok=True)
+    kept = env / "tiffs" / "hazard_flood.tif"
+    kept.write_bytes(b"another layer's file")
+    bad = "hazard_../../tiffs/hazard_flood"
+    (env / "tiffs.contrib.yml").write_text(yaml.safe_dump(
+        {bad: {"local_path": f"tiffs/{bad}.tif", "contributed": True, "title": "x"}}))
+    tiffs._BASE.clear()
+    with pytest.raises(ValueError, match="unknown tiff layer"):
+        removal.remove_raster(bad)
+    assert kept.read_bytes() == b"another layer's file"

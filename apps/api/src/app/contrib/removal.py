@@ -123,7 +123,8 @@ def remove_raster(layer: str) -> dict:
     out = {"catalog_row": "removed", "declared_contract": "removed"}
     from .staging import _purge_clips
     out["clips_purged"] = _purge_clips(layer)   # never serve an old clip under a reused name
-    tif = Path(settings.tiffs_dir) / f"{layer}.tif"
+    from ..graph.geo import tiffs
+    tif = Path(settings.tiffs_dir) / tiffs.file_name(layer)
     if tif.is_file():
         retired = tif.with_suffix(".tif.retired")
         tif.rename(retired)
