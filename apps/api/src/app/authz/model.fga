@@ -9,7 +9,7 @@ type platform
   relations
     define operator: [user]
     define reviewer: [user] or operator
-    define contributor: [user, hub#member] or operator
+    define contributor: [user, user:*, hub#member] or operator
 
 type hub
   relations

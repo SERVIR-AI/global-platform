@@ -442,7 +442,8 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
         if fut is not None:                    # the same submission, still working
             return _wait(same[0], fut)
         said, lane = _sorted(kind, manifest)
-        if lane == "prepare" and _fails_checks(kind, manifest):
+        if staging.refusal_to_contribute(caller) or (
+                lane == "prepare" and _fails_checks(kind, manifest)):
             return staging.submit(kind, manifest, caller)   # declined before any fetch
         ident = os.urandom(8).hex()
         now = time.time()

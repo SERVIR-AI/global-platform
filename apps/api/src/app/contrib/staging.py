@@ -3007,6 +3007,23 @@ def _manifest_from_text(text: str) -> tuple[dict | None, str | None]:
     return doc, None
 
 
+def refusal_to_contribute(caller: identity.Caller) -> str | None:
+    """Why this caller may not contribute, or None. Contributing is a role in the authorization
+    store, asked here for every kind; with the store off, whoever is identified may."""
+    from .. import authz
+    if not authz.enabled():
+        return None
+    try:
+        if authz.may_contribute(caller):
+            return None
+    except authz.AuthzUnavailable as exc:
+        return f"refused: the authorization store did not answer ({exc}); nothing was submitted"
+    return (f"refused: {caller.label} does not hold the contributor role on this platform, so "
+            "nothing was submitted. An administrator of the server grants it: to one person "
+            "(python -m app.authz role contributor <id>), or to everyone who is signed in "
+            "(python -m app.authz role contributor '*')")
+
+
 def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
     """Validate, store as pending, stage for preview. Declines name every problem."""
     caller = caller or identity.current()
@@ -3048,6 +3065,9 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
                                  f"land; a {kind} has no preview yet — drop preview and submit "
                                  "it (contribute_status(action='withdraw') takes it back)"],
                     "fields": spec["fields"]}
+    refusal = refusal_to_contribute(caller)
+    if refusal:
+        return {"status": "declined", "kind": kind, "problems": [refusal]}
     # What the platform prepares by itself, no person's choice involved (contrib/prepare:
     # detect before the first attempt, auto after a decline), applied and said.
     from ..config import get_settings

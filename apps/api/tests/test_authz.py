@@ -337,3 +337,131 @@ def test_with_the_store_unreachable_the_review_refusal_names_the_store(env, monk
     log("OUTPUT", out["note"])
     assert out["status"] == "declined" and "did not answer" in out["note"]
     assert "not a reviewer" not in out["note"]
+
+
+def _schema_before_everyone_could_hold_contributor() -> dict:
+    """The schema a store holds when it was made before this change: the contributor role
+    could go to a person or to a hub's members, not to everyone at once."""
+    old = authz.model_json()
+    platform = next(t for t in old["type_definitions"] if t["type"] == "platform")
+    platform["metadata"]["relations"]["contributor"] = authz._types("user", "hub#member")
+    return old
+
+
+def test_contributing_asks_for_the_contributor_role(env, file_host, log):
+    """A store that has just been made gives the contributor role to everyone who is signed
+    in, as one entry. Without it a submission is refused in words before anything is stored
+    or queued, the form is still handed out, and the role works by name, through a hub and
+    for an operator."""
+    from app.contrib import jobs
+    from app.mcp import store
+    assert authz.BASELINE[0] in authz.tuples(authz.PLATFORM)
+    up = _submit(file_host)
+    assert up["status"] == "staged", up
+    assert _as(OWNER, lambda: staging.withdraw(up["contribution_id"], OWNER))["status"] == "withdrawn"
+
+    authz.delete(list(authz.BASELINE))
+    records = len(store.list_contributions())
+    refused = _submit(file_host)
+    log("OUTPUT", refused)
+    assert refused["status"] == "declined" and len(refused["problems"]) == 1
+    assert "owner@hub.test does not hold the contributor role" in refused["problems"][0]
+    assert len(store.list_contributions()) == records                    # nothing was stored
+    assert _as(OWNER, lambda: staging.submit("raster", None, OWNER))["status"] == "form"
+    url = _serve_tif(file_host, "toyheat.tif")
+    queued = _as(OWNER, lambda: jobs.submit("raster", _manifest(url), OWNER))
+    assert queued["status"] == "declined" and "contributor role" in queued["problems"][0]
+    con = jobs._connect()
+    try:
+        assert con.execute("SELECT count(*) FROM contribution_jobs WHERE owner_id = ?",
+                           (OWNER.id,)).fetchone()[0] == 0               # and nothing was queued
+    finally:
+        con.close()
+
+    authz.write([("user:user_owner", "contributor", authz.PLATFORM)])        # by name
+    named = _submit(file_host)
+    assert named["status"] == "staged", named
+    _as(OWNER, lambda: staging.withdraw(named["contribution_id"], OWNER))
+    authz.delete([("user:user_owner", "contributor", authz.PLATFORM)])
+
+    authz.write([("hub:mekong#member", "contributor", authz.PLATFORM)])      # through a hub
+    assert authz.may_contribute(A1) and not authz.may_contribute(A2)
+    by_hub = _as(A1, lambda: staging.submit("raster", _manifest(url), A1))
+    assert by_hub["status"] == "staged", by_hub
+    _as(A1, lambda: staging.withdraw(by_hub["contribution_id"], A1))
+    other = _as(A2, lambda: staging.submit("raster", _manifest(url), A2))
+    assert other["status"] == "declined" and "analyst2@other.test" in other["problems"][0]
+
+    operator = identity.Caller("local-dev", "local-dev", False, "bound")     # an operator needs no entry
+    by_operator = _as(operator, lambda: staging.submit("raster", _manifest(url), operator))
+    assert by_operator["status"] == "staged", by_operator
+
+
+def test_a_store_that_does_not_answer_refuses_a_contribution_by_name(env, file_host, monkeypatch):
+    monkeypatch.setattr(get_settings(), "grp_fga_url", "http://127.0.0.1:9")
+    authz._CLIENT.clear()
+    said = staging.refusal_to_contribute(OWNER)
+    assert said and "did not answer" in said and "nothing was submitted" in said
+
+
+def test_a_store_on_the_older_schema_takes_the_new_one_without_a_gap(env, file_host, monkeypatch, log):
+    """The order a running server is moved in. Its store holds the older schema, pinned by
+    id. The new schema goes in as a new version and the entry for everyone is written under
+    it, while the server stays on the older version and answers exactly as before. Only when
+    the pin moves does every signed-in person hold the role, and nothing else changes."""
+    from openfga_sdk.models import WriteAuthorizationModelRequest
+    s = get_settings()
+    up = _submit(file_host, visibility="public")
+    cid = up["contribution_id"]
+    assert _as(REVIEWER, lambda: staging.approve(cid, REVIEWER))["status"] == "approved"
+    authz.delete(list(authz.BASELINE))                       # the server as it is: no such entry
+    store_id = authz.ids()["store_id"]
+    old = authz._fga().write_authorization_model(
+        WriteAuthorizationModelRequest(**_schema_before_everyone_could_hold_contributor())
+    ).authorization_model_id
+
+    def pin(model_id):
+        monkeypatch.setattr(s, "grp_fga_store_id", store_id)
+        monkeypatch.setattr(s, "grp_fga_model_id", model_id)
+        authz._CLIENT.clear()
+        tiffs._BASE.clear()
+
+    def served():
+        return (_sees(ANON), _sees(A2), sorted(authz.visible_datasets(ANON)),
+                sorted(authz.visible_datasets(A1)), identity._is_reviewer("user_rev", "r", "token"))
+
+    pin(old)
+    before = served()
+    assert before[0] and before[1] and cid in before[2]
+    assert not authz.may_contribute(A1)
+    with pytest.raises(authz.AuthzUnavailable):              # the older schema cannot hold the entry
+        authz.write(list(authz.BASELINE))
+    authz._CLIENT.clear()
+
+    new = authz.bootstrap(force_model=True)["model_id"]      # python -m app.authz bootstrap --model
+    log("OUTPUT", {"older": old, "newer": new})
+    assert new and new != old
+    assert authz.ids()["model_id"] == old                    # the server is still on the older version
+
+    pin(new)                                                 # the operator's command, run under the new id
+    assert authz.write(list(authz.BASELINE)) == 1
+    pin(old)                                                 # the server, not restarted yet
+    assert served() == before                                # the stray entry changes nothing for it
+    assert not authz.may_contribute(A1)
+
+    pin(new)                                                 # the restart
+    assert served() == before
+    assert authz.may_contribute(A1) and authz.may_contribute(A2) and not authz.may_contribute(ANON)
+    url = _serve_tif(file_host, "second.tif")
+    later = _as(A2, lambda: staging.submit("raster", _manifest(url, layer="hazard_toyheat2"), A2))
+    assert later["status"] == "staged", later
+
+
+def test_every_kind_asks_for_the_contributor_role(env):
+    """The check sits where a contribution enters, ahead of what any one kind validates, so
+    no kind is let past it: the kinds are read from the gate's own table, not listed here."""
+    authz.delete(list(authz.BASELINE))
+    assert len(staging._KINDS) > 3
+    for kind in staging._KINDS:
+        out = _as(OWNER, lambda: staging.submit(kind, {"title": "anything"}, OWNER))
+        assert out["status"] == "declined" and "contributor role" in out["problems"][0], (kind, out)

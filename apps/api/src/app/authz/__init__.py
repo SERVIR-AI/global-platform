@@ -25,6 +25,9 @@ from ..config import get_settings
 
 PLATFORM = "platform:servir"
 VISIBILITIES = ("private", "hub", "platform", "public")
+# Who may contribute in a store that has just been made: everyone who is signed in. It is one
+# tuple, so an operator narrows it by taking this away and granting the role by person or by hub.
+BASELINE = (("user:*", "contributor", PLATFORM),)
 _LOCK = threading.RLock()
 _CLIENT: dict = {}
 # Why the store did not answer during the current request, or None. Readers below the
@@ -105,7 +108,7 @@ def model_json() -> dict:
          "relations": {"operator": _this(), "reviewer": _union(_this(), "operator"),
                        "contributor": _union(_this(), "operator")},
          "metadata": {"relations": {"operator": _types("user"), "reviewer": _types("user"),
-                                    "contributor": _types("user", "hub#member")}}},
+                                    "contributor": _types("user", "user:*", "hub#member")}}},
         {"type": "hub",
          "relations": {"admin": _this(), "member": _union(_this(), "admin")},
          "metadata": {"relations": {"admin": _types("user"), "member": _types("user")}}},
@@ -172,11 +175,13 @@ def bootstrap(force_model: bool = False) -> dict:
     from openfga_sdk.sync import OpenFgaClient
     url = str(get_settings().grp_fga_url).rstrip("/")
     ids = _ids()
+    created = False
     try:
         with OpenFgaClient(_configuration(url)) as fga:
             if not ids["store_id"]:
                 resp = fga.create_store(CreateStoreRequest(name="servir-global-platform"))
                 ids["store_id"] = resp.id
+                created = True
             fga.set_store_id(ids["store_id"])
             if force_model or not ids["model_id"]:
                 body = WriteAuthorizationModelRequest(**model_json())
@@ -186,6 +191,8 @@ def bootstrap(force_model: bool = False) -> dict:
         raise _unavailable(f"authorization store at {url}: {type(exc).__name__}: {exc}", exc)
     _save_ids(ids)
     _CLIENT.clear()
+    if created:
+        write(list(BASELINE))
     return ids
 
 
@@ -354,6 +361,12 @@ def is_reviewer(caller) -> bool:
     return check(user_key(caller), "reviewer", PLATFORM)
 
 
+def may_contribute(caller) -> bool:
+    """Whether the caller holds the contributor role: by name, through a hub, as an operator,
+    or through the entry that gives it to everyone who is signed in."""
+    return check(user_key(caller), "contributor", PLATFORM)
+
+
 def is_operator(caller) -> bool:
     return check(user_key(caller), "operator", PLATFORM)
 
@@ -483,13 +496,16 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="python -m app.authz",
                                 description="Operate the platform's authorization store (OpenFGA).")
     sub = p.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("bootstrap", help="create the store and write the model; print the ids")
+    b = sub.add_parser("bootstrap", help="create the store and write the model; print the ids")
+    b.add_argument("--model", action="store_true",
+                   help="write this code's model into the store as a new version and print its id; "
+                        "the platform keeps the version GRP_FGA_MODEL_ID names until that changes")
     sub.add_parser("health", help="can the store answer? off | ok | unreachable | store-missing, "
                                   "without creating anything; exit 0 only on ok")
     sub.add_parser("model", help="print the model as JSON")
     r = sub.add_parser("role", help="give or take a platform role")
     r.add_argument("role", choices=["operator", "reviewer", "contributor"])
-    r.add_argument("user")
+    r.add_argument("user", help="a sign-in id; '*' with contributor means everyone who is signed in")
     r.add_argument("--remove", action="store_true")
     h = sub.add_parser("hub", help="hub membership")
     h.add_argument("hub")
@@ -516,7 +532,7 @@ def main(argv=None) -> int:
         print(json.dumps({"status": "off", "note": "set GRP_FGA_URL"}))
         return 2
     if a.cmd == "bootstrap":
-        print(json.dumps(bootstrap()))
+        print(json.dumps(bootstrap(force_model=a.model)))
     elif a.cmd == "model":
         print(json.dumps(model_json(), indent=2))
     elif a.cmd == "role":
