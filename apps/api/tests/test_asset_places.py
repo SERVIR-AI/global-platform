@@ -22,7 +22,7 @@ def _pt(lon, lat, **props):
 
 
 @pytest.fixture
-def hub_aoi(monkeypatch, aoi, tmp_path):
+def hub_aoi(monkeypatch, aoi, tmp_path, offline_source_rasters):
     """Testville plus a contributed layer `evac_centres` (name_field=centre_name):
     three centres in the flooded half, one dry, one outside the boundary."""
     aoi = dict(aoi)

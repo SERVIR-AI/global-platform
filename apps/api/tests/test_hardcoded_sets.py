@@ -58,7 +58,8 @@ def test_country_names_are_matched_forgivingly():
     assert vectors.not_applicable(_entry([0, 0, 1, 1], countries=["Thailand"]), B, None) is None   # unknown: clip as before
 
 
-def test_the_pack_declares_a_non_covering_layer_instead_of_counting_zero(aoi, monkeypatch, log):
+def test_the_pack_declares_a_non_covering_layer_instead_of_counting_zero(
+        aoi, monkeypatch, offline_source_rasters, log):
     thai = _entry([99.0, 5.6, 105.6, 20.5])
     monkeypatch.setattr(vectors, "visible", lambda: {"evac_th": thai})
     a = dict(aoi)

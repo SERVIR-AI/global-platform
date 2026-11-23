@@ -11,7 +11,7 @@ from app.risk import synthesis as risk
 
 
 @pytest.fixture
-def offline_aoi(monkeypatch, aoi):
+def offline_aoi(monkeypatch, aoi, offline_source_rasters):
     """Route the gatherer at Testville instead of Nominatim/Overpass/Drive."""
     monkeypatch.setattr(risk.ingest, "ensure_aoi",
                         lambda place=None, geometry=None, layers=None: dict(aoi))
@@ -85,7 +85,10 @@ def test_the_full_risk_loop_gates_and_receipts(offline_aoi, log):
     # "nothing live in risk" invariant is gone. What must hold is that the pack's
     # own computed evidence is there and is attributed as computed.
     assert len(f["computed_sources"]) >= 9
-    # 4 exposure + 4 risk-level + the vulnerability-layer passport + hazard layer
+    # 4 exposure + 4 risk-level + the vulnerability-layer passport + hazard layer, and a
+    # reading of each layer the recipe weighs; the count alone no longer proves the risk level
+    risk_level = {c["n"] for c in p["citations"] if c["kind"] == "risk_level"}
+    assert risk_level and risk_level <= set(f["computed_sources"])
     assert out["insight"]["series"]                      # categorical series flow
     assert out["insight"]["pack"] == "risk"
 

@@ -59,6 +59,25 @@ def aoi(tmp_path):
             "buildings": write("buildings", buildings), "hazard_flood": str(flood)}
 
 
+@pytest.fixture
+def offline_source_rasters(monkeypatch, aoi, tmp_path):
+    """For a test that points the risk gatherer at Testville: a source raster a download
+    would have fetched is the area's flood grid instead, stored in the dtype the layer
+    declares, in a raster cache of the test's own."""
+    from app.graph.geo import schema
+
+    def download(id, output, quiet=True):
+        layer = os.path.splitext(os.path.basename(output))[0]
+        with rasterio.open(aoi["hazard_flood"]) as src:
+            grid, profile = src.read(1), dict(src.profile)
+        profile["dtype"] = (schema.schema_for(layer) or {}).get("dtype", profile["dtype"])
+        with rasterio.open(output, "w", **profile) as dst:
+            dst.write(grid.astype(profile["dtype"]), 1)
+
+    monkeypatch.setattr(get_settings(), "tiffs_dir", tmp_path / "tiffs")
+    monkeypatch.setattr("gdown.download", download)
+
+
 class StubClient:
     """Mimics the slice of the OpenAI SDK the nodes use. `route_response` is either
     ("text", content) for a decline or ("tool", name, args) for a tool call; the
@@ -96,6 +115,17 @@ def _no_reverse_geocode(monkeypatch):
     """ensure_aoi asks Nominatim for an area's country once; the suite never does."""
     from app.graph.geo import ingest
     monkeypatch.setattr(ingest, "_reverse_country", lambda lon, lat: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_drive_download(monkeypatch):
+    """A source raster missing from the cache is downloaded from Google Drive; the suite
+    never does. A test that reaches for one fails here, not on the day Drive stops answering."""
+    def refuse(id=None, output=None, **kwargs):
+        pytest.fail(f"this test reached for Google Drive ({os.path.basename(str(output))}): ask "
+                    "for the offline_source_rasters fixture, or give the test its own raster")
+
+    monkeypatch.setattr("gdown.download", refuse)
 
 
 @pytest.fixture(autouse=True)
