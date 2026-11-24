@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..config import get_settings
+from ..geo.namekey import name_key
 
 _ID = re.compile(r"[0-9a-f]{16}")
 _TABLES = ("packs", "reports", "receipts")
@@ -152,22 +153,13 @@ def latest_receipt_id(pack: str | None = None) -> str | None:
     return None
 
 
-def _place_key(text) -> str:
-    """A place name as compared across receipts: case, accents and punctuation ignored."""
-    import re
-    import unicodedata
-    t = unicodedata.normalize("NFKD", str(text if text is not None else ""))
-    t = "".join(ch for ch in t if not unicodedata.combining(ch)).casefold()
-    return " ".join(re.sub(r"[\W_]+", " ", t).split())
-
-
 def list_receipts(place: str | None = None, pack: str | None = None, limit: int = 20) -> list[dict]:
     """Receipts already minted for an area, newest first — what a living page shows
     instead of computing anything: the question, the pack, the target and whether it
     passed. `place` matches the target's place by name (case and accents ignored);
     `pack` narrows to one domain pack. Previews (a pack citing a staged contribution)
     are never listed, the same rule as a direct load."""
-    want = _place_key(place) if place else None
+    want = name_key(place, split_apostrophes=True) if place else None
     con = _connect()
     try:
         rows = con.execute(
@@ -182,7 +174,7 @@ def list_receipts(place: str | None = None, pack: str | None = None, limit: int 
         if pack is not None and rec.get("pack") != pack:
             continue
         target = rec.get("target") or {}
-        if want is not None and _place_key(target.get("place")) != want:
+        if want is not None and name_key(target.get("place"), split_apostrophes=True) != want:
             continue
         out.append({"receipt_id": ident, "question": rec.get("question"), "pack": rec.get("pack"),
                     "target": target, "passed": rec.get("passed"),

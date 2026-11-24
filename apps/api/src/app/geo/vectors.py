@@ -19,7 +19,6 @@ import json
 import math
 import os
 import threading
-import unicodedata
 from collections import Counter, OrderedDict
 from pathlib import Path
 
@@ -28,6 +27,7 @@ from shapely.geometry import shape
 from shapely.ops import unary_union
 
 from ..mcp.budget import once
+from .namekey import name_key
 
 # WGS 84. Areas are computed on (lon, AUTHALIC latitude) with the authalic radius —
 # the sphere of the ellipsoid's own area, reached by an equal-area map — so they are
@@ -600,12 +600,6 @@ def summarise(entry: dict, boundary, cap_features: int = 250_000) -> dict:
 
 
 # ------------------------------------------------------------------ gazetteer
-def _norm(text) -> str:
-    t = unicodedata.normalize("NFKD", str(text or ""))
-    t = "".join(ch for ch in t if not unicodedata.combining(ch))
-    return " ".join(t.casefold().replace("-", " ").replace("_", " ").split())
-
-
 _NAME_INDEX: dict = {}       # layer -> (mtime, size, {normalised name: [(label, shapely geometry)]})
 
 
@@ -632,7 +626,7 @@ def _name_index(layer: str, entry: dict) -> dict:
         label = props.get(key)
         if label in (None, "") or geom is None:
             continue
-        index.setdefault(_norm(label), []).append((str(label).strip(), geom))
+        index.setdefault(name_key(label or "", keep_punctuation=True), []).append((str(label).strip(), geom))
     _NAME_INDEX[layer] = (st.st_mtime, st.st_size, index)
     return index
 
@@ -643,7 +637,7 @@ def named_area(name: str) -> dict | None:
     Exact matches win; else one feature whose name contains the query (or the query
     contains it) — several such are refused as ambiguous, in words. None when no
     contributed polygon layer knows the name."""
-    q = _norm(name)
+    q = name_key(name or "", keep_punctuation=True)
     if not q or len(q) < 3:
         return None
     exact, partial = [], []

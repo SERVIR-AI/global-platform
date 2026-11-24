@@ -9,6 +9,7 @@ import inspect
 import re
 from collections import Counter
 
+from ..geo.namekey import name_key as _key
 from . import budget, instructions, packs
 
 # Function words a question is written with; never a routing word (language, not data).
@@ -34,11 +35,6 @@ _QUOTED = 2000                          # chars of the question the reply quotes
 
 
 # --------------------------------------------------------------------------- words
-def _key(text) -> str:
-    from ..geo import ingest
-    return ingest._key(text)
-
-
 def _stem(w: str) -> str:
     """A word as compared: plural and -ing/-ed/-ure/-e endings off ('floods', 'flooding' ->
     'flood'; 'exposed', 'exposure' -> 'expos'), so a question and a name meet."""

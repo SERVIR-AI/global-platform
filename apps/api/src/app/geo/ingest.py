@@ -11,7 +11,6 @@ import os
 import re
 import threading
 import time
-import unicodedata
 import warnings
 
 warnings.filterwarnings("ignore")
@@ -22,6 +21,7 @@ from shapely.geometry import LineString, Point, box, mapping, shape
 
 from ..config import get_settings
 from . import drive_tifs, registry, tiffs, vectors
+from .namekey import name_key as _key
 
 HEADERS = {"User-Agent": "grp-mvp/0.1 (disaster-risk research prototype)"}
 NOMINATIM = "https://nominatim.openstreetmap.org"
@@ -208,15 +208,6 @@ class AmbiguousPlace(ValueError):
     def __init__(self, message, candidates):
         super().__init__(message)
         self.candidates = candidates
-
-
-def _key(text) -> str:
-    """A name as compared: case, accents and punctuation ignored, a hyphen the same as
-    a space — 'Térraba-Sierpe', 'terraba sierpe' and 'TERRABA SIERPE.' are one key."""
-    t = unicodedata.normalize("NFKD", str(text if text is not None else ""))
-    t = "".join(ch for ch in t if not unicodedata.combining(ch)).casefold()
-    t = re.sub(r"['’`]", "", t)
-    return " ".join(re.sub(r"[\W_]+", " ", t).split())
 
 
 def _is_measure(field) -> bool:
