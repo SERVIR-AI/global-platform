@@ -9,8 +9,8 @@ import math
 
 import yaml
 
-from ...config import get_settings
-from ...mcp.budget import once
+from ..config import get_settings
+from ..mcp.budget import once
 
 _LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
@@ -35,7 +35,7 @@ def _doc():
     except Exception:
         pass
     try:                                        # staged contracts, caller-scoped
-        from ...contrib import staging
+        from ..contrib import staging
         layers = doc.setdefault("layers", {})
         layers.update({k: v for k, v in staging.visible_staged_contracts().items()
                        if k not in layers})
@@ -112,7 +112,7 @@ def namespaces():
 
 def _shipped():
     """The platform's own conf/raster_schema.yml, whatever schema is configured."""
-    from ...config import _REPO_ROOT
+    from ..config import _REPO_ROOT
     try:
         with open(_REPO_ROOT / "conf" / "raster_schema.yml") as f:
             return yaml.safe_load(f) or {}

@@ -379,7 +379,7 @@ def test_a_table_declares_where_its_rows_speak_and_the_row_carries_it(gate, auto
     assert row["countries"] == ["Costa Rica"] and row["bbox"] == [-85.4, 9.6, -84.6, 10.4]
     assert registry.FEEDS["test_nicoya_factor"]["countries"] == ["Costa Rica"]
     # the land-cover pack's reader skips it for another country (the risk pack reads the same key)
-    from app.graph.geo import vectors
+    from app.geo import vectors
     assert not vectors.country_matches(row["countries"], "Ecuador")
     bad = staging.submit("table", _table("test_bad_scope", countries=[3], bbox=[10, 5, -10, 6]), OWNER)
     joined = " ".join(bad["problems"])
@@ -444,7 +444,7 @@ def test_a_paged_api_says_first_n_of_m(monkeypatch):
 
 # ------------------------------------------------------------- 13. hints
 def test_a_hint_points_at_a_pack_that_reaches_the_layer(gate, monkeypatch, log):
-    from app.graph.geo import tiffs
+    from app.geo import tiffs
     from app.land_cover import synthesis as lc
     monkeypatch.setattr(tiffs, "catalog", lambda include_staged=True: {
         "hazard_flood": {"title": "flood", "extent": {"lon": [92.0, 141.2], "lat": [-11.1, 28.7]}},
@@ -478,7 +478,7 @@ def test_the_audit_reconciles_vectors_and_counts_honestly(gate, auto, log):
     log("OUTPUT", out["note"])
     assert out["serving"] == 1 and out["unverifiable"] == 0
     assert out["note"].startswith("1 of 1 approved served")
-    from app.graph.geo import vectors
+    from app.geo import vectors
     vectors.master_path(vectors.landed()["test_audit_pts"]).unlink()
     out = staging.reconcile(OTHER)
     assert out["approved_but_inert"] == 1 and "NOT served" in out["note"]

@@ -5,7 +5,7 @@ the unrecoverable cases (multi-band, no CRS, over-range, oversize) hard-fail; so
 """
 import numpy as np
 
-from app.graph.geo.byod_verify import verify_upload
+from app.geo.byod_verify import verify_upload
 
 _CLASS = np.array([[0, 1, 2, 3, 4, 5]] * 6, dtype="int16")
 

@@ -83,7 +83,7 @@ ORDER = {"assemble": 10, "mosaic": 20, "convert": 30, "recode": 40, "clip": 50}
 #   url_refused            + url, problems (fetch_policy.check_url's words)
 #   shapefile_part         + url, part (which part it is)
 #   zip_of_rasters         + url, rasters (the zip's raster members), raised in remote_clip
-#   vector_unreadable      + url, error (graph/geo/vecio's words: a truncated export, ...),
+#   vector_unreadable      + url, error (geo/vecio's words: a truncated export, ...),
 #                            head (the file's first bytes)
 #   not_features           + url, problem (vectors.inspect's words), raw (the bytes fetched)
 #   vector_file_too_large  + url, bytes (the file's declared size, or None), cap: a vector

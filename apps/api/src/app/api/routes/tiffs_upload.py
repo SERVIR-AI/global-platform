@@ -13,7 +13,7 @@ import tempfile
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from ...graph.geo import byod_registry
+from ...geo import byod_registry
 
 router = APIRouter()
 

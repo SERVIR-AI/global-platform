@@ -2,7 +2,7 @@
 conf, no network. Default preference is L1 (precomputed risk exists); L2 when forced
 or when no L1 exists; the hazard<->risk name map handles landslides/landslide (R5).
 """
-from app.graph.geo import resolver
+from app.geo import resolver
 
 
 def test_flood_defaults_to_l1_with_l2_available():

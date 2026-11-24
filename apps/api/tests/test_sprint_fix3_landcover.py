@@ -19,7 +19,7 @@ import pytest
 import rasterio
 from shapely.geometry import box, mapping, shape
 
-from app.graph.geo import ingest, vectors
+from app.geo import ingest, vectors
 from app.mcp import assemble
 
 from test_sprint_fix2_stacks import _submit, env, lc_env  # noqa: F401  (fixture reuse)

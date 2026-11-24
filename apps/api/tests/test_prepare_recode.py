@@ -35,7 +35,7 @@ from rasterio.warp import transform_bounds
 from app.config import get_settings
 from app.contrib import fetch_policy, identity, prepare, rasters, staging
 from app.contrib.prepare import recode
-from app.graph.geo import ingest, schema, tiffs, vectors
+from app.geo import ingest, schema, tiffs, vectors
 from app.mcp import assemble, packs, registry, store
 from app.risk import synthesis as risk
 

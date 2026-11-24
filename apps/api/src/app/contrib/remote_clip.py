@@ -341,7 +341,7 @@ def box_of(clip) -> tuple[list[float], str]:
     refused: the box around it would be a guess."""
     if not isinstance(clip, str):
         return [float(v) for v in clip], ""
-    from ..graph.geo import ingest
+    from ..geo import ingest
     try:
         r = ingest._resolve(clip, cap=float("inf"))
     except ValueError as exc:

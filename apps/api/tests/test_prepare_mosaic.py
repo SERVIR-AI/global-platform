@@ -32,7 +32,7 @@ from rasterio.transform import from_bounds, from_origin
 from app.config import get_settings
 from app.contrib import identity, prepare, remote_clip, staging
 from app.contrib.prepare import mosaic
-from app.graph.geo import ingest, schema, tiffs
+from app.geo import ingest, schema, tiffs
 from app.mcp import assemble, packs, store
 from app.risk import synthesis as risk
 

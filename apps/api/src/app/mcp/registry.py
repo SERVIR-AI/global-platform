@@ -756,7 +756,7 @@ def _catalog_sources() -> list[dict]:
     """The published catalogs this server reads, with each root's state (capabilities
     never crash on a catalog: an unreadable one is reported, not raised)."""
     try:
-        from ..graph.geo import stac_catalog, tiffs
+        from ..geo import stac_catalog, tiffs
         out = stac_catalog.status()
         if out:
             local = {k for k, v in tiffs.catalog().items() if not (v or {}).get("stac")}
@@ -773,7 +773,7 @@ def _on_server(key: str, cat: dict) -> bool | None:
     """Whether a layer's file is here (a download_url or remote /vsi path counts as fetchable);
     None when its row names no file. A listing never claims a file this server lacks."""
     import os
-    from ..graph.geo import stacks
+    from ..geo import stacks
     if (cat.get(key) or {}).get("download_url"):
         return True
     path = str(stacks.year_path(key, cat) or "")
@@ -789,7 +789,7 @@ def raster_layers() -> list[dict]:
     """Every raster layer in the catalog (tiffs.catalog(): built-in and contributed, every
     namespace; a stack once, with its years): name, title, namespace, countries or extent."""
     try:
-        from ..graph.geo import schema, stacks, tiffs
+        from ..geo import schema, stacks, tiffs
         cat, spaces = tiffs.catalog(), schema.namespaces()
     except Exception:                          # the map never crashes on the catalog
         return []
@@ -887,7 +887,7 @@ def countries() -> list[str]:
     """Every country the platform holds data for, each once (Viet Nam is Vietnam), the most
     covered first: the raster catalog (stacks included), the vector layers, the live feeds
     and the document library declare them."""
-    from ..graph.geo import tiffs, vectors
+    from ..geo import tiffs, vectors
     rows: list = []
     try:
         rows += [r.get("countries") for r in tiffs.catalog().values() if isinstance(r, dict)]
@@ -925,7 +925,7 @@ def _contributed_vector_names() -> list[str]:
     """Names of the contributed vector layers the caller may see — read live, so the
     tool text names what the platform holds today."""
     try:
-        from ..graph.geo import vectors
+        from ..geo import vectors
         return [f"{k} ({vectors.family(e)})" for k, e in vectors.visible().items()]
     except Exception:
         return []
@@ -947,7 +947,7 @@ def _layer_kinds_line() -> str:
     class' — from the raster schema's namespaces, grouped by what their cells hold;
     a namespace added to the schema appears here with no edit."""
     try:
-        from ..graph.geo import schema
+        from ..geo import schema
         rows = schema.namespaces()
     except Exception:
         return ""

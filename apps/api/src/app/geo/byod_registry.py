@@ -16,7 +16,7 @@ import re
 import shutil
 import uuid
 
-from ...config import get_settings
+from ..config import get_settings
 from .byod_verify import verify_upload
 from .verify import VerifyReport
 

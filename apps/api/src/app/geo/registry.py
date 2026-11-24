@@ -6,7 +6,7 @@ COUNTABLE = ("hospitals", "schools", "buildings")     # built-in, from OSM
 
 def countable() -> tuple:
     """Built-in point layers plus every contributed POINT layer this caller may see.
-    Line and polygon layers are measured, not counted (graph/geo/vectors.summarise)."""
+    Line and polygon layers are measured, not counted (geo/vectors.summarise)."""
     from . import vectors
     return COUNTABLE + tuple(l for l, e in vectors.visible().items()
                              if l not in COUNTABLE and vectors.family(e) == "points")

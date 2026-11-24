@@ -339,7 +339,7 @@ def test_weights_refuse_an_unknown_layer_or_hazard(env, log):
 
 
 def test_staged_weights_change_only_their_authors_risk_levels(env, monkeypatch, log):
-    from app.graph.geo import combine
+    from app.geo import combine
     monkeypatch.setattr(get_settings(), "risk_l2_contrib_path", env / "risk_l2.contrib.yml")
     staging.STAGED_WEIGHTS.clear()
     monkeypatch.setattr(staging, "_STAGED_LOADED", False)
@@ -369,7 +369,7 @@ def test_staged_weights_change_only_their_authors_risk_levels(env, monkeypatch, 
 
 
 def test_a_return_period_layer_inherits_the_adjusted_weights(env, monkeypatch, log):
-    from app.graph.geo import combine
+    from app.geo import combine
     monkeypatch.setattr(get_settings(), "risk_l2_contrib_path", env / "risk_l2.contrib.yml")
     staging.STAGED_WEIGHTS.clear()
     monkeypatch.setattr(staging, "_STAGED_LOADED", False)
@@ -382,7 +382,7 @@ def test_a_return_period_layer_inherits_the_adjusted_weights(env, monkeypatch, l
 
 
 def test_proposing_the_weights_already_in_force_is_declined(env, log):
-    from app.graph.geo import combine
+    from app.geo import combine
     current = dict(combine.weights_for("hazard_flood"))
     out = staging.submit("weights", _weights(weights=current), OWNER)
     log("OUTPUT", out["problems"][0][:100])

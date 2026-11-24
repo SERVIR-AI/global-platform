@@ -38,7 +38,7 @@ POST /api/chat → route → resolve → fetch → operate → finalize → JSON
 - **resolve** — offers exposure / precomputed-risk (L1) / recomputed-risk (L2), only the paths whose
   data exists, and pauses for the user's pick (resumed on the same `thread_id`).
 - **fetch** — clips the OSM assets + the chosen hazard/risk raster to the AOI (L2 grids are computed here).
-- **operate** — `graph/geo/store.py`: the only place a number is born (the spatial overlay).
+- **operate** — `geo/store.py`: the only place a number is born (the spatial overlay).
 - **finalize** — phrases the answer, quoting the number and citing the source.
 
 On a decline (no place / unavailable layer) or a fetch failure, the answer is returned
@@ -55,22 +55,22 @@ src/app/
 ├── schemas.py              # request/response models
 ├── api/routes/             # HTTP endpoints: health, chat, raster (clipped GeoTIFF), tiffs (BYOD upload)
 ├── llm/client.py           # per-request OpenAI-SDK client: claude | openai | gemini
-└── graph/
-    ├── graph.py            # the route → resolve → fetch → operate → finalize graph
-    ├── prompts.py          # loads the grounding prompt (conf/prompts.yml)
-    └── geo/
-        ├── ingest.py       # place → OSM boundary/roads/POIs + hazard raster clip
-        ├── resolver.py     # picks exposure vs L1 vs L2 from what's available
-        ├── combine.py      # Layer-2 risk = Hazard × weighted vulnerability
-        ├── align.py        # resample any 1–5 layer onto the hazard grid
-        ├── verify.py / schema.py / rasterstats.py  # per-raster contracts + windowed checks
-        ├── byod_verify.py / byod_registry.py  # verify + per-thread registry for user-uploaded layers
-        ├── store.py        # the deterministic spatial ops (the only numbers)
-        ├── operations.py   # tool schemas + dispatch
-        ├── viz.py          # builds the map-visualization payload for the frontend
-        ├── tiffs.py / drive_tifs.py  # hazard catalog (conf/tiffs.yml) + Drive ids
-        ├── registry.py     # countable vs knowingly-unavailable layers
-        └── trace.py        # cost + groundedness trace
+├── graph/
+│   ├── graph.py            # the route → resolve → fetch → operate → finalize graph
+│   ├── prompts.py          # loads the grounding prompt (conf/prompts.yml)
+│   └── tracing.py          # builds and writes each turn's execution trace
+└── geo/
+    ├── ingest.py           # place → OSM boundary/roads/POIs + hazard raster clip
+    ├── resolver.py         # picks exposure vs L1 vs L2 from what's available
+    ├── combine.py          # Layer-2 risk = Hazard × weighted vulnerability
+    ├── align.py            # resample any 1–5 layer onto the hazard grid
+    ├── verify.py / schema.py / rasterstats.py  # per-raster contracts + windowed checks
+    ├── byod_verify.py / byod_registry.py  # verify + per-thread registry for user-uploaded layers
+    ├── store.py            # the deterministic spatial ops (the only numbers)
+    ├── operations.py       # tool schemas + dispatch
+    ├── viz.py              # builds the map-visualization payload for the frontend
+    ├── tiffs.py / drive_tifs.py  # hazard catalog (conf/tiffs.yml) + Drive ids
+    └── registry.py         # countable vs knowingly-unavailable layers
 ```
 
 Config lives at the repo root: the hazard catalog (`conf/tiffs.yml`), the grounding prompt

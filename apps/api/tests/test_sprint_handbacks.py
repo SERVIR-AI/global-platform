@@ -19,7 +19,7 @@ import pytest
 from app.config import get_settings
 from app.contrib import fetch_policy, identity, jobs, prepare, staging
 from app.contrib.prepare import _drive, clip, recode
-from app.graph.geo import vecio
+from app.geo import vecio
 from app.mcp import budget, store
 
 OWNER = identity.Caller("user_owner", "gis@hub.test", False, "bound")

@@ -97,7 +97,7 @@ def _matches(meta: dict, filters: dict) -> bool:
         have = meta.get(key)
         wanted = [str(w).lower() for w in (want if isinstance(want, (list, tuple)) else [want])]
         if key == "countries":
-            from ..graph.geo.vectors import country_matches
+            from ..geo.vectors import country_matches
             declared = [str(h) for h in (have if isinstance(have, (list, tuple)) else [have] if have else [])]
             if not declared or not any(country_matches(declared, w) for w in wanted):
                 return False

@@ -29,7 +29,7 @@ def _calendars() -> str:
 def _boundaries() -> str:
     """The contributed boundary layers whose feature names resolve as places, by title."""
     try:
-        from ..graph.geo import ingest
+        from ..geo import ingest
         layers = ingest._gazetteer_layers()
     except Exception:
         layers = {}

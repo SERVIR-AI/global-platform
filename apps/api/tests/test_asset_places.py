@@ -6,7 +6,7 @@ import json
 import pytest
 
 from app.gate import publish
-from app.graph.geo import operations, vectors
+from app.geo import operations, vectors
 from app.mcp import assemble, store
 from app.risk import synthesis as risk
 
@@ -211,7 +211,7 @@ def test_the_place_list_carries_the_contributors_own_id_and_full_precision(hub_a
 
 
 def test_an_osm_point_names_itself_from_any_name_tag():
-    from app.graph.geo import ingest
+    from app.geo import ingest
     assert ingest._osm_name({"name": "โรงเรียนวัดละหาร"}) == "โรงเรียนวัดละหาร"
     assert ingest._osm_name({"name:th": "โรงเรียนบางบัวทอง"}) == "โรงเรียนบางบัวทอง"
     assert ingest._osm_name({"amenity": "school"}) == ""

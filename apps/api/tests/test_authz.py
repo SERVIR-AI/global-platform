@@ -20,7 +20,7 @@ import yaml
 from app import authz
 from app.config import get_settings
 from app.contrib import identity, staging
-from app.graph.geo import tiffs
+from app.geo import tiffs
 
 pytestmark = pytest.mark.skipif(shutil.which("openfga") is None,
                                 reason="the openfga binary is not installed (brew install openfga)")

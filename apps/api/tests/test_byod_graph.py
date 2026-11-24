@@ -5,7 +5,7 @@ counted answer. A second thread can't see it; the map legend degrades gracefully
 import numpy as np
 
 from app.graph import graph as gm
-from app.graph.geo import byod_registry, viz
+from app.geo import byod_registry, viz
 
 _CLASS = np.array([[0, 1, 2, 3, 4, 5]] * 6, dtype="int16")
 

@@ -39,7 +39,7 @@ from shapely.geometry import box as sbox, mapping, shape
 from app.config import get_settings
 from app.contrib import identity, prepare, staging
 from app.contrib.prepare import _layer_reader as _features, rasterise, recode
-from app.graph.geo import ingest, schema, tiffs, vectors
+from app.geo import ingest, schema, tiffs, vectors
 from app.mcp import assemble, packs, registry, store
 from app.risk import synthesis as risk
 

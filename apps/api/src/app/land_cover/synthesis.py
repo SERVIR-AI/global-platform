@@ -21,8 +21,8 @@ import re
 
 from shapely.geometry import shape
 
-from ..graph.geo import ingest, layer_values, rasterstats, schema, stacks, tiffs, verify
-from ..graph.geo import vectors as geovectors
+from ..geo import ingest, layer_values, rasterstats, schema, stacks, tiffs, verify
+from ..geo import vectors as geovectors
 from ..rag import filters as _rag_filters
 
 SECTIONS = (
@@ -686,7 +686,7 @@ STANDING_GAPS = (
 # ---------------------------------------------------------------------- viz
 
 def _viz(aoi, name, layer_key, raster_path, legend_entries, label, caption, metric, outside):
-    from ..graph.geo import viz as geoviz
+    from ..geo import viz as geoviz
     aoi_feature, bounds = geoviz._aoi_feature(aoi)
     slug = os.path.basename(os.path.dirname(aoi["admin"]))
     return {"place": name, "hazard": layer_key, "layer": None, "layer_kind": "categorical",

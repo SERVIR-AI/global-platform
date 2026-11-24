@@ -86,7 +86,7 @@ def test_a_truthful_layer_lands_catalog_row_and_contract(conf_env, tif_writer, l
     sch = yaml.safe_load((conf_env / "raster_schema.contrib.yml").read_text())
     assert sch["layers"]["hazard_toyheat"]["dtype"] == "int16"
     assert (conf_env / "tiffs" / "hazard_toyheat.tif").is_file()
-    from app.graph.geo import tiffs as tiffs_mod
+    from app.geo import tiffs as tiffs_mod
     assert "hazard_toyheat" in tiffs_mod.catalog()           # merged view serves it
 
 

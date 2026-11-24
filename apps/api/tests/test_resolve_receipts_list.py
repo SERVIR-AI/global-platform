@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.api.routes import receipts as routes
-from app.graph.geo import ingest
+from app.geo import ingest
 from app.mcp import store
 
 

@@ -3,7 +3,7 @@
 source sheet hides. Stats are windowed (rasterstats) so a continent-scale file is
 never fully loaded.
 
-CLI:  python -m app.graph.geo.verify [name ...]
+CLI:  python -m app.geo.verify [name ...]
       (no args -> verify every layer declared in conf/raster_schema.yml)
 Exits non-zero if any file fails.
 """

@@ -148,7 +148,8 @@ apps/
 │   │   ├── land_cover/       land-cover pack: gatherer in synthesis.py
 │   │   ├── risk/             risk pack: gatherer in synthesis.py
 │   │   ├── packs_ext/        drop-in packs
-│   │   ├── graph/            geo engine (graph/geo) and the web app's LangGraph chat agent
+│   │   ├── geo/              geo engine: places, rasters, vectors, layer values
+│   │   ├── graph/            the web app's LangGraph chat agent
 │   │   ├── rag/              document libraries and search
 │   │   ├── llm/              OpenAI-compatible provider client
 │   │   └── api/routes/       REST: receipts (/api/resolve), contribute, chat, raster, tiffs, rag, health

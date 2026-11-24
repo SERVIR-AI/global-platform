@@ -37,7 +37,7 @@ from shapely.geometry import box as _bbox, mapping, shape
 from app.config import get_settings
 from app.contrib import fetch_policy, identity, prepare, staging
 from app.contrib.prepare import api_points, clip, from_folder
-from app.graph.geo import ingest, schema, tiffs, vecio, vectors
+from app.geo import ingest, schema, tiffs, vecio, vectors
 from app.mcp import assemble, registry, store
 from app.risk import synthesis as risk
 

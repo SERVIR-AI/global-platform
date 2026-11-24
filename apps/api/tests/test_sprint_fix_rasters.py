@@ -20,7 +20,7 @@ from shapely.geometry import box, mapping
 
 from app.config import get_settings
 from app.contrib import fetch_policy, identity, rasters, staging
-from app.graph.geo import layer_values, stacks, tiffs
+from app.geo import layer_values, stacks, tiffs
 from app.mcp import assemble, packs, store
 
 from test_landcover_pack import lc_env  # noqa: F401  (fixture reuse)

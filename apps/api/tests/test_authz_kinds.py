@@ -13,7 +13,7 @@ import pytest
 
 from app.config import get_settings
 from app.contrib import staging
-from app.graph.geo import vectors
+from app.geo import vectors
 from app.mcp import feeds, fetch, registry
 from app.rag.embed import ProviderEmbedder
 from app.rag.store import Corpus

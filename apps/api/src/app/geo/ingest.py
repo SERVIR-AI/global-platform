@@ -20,7 +20,7 @@ import requests
 from rasterio.windows import from_bounds
 from shapely.geometry import LineString, Point, box, mapping, shape
 
-from ...config import get_settings
+from ..config import get_settings
 from . import drive_tifs, tiffs, vectors
 
 HEADERS = {"User-Agent": "grp-mvp/0.1 (disaster-risk research prototype)"}

@@ -322,7 +322,7 @@ def test_a_truncated_zip_is_declined_not_raised(env, host, log):
     assert out["status"] == "declined"
     assert "cannot be read (it is truncated or damaged); re-upload it" in out["problems"][0]
     assert "staged-tmp" not in out["problems"][0] and _no_strays(env)
-    from app.graph.geo import vecio
+    from app.geo import vecio
     shp = _zip({"rios.shp": b"x" * 400, "rios.dbf": b"x" * 400})
     with pytest.raises(ValueError, match="re-upload it"):
         vecio.to_geojson(shp[: len(shp) // 2], "rios.zip")
@@ -366,7 +366,7 @@ def _land_lines(layer, caller):
 def test_an_anonymous_caller_owns_nothing_and_takes_nothing_down(vec_env, monkeypatch, log):
     """An open deployment: every caller is 'anonymous', so none owns a contribution — one
     stranger cannot withdraw another's live layer, nor review it whatever GRP_REVIEWERS says."""
-    from app.graph.geo import vectors
+    from app.geo import vectors
     monkeypatch.setattr(vec_env, "grp_allow_anonymous", True)
     a = identity.resolve()
     assert a.source == "anonymous" and not a.owns("anonymous") and not a.owns(None)
@@ -388,7 +388,7 @@ def test_an_anonymous_caller_owns_nothing_and_takes_nothing_down(vec_env, monkey
 def test_the_local_operator_and_a_signed_in_contributor_still_withdraw_their_own(vec_env, log):
     """A dev box's one operator (local-dev) withdraws what it landed; under OAuth only the
     contributor may — another signed-in caller is told nothing of it."""
-    from app.graph.geo import vectors
+    from app.geo import vectors
     me = identity.resolve()
     assert me.source == "local-dev" and me.owns("local-dev")
     cid = _land_lines("dev_lines", me)
@@ -406,7 +406,7 @@ def test_the_local_operator_and_a_signed_in_contributor_still_withdraw_their_own
 def test_a_late_take_down_never_removes_the_layer_that_replaced_it(vec_env, log):
     """Two take-downs of one approved contribution race a resubmission of the freed name:
     the late one finds the NEW contributor's row, says so and removes nothing."""
-    from app.graph.geo import vectors
+    from app.geo import vectors
     from app.mcp import store
     alice = identity.Caller("user_alice", "alice@hub.test", False, "token")
     bob = identity.Caller("user_bob", "bob@hub.test", False, "token")
@@ -426,7 +426,7 @@ def test_feed_and_raster_take_downs_check_the_row_is_still_theirs(env, host, mon
     another contribution leaves them. A table row from before rows carried the id is
     matched on the sha its landing recorded."""
     import yaml
-    from app.graph.geo import tiffs
+    from app.geo import tiffs
     s = get_settings()
     monkeypatch.setattr(s, "grp_auto_approve", True)
     monkeypatch.setattr(s, "feeds_conf_dir", env / "feeds")

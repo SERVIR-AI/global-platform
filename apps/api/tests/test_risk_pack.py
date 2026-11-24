@@ -109,7 +109,7 @@ def test_a_clip_straddling_the_raster_extent_is_georeferenced_correctly(tif_writ
     import json as _json
     import numpy as np
     import rasterio
-    from app.graph.geo import ingest
+    from app.geo import ingest
 
     # raster spans lon 100.0-100.1; AOI requests from 99.95 (straddles the west edge)
     data = np.arange(100, dtype="int16").reshape(10, 10) % 5 + 1
@@ -123,7 +123,7 @@ def test_a_clip_straddling_the_raster_extent_is_georeferenced_correctly(tif_writ
             [99.95, 13.08], [99.95, 13.02]]]}}]}))
     aoi = {"admin": str(admin), "name": "edge-case"}
 
-    import app.graph.geo.ingest as ing
+    import app.geo.ingest as ing
     orig = ing.source_raster
     ing.source_raster = lambda layer: src
     try:
@@ -140,7 +140,7 @@ def test_a_clip_straddling_the_raster_extent_is_georeferenced_correctly(tif_writ
 def test_fully_outside_the_raster_declines_rather_than_tracebacks(tif_writer, tmp_path, log):
     import json as _json
     import numpy as np
-    from app.graph.geo import ingest
+    from app.geo import ingest
     data = np.ones((4, 4), dtype="int16")
     src = tif_writer(data, bounds=(100.0, 13.0, 100.1, 13.1), name="src_y.tif")
     adir = tmp_path / "aoi"; adir.mkdir(exist_ok=True)
@@ -150,7 +150,7 @@ def test_fully_outside_the_raster_declines_rather_than_tracebacks(tif_writer, tm
         "geometry": {"type": "Polygon", "coordinates": [[
             [36.7, -1.4], [36.9, -1.4], [36.9, -1.2], [36.7, -1.2], [36.7, -1.4]]]}}]}))
     aoi = {"admin": str(admin), "name": "Nairobi-ish"}
-    import app.graph.geo.ingest as ing
+    import app.geo.ingest as ing
     orig = ing.source_raster
     ing.source_raster = lambda layer: src
     try:

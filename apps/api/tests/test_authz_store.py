@@ -10,7 +10,7 @@ import pytest
 from app import authz
 from app.config import get_settings
 from app.contrib import staging
-from app.graph.geo import tiffs
+from app.geo import tiffs
 from app.mcp import assemble, packs
 from test_authz import A2, REVIEWER, _as, _submit, env, fga_server, file_host  # noqa: F401 (fixtures)
 

@@ -289,7 +289,7 @@ def _has_evidence(citations: list, country: str | None = None) -> bool:
     "No evidence available" over a country-matching table. A pack source that
     declares no countries is global as far as the platform knows, and a global
     table can no more carry a brief about one country than an ocean index can."""
-    from ..graph.geo import vectors as _vectors
+    from ..geo import vectors as _vectors
     for c in citations:
         if c.get("kind") not in _CONTEXT_ONLY:
             return True

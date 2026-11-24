@@ -17,7 +17,7 @@ import numpy as np
 import rasterio
 import yaml
 
-from ...config import get_settings
+from ..config import get_settings
 from . import align as align_mod
 from . import ingest
 
@@ -91,7 +91,7 @@ def staged_weights_row(hazard):
     key = hazard[len("hazard_"):] if hazard.startswith("hazard_") else hazard
     base = _re.sub(r"_rp\d+$", "", key)
     try:
-        from ...contrib import staging
+        from ..contrib import staging
         for k in (key, base):
             row = staging.visible_staged_weights(k)
             if row and row.get("weights"):

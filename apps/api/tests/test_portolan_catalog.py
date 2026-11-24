@@ -1,6 +1,6 @@
 """The published catalog, both directions: the gate publishes an approved raster as a
 Portolan collection (contrib/portolan.py) and a server reads such a catalog as a third,
-non-shadowing source (graph/geo/stac_catalog.py), mirrors the file with its checksum
+non-shadowing source (geo/stac_catalog.py), mirrors the file with its checksum
 verified, lists the root's health and declares a gap when it cannot be read."""
 import hashlib
 import json
@@ -12,7 +12,7 @@ import yaml
 
 from app.config import get_settings
 from app.contrib import portolan
-from app.graph.geo import ingest, schema, stac_catalog, tiffs
+from app.geo import ingest, schema, stac_catalog, tiffs
 
 
 def _reset():

@@ -180,7 +180,7 @@ def _cache_read(path: Path) -> dict | None:
 def _cache_write(path: Path, data) -> None:
     """Atomic write (temp file + os.replace) so a concurrent reader or a crash can
     never observe a partial file."""
-    from ..graph.geo.ingest import write_json
+    from ..geo.ingest import write_json
     path.parent.mkdir(parents=True, exist_ok=True)
     write_json(path, {"fetched_at": time.time(), "data": data})
 

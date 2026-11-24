@@ -6,7 +6,7 @@ import pytest
 import rasterio
 from rasterio.transform import from_origin
 
-from app.graph.geo import store
+from app.geo import store
 
 
 def _write(path, arr, dtype):
@@ -32,7 +32,7 @@ def aoi(tmp_path, monkeypatch):
     json.dump({"type": "FeatureCollection",
                "features": [{"type": "Feature", "geometry": poly, "properties": {"name": "box"}}]},
               open(tmp_path / "admin.geojson", "w"))
-    from app.graph.geo import ingest
+    from app.geo import ingest
     monkeypatch.setattr(ingest, "source_raster", lambda layer: str(tmp_path / f"{layer}.tif"))
     monkeypatch.setattr(store.tiffs, "legend", lambda layer: {})
     return {"name": "box", "admin": str(tmp_path / "admin.geojson"),

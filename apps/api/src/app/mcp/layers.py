@@ -22,7 +22,7 @@ there would let a made-up figure pass.
 
 from __future__ import annotations
 
-from ..graph.geo import layer_values
+from ..geo import layer_values
 
 
 def check(layers) -> str | None:
@@ -74,7 +74,7 @@ def _caller_area(target: dict, extras: dict) -> dict | None:
         return None
     from shapely.geometry import mapping
 
-    from ..graph.geo import ingest
+    from ..geo import ingest
     try:
         geom = ingest._to_polygon(geometry)
     except Exception:

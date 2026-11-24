@@ -4,7 +4,7 @@ No network — the per-layer Overpass fetch is monkeypatched to record requests.
 """
 from app.config import get_settings
 from app.graph import graph as gm
-from app.graph.geo import ingest
+from app.geo import ingest
 
 
 def test_needed_layers_maps_op_to_single_asset():

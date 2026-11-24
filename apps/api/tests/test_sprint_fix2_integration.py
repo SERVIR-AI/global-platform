@@ -20,7 +20,7 @@ from shapely.geometry import box, mapping, shape
 from app.config import get_settings
 from app.contrib import catalog_io, fetch_policy, identity, rasters, removal, staging, tables
 from app.gate import publish, record
-from app.graph.geo import align, combine, ingest, schema, stacks, tiffs, vectors
+from app.geo import align, combine, ingest, schema, stacks, tiffs, vectors
 from app.land_cover import synthesis as lc
 from app.food_security import synthesis as fs
 from app.mcp import app_ui, assemble, feeds, packs, registry, store

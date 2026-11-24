@@ -187,14 +187,14 @@ def _family(part, dim: int):
 
 def _cut_at_edge(ctx, made, box, where):
     """With cut: true, the kept features cut at the clip box's edge: the file read by the
-    gate's own reader (graph/geo/vecio: any CRS to lon/lat, its repairs), each feature
+    gate's own reader (geo/vecio: any CRS to lon/lat, its repairs), each feature
     reaching outside the box replaced by its part inside, written as GeoJSON."""
     m = ctx.manifest
     if box is None or not m.get("cut"):
         return made
     import shapely
     from shapely.geometry import mapping, shape
-    from ...graph.geo import vecio
+    from ...geo import vecio
     from .. import remote_clip
     from . import PrepRefused, PreparedFile, size_text
     quoted = _quoted(ctx)
@@ -663,7 +663,7 @@ def _paged(ctx, svc, box, where):
 
 def _cut(error) -> bool:
     """The gate reader's own words for an export cut at its record limit."""
-    from ...graph.geo import vecio
+    from ...geo import vecio
     return vecio._TRUNCATED.split("{", 1)[0] in str(error or "")
 
 

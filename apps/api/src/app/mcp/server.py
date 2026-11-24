@@ -173,7 +173,7 @@ def _signature() -> tuple:
     """(path, mtime, size) of where contributions land: every conf file or directory the
     settings name, the vector registry and each pack's document library, and the feed rows'
     generation. A change makes the cached text stale before its TTL (which catches the rest)."""
-    from ..graph.geo import vectors
+    from ..geo import vectors
     from ..rag.store import corpus_dir
     from . import packs
     s = get_settings()
@@ -802,7 +802,7 @@ def places() -> dict:
     """Every contributed boundary name with its km² and size class — the full list that
     resolve_place_time(list='all') groups and abridges."""
     import sys
-    from ..graph.geo import ingest
+    from ..geo import ingest
     return ingest.list_boundaries(names_cap=sys.maxsize)
 
 

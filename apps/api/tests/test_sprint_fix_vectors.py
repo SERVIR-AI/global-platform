@@ -20,7 +20,7 @@ from shapely.geometry import box, mapping, shape
 
 from app.config import get_settings
 from app.contrib import fetch_policy, identity, staging
-from app.graph.geo import vecio, vectors
+from app.geo import vecio, vectors
 from app.mcp import store, vectors as vectors_step
 
 OWNER = identity.Caller("user_owner", "gis@hub.test", False, "bound")

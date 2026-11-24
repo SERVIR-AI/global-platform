@@ -21,7 +21,7 @@ from shapely.geometry import box
 
 from app.config import get_settings
 from app.contrib import fetch_policy, identity, sources, staging
-from app.graph.geo import combine, tiffs, vectors
+from app.geo import combine, tiffs, vectors
 from app.mcp import assemble, climate_indices, feeds, registry, store
 from app.rag.embed import ProviderEmbedder
 from app.rag.store import Corpus

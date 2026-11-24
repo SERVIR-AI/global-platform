@@ -39,7 +39,7 @@ def _may_view(layer: str, request: Request) -> bool:
     """A built-in layer: always. A contributed one: what the authorization store says
     for the caller the request's headers identify (everyone, when the store is off)."""
     from ...contrib import identity
-    from ...graph.geo import tiffs
+    from ...geo import tiffs
     try:
         row = tiffs._base().get(layer) or {}
     except Exception:
