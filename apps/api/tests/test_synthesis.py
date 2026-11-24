@@ -286,11 +286,11 @@ def test_a_share_of_a_cited_total_is_not_a_fabrication(brief_env):
     """The one calculation a drafter legitimately does stays allowed: a percentage
     of a total stated in the SAME citation. Blocking that would block honest work,
     and a gate that blocks honest work gets switched off."""
-    from app.food_security import synthesis as fs
+    from app.gate import grounded
     cits = [{"n": 1, "text": "2 of 27 schools in Battambang fall in the flood footprint."}]
-    assert fs._cited_share("7.4", cits)        # 2/27*100
-    assert fs._cited_share("167.13", cits) is None      # not a percentage at all
-    assert fs._cited_share("47281", cits) is None       # traces to nothing
+    assert grounded._cited_share("7.4", cits)        # 2/27*100
+    assert grounded._cited_share("167.13", cits) is None      # not a percentage at all
+    assert grounded._cited_share("47281", cits) is None       # traces to nothing
 
 
 def test_conditions_truncation_is_visible(brief_env, monkeypatch):
@@ -461,24 +461,24 @@ def test_a_rounded_or_unit_converted_pack_figure_is_not_a_fabrication():
     """MGV-478/G13: a pack figure rounded, converted between units both sides name, or as a
     magnitude of the same count traces to the pack; a sum, a difference, extra precision, an
     unnamed conversion, pixels for hectares or a figure with no origin blocks."""
-    from app.food_security import synthesis as fs
-    evid = fs._vouchers("mangrove 957.5 ha; 408.4 km² classified; 12,797,972 pixels; "
-                        "extent 557.9 km² and 430.7 km²")
-    assert fs._rounded_or_converted("957", evid)          # rounded
-    assert fs._rounded_or_converted("958", evid)          # the other rounding convention
-    assert fs._rounded_or_converted("40840", evid, units=["ha"])     # km² -> ha, exact
-    assert fs._rounded_or_converted("40840", evid) is None           # no unit named: no conversion
-    assert fs._rounded_or_converted("40840", evid, units=["t"]) is None   # km² is not tonnes
-    assert fs._rounded_or_converted("12800000", evid, tol=50000, nouns=["pixels"])
-    assert fs._rounded_or_converted("12800000", evid, tol=50000, nouns=["hectares"]) is None
-    assert fs._rounded_or_converted("957.53", evid) is None     # more precision than the pack
-    assert fs._rounded_or_converted("127.2", evid) is None      # a difference (557.9 - 430.7)
-    assert fs._rounded_or_converted("604", evid) is None        # no origin at all
-    assert fs._rounded_or_converted("150", fs._vouchers("a factor of 1.5")) is None  # base not load-bearing
+    from app.gate import grounded
+    evid = grounded._vouchers("mangrove 957.5 ha; 408.4 km² classified; 12,797,972 pixels; "
+                              "extent 557.9 km² and 430.7 km²")
+    assert grounded._rounded_or_converted("957", evid)          # rounded
+    assert grounded._rounded_or_converted("958", evid)          # the other rounding convention
+    assert grounded._rounded_or_converted("40840", evid, units=["ha"])     # km² -> ha, exact
+    assert grounded._rounded_or_converted("40840", evid) is None           # no unit named: no conversion
+    assert grounded._rounded_or_converted("40840", evid, units=["t"]) is None   # km² is not tonnes
+    assert grounded._rounded_or_converted("12800000", evid, tol=50000, nouns=["pixels"])
+    assert grounded._rounded_or_converted("12800000", evid, tol=50000, nouns=["hectares"]) is None
+    assert grounded._rounded_or_converted("957.53", evid) is None     # more precision than the pack
+    assert grounded._rounded_or_converted("127.2", evid) is None      # a difference (557.9 - 430.7)
+    assert grounded._rounded_or_converted("604", evid) is None        # no origin at all
+    assert grounded._rounded_or_converted("150", grounded._vouchers("a factor of 1.5")) is None  # base not load-bearing
 
 
 def test_check_grounded_passes_a_rounded_figure_and_records_how():
-    from app.food_security import synthesis as fs
+    from app.gate import grounded
     cits = [{"n": 1, "text": "Mangroves 2020: 957.5 ha inside the boundary."}]
     draft = ("## What the maps show\n\nAbout 957 ha of mangrove in 2020 [1].\n\n"
              "## Method, resolution and masks\n\nPixel counts [1].\n\n"
@@ -486,8 +486,8 @@ def test_check_grounded_passes_a_rounded_figure_and_records_how():
              "## Reading land-cover change\n\nOne year only [1].")
     sections = ["## What the maps show", "## Method, resolution and masks",
                 "## What's missing and how to weigh it", "## Reading land-cover change"]
-    out = fs.check_grounded(draft, cits, sections=sections)
+    out = grounded.check_grounded(draft, cits, sections=sections)
     assert out["passed"], out["failures"]
     assert "957" in out["numbers_derived"] and "957.5" in out["numbers_derived"]["957"]
-    bad = fs.check_grounded(draft.replace("957 ha", "604 ha"), cits, sections=sections)
+    bad = grounded.check_grounded(draft.replace("957 ha", "604 ha"), cits, sections=sections)
     assert not bad["passed"] and "604" in bad["numbers_unverified"]

@@ -1,7 +1,7 @@
 """The verify bone: the deterministic groundedness gate over a persisted pack.
 Draft + pack_id in; server-computed verdict + a persisted report_id out (rule 5:
 the verdict is server-bound, never a client input). The report states its
-evidence tier (rule 6). Thin over synthesis.check_grounded.
+evidence tier (rule 6). Thin over grounded.check_grounded.
 """
 
 from __future__ import annotations
@@ -10,10 +10,11 @@ import hashlib
 
 from ..food_security import synthesis
 from ..mcp import loop, packs, store
+from . import grounded
 
 
 def groundedness(draft: str, pack_id: str) -> dict:
-    """Gate `draft` against the pack (synthesis.check_grounded: what blocks, what only warns)
+    """Gate `draft` against the pack (grounded.check_grounded: what blocks, what only warns)
     and persist a report_id resolvable later (feeds record_receipt)."""
     pack = store.load_pack(pack_id)
     if pack is None:
@@ -42,9 +43,9 @@ def groundedness(draft: str, pack_id: str) -> dict:
     # The pack's declared gaps go in too: it already announces when it holds no
     # document about the country or crop asked for, and nothing used to check that
     # the draft repeated it.
-    r = synthesis.check_grounded(draft, citations, sections=sections,
-                                 extra_evidence=pack.get("stats"),
-                                 gaps=pack.get("gaps"))
+    r = grounded.check_grounded(draft, citations, sections=sections,
+                                extra_evidence=pack.get("stats"),
+                                gaps=pack.get("gaps"))
     # Store the FULL verified text + its hash: a receipt that can't show what
     # passed can't answer "is the circulating copy the one you verified?".
     digest = hashlib.sha256(draft.encode("utf-8")).hexdigest()
