@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from langchain_core.runnables import RunnableConfig
 from ..config import get_settings
 from ..geo import operations, registry
+from ..llm import token_counts
 
 def _last_user_message(messages: list) -> dict | None:
     return next((m for m in reversed(messages) if m.get("role") == "user"), None)
@@ -42,15 +43,11 @@ def _usage(resp, price_in, price_out) -> dict | None:
     it resumes a paused turn deterministically, and reporting `0 in / 0 out` there reads
     as a free model call rather than as no call at all.
     """
-    u = getattr(resp, "usage", None)
-    if not u:
+    tokens = token_counts(resp, none_if_missing=True)
+    if tokens is None:
         return None
     priced = bool(price_in or price_out)
     rate_in, rate_out = price_in / 1_000_000, price_out / 1_000_000  # price is per million tokens
-    tokens = {
-        "in": getattr(u, "prompt_tokens", 0) or 0,
-        "out": getattr(u, "completion_tokens", 0) or 0,
-    }
     tokens["total"] = tokens["in"] + tokens["out"]
     tokens["cost_in"] = tokens["in"]*rate_in if priced else None
     tokens["cost_out"] = tokens["out"]*rate_out if priced else None

@@ -27,6 +27,7 @@ from langgraph.graph import END, START, StateGraph
 
 from . import prompts, tracing
 from ..geo import byod_registry, combine, ingest, operations, resolver, tiffs
+from ..llm import token_counts
 
 
 def _add(left: list | None, right: list | None) -> list:
@@ -88,13 +89,6 @@ class State(TypedDict):  # total=True by default: keys are required unless NotRe
                                                 # appends (return [event], never [_RESET, event])
     awaiting_choice: dict | None           # set when the agent asked L1-vs-L2; resumes on the reply
     _resume: bool                          # transient: this turn applied a pending L1/L2 choice
-
-
-def _usage(resp) -> dict:
-    u = getattr(resp, "usage", None)
-    if not u:
-        return {"in": 0, "out": 0}
-    return {"in": getattr(u, "prompt_tokens", 0) or 0, "out": getattr(u, "completion_tokens", 0) or 0}
 
 
 def _last_user(messages: list[dict]) -> str:
@@ -188,7 +182,7 @@ def route(state: State, config) -> dict:
     # channel, so a prior turn's `error` would re-fire finalize (re-emitting an old refusal even
     # after we now route correctly), and a prior `result`/`aoi` would attach a stale map. Reset
     # them so this turn stands on its own. (Choice-resume returns above and is unaffected.)
-    out = {"usage": [_usage(resp)], "trace": [f'question: "{_last_user(state["messages"])}"'],
+    out = {"usage": [token_counts(resp)], "trace": [f'question: "{_last_user(state["messages"])}"'],
            "error": None, "result": None, "aoi": None, "operation": None, "tiffs": [],
            "op_args": {}, "place": None, "tool_call_id": None}
     if not msg.tool_calls:                       # model declined -> plain-text reply
@@ -464,7 +458,7 @@ def finalize(state: State, config) -> dict:
     trace_event = tracing.make_trace_event_finalize(
         start_time=t_start, end_time=t_end, started_at=started_at, ended_at=ended_at,
         messages=messages, state=state, config=config, answer=answer, resp=resp, error=None)
-    return {"messages": [{"role": "assistant", "content": answer}], "usage": [_usage(resp)],
+    return {"messages": [{"role": "assistant", "content": answer}], "usage": [token_counts(resp)],
             "events": [trace_event]}
 
 

@@ -53,3 +53,12 @@ def build_client(provider: Provider) -> OpenAI:
             f"No API key configured for provider {provider!r} — set {row.key_env}"
         )
     return OpenAI(base_url=row.base_url, api_key=row.api_key)
+
+
+def token_counts(resp, *, none_if_missing: bool = False) -> dict | None:
+    """The prompt and completion tokens of one chat completion, as {"in", "out"}. A response with no
+    usage gives zeros, or None when none_if_missing is set."""
+    u = getattr(resp, "usage", None)
+    if not u:
+        return None if none_if_missing else {"in": 0, "out": 0}
+    return {"in": getattr(u, "prompt_tokens", 0) or 0, "out": getattr(u, "completion_tokens", 0) or 0}

@@ -1184,7 +1184,7 @@ def synthesize(question: str, provider: str | None = None,
     from ...config import get_settings
     from ..food_security import synthesis as fs
     from ...gate import grounded
-    from ...llm import build_client, default_model
+    from ...llm import build_client, default_model, token_counts
     from ...mcp import packs as mcp_packs
 
     settings = get_settings()
@@ -1199,7 +1199,7 @@ def synthesize(question: str, provider: str | None = None,
         model=model, max_tokens=300, tools=_PARSE_TOOLS,
         messages=[{"role": "system", "content": _PARSE_SYSTEM},
                   {"role": "user", "content": question}])
-    usage.append(fs._usage(resp))
+    usage.append(token_counts(resp))
     msg = resp.choices[0].message
     if not msg.tool_calls:
         trace.append("parse -> out of scope (no tool call)")
@@ -1245,7 +1245,7 @@ def synthesize(question: str, provider: str | None = None,
     for attempt in (1, 2):
         resp = client.chat.completions.create(model=model, max_tokens=3000,
                                               messages=messages)
-        usage.append(fs._usage(resp))
+        usage.append(token_counts(resp))
         draft = (resp.choices[0].message.content or "").strip()
         if getattr(resp.choices[0], "finish_reason", None) == "length":
             trace.append(f"synthesis attempt {attempt} -> TRUNCATED at max_tokens; "
