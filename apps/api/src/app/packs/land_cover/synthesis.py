@@ -1182,8 +1182,8 @@ def _scope_miss(spec, countries, boundary):
     """None when a table or feed may be read for this area, else (where it is scoped,
     why this area is not in it). One that declares countries or a bbox [w, s, e, n]
     is read only for an area in one of those countries and inside that box; one that
-    declares neither is global. The rule is every pack's (mcp.feeds.scope_miss)."""
-    from ...mcp import feeds
+    declares neither is global. The rule is every pack's (feeds.feeds.scope_miss)."""
+    from ...feeds import feeds
     return feeds.scope_miss(spec, countries, boundary.bounds if boundary is not None else None)
 
 
@@ -1202,7 +1202,8 @@ def _bound_tables(countries, boundary, gaps, trace):
     Ecuador and Brazil. A factor table scoped elsewhere is still read, so the caller
     can say so where its classes are this legend's."""
     from ...contrib import staging
-    from ...mcp import feeds, registry
+    from ...feeds import feeds
+    from ...mcp import registry
     rows = {k: v for k, v in registry.visible_feeds().items()
             if v.get("pack") == PACK_ID and v.get("status") == "available"}
     try:

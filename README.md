@@ -143,6 +143,7 @@ apps/
 │   │   ├── mcp/              MCP server and tools; assemble; budgets; SQLite store
 │   │   ├── gate/             the answer gate every pack goes through: the check (grounded.py), verify,
 │   │   │                     publish, record
+│   │   ├── feeds/            live feeds: the entry point and adapters, climate indices, the ENSO forecast
 │   │   ├── contrib/          contribution gate: kinds, fetch policy, preparation ops, methods, jobs
 │   │   ├── packs/            the domain packs
 │   │   │   ├── food_security/  food-security pack: gatherer, crop calendar, Crop Monitor, REST routes

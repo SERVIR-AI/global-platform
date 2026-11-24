@@ -11,8 +11,9 @@ the part that actually decides whether it gets read.
 
 import pytest
 
+from app.feeds import feeds
 from app.gate import publish, record, verify
-from app.mcp import assemble, feeds, loop, store
+from app.mcp import assemble, loop, store
 
 
 @pytest.fixture(scope="module")

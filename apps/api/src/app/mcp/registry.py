@@ -108,7 +108,7 @@ FEEDS = {
         "cadence": "monthly (follows ONI)",
     },
     # WAS available and working until 2026-08-17, when IRI retired its JSON API.
-    # The adapter and parser are kept intact (mcp/enso_forecast.py) because nothing
+    # The adapter and parser are kept intact (feeds/enso_forecast.py) because nothing
     # is wrong with them: flip `status` back to "available" the day a data endpoint
     # returns. Reproduce the break in three commands, see the reason below.
     "enso_plume": {
@@ -641,7 +641,7 @@ def _feed_brief(row: dict) -> dict:
     if isinstance(out.get("source"), str) and len(out["source"]) > 140:
         out["source"] = out["source"][:140] + "…"
     try:
-        from . import feeds as _feeds
+        from ..feeds import feeds as _feeds
         params = _feeds.params_doc(row)
     except Exception:
         params = row.get("params") if isinstance(row.get("params"), dict) else {}

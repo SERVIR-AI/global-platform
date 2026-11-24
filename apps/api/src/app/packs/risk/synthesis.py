@@ -263,7 +263,8 @@ def _pack_feeds(place, trace, gaps, hazard=None, country=None, bounds=None):
     says which pack may cite it; this reads the ones that say risk.
     """
     from ...contrib import staging
-    from ...mcp import feeds, registry
+    from ...feeds import feeds
+    from ...mcp import registry
     rows = {k: v for k, v in registry.visible_feeds().items()
             if v.get("pack") == "risk" and v.get("status") == "available"}
     try:                      # a contributor's own staged feed previews here too
@@ -277,7 +278,7 @@ def _pack_feeds(place, trace, gaps, hazard=None, country=None, bounds=None):
             off_topic.append(ds)
             continue
         # A source that declares its countries or its box is cited only where it
-        # speaks (mcp.feeds.scope_miss, every pack's rule). A Thai gauge was cited into
+        # speaks (feeds.feeds.scope_miss, every pack's rule). A Thai gauge was cited into
         # every Cambodian flood brief, and a Gulf of Nicoya box into all of Costa Rica.
         miss = feeds.scope_miss(rows[ds], [country] if country else [], bounds)
         if miss:

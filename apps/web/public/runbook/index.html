@@ -948,7 +948,7 @@ uv run --project apps/api python -m app.contrib.cli add-raster manifest.yml</cod
   <code>gather(target, focus, trace, extras) -&gt; (citations, gaps, stats)</code>. This is
   the only real work. A worked example that reads one platform feed and computes one number:</p>
 <pre><code>def gather(target, focus, trace, extras):
-    from app.mcp import feeds
+    from app.feeds import feeds
 
     place = target["place"]
     trace.append(f"coastal-tides[{place}]")          # the assembly trace users see

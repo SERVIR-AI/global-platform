@@ -18,9 +18,10 @@ from shapely.geometry import box, mapping
 
 from app.config import get_settings
 from app.contrib import fetch_policy, identity, staging
+from app.feeds import feeds
 from app.geo import ingest
 from app.packs.land_cover import synthesis as lc
-from app.mcp import assemble, feeds, packs, registry, store, vectors as vectors_step
+from app.mcp import assemble, packs, registry, store, vectors as vectors_step
 from app.packs.risk import synthesis as risk
 
 W = H = 10

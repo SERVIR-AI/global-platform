@@ -11,8 +11,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import get_settings
+from app.feeds import feeds
 from app.packs.food_security import cropmonitor, synthesis
-from app.mcp import feeds, registry
+from app.mcp import registry
 from app.main import app
 from app.rag.embed import ProviderEmbedder
 from app.rag.store import Corpus

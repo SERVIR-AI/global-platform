@@ -87,7 +87,8 @@ def test_doctor_flags_overlong_pack_guidance(monkeypatch, log):
 def test_feed_guidance_reaches_the_query_response(monkeypatch, log):
     """The adapter note (usage_notes rides it) must surface on the OK path —
     guidance that only appears on failure paths guides nothing."""
-    from app.mcp import feeds, registry
+    from app.feeds import feeds
+    from app.mcp import registry
     spec = {"status": "available", "adapter": "generic_csv", "source": "s",
             "validation": "unvalidated", "cadence": "monthly",
             "usage_notes": NOTE, "title": "t",

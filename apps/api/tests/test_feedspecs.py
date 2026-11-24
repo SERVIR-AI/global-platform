@@ -3,7 +3,8 @@
 import pytest
 
 from app.contrib import feedspecs
-from app.mcp import feeds, registry
+from app.feeds import feeds
+from app.mcp import registry
 
 
 def _spec(**over):
@@ -60,7 +61,7 @@ def test_generic_table_parses_the_noaa_family(monkeypatch, log):
         def raise_for_status(self): pass
     import requests
     monkeypatch.setattr(requests, "get", lambda *a, **k: R())
-    from app.mcp import climate_indices
+    from app.feeds import climate_indices
     monkeypatch.setattr(climate_indices, "cached", lambda key, builder, ttl=0: builder())
     spec = _spec(declarative="toy.yml")
     spec["fetch"]["missing_below"] = -90
@@ -81,7 +82,7 @@ def test_generic_json_maps_dot_paths(monkeypatch, log):
                                       {"d": "2026-08", "obs": {"v": 5}}]}}
     import requests
     monkeypatch.setattr(requests, "get", lambda *a, **k: R())
-    from app.mcp import climate_indices
+    from app.feeds import climate_indices
     monkeypatch.setattr(climate_indices, "cached", lambda key, builder, ttl=0: builder())
     spec = _spec(adapter="generic_json", declarative="j.yml")
     spec["fetch"] = {"url": "https://x/api", "records_path": "data.rows",

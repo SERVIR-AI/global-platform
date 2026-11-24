@@ -804,7 +804,8 @@ def input_spec(ds: str) -> dict | None:
 def prepare(m: dict) -> dict:
     """The live check: every input is a feed or table the platform serves, every field a
     step reads is in its rows, and the method runs on them. Stores nothing."""
-    from ..mcp import feeds, registry
+    from ..feeds import feeds
+    from ..mcp import registry
     inputs, rows = {}, {}
     for alias, ref in (m.get("inputs") or {}).items():
         kind, ds = next(iter(ref.items()))

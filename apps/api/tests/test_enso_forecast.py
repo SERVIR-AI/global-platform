@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from app.mcp import climate_indices, enso_forecast, feeds
+from app.feeds import climate_indices, enso_forecast, feeds
 
 
 class _Resp:

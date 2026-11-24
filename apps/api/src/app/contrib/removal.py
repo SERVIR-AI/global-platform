@@ -58,7 +58,7 @@ def remove_feed(dataset: str, force: bool = False) -> dict:
     removed = {"feed_row": str(yml)}
     # Resolved the same way the feed reader resolves it: the spec records a path
     # relative to the cache dir, and older specs hold an absolute one.
-    from ..mcp.feeds import _landed_table
+    from ..feeds.feeds import _landed_table
     recorded = (spec.get("fetch") or {}).get("path")
     landed = _landed_table(recorded) if recorded else None
     if landed and landed.is_file():                    # a landed table's copy

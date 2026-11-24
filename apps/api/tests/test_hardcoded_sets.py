@@ -191,7 +191,8 @@ def test_a_feed_or_table_bound_to_a_pack_that_cites_nothing_is_declined(monkeypa
 
 
 def test_risk_feeds_are_cited_only_where_they_speak(monkeypatch, log):
-    from app.mcp import feeds, registry
+    from app.feeds import feeds
+    from app.mcp import registry
     monkeypatch.setattr(registry, "FEEDS", {
         "thai_gauge": {"pack": "risk", "status": "available", "countries": ["Thailand"], "title": "Thai gauge"},
         "global_quakes": {"pack": "risk", "status": "available", "title": "USGS"}})
@@ -228,8 +229,9 @@ def test_every_kind_carries_the_auto_approve_note_into_its_citation(monkeypatch,
     log("OUTPUT", prov[:120])
     assert prov.startswith("Review: auto-approved")
     # a staged driver feed previews AS a driver, carrying who staged it
+    from app.feeds import feeds
     from app.packs.food_security import synthesis as fs
-    from app.mcp import feeds, registry
+    from app.mcp import registry
     monkeypatch.setattr(registry, "FEEDS", {})
     monkeypatch.setattr(staging, "visible_staged_feeds_for_pack", lambda pack: {
         "oni_hub": {"brief_role": "driver", "status": "available", "staged_by": "user_1",

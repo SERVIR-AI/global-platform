@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from ..mcp import feeds, loop, store, ui
+from ..feeds import feeds
+from ..mcp import loop, store, ui
 
 
 def _abs(path: str) -> str:

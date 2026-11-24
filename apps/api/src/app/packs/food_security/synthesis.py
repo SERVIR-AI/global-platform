@@ -162,7 +162,9 @@ def _driver_citations(trace):
     on the evidence itself (not only in the system prompt) means it survives into
     the pack and the receipt, where a reader can check it.
     """
-    from ...mcp import feeds, registry     # local: mirrors registry's own cycle guard
+    # local: mirrors registry's own cycle guard
+    from ...feeds import feeds
+    from ...mcp import registry
 
     def render(records, budget=1800):
         """Feed rows -> evidence prose, shape-driven rather than feed-name-driven.
@@ -309,7 +311,8 @@ def _pack_bound_sources(trace, gaps, country=None):
     simply never had.
     """
     from ...contrib import staging
-    from ...mcp import feeds, registry
+    from ...feeds import feeds
+    from ...mcp import registry
     rows = {n: sp for n, sp in registry.visible_feeds().items()
             if sp.get("status") == "available"
             and sp.get("pack", "food-security") == "food-security"
@@ -324,7 +327,7 @@ def _pack_bound_sources(trace, gaps, country=None):
     for ds in sorted(rows):
         # Is this source about the country asked about? A Battambang rainfall table was
         # cited into a KENYA maize brief. Countries and a box, the rule every pack
-        # applies (mcp.feeds.scope_miss); this pack answers for a whole country, so a
+        # applies (feeds.feeds.scope_miss); this pack answers for a whole country, so a
         # box is placed through the countries the source also declares, never guessed.
         miss = feeds.scope_miss(rows[ds], [country] if country else [], None)
         if miss:

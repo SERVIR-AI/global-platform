@@ -24,7 +24,8 @@ from requests.structures import CaseInsensitiveDict
 
 from app.config import get_settings
 from app.contrib import fetch_policy, identity, staging, tables
-from app.mcp import feeds, registry, store
+from app.feeds import feeds
+from app.mcp import registry, store
 from app.rag import docloader
 from app.rag.embed import ProviderEmbedder
 
@@ -425,7 +426,7 @@ def test_a_table_without_coordinates_declines_a_bbox(gate, auto):
 
 def test_a_paged_api_says_first_n_of_m(monkeypatch):
     import requests
-    from app.mcp import climate_indices
+    from app.feeds import climate_indices
     monkeypatch.setattr(climate_indices, "_CACHE", {})
 
     class R:
