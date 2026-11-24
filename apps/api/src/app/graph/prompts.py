@@ -7,7 +7,7 @@ in one place (the registry). The route and finalize nodes share this prompt.
 import yaml
 
 from ..config import get_settings
-from .geo import registry
+from ..geo import registry
 
 
 def system_prompt():

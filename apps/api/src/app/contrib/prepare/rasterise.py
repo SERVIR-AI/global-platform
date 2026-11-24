@@ -282,7 +282,7 @@ def run(ctx):
     import shapely
     from shapely.geometry import box as shapely_box
     from .. import rasters, remote_clip
-    from ...graph.geo import vectors
+    from ...geo import vectors
     from . import PrepRefused, PreparedFile
     from ._layer_reader import Reader
     m = ctx.manifest
@@ -461,7 +461,7 @@ def _burn(ctx, spool, offsets, lengths, codes, bounds, dest, x0, y0, deg, width,
     from rasterio.transform import Affine
     from rasterio.windows import Window
     from .. import rasters
-    from ...graph.geo import stacks
+    from ...geo import stacks
     burn_dtype = dtype if dtype in ("uint8", "uint16", "int16", "uint32", "int32", "float32",
                                     "float64") else ("float64" if np.dtype(dtype).kind == "f"
                                                      else "int32")

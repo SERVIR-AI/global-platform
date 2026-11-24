@@ -11,7 +11,7 @@ from rasterio.transform import from_origin
 from shapely.geometry import box
 
 from app.config import get_settings
-from app.graph.geo import ingest, stacks
+from app.geo import ingest, stacks
 from app.land_cover import fire
 from app.mcp import assemble
 

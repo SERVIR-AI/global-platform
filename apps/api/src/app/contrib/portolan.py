@@ -8,7 +8,7 @@ collection carries its data as a collection-level asset (Portolan's rule; scenes
 stack become items, which this publisher does not do yet). Every governance field the
 platform reads back (role, countries, contract, review, outside values) travels as a
 `servir:` field on the collection, so a server pointed at the published catalog
-(graph/geo/stac_catalog.py) rebuilds the same row with nothing lost.
+(geo/stac_catalog.py) rebuilds the same row with nothing lost.
 
 Versions are immutable: the version id carries the file's sha256, a re-publish of
 changed bytes adds a new folder and demotes the previous data asset to an `archive`
@@ -114,7 +114,7 @@ def write_cog(src, dst, role=None) -> dict:
     one tile, statistics embedded. Classes are resampled nearest, measures averaged."""
     import rasterio
     from rasterio.shutil import copy as rcopy
-    from ..graph.geo import schema
+    from ..geo import schema
     with rasterio.open(src) as s:
         dtype = s.dtypes[0]
     is_float = str(dtype).startswith("float")
@@ -516,7 +516,7 @@ def annotate(kind: str, landing: dict) -> dict:
 def publish_approved(layers=None, root=None) -> list[dict]:
     """Publish every approved contributed raster row (or the named ones) that has its
     file on this server. Rows already published with the same bytes report unchanged."""
-    from ..graph.geo import schema, tiffs
+    from ..geo import schema, tiffs
     settings = get_settings()
     cat = tiffs.catalog(include_staged=False)
     wanted = set(layers or [])

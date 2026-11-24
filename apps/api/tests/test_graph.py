@@ -4,7 +4,7 @@ and the checkpointer keeps multi-turn memory.
 """
 
 from app.graph import graph as gm
-from app.graph.geo import store
+from app.geo import store
 
 
 def _cfg(client, thread):

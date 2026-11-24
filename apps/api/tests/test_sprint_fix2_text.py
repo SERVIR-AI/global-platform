@@ -24,7 +24,7 @@ from shapely.geometry import box, mapping, shape
 from app.config import get_settings
 from app.contrib import fetch_policy, identity, rasters, staging
 from app.gate import publish
-from app.graph.geo import stacks
+from app.geo import stacks
 from app.land_cover import synthesis as lc
 from app.mcp import app_ui, assemble, fetch, packs, registry, store
 from app.rag import filters as rag_filters
@@ -303,7 +303,7 @@ def test_the_view_renders_the_measure_fields_and_its_script_parses(tmp_path):
 
 # ------------------------------------------------------------ 4. the tool texts
 def test_assemble_pack_says_what_a_measure_returns_from_the_schema(monkeypatch, log):
-    from app.graph.geo import schema
+    from app.geo import schema
     d = registry.assemble_params()["layers"]
     line = d[d.index("What a layer's values state"):]
     log("OUTPUT", line[:400])
@@ -323,7 +323,7 @@ def test_assemble_pack_says_what_a_measure_returns_from_the_schema(monkeypatch, 
 
 
 def test_the_risk_region_is_read_from_its_maps(monkeypatch, log):
-    from app.graph.geo import tiffs
+    from app.geo import tiffs
     cov = {"hazard_flood": {"title": "100-year flood hazard (Southeast Asia)", "bounds": [92.0, -11.1, 141.2, 28.7],
                             "countries": []},
            "hazard_flood_rp10": {"title": "10-year flood hazard (Southeast Asia, JRC)", "bounds": None,

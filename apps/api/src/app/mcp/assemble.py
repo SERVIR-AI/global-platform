@@ -26,7 +26,7 @@ def shared_gaps(gaps: list) -> list:
     The readers below the pack fail closed by hiding every contributed layer, so without
     this line the pack would look complete, minus evidence nobody was told about."""
     try:
-        from ..graph.geo import stac_catalog
+        from ..geo import stac_catalog
         gaps.extend(line for line in stac_catalog.gap_lines() if line not in gaps)
     except Exception as exc:                 # the gap line itself never breaks a pack
         gaps.append(f"published catalog status unknown ({type(exc).__name__}: {exc})")
@@ -103,7 +103,7 @@ def assemble(country: str | None = None, crop: str | None = None,
         if not any(k in spec["target_keys"] for k in ("place",)):
             return declined(f"within needs a pack that analyses an area; {pack_id_name} has none",
                             coverage=False)
-        from ..graph.geo import ingest as _ingest
+        from ..geo import ingest as _ingest
         from shapely.geometry import mapping as _mapping
         try:
             if geometry is not None:

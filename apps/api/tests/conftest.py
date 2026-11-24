@@ -64,7 +64,7 @@ def offline_source_rasters(monkeypatch, aoi, tmp_path):
     """For a test that points the risk gatherer at Testville: a source raster a download
     would have fetched is the area's flood grid instead, stored in the dtype the layer
     declares, in a raster cache of the test's own."""
-    from app.graph.geo import schema
+    from app.geo import schema
 
     def download(id, output, quiet=True):
         layer = os.path.splitext(os.path.basename(output))[0]
@@ -113,7 +113,7 @@ def make_client():
 @pytest.fixture(autouse=True)
 def _no_reverse_geocode(monkeypatch):
     """ensure_aoi asks Nominatim for an area's country once; the suite never does."""
-    from app.graph.geo import ingest
+    from app.geo import ingest
     monkeypatch.setattr(ingest, "_reverse_country", lambda lon, lat: None)
 
 
@@ -165,7 +165,7 @@ def tif_writer(tmp_path):
 @pytest.fixture
 def byod_env(tmp_path, monkeypatch):
     """Isolate BYOD state for a test: a tmp tiff cache + a cleared per-thread registry."""
-    from app.graph.geo import byod_registry
+    from app.geo import byod_registry
     monkeypatch.setattr(get_settings(), "tiffs_dir", tmp_path / "tiffs")
     byod_registry.clear()
     yield tmp_path / "tiffs"

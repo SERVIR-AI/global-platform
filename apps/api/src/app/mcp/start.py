@@ -35,7 +35,7 @@ _QUOTED = 2000                          # chars of the question the reply quotes
 
 # --------------------------------------------------------------------------- words
 def _key(text) -> str:
-    from ..graph.geo import ingest
+    from ..geo import ingest
     return ingest._key(text)
 
 
@@ -165,7 +165,7 @@ def _choices(sp: dict) -> dict:
 def _countries(choices_by_pack: dict) -> dict:
     """{country key: name} for every country the platform holds data for (registry.countries)
     and every pack's choices declare; Viet Nam / Vietnam are one key."""
-    from ..graph.geo import vectors
+    from ..geo import vectors
     from . import registry
     names = list(registry.countries())
     for choices in choices_by_pack.values():
@@ -179,7 +179,7 @@ def _countries(choices_by_pack: dict) -> dict:
 
 def _countries_in(words: list[str], known: dict) -> list[str]:
     """The countries `words` name (up to four words each, aliases folded), in the order said."""
-    from ..graph.geo import vectors
+    from ..geo import vectors
     found, i = [], 0
     while i < len(words):
         for n in (4, 3, 2, 1):
@@ -200,7 +200,7 @@ def _tz_tables() -> tuple[dict, dict]:
     (a country is then known from the registries only, its coverage not known, never assumed)."""
     import zoneinfo
     from pathlib import Path
-    from ..graph.geo import vectors
+    from ..geo import vectors
     for root in zoneinfo.TZPATH:
         zt, iso = Path(root) / "zone.tab", Path(root) / "iso3166.tab"
         if zt.is_file() and iso.is_file():
@@ -291,7 +291,7 @@ def _overlaps(a, b) -> bool:
 def _place_ctx(countries: list, box=None) -> dict:
     """What a choice's reach is judged against: the countries named (keys), the place's own box
     (a contributed boundary) and, for choices that declare no country, where those countries lie."""
-    from ..graph.geo import vectors
+    from ..geo import vectors
     ckeys = {vectors.country_key(_key(c)) for c in countries}
     pts = _tz_points()
     return {"ckeys": ckeys, "box": list(box) if box else None,
@@ -302,7 +302,7 @@ def _reach(choice: dict, pc: dict) -> bool | None:
     """Does the choice reach the place: a declared country decides (then the place's own box
     against its extent), else its extent against the place's box or its countries' places;
     None when neither side says."""
-    from ..graph.geo import vectors
+    from ..geo import vectors
     cs = {vectors.country_key(_key(c)) for c in choice.get("countries") or []}
     box = choice.get("bbox")
     box = list(box) if isinstance(box, (list, tuple)) and len(box) == 4 else None
@@ -346,7 +346,7 @@ def _boundary(q: dict, ckeys: set, skip: set) -> dict | None:
     """{name, areas, layers, also}: the contributed boundary the question names, longest first (a
     one-word or all-subject-word name only capitalised; none outside a country it names), and in
     `also` the other boundaries it names."""
-    from ..graph.geo import ingest, vectors
+    from ..geo import ingest, vectors
     try:
         layers = ingest._gazetteer_layers()
     except Exception:
@@ -396,7 +396,7 @@ def _place_run(question: str, known: dict, skip: set) -> str:
     """A place the question names in its own words (a capitalised run after 'in', 'inside', ...;
     never a class or subject word), with the country it names after a comma or before an
     apostrophe; a run followed by a comma and a country first; '' when none."""
-    from ..graph.geo import vectors
+    from ..geo import vectors
     first = ""
     for m in _RUN.finditer(question):
         run = m.group(1).strip(" .'’")
@@ -426,7 +426,7 @@ def _area_of(q: dict, place, known: dict, skip: set) -> dict:
     """{place, place_how, box, countries, notes}: a passed place (its boundary's box when
     contributed), else the contributed boundary the question names, else a place it names in its
     own words, else the one country it names."""
-    from ..graph.geo import ingest, vectors
+    from ..geo import ingest, vectors
     named = _named_countries(q, known)
     out = {"countries": list(named), "box": None, "notes": []}
     if place:
@@ -593,7 +593,7 @@ def _pick(rows: list, q: dict, pc: dict, want: list) -> tuple[list, list]:
     """(named choices that may reach the place, best first; named ones that do not): ranked by
     how strongly named, a country named in both, the asked years held, the question's classes in
     its legend, the most classes, the most years, registration order."""
-    from ..graph.geo import vectors
+    from ..geo import vectors
     shared = Counter(r for c in rows for r in {r for n in c.get("names") or [] if _form(n) == "proper"
                                                for r in _runs(_stems(n))})
     fams = _families(rows)
@@ -874,7 +874,7 @@ def _related(q: dict, ctx: dict, pid: str, said: list[str], feeds: dict) -> list
     """Approved methods computing from a related feed first, then the feeds the question's coined
     words, products, subjects or countries meet (none of another country), each with what its rows
     are; the pack's document library when it holds any."""
-    from ..graph.geo import vectors
+    from ..geo import vectors
     from . import loop
     coined = list(dict.fromkeys([w for w in q["raw"] if _coined(w)][:20]
                                 + [s for s in said if _form(s) == "proper" or len(_stems(s)) >= 2]))
@@ -968,7 +968,7 @@ def _not_covered(question: str, note: str, gaps: list, extra: dict) -> dict:
 
 
 def _route(question: str, place, year, year_to, pack) -> dict:
-    from ..graph.geo import vectors
+    from ..geo import vectors
     from . import loop
     if not question:
         return {"status": "declined", "note": "start_here needs the question, in the person's words"}

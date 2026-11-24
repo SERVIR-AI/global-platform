@@ -16,7 +16,7 @@ from shapely.geometry import box, mapping
 
 from app.config import get_settings
 from app.contrib import fetch_policy, identity, rasters, staging
-from app.graph.geo import ingest, stacks, vectors
+from app.geo import ingest, stacks, vectors
 from app.mcp import assemble, store, vectors as vectors_step
 
 OWNER = identity.Caller("user_owner", "gis@hub.test", False, "bound")
@@ -552,7 +552,7 @@ def test_vector_measures_reach_the_evidence_view_and_replay_verifies_them(binary
     view = record.replay_view({"receipt_id": "r1", "pack_id": p["pack_id"]})
     assert view["vectors_verified"] == {"test_lines": True}
     # the layer gone: the replay says so instead of claiming verification
-    from app.graph.geo import vectors as _v
+    from app.geo import vectors as _v
     _v.unregister("test_lines")
     view = record.replay_view({"receipt_id": "r1", "pack_id": p["pack_id"]})
     assert "no longer registered" in view["vectors_verified"]["test_lines"]
@@ -649,7 +649,7 @@ UTM16N_ESRI_WKT = ('PROJCS["WGS_1984_UTM_Zone_16N",GEOGCS["GCS_WGS_1984",DATUM["
 
 
 def test_a_zipped_shapefile_in_utm_reads_as_geojson_on_wgs84():
-    from app.graph.geo import vecio
+    from app.geo import vecio
     raw = _mini_shapefile_zip(crs_wkt=UTM16N_ESRI_WKT)
     assert vecio.kind_of(raw, "rios.zip") == "shapefile-zip"
     out, notes = vecio.to_geojson(raw, "rios.zip")
@@ -666,7 +666,7 @@ def test_a_zipped_shapefile_in_utm_reads_as_geojson_on_wgs84():
 def test_a_geopackage_layer_reads_as_geojson_and_several_layers_need_a_name(tmp_path):
     import sqlite3, struct
     from shapely.geometry import Polygon
-    from app.graph.geo import vecio
+    from app.geo import vecio
     p = tmp_path / "t.gpkg"
     con = sqlite3.connect(p)
     con.executescript("""

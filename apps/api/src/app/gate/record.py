@@ -125,7 +125,7 @@ def replay_view(receipt: dict) -> dict:
     if pack.get("layers"):
         # Recompute each layer's fingerprint from the stored pack alone: the values a
         # receipt names are checkable, not only recorded.
-        from ..graph.geo import layer_values
+        from ..geo import layer_values
         view["layers_verified"] = {
             name: (rec.get("values_sha256") == layer_values.values_sha256(
                 name, rec, rec.get("area_sha256")))
@@ -332,7 +332,7 @@ def _access_decisions(pack: dict) -> dict:
     ids = [c.get("contribution_id") for c in pack.get("citations", []) if c.get("contribution_id")]
     # a citation names its layer; the layer's row names its contribution
     try:
-        from ..graph.geo import tiffs
+        from ..geo import tiffs
         rows = tiffs._base()
         for c in pack.get("citations", []):
             name = c.get("layer") if isinstance(c, dict) else None

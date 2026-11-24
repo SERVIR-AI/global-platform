@@ -80,7 +80,7 @@ def remove_raster(layer: str) -> dict:
     cat_path = Path(settings.tiffs_contrib_path)
     cat = (yaml.safe_load(cat_path.read_text()) or {}) if cat_path.exists() else {}
     if layer not in cat:
-        from ..graph.geo import tiffs
+        from ..geo import tiffs
         if layer in tiffs.catalog():
             return {"status": "declined",
                     "failures": [f"{layer!r} is a built-in layer, not a contribution "
@@ -123,7 +123,7 @@ def remove_raster(layer: str) -> dict:
     out = {"catalog_row": "removed", "declared_contract": "removed"}
     from .staging import _purge_clips
     out["clips_purged"] = _purge_clips(layer)   # never serve an old clip under a reused name
-    from ..graph.geo import tiffs
+    from ..geo import tiffs
     tif = Path(settings.tiffs_dir) / tiffs.file_name(layer)
     if tif.is_file():
         retired = tif.with_suffix(".tif.retired")

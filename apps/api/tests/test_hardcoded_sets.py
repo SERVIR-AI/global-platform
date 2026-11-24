@@ -9,7 +9,7 @@ from rasterio.transform import from_bounds
 
 from app.config import get_settings
 from app.contrib import rasters, staging
-from app.graph.geo import combine, ingest, store, vectors
+from app.geo import combine, ingest, store, vectors
 from app.mcp import assemble, packs
 from app.risk import synthesis as risk
 
@@ -149,7 +149,7 @@ def test_a_landed_hazard_with_a_value_past_the_contract_declines_in_words(aoi, t
 
 # ----------------------------------------------------------------- H4: weights reach contributed layers
 def test_a_contributed_vulnerability_layer_is_weightable(monkeypatch):
-    from app.graph.geo import schema
+    from app.geo import schema
     monkeypatch.setattr(schema, "_doc", lambda: {"layers": {
         "vulnerability_reclass_road": {"role": "vulnerability_reclass"},
         "vulnerability_shelter_dist": {"role": "vulnerability"},        # the gate's role
@@ -158,7 +158,7 @@ def test_a_contributed_vulnerability_layer_is_weightable(monkeypatch):
 
 
 def test_a_contributed_hazard_can_get_a_recipe(monkeypatch, log):
-    from app.graph.geo import tiffs
+    from app.geo import tiffs
     monkeypatch.setattr(tiffs, "resolve", lambda k: "hazard_heatdays" if k == "heatdays" else None)
     monkeypatch.setattr(tiffs, "catalog", lambda include_staged=True: {"hazard_heatdays": {}, "hazard_flood": {}})
     monkeypatch.setattr(staging, "available_vulnerability_layers", lambda: ["vulnerability_pop_all_total"])
@@ -246,7 +246,7 @@ def test_every_kind_carries_the_auto_approve_note_into_its_citation(monkeypatch,
 
 # ----------------------------------------------------------------- H6: text derived from the catalog
 def test_pack_summaries_name_what_the_catalog_holds_today(monkeypatch, log):
-    from app.graph.geo import tiffs
+    from app.geo import tiffs
     monkeypatch.setattr(tiffs, "catalog", lambda include_staged=True: {
         "hazard_flood": {}, "hazard_heatdays": {"title": "heat days"}, "hazard_flood_rp10": {},
         "hazard_flood_rp500": {}, "population_worldpop": {}, "hazard_demo": {"description": "SYNTHETIC DEMONSTRATION LAYER"}})

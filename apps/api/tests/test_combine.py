@@ -11,7 +11,7 @@ import pytest
 import rasterio
 from shapely.geometry import box, mapping
 
-from app.graph.geo import combine
+from app.geo import combine
 
 slow = pytest.mark.skipif(
     os.getenv("GRP_RUN_SLOW") != "1", reason="slow: live Drive download (set GRP_RUN_SLOW=1)")
@@ -73,7 +73,7 @@ _CACHED = {"vulnerability_pop_all_total": 0.4,
 @slow
 def test_combine_l2_real_aoi(tmp_path):
     """S3.T4/T5 [slow] real AOI -> a 1-5 risk grid we computed, on the flood grid, not all-zero."""
-    from app.graph.geo import align as al
+    from app.geo import align as al
     aoi = _minimal_aoi(tmp_path)
     ref = al.reference_grid(aoi, "hazard_flood")
     out = combine.combine_l2(aoi, "hazard_flood", vuln_weights=_CACHED)

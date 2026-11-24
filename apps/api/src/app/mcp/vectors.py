@@ -15,8 +15,8 @@ pack's top-level `vectors` block, never `stats` (the gate scans stats for number
 
 from __future__ import annotations
 
-from ..graph.geo import vecio as _vecio
-from ..graph.geo import vectors as _vectors
+from ..geo import vecio as _vecio
+from ..geo import vectors as _vectors
 
 MAX_LAYERS = 8
 
@@ -166,7 +166,7 @@ def attach(spec: dict, target: dict, stats: dict, citations: list, gaps: list,
                     "Nothing was measured, which is not a zero.")
         return None, None
     from shapely.geometry import shape
-    from ..graph.geo import layer_values
+    from ..geo import layer_values
     name = area.get("name") or target.get("place") or "this area"
     try:
         boundary = shape(area["geometry"])

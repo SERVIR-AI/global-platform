@@ -162,7 +162,7 @@ def query(npz_path, boundary, legend):
 
 def _main(argv):
     from ..config import get_settings
-    from ..graph.geo import stacks, tiffs
+    from ..geo import stacks, tiffs
     if not argv or argv[0] != "build":
         print(__doc__)
         return 2

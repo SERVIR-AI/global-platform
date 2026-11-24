@@ -798,7 +798,7 @@ def run(ctx):
     grid in memory) into one GeoTIFF on the reference tile's grid."""
     import numpy as np
     from .. import rasters, remote_clip as rc
-    from ...graph.geo import schema
+    from ...geo import schema
     from . import PreparedFile
     m = ctx.manifest
     box, where = (rc.box_of(m["clip"]) if m.get("clip") is not None else (None, ""))

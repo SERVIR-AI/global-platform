@@ -27,7 +27,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
-from ...config import get_settings
+from ..config import get_settings
 
 COG_TYPES = ("image/tiff; application=geotiff; profile=cloud-optimized",
              "image/tiff; application=geotiff")

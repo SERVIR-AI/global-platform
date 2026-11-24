@@ -135,7 +135,7 @@ def test_the_handshake_hands_out_the_composed_instructions(log):
 def _catalog_names() -> set[str]:
     """Every NAME the registries hold that belongs in capabilities, never in the opening."""
     from app.land_cover.synthesis import landcover_stacks
-    from app.graph.geo import vectors
+    from app.geo import vectors
     names = set()
     for row in landcover_stacks().values():
         names.add(str(row.get("title")))
@@ -850,7 +850,7 @@ def test_the_priority_table_is_the_reply_order_for_every_shaped_kind(log):
 def _grow(monkeypatch, n_stacks=6, n_feeds=8, n_points=3, n_polys=3):
     """Contributions as a busy hub would land them: stacks over new countries, live feeds,
     point layers inside the risk region and polygon layers — names long, as real ones are."""
-    from app.graph.geo import registry as geo_registry, vectors
+    from app.geo import registry as geo_registry, vectors
     from app.land_cover import synthesis
     rows = dict(synthesis.landcover_stacks())
     first = next(iter(rows.values()))

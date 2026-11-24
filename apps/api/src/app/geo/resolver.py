@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 import yaml
 
-from ...config import get_settings
+from ..config import get_settings
 from . import combine, drive_tifs
 
 

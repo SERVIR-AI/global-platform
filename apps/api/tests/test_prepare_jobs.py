@@ -24,7 +24,7 @@ import pytest
 
 from app.config import get_settings
 from app.contrib import jobs, prepare, staging
-from app.graph.geo import vectors
+from app.geo import vectors
 from app.mcp import assemble, store
 
 from test_contrib_jobs import _call, _coded, _drain, _json, _keep_checking, _plain, _status, _until, _vuln

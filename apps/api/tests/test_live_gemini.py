@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.config import get_settings
 from app.graph import graph as gm
-from app.graph.geo import store
+from app.geo import store
 from app.main import app
 
 pytestmark = pytest.mark.skipif(

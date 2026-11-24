@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 
 from app.config import get_settings
 from app.graph import graph as gm
-from app.graph.geo import drive_tifs, ingest
+from app.geo import drive_tifs, ingest
 from app.main import app
 
 client = TestClient(app)
@@ -251,7 +251,7 @@ def test_resolve_byod_passthrough_uses_the_upload_directly(aoi, make_client, mon
     """A verified upload has one meaning, so there is nothing to choose: resolve passes
     straight through with byod_passthrough=true and fetch clips the user's own layer."""
     import numpy as np
-    from app.graph.geo import byod_registry
+    from app.geo import byod_registry
 
     layer, report = byod_registry.register(
         "byod-thread", hazard_label="flood", severity_scale="0-5",

@@ -9,7 +9,7 @@ import pytest
 from shapely.geometry import box
 
 from app.config import get_settings
-from app.graph.geo import ingest, vectors
+from app.geo import ingest, vectors
 
 
 @pytest.fixture

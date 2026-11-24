@@ -43,7 +43,7 @@ def place_time(country: str | None = None, crop: str | None = None,
     # `list` asks what can be named at all: every contributed boundary layer with
     # its names and their sizes — the menu a question picks an area from.
     if list:
-        from ..graph.geo import ingest
+        from ..geo import ingest
         return ingest.list_boundaries(layer=list if isinstance(list, str)
                                       and list.lower() not in ("all", "true", "*") else None,
                                       **({"names_cap": names_cap} if names_cap else {}))
@@ -59,7 +59,7 @@ def place_time(country: str | None = None, crop: str | None = None,
     asked_place = place or (f"{region}, {country}" if region and country else region)
     resolved_place = None
     if asked_place:
-        from ..graph.geo import ingest
+        from ..geo import ingest
         resolved_place = ingest.resolve_place(asked_place)
 
     if not (country and crop):

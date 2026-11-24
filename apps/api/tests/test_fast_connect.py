@@ -246,7 +246,7 @@ def live_sized(root, stacks=STACKS):
 
 def install(reg, setattr_, setitem):
     """Point the platform at a live_sized() registry (setattr_/setitem: monkeypatch's)."""
-    from app.graph.geo import vectors
+    from app.geo import vectors
     from app.mcp import registry
     s = get_settings()
     for k, v in reg["settings"].items():
@@ -442,7 +442,7 @@ def test_a_rebuild_reads_each_source_once_even_when_it_refits(live, monkeypatch,
     layers, the schema, methods, the library — is computed once per rebuild though the
     assemble_pack description is rendered again and again to fit."""
     from app.contrib import methods
-    from app.graph.geo import schema, tiffs, vectors
+    from app.geo import schema, tiffs, vectors
     from app.mcp import budget, packs, registry, server
     for fn in (tiffs.catalog, registry.coverage, registry.raster_layers, registry._corpus_summary,
                vectors.visible, schema.namespaces, methods.for_pack, packs.risk_coverage):
@@ -552,7 +552,7 @@ def test_a_pack_beyond_the_three_routes_through_the_same_seam(live, monkeypatch,
 def test_the_signature_follows_every_store_a_contribution_lands_in(live, tmp_path, monkeypatch, log):
     """A landed raster row, a declarative feed file, an approved vector layer and a document
     each change the signature that makes the served text stale before its TTL."""
-    from app.graph.geo import vectors
+    from app.geo import vectors
     from app.mcp import packs, server
     from app.rag.store import corpus_dir
     s = get_settings()
@@ -790,7 +790,7 @@ def test_a_feed_another_worker_landed_is_read_before_a_call(feeds_dir, log):
 def test_a_place_qualified_hazard_is_said_in_words(monkeypatch, log):
     """A contributed hazard's stem names its place once, from the countries its row declares;
     one return period is said in the singular."""
-    from app.graph.geo import tiffs
+    from app.geo import tiffs
     from app.mcp import packs
     monkeypatch.setattr(tiffs, "catalog", lambda include_staged=True: {
         "hazard_flood": {}, "hazard_flood_rp10": {}, "hazard_flood_rp500": {},

@@ -11,7 +11,7 @@ from rasterio.transform import from_origin
 
 from app.config import get_settings
 from app.gate import publish
-from app.graph.geo import ingest, stacks
+from app.geo import ingest, stacks
 from app.mcp import assemble, packs, store
 
 LEGEND = {1: "Water body", 2: "Snow and glacier", 3: "Forest", 4: "Riverbed",
@@ -108,7 +108,7 @@ def _expected_px_area_km2(row):
 
 
 def test_stack_expands_into_per_year_rows_and_contracts(lc_env):
-    from app.graph.geo import schema, tiffs
+    from app.geo import schema, tiffs
     cat = tiffs.catalog()
     assert "landcover_test_2022" in cat and cat["landcover_test_2022"]["internal"]
     assert cat["landcover_test_2022"]["path"].endswith("lc-2022.tif")

@@ -9,7 +9,7 @@ import yaml
 
 from app.config import get_settings
 from app.contrib import fetch_policy, identity, removal, staging
-from app.graph.geo import schema, tiffs
+from app.geo import schema, tiffs
 from app.mcp import store
 
 OWNER = identity.Caller("user_owner", "hydrologist@hub.test", False, "bound")
@@ -178,7 +178,7 @@ def test_a_stack_name_is_held_to_the_same_rule(env):
 def test_a_name_with_a_path_in_it_never_becomes_a_file_path(env):
     """The guard under the gate: wherever a layer name is turned into a file, a name that
     holds a path separator is an unknown layer, even for a row that got in before the rule."""
-    from app.graph.geo import ingest
+    from app.geo import ingest
     for name in ("../x", "a/b", "a\\b", "..", ".", ""):
         with pytest.raises(ValueError, match="unknown tiff layer"):
             tiffs.file_name(name)

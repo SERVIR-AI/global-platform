@@ -31,7 +31,7 @@ from rasterio.transform import from_bounds
 from app.config import get_settings
 from app.contrib import fetch_policy, identity, prepare, staging
 from app.contrib.prepare import api_points
-from app.graph.geo import ingest, schema, vectors
+from app.geo import ingest, schema, vectors
 from app.mcp import assemble, registry, store
 from app.risk import synthesis as risk
 

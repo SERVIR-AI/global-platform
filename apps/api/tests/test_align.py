@@ -12,7 +12,7 @@ from rasterio.crs import CRS
 from rasterio.transform import from_bounds
 from shapely.geometry import box, mapping
 
-from app.graph.geo import align
+from app.geo import align
 
 slow = pytest.mark.skipif(
     os.getenv("GRP_RUN_SLOW") != "1", reason="slow: live Drive download (set GRP_RUN_SLOW=1)")

@@ -263,7 +263,7 @@ def payload(hazard: str | None = None) -> dict:
     """What the picker renders: every hazard's recipe, the layers a weight may name,
     and who last adjusted each. Read-only — the picker proposes, the gate decides."""
     from ..contrib import staging
-    from ..graph.geo import combine, tiffs
+    from ..geo import combine, tiffs
 
     recipe = combine._recipe()
     recipes = {h: {k: float(v) for k, v in row.items()}

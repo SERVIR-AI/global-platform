@@ -86,5 +86,5 @@ def list_places(response: Response, layer: str | None = None) -> dict:
     """Every contributed boundary a question can name, with each name's area and size
     class — the same living list resolve_place_time(list=...) returns, for pages."""
     _readable_anywhere(response)
-    from ...graph.geo import ingest
+    from ...geo import ingest
     return ingest.list_boundaries(layer=layer)

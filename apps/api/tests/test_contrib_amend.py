@@ -9,7 +9,7 @@ import yaml
 
 from app.config import get_settings
 from app.contrib import fetch_policy, staging
-from app.graph.geo import layer_values
+from app.geo import layer_values
 from app.mcp import assemble
 
 from test_layer_values import OTHER, OWNER, POLY, REVIEWER, _as, _tif, world  # noqa: F401

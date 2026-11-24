@@ -608,7 +608,7 @@ def test_fetch_event_aoi_none_on_failure(log):
 
 # --- ingest's IOCollector / emit in isolation --------------------------------------------
 
-from app.graph.geo import ingest as ingest_mod
+from app.geo import ingest as ingest_mod
 
 
 def test_emit_noop_when_nothing_installed(log):

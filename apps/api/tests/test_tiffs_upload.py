@@ -5,7 +5,7 @@ multiband raster is rejected (ok:false, never registered); malformed requests ge
 import numpy as np
 from fastapi.testclient import TestClient
 
-from app.graph.geo import byod_registry
+from app.geo import byod_registry
 from app.main import app
 
 client = TestClient(app)

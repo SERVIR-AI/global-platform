@@ -11,7 +11,7 @@ import pytest
 import rasterio
 from shapely.geometry import box, mapping
 
-from app.graph.geo import combine, validate, verify
+from app.geo import combine, validate, verify
 
 slow = pytest.mark.skipif(
     os.getenv("GRP_RUN_SLOW") != "1", reason="slow: live Drive download (set GRP_RUN_SLOW=1)")

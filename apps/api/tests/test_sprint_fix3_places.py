@@ -11,7 +11,7 @@ from shapely.geometry import box, mapping
 
 from app.config import get_settings
 from app.contrib import fetch_policy, identity, staging
-from app.graph.geo import ingest, vectors
+from app.geo import ingest, vectors
 from app.mcp import assemble, resolve, store
 
 OWNER = identity.Caller("user_owner", "gis@hub.test", False, "bound")

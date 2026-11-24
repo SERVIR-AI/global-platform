@@ -18,7 +18,7 @@ from shapely.geometry import box, mapping
 
 from app.config import get_settings
 from app.contrib import fetch_policy, identity, staging
-from app.graph.geo import ingest
+from app.geo import ingest
 from app.land_cover import synthesis as lc
 from app.mcp import assemble, feeds, packs, registry, store, vectors as vectors_step
 from app.risk import synthesis as risk
@@ -471,7 +471,7 @@ def test_risk_coverage_comes_from_each_maps_extent_or_its_file(lc_env, tif_write
 
 # ------------------------------------------------------- 11. the generated texts
 def test_exposure_assets_are_the_point_layers_inside_the_risk_region(monkeypatch):
-    from app.graph.geo import registry as geo_registry, vectors
+    from app.geo import registry as geo_registry, vectors
     layers = {"th_shelters": {"title": "Shelters (Thailand)", "bbox": [100.2, 13.5, 100.8, 14.0], "countries": ["Thailand"]},
               "cr_occurrences": {"title": "Occurrences (Costa Rica)", "bbox": [-85.3, 9.9, -84.7, 10.3], "countries": ["Costa Rica"]},
               "global_farms": {"title": "Farms (global)", "bbox": [-156.0, -54.0, 166.0, 71.0]}}

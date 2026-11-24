@@ -4,7 +4,7 @@ that intersect a lon/lat box — never the whole file in memory.
 A GeoJSON is read one feature at a time (its text kept as it is); a shapefile one record
 at a time, the kept records copied byte for byte into a smaller shapefile; a GeoPackage
 through its spatial index, the kept rows copied as they are into a smaller GeoPackage.
-Nothing kept is changed: the gate's own reader (graph/geo/vecio) then converts the result
+Nothing kept is changed: the gate's own reader (geo/vecio) then converts the result
 exactly as it would the file a contributor cut by hand — CRS, encoding, repairs and all.
 """
 
@@ -20,7 +20,7 @@ import zipfile
 from shapely import get_num_coordinates
 from shapely.geometry import box as _box, mapping, shape
 
-from ...graph.geo import vecio
+from ...geo import vecio
 from . import PrepRefused
 
 GZIP_MAGIC = b"\x1f\x8b"
@@ -363,7 +363,7 @@ def filter_geojson(ctx, path: str, box: Box, out_path: str) -> dict:
 
 def pick_shapefile(files: dict, layer_name: str | None, quoted: str) -> str:
     """The .shp member to read, by layer_name (the file's stem) or as the only one —
-    the gate reader's own rule (graph/geo/vecio)."""
+    the gate reader's own rule (geo/vecio)."""
     shps = sorted(n for n in files if n.lower().endswith(".shp"))
     stems = [os.path.splitext(os.path.basename(n))[0] for n in shps]
     if layer_name:

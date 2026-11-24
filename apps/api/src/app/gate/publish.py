@@ -164,7 +164,7 @@ def _insight_layers(pack: dict, budget: int = 12_000) -> list[dict]:
     in the pack."""
     import json as _json
 
-    from ..graph.geo import layer_values
+    from ..geo import layer_values
     rows = []
     for name, rec in (pack.get("layers") or {}).items():
         s = rec.get("summary") or {}
@@ -302,7 +302,7 @@ def _lean(fc: dict, cap: int | None = None) -> tuple[dict, int, bool]:
     """(collection, total, truncated): the features with only the properties the
     panel draws and names by — plus the contributor's own id — most severe first,
     at most `cap`."""
-    from ..graph.geo import viz as _viz
+    from ..geo import viz as _viz
     feats = (fc or {}).get("features") or []
     out = []
     for f in feats:

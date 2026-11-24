@@ -6,8 +6,8 @@ import os
 
 import yaml
 
-from ...config import get_settings
-from ...mcp.budget import once
+from ..config import get_settings
+from ..mcp.budget import once
 
 _BASE: dict = {}        # the merged, expanded hand + contributed catalog, keyed by both files' (mtime, size)
 _LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
@@ -59,7 +59,7 @@ def catalog(include_staged: bool = True):
     cat = dict(_base())
     if include_staged:
         try:
-            from ...contrib import staging
+            from ..contrib import staging
             cat.update({k: v for k, v in staging.visible_staged_rasters().items() if k not in cat})
             # a correction of a landed row the caller staged: their own view only
             for k in staging.visible_staged_amends():
@@ -67,7 +67,7 @@ def catalog(include_staged: bool = True):
                     cat[k] = staging.amended_row(k, cat[k])
         except Exception:                       # the catalog never fails on staging
             pass
-    from ...contrib import identity
+    from ..contrib import identity
     return identity.viewable(cat)
 
 

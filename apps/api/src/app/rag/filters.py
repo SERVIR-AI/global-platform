@@ -100,7 +100,7 @@ def speaks_to(declared, countries) -> bool:
     """Does a document declaring `declared` countries speak to an area in one of
     `countries`? One that declares none is about anywhere; an area whose country is
     unknown rules nothing out. Names match forgivingly (Viet Nam / Vietnam)."""
-    from ..graph.geo.vectors import country_matches
+    from ..geo.vectors import country_matches
     declared = [str(c) for c in (declared or []) if str(c).strip()]
     countries = [str(c) for c in (countries or []) if str(c).strip()]
     if not declared or not countries:

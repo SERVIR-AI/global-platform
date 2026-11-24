@@ -8,7 +8,7 @@ import os
 import numpy as np
 
 from app.config import get_settings
-from app.graph.geo import byod_registry, ingest
+from app.geo import byod_registry, ingest
 
 _CLASS = np.array([[0, 1, 2, 3, 4, 5]] * 6, dtype="int16")
 

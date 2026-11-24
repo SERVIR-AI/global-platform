@@ -44,7 +44,7 @@ def _boundaries(tmp_path, reg, layer, title, country, features) -> None:
 def _registry(tmp_path, monkeypatch, squeezed=False) -> dict:
     """The live-like registry with Ecuador's protected areas as a boundary layer and the MapBiomas
     validation points feed; `squeezed` adds live's other countries (as in test_fast_connect)."""
-    from app.graph.geo import ingest, vectors
+    from app.geo import ingest, vectors
     from app.mcp import feeds, registry
     reg = live_sized(tmp_path, LIVE_STACKS)
     _boundaries(tmp_path, reg, "ec_protected_areas", "Protected areas of Ecuador (MAATE SNAP)", "Ecuador", [
@@ -78,7 +78,7 @@ def _registry(tmp_path, monkeypatch, squeezed=False) -> dict:
 
 @pytest.fixture
 def salado(tmp_path, monkeypatch):
-    from app.graph.geo import ingest
+    from app.geo import ingest
     reg = _registry(tmp_path, monkeypatch)
     yield reg
     ingest._GAZETTEER.clear()
@@ -170,7 +170,7 @@ def test_freshly_contributed_stack_feed_boundary_and_pack_route_with_no_code_cha
     """A stack lands in the gate's catalog file, a boundary layer and a points feed are approved,
     and an extension pack with its own choices is dropped in: each routes at once; a pack that
     declares no routing words is named, never skipped."""
-    from app.graph.geo import ingest
+    from app.geo import ingest
     from app.mcp import packs, registry
     get_settings().tiffs_contrib_path.write_text(json.dumps({"landcover_bnt_bs": {
         "kind": "stack", "role": "landcover", "title": "Bahamas National Trust mangrove extent 2024",
@@ -180,7 +180,7 @@ def test_freshly_contributed_stack_feed_boundary_and_pack_route_with_no_code_cha
     reg = {"vectors": {}}
     _boundaries(tmp_path, reg, "bs_parks", "Bahamas national parks (BNT)", "Bahamas",
                 [_poly("Andros West Side National Park", -78.2, 24.3, 0.3, 0.3, country="Bahamas")])
-    from app.graph.geo import vectors
+    from app.geo import vectors
     landed = vectors.landed()
     monkeypatch.setattr(vectors, "landed", lambda: {**landed, **reg["vectors"]})
     ingest._GAZETTEER.clear()
@@ -420,7 +420,7 @@ def test_a_product_family_tie_goes_to_the_map_with_the_question_s_classes(tmp_pa
     """MapBiomas Agua registered before MapBiomas land cover: a question naming only the family
     reads the land-cover map (its legend and most classes), never the first registered."""
     import test_desktop_routing as me
-    from app.graph.geo import ingest
+    from app.geo import ingest
     from app.mcp import start
     agua = next(s for s in LIVE_STACKS if s[0] == "landcover_ec_mbwaterbg")
     monkeypatch.setattr(me, "LIVE_STACKS", [agua] + [s for s in LIVE_STACKS if s is not agua])
@@ -437,7 +437,7 @@ def test_class_and_subject_words_are_never_places(salado, tmp_path, monkeypatch,
     """A capitalised class or subject after a preposition is not a place, a possessive country
     is read before the possessive's word, a second boundary named is said, and a boundary in
     another country than the question names is not the place."""
-    from app.graph.geo import ingest, vectors
+    from app.geo import ingest, vectors
     from app.mcp import start
 
     def place(q):

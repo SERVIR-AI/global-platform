@@ -319,7 +319,7 @@ def _once(entries, url) -> None:
 def _reads(name: str) -> bool:
     """A file the vector gate reads whole (GeoJSON, GeoPackage, zip) — by the reader's
     own rule, never a list here; a shapefile's .shp is picked with its parts instead."""
-    from ...graph.geo import vecio
+    from ...geo import vecio
     return vecio.kind_of(b"", name) != "unknown"
 
 

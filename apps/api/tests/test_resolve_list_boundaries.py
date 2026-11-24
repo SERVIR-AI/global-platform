@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from app.graph.geo import ingest, vectors
+from app.geo import ingest, vectors
 from app.mcp import resolve
 
 

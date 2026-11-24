@@ -29,7 +29,7 @@ from shapely.geometry import box as shp_box
 
 from app.config import get_settings
 from app.contrib import fetch_policy, identity, rasters, remote_clip, staging
-from app.graph.geo import ingest
+from app.geo import ingest
 from app.mcp import store
 
 OWNER = identity.Caller("user_owner", "hydrologist@hub.test", False, "bound")

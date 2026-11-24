@@ -20,7 +20,7 @@ import rasterio.features
 import rasterio.warp
 
 from . import tiffs
-from ...mcp.budget import once
+from ..mcp.budget import once
 
 # The authalic radius: a sphere of this radius has the ellipsoid's total area, but not
 # its area between two parallels — at 10 N the sphere overstates a pixel by ~0.41%, at
@@ -93,7 +93,7 @@ def year_path(layer_key, cat=None):
     is a landed row whose `local_path` sits under the tiffs directory. None when the
     row names no file."""
     import os
-    from ...config import get_settings
+    from ..config import get_settings
     meta = (cat if cat is not None else tiffs.catalog()).get(layer_key) or {}
     if meta.get("path"):
         return meta["path"]

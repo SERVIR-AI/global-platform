@@ -61,7 +61,7 @@ def registered() -> dict:
     rows (hand-authored, contributed, and the caller's own staged previews) plus
     schema-declared layers with a registered source. A stack's root row is not a
     file; its per-year rows are."""
-    from ...config import get_settings
+    from ..config import get_settings
     from . import drive_tifs, schema, tiffs
     out = {k: v for k, v in tiffs.catalog().items()
            if v.get("kind") != "stack" and not v.get("computed")}

@@ -62,7 +62,7 @@ LOCK = _Lock()
 
 
 def write_text(path, text: str) -> None:
-    from ..graph.geo.ingest import atomic_path
+    from ..geo.ingest import atomic_path
     with LOCK, atomic_path(os.fspath(path)) as tmp:
         Path(tmp).write_text(text, encoding="utf-8")
 

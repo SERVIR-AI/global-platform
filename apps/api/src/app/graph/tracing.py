@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timezone
 from langchain_core.runnables import RunnableConfig
 from ..config import get_settings
-from .geo import operations, registry
+from ..geo import operations, registry
 
 def _last_user_message(messages: list) -> dict | None:
     return next((m for m in reversed(messages) if m.get("role") == "user"), None)

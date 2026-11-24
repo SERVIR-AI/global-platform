@@ -11,7 +11,7 @@ from langchain_core.runnables import RunnableConfig
 
 from ...config import get_settings
 from ...graph import get_graph, tracing
-from ...graph.geo import viz
+from ...geo import viz
 from ...llm import MissingAPIKey, build_client, default_model
 from ...schemas import ChatMessage, ChatRequest, ChatResponse, Usage
 

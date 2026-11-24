@@ -7,7 +7,7 @@ from rasterio.transform import from_origin
 
 from app.config import get_settings
 from app.contrib import rasters
-from app.graph.geo import stacks
+from app.geo import stacks
 from app.mcp import compose, registry
 
 
@@ -64,7 +64,7 @@ def test_a_hub_stack_lands_through_the_gate_year_by_year(gate_env, log):
     dup = rasters.add({**common, "layer": "landcover_toy_2022", "year": 2022, "file": _year_file(gate_env, 2022, 3)})
     assert dup["status"] == "declined"
     # the landed stack is a real stack to the pack machinery
-    from app.graph.geo import schema, tiffs
+    from app.geo import schema, tiffs
     assert stacks.layer_for("landcover_toy", 2022) == "landcover_toy_2022"
     assert schema.schema_for("landcover_toy_2022")["valid_max"] == 3
     assert tiffs.catalog()["landcover_toy_2021"]["internal"] is True

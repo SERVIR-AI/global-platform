@@ -1,7 +1,7 @@
 """The deterministic spatial ops over a known fixture: exact counts, and the flood
 severity threshold actually filtering. These are the numbers the LLM may only quote.
 """
-from app.graph.geo import store
+from app.geo import store
 
 
 def test_count_features(aoi, log):
@@ -80,7 +80,7 @@ def test_a_point_of_interest_never_becomes_an_area(monkeypatch, log):
     """'Battambang Province' returned only a records office and a police station, and
     the platform answered about a 12 km box around the office — confidently, with
     citations. Dropping the administrative noun finds the real boundary."""
-    from app.graph.geo import ingest
+    from app.geo import ingest
     ring = [[103.15, 13.05], [103.25, 13.05], [103.25, 13.15], [103.15, 13.15], [103.15, 13.05]]
     calls = []
 
@@ -99,7 +99,7 @@ def test_a_point_of_interest_never_becomes_an_area(monkeypatch, log):
 
 
 def test_a_genuine_building_query_declines_instead_of_inventing_an_area(monkeypatch, log):
-    from app.graph.geo import ingest
+    from app.geo import ingest
     monkeypatch.setattr(ingest, "_search", lambda q: [_poi("Archives of Battambang Province")])
     try:
         ingest._boundary("Archives of Battambang Province")
@@ -112,7 +112,7 @@ def test_a_genuine_building_query_declines_instead_of_inventing_an_area(monkeypa
 def test_an_over_cap_admin_area_is_named_and_sized_not_silently_boxed(monkeypatch, log):
     """A province over the area cap must say so by name, never hand back a box that
     reads like the province."""
-    from app.graph.geo import ingest
+    from app.geo import ingest
     big = [[100.0, 10.0], [106.0, 10.0], [106.0, 16.0], [100.0, 16.0], [100.0, 10.0]]
     monkeypatch.setattr(ingest, "_search", lambda q: [_admin("Battambang", big, rank=8)])
     km2, name, geom, how = ingest._boundary("Battambang")

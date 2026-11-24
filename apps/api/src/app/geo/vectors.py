@@ -27,7 +27,7 @@ import numpy as np
 from shapely.geometry import shape
 from shapely.ops import unary_union
 
-from ...mcp.budget import once
+from ..mcp.budget import once
 
 # WGS 84. Areas are computed on (lon, AUTHALIC latitude) with the authalic radius —
 # the sphere of the ellipsoid's own area, reached by an equal-area map — so they are
@@ -56,7 +56,7 @@ NAME_RE = r"^[a-z][a-z0-9_]{2,40}$"
 
 
 def _dir() -> Path:
-    from ...config import get_settings
+    from ..config import get_settings
     d = Path(get_settings().cache_dir) / "vectors"
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -101,24 +101,24 @@ def unregister(layer: str) -> None:
 def visible() -> dict:
     """Landed layers plus the staged ones THIS caller may see, less the landed contributions
     the authorization store does not list for them — the raster catalog's rules
-    (graph/geo/tiffs.catalog): staged, contributor and reviewers; landed, whoever its
+    (geo/tiffs.catalog): staged, contributor and reviewers; landed, whoever its
     visibility level, hub or a share admits. `landed()` stays whole for the gate. Read
     once per snapshot."""
     out = dict(landed())
     try:
-        from ...contrib import staging
+        from ..contrib import staging
         out.update(staging.visible_staged_vectors())
         for k in staging.visible_staged_amends():
             if k in out:
                 out[k] = staging.amended_row(k, out[k])
     except Exception:
         pass
-    from ...contrib import identity
+    from ..contrib import identity
     return identity.viewable(out)
 
 
 def master_path(entry: dict) -> Path:
-    from ...config import get_settings
+    from ..config import get_settings
     return Path(get_settings().cache_dir) / entry["local_path"]
 
 
@@ -296,7 +296,7 @@ def clip_into(adir: str, boundary, layer: str, entry: dict) -> int:
 def purge_clips(layer: str) -> int:
     """Per-AOI clips are cached by layer NAME; a layer that changes identity must not
     be served from an old clip."""
-    from ...config import get_settings
+    from ..config import get_settings
     root = Path(get_settings().cache_dir)
     n = 0
     for clip in root.glob(f"*/{layer}.geojson"):

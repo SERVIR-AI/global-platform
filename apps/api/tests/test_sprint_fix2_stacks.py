@@ -16,7 +16,7 @@ from rasterio.transform import from_origin
 from shapely.geometry import box, shape
 
 from app.contrib import fetch_policy, identity, rasters, staging
-from app.graph.geo import layer_values, schema, stacks, tiffs
+from app.geo import layer_values, schema, stacks, tiffs
 from app.land_cover import synthesis as lc
 from app.mcp import assemble, packs
 

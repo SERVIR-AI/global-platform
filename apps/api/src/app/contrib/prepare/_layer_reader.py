@@ -4,7 +4,7 @@ A WFS GetFeature link is PAGED (startIndex, as GeoJSON, as many features a reque
 about PAGE_BYTES — a layer of a few huge dissolved polygons comes one or two at a time) and, when
 the step has a box, asked only for that box; any other source — a GeoJSON, a zipped
 shapefile, a GeoPackage, or the file a step before made — is downloaded whole (streamed
-to disk) and read by graph/geo/vecio, as the vector gate reads it. Invalid polygons are
+to disk) and read by geo/vecio, as the vector gate reads it. Invalid polygons are
 repaired by vecio's rules, so a layer reads here as it would land as a vector. However
 many pages a WFS takes, the record holds ONE fetch step: the link as asked, every page's
 [startIndex, count] and sha256, and one sha256 over the pages in order — a replay asks the
@@ -174,7 +174,7 @@ class Reader:
         yield self._whole(path, ctx.filename)
 
     def _whole(self, path: str, filename: str | None) -> list:
-        from ...graph.geo import vecio
+        from ...geo import vecio
         from . import PrepRefused, size_text
         size = os.path.getsize(path)
         limit = WHOLE_FACTOR * self.ctx.cap
@@ -347,7 +347,7 @@ class Reader:
 
     # ------------------------------------------------------------------ the features
     def _crs(self, members: dict):
-        from ...graph.geo import vecio
+        from ...geo import vecio
         from . import PrepRefused
         try:
             return vecio._geojson_crs(members)
@@ -357,7 +357,7 @@ class Reader:
     def _page_checks(self, members: dict, crs, n: int) -> None:
         """A page truncated by the server, or on another CRS than the features it already
         sent were read in (the crs member comes after them), is refused."""
-        from ...graph.geo import vecio
+        from ...geo import vecio
         from . import PrepRefused
         if members.get("exceededTransferLimit") is True \
                 or (members.get("properties") or {}).get("exceededTransferLimit") is True:
@@ -370,7 +370,7 @@ class Reader:
                               "add srsName=EPSG:4326 to the link")
 
     def _chunk(self, crs, feats: list) -> list:
-        from ...graph.geo import vecio
+        from ...geo import vecio
         if crs is not None:
             geoms = vecio._reproject([ft.get("geometry") if vecio._located(ft.get("geometry"))
                                       else None for ft in feats], crs)
@@ -384,7 +384,7 @@ class Reader:
     def _shapes(self, feats: list, repair: bool) -> list:
         import shapely
         from shapely.geometry import shape
-        from ...graph.geo import vecio
+        from ...geo import vecio
         out = []
         for ft in feats:
             if not isinstance(ft, dict) or not vecio._located(ft.get("geometry")):

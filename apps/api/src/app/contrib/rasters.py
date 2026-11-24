@@ -7,7 +7,7 @@ written — because filenames and source sheets lie about units and scale, which
 is the exact lesson raster_schema.yml records at its top.
 
 Which namespaces exist, and what each demands, is the schema's `namespaces` table
-(graph/geo/schema.namespaces): nothing here lists a prefix.
+(geo/schema.namespaces): nothing here lists a prefix.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ CLASS_MAX = 5     # the class contract every reader indexes by: 1..5, 0 = nodata
 def namespaces() -> dict:
     """{prefix: rule} — every namespace a contributed raster may take, each rule
     carrying its `role`; read from the schema on every call."""
-    from ..graph.geo import schema
+    from ..geo import schema
     return {str(r["prefix"]): {**r, "role": role}
             for role, r in schema.namespaces().items() if r.get("prefix")}
 
@@ -424,7 +424,7 @@ def normalise(path: str, role: str, declared: dict | None = None,
     to use, notes); the path is the input when nothing changed."""
     import rasterio
     from rasterio.warp import Resampling, calculate_default_transform
-    from ..graph.geo import schema
+    from ..geo import schema
     rule = schema.namespaces().get(str(role)) or {}
     regrid = str(rule.get("regrid") or "refuse")
     notes = []
@@ -568,7 +568,7 @@ def _legend_problem(m: dict) -> list[str]:
     if namespace(str(m.get("layer") or "")).get("unique_labels"):
         # Change compares codes: {1: Mangrove, 10: Mangrove} landed, and 1956->2014 then
         # said every cell changed.
-        from ..graph.geo import stacks
+        from ..geo import stacks
         dup = stacks.duplicate_labels_text(legend)
         if dup:
             said = _suggested({"event": "duplicate_labels", "manifest": m, "legend": legend})
@@ -619,7 +619,7 @@ def _field_problems(m: dict, rule: dict) -> list[str]:
                 fails.append(f"from_year {a} must come before to_year {b}")
     sid = m.get("compares")
     if "compares" in mine and sid not in (None, ""):
-        from ..graph.geo import tiffs
+        from ..geo import tiffs
         stacks_now = {k: v for k, v in tiffs.catalog().items() if v.get("kind") == "stack"}
         st = stacks_now.get(str(sid))
         if st is None:
@@ -654,7 +654,7 @@ def stack_legend_problem(m: dict, cat: dict | None = None) -> str | None:
     if not sid or not isinstance(m.get("legend"), dict):
         return None
     if cat is None:
-        from ..graph.geo import tiffs
+        from ..geo import tiffs
         cat = tiffs.catalog()
     st = cat.get(sid)
     if not st or st.get("kind") != "stack":
@@ -689,7 +689,7 @@ def _stack_as_lands(sid: str, cat: dict | None) -> dict:
     if isinstance(st.get("outside_values"), list):
         out["outside_values"] = [_num(v) for v in st["outside_values"] if _isnum(v)]
     try:
-        from ..graph.geo import schema
+        from ..geo import schema
         years = sorted((int(r["year"]), k) for k, r in (cat or {}).items()
                        if isinstance(r, dict) and k != sid and r.get("stack") == sid
                        and _isnum(r.get("year")))
@@ -874,7 +874,7 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None,
         return {"status": "declined", "failures": fails}
     layer = manifest["layer"]
     settings = get_settings()
-    from ..graph.geo import tiffs
+    from ..geo import tiffs
     if layer in tiffs.catalog():
         return {"status": "declined",
                 "failures": [f"layer {layer!r} already in the catalog — contributions "
@@ -891,7 +891,7 @@ def add(manifest: dict, dry_run: bool = False, review: str | None = None,
 
 def _verify_and_land(manifest, dry_run, review, keep_prepared, prepared_before, fetched,
                      contribution_id, decl, layer, settings):
-    from ..graph.geo import schema as schema_mod, verify
+    from ..geo import schema as schema_mod, verify
     try:
         src_file, prepared = normalise(str(manifest["file"]), decl["role"], declared=decl,
                                        layer_name=manifest.get("layer_name"))
@@ -937,7 +937,7 @@ def _verify_and_land(manifest, dry_run, review, keep_prepared, prepared_before, 
     # to the contributor and the reviewer before approval. A layer described as one
     # value per sub-district that repeats one value across a whole district landed
     # unquestioned because nothing ever looked.
-    from ..graph.geo import layer_values
+    from ..geo import layer_values
     gran = layer_values.granularity(str(manifest["file"]), decl,
                                     row={"outside_values": outside,
                                          "legend": manifest.get("legend") or {}},
@@ -954,7 +954,7 @@ def _verify_and_land(manifest, dry_run, review, keep_prepared, prepared_before, 
     if legend_keys and namespace(layer).get("values") == "classes":
         # the readers' own count, run on the file before it is approved: they mask the
         # outside values, the declared nodata and the file's own fill tag
-        from ..graph.geo import stacks as _stacks
+        from ..geo import stacks as _stacks
         unread = _stacks.read_check(str(manifest["file"]), _norm_legend(manifest.get("legend")),
                                     [*skip, *([_num(tag)] if _isnum(tag) else [])], driver="GTiff")
         if unread:
@@ -984,10 +984,10 @@ def _verify_and_land(manifest, dry_run, review, keep_prepared, prepared_before, 
                 _drop_prepared()
                 return {"status": "declined", "verified": True, "failures": [conflict], "observed": obs}
 
-        from ..graph.geo import tiffs
+        from ..geo import tiffs
         dest = Path(settings.tiffs_dir) / tiffs.file_name(layer)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        from ..graph.geo.ingest import atomic_path
+        from ..geo.ingest import atomic_path
         with atomic_path(str(dest)) as tmp:          # a reader never opens half a copy
             shutil.copyfile(manifest["file"], tmp)
         _drop_prepared()
@@ -1080,7 +1080,7 @@ def _land_stack_year(cat, layer, manifest, dest, outside):
     """A landed land-cover year joins (or starts) its STACK row in the contributed
     catalog: the series' legend, years and extent live once; the per-year row points
     at its file and carries the stack id so every primitive can find its contract."""
-    from ..graph.geo import stacks as _stacks
+    from ..geo import stacks as _stacks
     sid, year = str(manifest["stack"]), int(manifest["year"])
     b = _stacks.header(str(dest), driver="GTiff")["bounds"]      # the GeoTIFF the gate verified
     row = cat[layer]

@@ -12,9 +12,9 @@ import pytest
 import rasterio
 from rasterio.transform import from_bounds
 
-from app.graph.geo import drive_tifs, verify
-from app.graph.geo import schema as schema_mod
-from app.graph.geo.rasterstats import windowed_stats
+from app.geo import drive_tifs, verify
+from app.geo import schema as schema_mod
+from app.geo.rasterstats import windowed_stats
 
 # Reclassed (0-5 class) catalog tifs must each have a schema contract. Raw/continuous
 # layers are declared per-slice (their cutoffs/units land in S9); forest/mangrove aren't risk inputs.

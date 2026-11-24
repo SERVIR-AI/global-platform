@@ -114,7 +114,7 @@ def _risk_hazards() -> list[str]:
     """The hazards the catalog serves, in words: return-period floods collapsed to
     one clause, synthetic demonstration layers left out."""
     import re
-    from ..graph.geo import tiffs
+    from ..geo import tiffs
     try:
         cat = tiffs.catalog()
     except Exception:
@@ -163,7 +163,7 @@ def risk_coverage() -> dict:
     region: {layer: {title, bounds [w, s, e, n] or None, countries}}. Bounds are the
     row's declared extent or bbox, else the file's own header when it is on this
     server; a layer with neither is unknown, not global."""
-    from ..graph.geo import stacks, tiffs
+    from ..geo import stacks, tiffs
     try:
         cat = tiffs.catalog()
     except Exception:
@@ -197,14 +197,14 @@ def _in_risk_region(entry: dict, cov: dict) -> bool:
             return False
     declared = [str(c) for c in (entry.get("countries") or []) if str(c).strip()]
     if declared and countries:
-        from ..graph.geo import vectors
+        from ..geo import vectors
         return any(vectors.country_matches(countries, c) for c in declared)
     return not boxes or not isinstance(bbox, (list, tuple))
 
 
 def _risk_builtin_assets() -> list[str]:
     """People when a count grid is landed, then the built-in OSM classes."""
-    from ..graph.geo import tiffs
+    from ..geo import tiffs
     try:
         people = any(k.startswith("population_") for k in tiffs.catalog())
     except Exception:
@@ -217,7 +217,7 @@ def _risk_assets() -> list[str]:
     """What can be counted under a hazard: the built-in assets, and every contributed point
     layer inside the region the hazard maps cover, by its title. A Costa Rica occurrence
     layer was being offered as a hazard-exposure asset for Southeast Asia."""
-    from ..graph.geo import registry as geo_registry, vectors
+    from ..geo import registry as geo_registry, vectors
     words = _risk_builtin_assets()
     try:
         vis = vectors.visible()
@@ -249,7 +249,7 @@ def _risk_places() -> list[str]:
     cell size; else its box. Each place once. It used to be typed 'Southeast Asia',
     and stayed so when a hub's hazard map of another region landed."""
     import re
-    from ..graph.geo import tiffs
+    from ..geo import tiffs
     try:
         cov, cat = risk_coverage(), tiffs.catalog()
     except Exception:
@@ -286,7 +286,7 @@ def _risk_summary() -> str:
 
 def _risk_covers() -> str:
     """Counts and a region, never a layer name: the connect-time opening is budgeted."""
-    from ..graph.geo import tiffs
+    from ..geo import tiffs
     try:
         cov, cat = risk_coverage(), tiffs.catalog()
     except Exception:
@@ -371,7 +371,7 @@ def _lc_stacks_words() -> tuple[str, str]:
     seventy classes."""
     try:
         from ..land_cover.synthesis import landcover_stacks
-        from ..graph.geo import stacks as _stacks
+        from ..geo import stacks as _stacks
         rows = landcover_stacks()
     except Exception:
         rows = {}
@@ -425,7 +425,7 @@ def _lc_covers() -> str:
     """Counts only (stacks, classes, span, countries) for the budgeted opening."""
     try:
         from ..land_cover.synthesis import _fold, landcover_stacks
-        from ..graph.geo import stacks as _stacks
+        from ..geo import stacks as _stacks
         rows = landcover_stacks()
     except Exception:
         rows = {}
@@ -548,7 +548,7 @@ def _lc_stack_choices() -> list[dict]:
     `classes` its legend then takes."""
     try:
         from ..land_cover.synthesis import landcover_stacks
-        from ..graph.geo import stacks as _stacks
+        from ..geo import stacks as _stacks
         rows = landcover_stacks()
     except Exception:
         rows = {}
@@ -599,7 +599,7 @@ def _risk_hazard_choices() -> list[dict]:
     """Each hazard map the catalog serves as `hazard` takes it (its stem), named by its hazard
     words and, for a return period, 'N-year <hazard>'; synthetic demonstration layers left out."""
     import re
-    from ..graph.geo import tiffs
+    from ..geo import tiffs
     try:
         cat, cov = tiffs.catalog(), risk_coverage()
     except Exception:
@@ -678,7 +678,7 @@ def target_shapes_long() -> str:
 def _vulnerability_coverage_line() -> str:
     """How much of the regional indicator scheme the recipes in force represent —
     read from the recipe, so a hub's wider recipe changes this sentence."""
-    from ..graph.geo import combine
+    from ..geo import combine
     try:
         recipes = combine._recipe().get("weights") or {}
         layers = sorted({l for w in recipes.values() for l in (w or {})})
@@ -694,7 +694,7 @@ def _vulnerability_coverage_line() -> str:
 def _risk_manifest() -> dict:
     """Honest v0: what the risk pack ships and what it does not. Real state where
     derivable, gaps declared in one place."""
-    from ..graph.geo import tiffs
+    from ..geo import tiffs
     cat = tiffs.catalog()
     all_hazards = sorted(k.removeprefix("hazard_") for k in cat if k.startswith("hazard_"))
     # A synthetic demonstration layer must not sit in a hazard MENU looking like a

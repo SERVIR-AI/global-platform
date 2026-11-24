@@ -834,7 +834,7 @@ def _where_to_test(name: str, bbox, arg: str, family: str | None = None) -> str:
     else:
         does = f" — the pack returns the layer's values over its area in layers.{name}"
     try:
-        from ..graph.geo import tiffs
+        from ..geo import tiffs
         from ..mcp.packs import _is_synthetic
         for k, row in tiffs.catalog().items():
             ext = (row or {}).get("extent") or {}
@@ -846,7 +846,7 @@ def _where_to_test(name: str, bbox, arg: str, family: str | None = None) -> str:
     except Exception:
         pass
     try:
-        from ..graph.geo import stacks as _stacks
+        from ..geo import stacks as _stacks
         from ..land_cover.synthesis import landcover_stacks
         for sid, row in landcover_stacks().items():
             ext = row.get("extent") or {}
@@ -869,7 +869,7 @@ def _raster_bounds(path) -> list | None:
     no network."""
     try:
         import rasterio
-        from ..graph.geo import stacks as _stacks
+        from ..geo import stacks as _stacks
         from . import rasters
         with rasterio.Env(**rasters.gdal_env()):
             return _stacks.header(str(path), driver="GTiff")["bounds"]
@@ -934,7 +934,7 @@ def _url_problems(kind: str, m: dict) -> list[str]:
 
 def _raster_namespace_fields() -> dict:
     try:
-        from ..graph.geo import layer_values
+        from ..geo import layer_values
         return layer_values.namespace_fields()
     except Exception:                             # the form text never fails an import
         return {}
@@ -1011,7 +1011,7 @@ RASTER_FIELDS = {
 _RASTER_KNOWN = set(RASTER_FIELDS["required"]) | set(RASTER_FIELDS["optional"])
 
 # Staged layers live here (and in the contribution records), never in the
-# contrib catalog files; graph/geo/tiffs.py and schema.py overlay them for the
+# contrib catalog files; geo/tiffs.py and schema.py overlay them for the
 # caller who may see them.
 STAGED_RASTERS: dict[str, dict] = {}
 
@@ -1052,7 +1052,7 @@ def _purge_clips(layer: str) -> int:
     from ..config import get_settings
     settings = get_settings()
     n = 0
-    from ..graph.geo import tiffs as _tiffs
+    from ..geo import tiffs as _tiffs
     try:
         name = _tiffs.file_name(layer)
     except ValueError:                    # not a file name: no clip was ever written under it
@@ -1069,7 +1069,7 @@ def _purge_clips(layer: str) -> int:
 
 
 def _raster_taken(layer: str) -> str | None:
-    from ..graph.geo import tiffs
+    from ..geo import tiffs
     _ensure_staged_loaded()
     # every landed row, whoever asks: a name is taken even by a layer this caller may not view
     if layer in tiffs._base() or layer in STAGED_RASTERS:
@@ -1389,7 +1389,7 @@ def _stage_raster(rec: dict, prepared: dict) -> dict:
     _ensure_staged_loaded()
     if rule.get("stack"):
         import rasterio
-        from ..graph.geo import stacks as _stacks
+        from ..geo import stacks as _stacks
         with rasterio.Env(**_r.gdal_env()):              # the GeoTIFF the gate verified
             bounds = _stacks.header(str(dest), driver="GTiff")["bounds"]
         entry.update({"stack": str(m["stack"]), "year": int(m["year"]), "role": contract["role"],
@@ -1571,7 +1571,7 @@ def available_vulnerability_layers() -> list[str]:
     apart, and the weights kind only knew the first, so every contributed
     vulnerability layer was "unknown" to the one kind the field doc promised."""
     try:
-        from ..graph.geo import schema
+        from ..geo import schema
         doc = schema._doc()
         return sorted(k for k, v in (doc.get("layers") or {}).items()
                       if (v or {}).get("role") in _VULNERABILITY_ROLES)
@@ -1580,7 +1580,7 @@ def available_vulnerability_layers() -> list[str]:
 
 
 def _validate_weights(manifest) -> list[str]:
-    from ..graph.geo import tiffs
+    from ..geo import tiffs
     if not isinstance(manifest, dict):
         return ["manifest must be a mapping with hazard, weights and rationale"]
     m = dict(manifest)
@@ -1646,7 +1646,7 @@ def _validate_weights(manifest) -> list[str]:
 def _prepare_weights(m: dict) -> dict:
     """Nothing to fetch; report what the change actually is, so the record and the
     reviewer both see the before and after rather than only the after."""
-    from ..graph.geo import combine
+    from ..geo import combine
     key = str(m["hazard"]).removeprefix("hazard_")
     before = dict(combine.weights_for(f"hazard_{key}"))
     after = {k: round(float(v), 4) for k, v in m["weights"].items()}
@@ -1829,7 +1829,7 @@ def _shapefile_part(raw: bytes, fname: str | None) -> str | None:
 
 def _vector_taken(layer: str) -> str | None:
     import re
-    from ..graph.geo import ingest, vectors
+    from ..geo import ingest, vectors
     if not re.fullmatch(vectors.NAME_RE, layer or ""):
         return "layer must be snake_case: lowercase letters, digits, underscores, 3-40 chars"
     if layer in ingest.ASSET_LAYERS or layer in ("admin",):
@@ -1868,7 +1868,7 @@ def _validate_vector(manifest) -> list[str]:
 def _prepare_vector(m: dict) -> dict:
     import os
     import tempfile
-    from ..graph.geo import vectors
+    from ..geo import vectors
     from . import prepare
     taken = _vector_taken(m["layer"])
     if taken:
@@ -1912,7 +1912,7 @@ def _prepare_vector(m: dict) -> dict:
                        + (f" — {said}" if said else ""))
     # A zipped shapefile or a GeoPackage is read into GeoJSON on EPSG:4326 here;
     # what lands is always GeoJSON, and the record says what ingest did.
-    from ..graph.geo import vecio
+    from ..geo import vecio
     try:
         raw, prep_notes = vecio.to_geojson(raw, fname, m.get("layer_name"))
     except ValueError as exc:
@@ -1988,7 +1988,7 @@ def _read_prepared(made, url: str, cap: int, m: dict | None = None) -> tuple[byt
     GeoJSON shrinks by its spacing, rarely 3-fold): one over PACKED_FACTOR (GEOJSON_FACTOR)
     times the cap is declined unread — parsed, a 159 MiB GeoPackage took 2 GiB."""
     import os
-    from ..graph.geo import vecio
+    from ..geo import vecio
     from . import remote_clip
     try:
         size = os.path.getsize(made.path)
@@ -2009,7 +2009,7 @@ def _read_prepared(made, url: str, cap: int, m: dict | None = None) -> tuple[byt
 
 def _stage_vector(rec: dict, prepared: dict) -> dict:
     import os
-    from ..graph.geo import vectors
+    from ..geo import vectors
     m = rec["manifest"]
     layer, cid = m["layer"], rec["contribution_id"]
     dest = vectors._dir() / f"staged-{cid}.geojson"
@@ -2065,7 +2065,7 @@ def _stage_vector(rec: dict, prepared: dict) -> dict:
 
 def _land_vector(rec: dict) -> dict:
     import os
-    from ..graph.geo import vectors
+    from ..geo import vectors
     m, preview = rec["manifest"], rec["preview"]
     layer = m["layer"]
     src = vectors.master_path(preview["entry"])
@@ -2088,7 +2088,7 @@ def _land_vector(rec: dict) -> dict:
 
 def _retire_vector(rec: dict) -> dict:
     from pathlib import Path
-    from ..graph.geo import vectors
+    from ..geo import vectors
     preview = rec.get("preview") or {}
     layer = preview.get("layer", "")
     _ensure_staged_vectors_loaded()
@@ -2150,7 +2150,7 @@ def _amend_target(layer: str):
             except Exception:
                 row["units"] = None
             return "raster", row
-    from ..graph.geo import vectors
+    from ..geo import vectors
     entry = vectors.landed().get(layer)
     if entry:
         return "vector", dict(entry)
@@ -2310,7 +2310,7 @@ def _land_amend(rec: dict) -> dict:
             catalog_io.write_text(sp, "# Contributed raster contracts — machine-owned.\n"
                                   + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
     else:
-        from ..graph.geo import vectors
+        from ..geo import vectors
         entry = vectors.landed().get(layer)
         if entry is None:
             raise Declined(f"{layer!r} is no longer a landed vector layer — nothing to correct")
@@ -2444,7 +2444,7 @@ def _unland_raster(rec: dict) -> dict:
     """A landed layer leaves the catalog and its declared contract; a land-cover year
     leaves its stack, and a stack with no year left leaves with it — so it is no
     longer a stack any pack can choose. The file moves aside, kept for replay."""
-    from ..graph.geo import tiffs
+    from ..geo import tiffs
     from . import removal
     layer = (rec.get("manifest") or {}).get("layer")
     cat = tiffs._base()                          # every landed row, whoever asks
@@ -2463,7 +2463,7 @@ def _unland_raster(rec: dict) -> dict:
 
 def _unland_vector(rec: dict) -> dict:
     from pathlib import Path
-    from ..graph.geo import vectors
+    from ..geo import vectors
     from . import removal
     layer = (rec.get("manifest") or {}).get("layer")
     entry = vectors.landed().get(layer)
@@ -2577,7 +2577,7 @@ def _unland_amend(rec: dict) -> dict:
             catalog_io.write_text(sp, "# Contributed raster contracts — machine-owned.\n"
                                   + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
     else:
-        from ..graph.geo import vectors
+        from ..geo import vectors
         vectors.register(layer, undone(vectors.landed()[layer]))
     return {"removed": True, "layer": layer, "restored": restore,
             **({"left_as_corrected_later": kept} if kept else {}), "note": removal._HISTORY}
@@ -3210,7 +3210,7 @@ def _preview_raster(m: dict, prepared: dict) -> dict:
     import numpy as np
     import rasterio
     from rasterio.windows import Window
-    from ..graph.geo import stacks
+    from ..geo import stacks
     from . import rasters
     path = prepared["tmp"]
     obs = prepared.get("observed") or {}
@@ -3264,7 +3264,7 @@ def _preview_vector(m: dict, prepared: dict) -> dict:
     import json
     import os
     from shapely.geometry import shape
-    from ..graph.geo import vectors
+    from ..geo import vectors
     obs = prepared["observed"]
     out = {"layer": m["layer"], "bytes": os.path.getsize(prepared["tmp"]), "stored_as": "GeoJSON",
            "features": obs["features"], "geometry": obs.get("geometry"), "extent": obs["bbox"],
@@ -3332,7 +3332,7 @@ def _landed_state(rec: dict) -> dict:
             return {"live": bool(row), "why": None if row else
                     f"no registry row named {ds!r} — the landing file is missing or unreadable"}
         if kind == "raster":
-            from ..graph.geo import tiffs
+            from ..geo import tiffs
             layer = m.get("layer")
             cat = tiffs._base()                  # served or not does not depend on who asks
             return {"live": layer in cat, "why": None if layer in cat else
@@ -3340,7 +3340,7 @@ def _landed_state(rec: dict) -> dict:
         if kind == "vector":
             # Served = registered AND its master file is there and reads as GeoJSON;
             # every pack clips from that file, so a row without it serves nothing.
-            from ..graph.geo import vectors
+            from ..geo import vectors
             layer = m.get("layer")
             entry = vectors.landed().get(layer)
             if not entry:
@@ -3356,7 +3356,7 @@ def _landed_state(rec: dict) -> dict:
             return {"live": ok, "why": None if ok else
                     f"{layer!r} is registered but its file is not GeoJSON"}
         if kind == "weights":
-            from ..graph.geo import combine
+            from ..geo import combine
             adj = combine.adjustment_for("hazard_" + str(m.get("hazard") or ""))
             return {"live": bool(adj), "why": None if adj else
                     "no adjusted block is in force for this hazard"}
