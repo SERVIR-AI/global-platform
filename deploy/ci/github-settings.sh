@@ -19,6 +19,8 @@
 #      must be up to date, history is linear, no force pushes, no deletion.
 #      Repository admins may bypass, so a one-person day is never blocked by the
 #      gate meant for a team.
+#   5. the head branch of a merged pull request is deleted, so merged branches do not
+#      pile up beside the open ones
 set -euo pipefail
 
 # gh pages its output through $PAGER when run from a terminal; an editor-style pager opens
@@ -92,5 +94,8 @@ else
   printf '%s' "${ruleset}" | gh api -X POST "repos/${REPO}/rulesets" --input - --jq '{id, name, enforcement}'
 fi
 
+say "5. merged pull requests: the head branch is deleted"
+gh api -X PATCH "repos/${REPO}" -F delete_branch_on_merge=true --jq '{delete_branch_on_merge}'
+
 say "done: ${REPO}"
-gh api "repos/${REPO}" --jq '{default_branch, security_and_analysis}'
+gh api "repos/${REPO}" --jq '{default_branch, delete_branch_on_merge, security_and_analysis}'
