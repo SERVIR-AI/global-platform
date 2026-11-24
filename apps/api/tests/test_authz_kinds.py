@@ -141,7 +141,7 @@ def test_a_hub_document_is_searched_by_its_hub_only(doc_env, log):
     keep its contribution_id (contrib/staging._land_document)."""
     from fastapi import HTTPException
     from app.api.routes import rag as rag_route
-    from app.food_security import routes as fs_routes
+    from app.packs.food_security import routes as fs_routes
     up = _submit("document", {"pack": "food-security", "url": doc_env, "source": "NOAA CPC",
                               "title": "ENSO Diagnostic Discussion Sep 2026", "pub_date": "2026-09",
                               "temporal": "forecast", "validation": "single-agency",

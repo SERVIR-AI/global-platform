@@ -21,9 +21,9 @@ import re
 
 from shapely.geometry import shape
 
-from ..geo import ingest, layer_values, rasterstats, schema, stacks, tiffs, verify
-from ..geo import vectors as geovectors
-from ..rag import filters as _rag_filters
+from ...geo import ingest, layer_values, rasterstats, schema, stacks, tiffs, verify
+from ...geo import vectors as geovectors
+from ...rag import filters as _rag_filters
 
 SECTIONS = (
     "## What the maps show",
@@ -686,7 +686,7 @@ STANDING_GAPS = (
 # ---------------------------------------------------------------------- viz
 
 def _viz(aoi, name, layer_key, raster_path, legend_entries, label, caption, metric, outside):
-    from ..geo import viz as geoviz
+    from ...geo import viz as geoviz
     aoi_feature, bounds = geoviz._aoi_feature(aoi)
     slug = os.path.basename(os.path.dirname(aoi["admin"]))
     return {"place": name, "hazard": layer_key, "layer": None, "layer_kind": "categorical",
@@ -751,7 +751,7 @@ def _area_only(aoi, boundary, how, name, place, why, trace):
 
 def gather_land_cover_evidence(target: dict, focus: str, trace: list,
                                extras: dict) -> tuple[list, list, dict]:
-    from ..config import get_settings
+    from ...config import get_settings
     place = str(target.get("place") or "").strip()
     measures = _measures_asked(extras)
     year = _year(target.get("year")) if target.get("year") not in (None, "") else None
@@ -929,7 +929,7 @@ def gather_land_cover_evidence(target: dict, focus: str, trace: list,
         npz = os.path.join(str(get_settings().cache_dir), "vectors", str(spec.get("derived") or ""))
         if not spec.get("derived") or not os.path.exists(npz):
             gaps.append(f"{spec.get('title', pid)} is registered for this stack but not built on "
-                        "this server (python -m app.land_cover.fire build)")
+                        "this server (python -m app.packs.land_cover.fire build)")
             continue
         from . import fire
         q = fire.query(npz, boundary, legend)
@@ -1096,8 +1096,8 @@ def _library_hits(name, focus, labels, trace, gaps, k=3, countries=()):
     unreadable library is a declared gap, never a failure. A document that declares
     its countries is cited only for an area in one of them — a Gulf of Nicoya report
     was being cited in Gulf of Guayaquil answers. Returns (corpus, hits)."""
-    from ..llm import MissingAPIKey
-    from ..rag.store import Corpus, CorpusError
+    from ...llm import MissingAPIKey
+    from ...rag.store import Corpus, CorpusError
     try:
         corpus = Corpus(PACK_ID)
     except (CorpusError, MissingAPIKey) as exc:
@@ -1160,7 +1160,7 @@ _looks_like_references = _rag_filters.looks_like_references
 
 
 def _document_citation(n, h, corpus):
-    from ..contrib import staging
+    from ...contrib import staging
     m = h.get("metadata") or {}
     return {"n": n, "kind": "document", "retrieval": "archived-document",
             "source": m.get("source"), "title": m.get("title"),
@@ -1183,7 +1183,7 @@ def _scope_miss(spec, countries, boundary):
     why this area is not in it). One that declares countries or a bbox [w, s, e, n]
     is read only for an area in one of those countries and inside that box; one that
     declares neither is global. The rule is every pack's (mcp.feeds.scope_miss)."""
-    from ..mcp import feeds
+    from ...mcp import feeds
     return feeds.scope_miss(spec, countries, boundary.bounds if boundary is not None else None)
 
 
@@ -1201,8 +1201,8 @@ def _bound_tables(countries, boundary, gaps, trace):
     where it speaks. A Gulf of Nicoya soil-carbon factor was being multiplied into
     Ecuador and Brazil. A factor table scoped elsewhere is still read, so the caller
     can say so where its classes are this legend's."""
-    from ..contrib import staging
-    from ..mcp import feeds, registry
+    from ...contrib import staging
+    from ...mcp import feeds, registry
     rows = {k: v for k, v in registry.visible_feeds().items()
             if v.get("pack") == PACK_ID and v.get("status") == "available"}
     try:
@@ -1552,8 +1552,8 @@ def _default_detail_from_areas(st_a, st_b, legend):
 def manifest() -> dict:
     """What the land-cover pack ships and what it does not — real state where it
     can be read, declared gaps in one place."""
-    from ..config import get_settings
-    from ..mcp.packs import corpus_state
+    from ...config import get_settings
+    from ...mcp.packs import corpus_state
     sources, points = {}, {}
     for sid, row in landcover_stacks().items():
         inst = stacks.installed(sid)
@@ -1668,11 +1668,11 @@ def synthesize(question: str, provider: str | None = None, model: str | None = N
     risk composition, so compose.run persists it generically."""
     import json as _json
 
-    from ..config import get_settings
+    from ...config import get_settings
     from ..food_security import synthesis as fs
-    from ..gate import grounded
-    from ..llm import build_client, default_model
-    from ..mcp import packs as mcp_packs
+    from ...gate import grounded
+    from ...llm import build_client, default_model
+    from ...mcp import packs as mcp_packs
 
     settings = get_settings()
     provider = provider or settings.default_provider

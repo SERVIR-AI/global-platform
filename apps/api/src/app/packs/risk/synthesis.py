@@ -18,8 +18,8 @@ from __future__ import annotations
 import os
 import re
 
-from ..geo import (combine, ingest, layer_values, rasterstats, schema,
-                   store as geostore, tiffs, viz)
+from ...geo import (combine, ingest, layer_values, rasterstats, schema,
+                    store as geostore, tiffs, viz)
 
 SECTIONS = (
     "## What the numbers show",
@@ -35,7 +35,7 @@ def _asset_layers() -> tuple:
     """Built-in point assets plus every contributed POINT layer the caller may see.
     A contributed line or polygon layer reaches a risk answer through the seam's
     vector step (assemble_pack(..., vectors=[...])), not as a counted asset."""
-    from ..geo import vectors
+    from ...geo import vectors
     return _ASSETS + tuple(l for l, e in vectors.visible().items()
                            if l not in _ASSETS and vectors.family(e) == "points")
 
@@ -125,8 +125,8 @@ def _document_hits(place, hz, focus, trace, gaps, country=None):
     declared gap, never a failure — the computed numbers still stand on their own. A
     document that declares other countries than the area's is passed over (the next
     one down takes its place) and the gap says which."""
-    from ..llm import MissingAPIKey
-    from ..rag.store import Corpus, CorpusError
+    from ...llm import MissingAPIKey
+    from ...rag.store import Corpus, CorpusError
     hazard = re.sub(r"_rp\d+$", "", hz.removeprefix("hazard_"))
     try:
         corpus = Corpus(RISK_CORPUS)
@@ -176,7 +176,7 @@ def _l2_coverage_gap(hz, risk_weights) -> list:
     recipe through the gate: a cited gap the pack's own method contradicted."""
     if not risk_weights:
         return []                      # no Layer-2: _l2_risk already declared why
-    from ..geo import combine
+    from ...geo import combine
     covered, absent, outside = combine.families_covered(risk_weights)
     n_fam = len(combine.indicator_families())
     if combine.staged_weights_row(hz):
@@ -198,7 +198,7 @@ def _weights_provenance(hz) -> str:
     """Whose weights these are. A hub-adjusted recipe and the platform's defaults are
     different claims, and a brief that reads the same either way is hiding the one
     fact a reviewer approved."""
-    from ..geo import combine
+    from ...geo import combine
     # A STAGED proposal is in force for this caller and nobody else. Say so first
     # and loudly: these numbers were computed with weights no reviewer has seen,
     # and a brief that describes the approved recipe instead is asserting something
@@ -262,8 +262,8 @@ def _pack_feeds(place, trace, gaps, hazard=None, country=None, bounds=None):
     be landed, be queryable on its own, and still never reach a risk answer. A feed
     says which pack may cite it; this reads the ones that say risk.
     """
-    from ..contrib import staging
-    from ..mcp import feeds, registry
+    from ...contrib import staging
+    from ...mcp import feeds, registry
     rows = {k: v for k, v in registry.visible_feeds().items()
             if v.get("pack") == "risk" and v.get("status") == "available"}
     try:                      # a contributor's own staged feed previews here too
@@ -341,8 +341,8 @@ def _outside_coverage(hz: str, aoi: dict, place: str) -> str | None:
 
     from shapely.geometry import shape
 
-    from ..geo import vectors as _vectors
-    from ..mcp import packs as _packs
+    from ...geo import vectors as _vectors
+    from ...mcp import packs as _packs
     if aoi.get(hz) or os.path.exists(os.path.join(os.path.dirname(aoi["admin"]), f"{hz}.tif")):
         return None                        # already clipped here: the map reaches it
     cov = _packs.risk_coverage()
@@ -431,8 +431,8 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     # A demonstration layer can still be named explicitly, and then the brief has
     # to lead with what it is. A synthetic raster produces a complete, cited,
     # gate-eligible answer that looks exactly like a real one.
-    from ..geo import tiffs as _tiffs
-    from ..mcp.packs import _is_synthetic
+    from ...geo import tiffs as _tiffs
+    from ...mcp.packs import _is_synthetic
     if _is_synthetic((_tiffs.catalog() or {}).get(hz) or {}):
         gaps.insert(0, (
             f"{hz} is a SYNTHETIC DEMONSTRATION LAYER, not a scientific product — it "
@@ -450,7 +450,7 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     counts: dict = {}
 
     # --- what has been published about this place and hazard ------------------
-    from ..contrib import staging
+    from ...contrib import staging
     for h in doc_hits:
         m = h["metadata"]
         n += 1
@@ -539,7 +539,7 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
         if na:
             # The layer does not cover this place. A gap, in words — not a count,
             # and above all not a zero.
-            from ..geo import vectors as _vectors
+            from ...geo import vectors as _vectors
             title = (_vectors.visible().get(layer) or {}).get("title") or layer
             gaps.append(f"{title} ({layer}) was not counted for {aoi.get('name', place)}: "
                         f"{na['reason']}. This is not a zero: the layer does not cover the place.")
@@ -557,7 +557,7 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
         # The places behind the count. A count of "8 of 8 centres" that cannot
         # name a single centre is a number a planner cannot act on; the names
         # and coordinates were on the platform all along.
-        from ..geo import vectors as _vectors
+        from ...geo import vectors as _vectors
         _ventry = _vectors.visible().get(layer) or {}
         assets[layer] = _asset_places(aoi, layer, hz_sev, min_sev,
                                       _ventry.get("name_field"), total, r["count"])
@@ -578,7 +578,7 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
         }
         # A contributed point layer carries ITS provenance, not OSM's: who keeps
         # the list, when it was updated, and — until approved — who staged it.
-        from ..geo import vectors as _vectors
+        from ...geo import vectors as _vectors
         ventry = _vectors.visible().get(layer)
         if ventry:
             cit["source"] = ventry.get("source") or cit["source"]
@@ -611,7 +611,7 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     # The class layers say how dense a cell is; a population_* layer says how many
     # people are in it. One citation per count grid the caller may see, and a
     # declared gap — never a silent zero — when it cannot be computed.
-    from ..geo import tiffs as _tiffs
+    from ...geo import tiffs as _tiffs
     for layer, ent in _tiffs.catalog().items():
         if not layer.startswith("population_"):
             continue
@@ -1191,11 +1191,11 @@ def synthesize(question: str, provider: str | None = None,
     gather -> platform-LLM draft -> groundedness gate (retry x1). Returns the
     synthesize-shaped dict compose.run persists, plus required_sections/pack/
     target so the generic persistence stops assuming food-security."""
-    from ..config import get_settings
+    from ...config import get_settings
     from ..food_security import synthesis as fs
-    from ..gate import grounded
-    from ..llm import build_client, default_model
-    from ..mcp import packs as mcp_packs
+    from ...gate import grounded
+    from ...llm import build_client, default_model
+    from ...mcp import packs as mcp_packs
 
     settings = get_settings()
     provider = provider or settings.default_provider

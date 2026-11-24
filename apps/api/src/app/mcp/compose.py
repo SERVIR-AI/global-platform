@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 
-from ..food_security import synthesis
+from ..packs.food_security import synthesis
 from ..gate import record
 from ..llm import MissingAPIKey
 from ..rag.store import CorpusError
@@ -32,7 +32,7 @@ def _run_risk_brief(question, override, override_country, override_crop,
                     provider, model) -> dict:
     """Runner for `risk.brief`. The calendar override params are food-security
     concepts and are ignored here — a risk target has no crop calendar."""
-    from ..risk import synthesis as risk_synthesis
+    from ..packs.risk import synthesis as risk_synthesis
     return risk_synthesis.synthesize(question, provider=provider, model=model)
 
 
@@ -43,7 +43,7 @@ def _run_landcover_brief(question, override, override_country, override_crop,
                          provider, model) -> dict:
     """Runner for `landcover.brief`; the calendar params are food-security concepts
     and are ignored here."""
-    from ..land_cover import synthesis as lc_synthesis
+    from ..packs.land_cover import synthesis as lc_synthesis
     return lc_synthesis.synthesize(question, provider=provider, model=model)
 
 

@@ -1,6 +1,6 @@
 """coastal-tides: the runbook's worked domain-pack example, complete.
 
-Drop this file into apps/api/src/app/packs_ext/ , restart the server, and the
+Drop this file into apps/api/src/app/packs/packs_ext/ , restart the server, and the
 pack registers itself. Validate first:
     uv run --project apps/api python -m app.contrib.cli doctor coastal-tides
 """

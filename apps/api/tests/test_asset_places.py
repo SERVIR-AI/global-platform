@@ -8,7 +8,7 @@ import pytest
 from app.gate import publish
 from app.geo import operations, vectors
 from app.mcp import assemble, store
-from app.risk import synthesis as risk
+from app.packs.risk import synthesis as risk
 
 
 def _write(tmp_path, name, feats):

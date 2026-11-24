@@ -41,7 +41,7 @@ from app.contrib import identity, prepare, staging
 from app.contrib.prepare import _layer_reader as _features, rasterise, recode
 from app.geo import ingest, schema, tiffs, vectors
 from app.mcp import assemble, packs, registry, store
-from app.risk import synthesis as risk
+from app.packs.risk import synthesis as risk
 
 OWNER = identity.Caller("user_owner", "gis@hub.test", False, "bound")
 B = (103.0, 13.0, 103.02, 13.02)              # the risk world: 20 x 20 cells of 0.001 deg

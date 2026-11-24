@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from ..food_security import calendar as fs_calendar
+from ..packs.food_security import calendar as fs_calendar
 
 
 def _valid_override(override: list[dict]) -> bool:

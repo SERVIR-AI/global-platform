@@ -290,7 +290,7 @@ def test_series_id_is_the_feeds_query_dataset_key(log):
     "full history" chip calls feeds_query(series.id). Rename a feed key without
     this test and the button breaks silently, only at click time, only in a host
     that proxies tool calls."""
-    from app.food_security import synthesis
+    from app.packs.food_security import synthesis
     from app.mcp import registry
     sr = synthesis._series("enso_oni", [
         {"season": "MJJ", "year": 2026, "value": 1.39, "classification": "moderate El Nino"},

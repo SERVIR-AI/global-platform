@@ -15,7 +15,7 @@ pytestmark = pytest.mark.skipif(
     or not get_settings().anthropic_api_key or not get_settings().openai_api_key
     or not (get_settings().cache_dir / "rag" / "food-security").exists(),
     reason="set SYNTHESIS_LIVE=1 (needs Anthropic + OpenAI keys AND the seeded corpus: "
-           "python -m app.food_security.seed_corpus)")
+           "python -m app.packs.food_security.seed_corpus)")
 
 
 def test_live_el_nino_brief(log):

@@ -7,7 +7,7 @@ for one layer, so the shapefile is read ONCE, with numpy alone, into a compact
 producer's own lineage note). Questions then cost milliseconds: a bounding-box
 pre-filter and shapely's contains_xy inside the boundary.
 
-    python -m app.land_cover.fire build            # every stack's registered point set
+    python -m app.packs.land_cover.fire build            # every stack's registered point set
 """
 from __future__ import annotations
 
@@ -161,8 +161,8 @@ def query(npz_path, boundary, legend):
 
 
 def _main(argv):
-    from ..config import get_settings
-    from ..geo import stacks, tiffs
+    from ...config import get_settings
+    from ...geo import stacks, tiffs
     if not argv or argv[0] != "build":
         print(__doc__)
         return 2

@@ -70,12 +70,12 @@ SPEC["gather"] = gather
 
 def new_pack(pack_id: str, display_name: str | None = None,
              target_keys: tuple = ("place",), dest_dir: Path | None = None) -> dict:
-    """Write app/packs_ext/<id>.py from the template. Refuses to overwrite."""
+    """Write app/packs/packs_ext/<id>.py from the template. Refuses to overwrite."""
     safe = pack_id.replace("-", "_")
     if not safe.replace("_", "").isalnum():
         return {"status": "declined",
                 "failures": [f"pack id {pack_id!r} must be a simple identifier"]}
-    base = Path(dest_dir) if dest_dir else Path(__file__).resolve().parents[1] / "packs_ext"
+    base = Path(dest_dir) if dest_dir else Path(__file__).resolve().parents[1] / "packs" / "packs_ext"
     dest = base / f"{safe}.py"
     if dest.exists():
         return {"status": "declined",

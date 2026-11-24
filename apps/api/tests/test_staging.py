@@ -218,7 +218,7 @@ def test_ingest_failure_after_validation_marks_the_record_failed(env, monkeypatc
 
 def test_archive_route_honours_visibility_and_retired_previews(env, log):
     from fastapi import HTTPException
-    from app.food_security import routes
+    from app.packs.food_security import routes
     out = staging.submit("document", _manifest(), OWNER)
     doc_id = out["preview"]["doc_id"]
     for caller, allowed in ((OWNER, True), (REVIEWER, True), (OTHER, False)):

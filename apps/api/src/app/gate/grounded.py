@@ -986,7 +986,7 @@ def check_grounded(draft, citations, sections=None, extra_evidence=None,
     """Blocking: sections present, no model-written Sources, citations resolve, every paragraph
     cites, every load-bearing figure (digits, words, a magnitude) traces to the evidence, every
     link is one the pack carries (G13). `sections`: another pack's own contract."""
-    from ..food_security.synthesis import SECTIONS      # the default: that pack's contract
+    from ..packs.food_security.synthesis import SECTIONS      # the default: that pack's contract
     valid = {c["n"] for c in citations}
     used = _cited_numbers(draft)
     phantom = sorted(used - valid)

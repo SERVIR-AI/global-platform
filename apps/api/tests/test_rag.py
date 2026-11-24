@@ -339,7 +339,7 @@ class FakeResp:
 @pytest.fixture
 def fetch_env(rag_env, monkeypatch):
     """Bypass the SSRF host check (tests must not need DNS) and script the fetch."""
-    from app.food_security import routes as fs_routes
+    from app.packs.food_security import routes as fs_routes
     monkeypatch.setattr(fs_routes, "_assert_public_http", lambda url: None)
 
     def scripted(responses):
@@ -446,7 +446,7 @@ def test_ingest_blocks_non_public_urls_without_network():
 
 
 def test_ingest_caps_document_size(fetch_env, monkeypatch):
-    from app.food_security import routes as fs_routes
+    from app.packs.food_security import routes as fs_routes
     client = TestClient(app)
     fetch_env([FakeResp(headers={"Content-Length": str(10 ** 12)})])
     r = client.post("/api/food-security/rag/ingest",

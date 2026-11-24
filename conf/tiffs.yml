@@ -212,7 +212,7 @@ landcover_hkh:
   data_root: landcover/OneDrive_2_10-6-2026.zip
   data_root_env: LANDCOVER_HKH_ROOT
   # Point sets that ride this stack. The shapefile is converted once into a compact
-  # platform-owned file under cache/vectors/ (python -m app.land_cover.fire build);
+  # platform-owned file under cache/vectors/ (python -m app.packs.land_cover.fire build);
   # until then the pack declares the layer as registered but not built.
   points:
     hkh_fire:

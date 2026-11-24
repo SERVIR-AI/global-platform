@@ -72,7 +72,7 @@ have no model of their own.
 A pack is a row in `PACKS` (`apps/api/src/app/mcp/packs.py`): its target, a `gather`
 function and the sections a brief must contain. Everything after `gather` (contributed
 layers, vectors and methods, the gate, receipts) is shared by every pack. A new pack can be
-dropped in as `apps/api/src/app/packs_ext/<id>.py` exporting a `SPEC`.
+dropped in as `apps/api/src/app/packs/packs_ext/<id>.py` exporting a `SPEC`.
 
 ## MCP tools
 
@@ -144,10 +144,11 @@ apps/
 │   │   ├── gate/             the answer gate every pack goes through: the check (grounded.py), verify,
 │   │   │                     publish, record
 │   │   ├── contrib/          contribution gate: kinds, fetch policy, preparation ops, methods, jobs
-│   │   ├── food_security/    food-security pack: gatherer, crop calendar, Crop Monitor, REST routes
-│   │   ├── land_cover/       land-cover pack: gatherer in synthesis.py
-│   │   ├── risk/             risk pack: gatherer in synthesis.py
-│   │   ├── packs_ext/        drop-in packs
+│   │   ├── packs/            the domain packs
+│   │   │   ├── food_security/  food-security pack: gatherer, crop calendar, Crop Monitor, REST routes
+│   │   │   ├── land_cover/   land-cover pack: gatherer in synthesis.py
+│   │   │   ├── risk/         risk pack: gatherer in synthesis.py
+│   │   │   └── packs_ext/    drop-in packs
 │   │   ├── geo/              geo engine: places, rasters, vectors, layer values
 │   │   ├── graph/            the web app's LangGraph chat agent
 │   │   ├── rag/              document libraries and search
@@ -208,7 +209,7 @@ Drive on first use. The food-security document library has to be built once, wit
 embeddings key set:
 
 ```bash
-PYTHONPATH=apps/api/src uv run python -m app.food_security.seed_corpus
+PYTHONPATH=apps/api/src uv run python -m app.packs.food_security.seed_corpus
 ```
 
 ## Test

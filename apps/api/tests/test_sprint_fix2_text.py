@@ -25,7 +25,7 @@ from app.config import get_settings
 from app.contrib import fetch_policy, identity, rasters, staging
 from app.gate import publish
 from app.geo import stacks
-from app.land_cover import synthesis as lc
+from app.packs.land_cover import synthesis as lc
 from app.mcp import app_ui, assemble, fetch, packs, registry, store
 from app.rag import filters as rag_filters
 from app.rag.store import Corpus
@@ -435,7 +435,7 @@ def test_a_shelf_holding_only_a_bibliography_declines_in_words(library):
 def test_a_pack_that_does_not_opt_in_loses_no_passage(library, log):
     """Passing over reference lists is opt-in (land cover, corpus_search): a heuristic that
     misreads a dated table must not silently drop another pack's evidence."""
-    from app.risk import synthesis as risk
+    from app.packs.risk import synthesis as risk
     library(risk.RISK_CORPUS)
     trace, gaps = [], []
     _corpus, hits = risk._document_hits("Nicoya", "hazard_flood", "mangrove carbon Nicoya flood", trace, gaps)

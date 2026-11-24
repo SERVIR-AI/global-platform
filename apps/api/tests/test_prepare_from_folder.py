@@ -35,7 +35,7 @@ from app.contrib import fetch_policy, identity, prepare, staging
 from app.contrib.prepare import _drive, from_folder
 from app.geo import ingest, schema, vecio, vectors
 from app.mcp import assemble, packs, registry, store
-from app.risk import synthesis as risk
+from app.packs.risk import synthesis as risk
 
 OWNER = identity.Caller("user_owner", "gis@hub.test", False, "bound")
 WGS84 = CRS.from_epsg(4326).to_wkt(version="WKT1_ESRI")

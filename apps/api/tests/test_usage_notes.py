@@ -4,7 +4,7 @@
 import pytest
 
 from app.contrib import feedspecs, notes, rasters, sources, tables
-from app.food_security import synthesis as fs
+from app.packs.food_security import synthesis as fs
 from app.mcp import assemble, packs
 
 

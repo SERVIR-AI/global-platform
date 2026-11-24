@@ -11,10 +11,10 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from ..config import get_settings
-from ..gate import grounded
-from ..llm import build_client, default_model
-from ..rag.store import Corpus, source_block
+from ...config import get_settings
+from ...gate import grounded
+from ...llm import build_client, default_model
+from ...rag.store import Corpus, source_block
 from . import calendar as crop_calendar
 from . import cropmonitor
 
@@ -42,7 +42,7 @@ def _parse_system() -> str:
     freeze "El Nino impacts, food security in East/Southern Africa": a hub's own
     Cambodia rice bulletins would have been declined out of scope by the router
     before the library was read."""
-    from ..mcp import registry
+    from ...mcp import registry
     try:
         c = registry.coverage()
     except Exception:
@@ -162,7 +162,7 @@ def _driver_citations(trace):
     on the evidence itself (not only in the system prompt) means it survives into
     the pack and the receipt, where a reader can check it.
     """
-    from ..mcp import feeds, registry     # local: mirrors registry's own cycle guard
+    from ...mcp import feeds, registry     # local: mirrors registry's own cycle guard
 
     def render(records, budget=1800):
         """Feed rows -> evidence prose, shape-driven rather than feed-name-driven.
@@ -191,7 +191,7 @@ def _driver_citations(trace):
     specs = {n: s for n, s in registry.visible_feeds().items()
              if s.get("status") == "available" and s.get("brief_role") == "driver"}
     try:          # a contributor's own STAGED driver previews AS a driver, not as a table
-        from ..contrib import staging
+        from ...contrib import staging
         specs.update({n: s for n, s in staging.visible_staged_feeds_for_pack("food-security").items()
                       if s.get("brief_role") == "driver" and n not in specs})
     except Exception:
@@ -289,7 +289,7 @@ def _has_evidence(citations: list, country: str | None = None) -> bool:
     "No evidence available" over a country-matching table. A pack source that
     declares no countries is global as far as the platform knows, and a global
     table can no more carry a brief about one country than an ocean index can."""
-    from ..geo import vectors as _vectors
+    from ...geo import vectors as _vectors
     for c in citations:
         if c.get("kind") not in _CONTEXT_ONLY:
             return True
@@ -308,8 +308,8 @@ def _pack_bound_sources(trace, gaps, country=None):
     reads its own pack-bound sources; this is the same path, which food-security
     simply never had.
     """
-    from ..contrib import staging
-    from ..mcp import feeds, registry
+    from ...contrib import staging
+    from ...mcp import feeds, registry
     rows = {n: sp for n, sp in registry.visible_feeds().items()
             if sp.get("status") == "available"
             and sp.get("pack", "food-security") == "food-security"
@@ -494,7 +494,7 @@ def gather_evidence(parsed, trace, calendar_override=None, calendar_target=(None
                 f"failure modes differ by crop. Do not read any of it as evidence "
                 f"about {crop}."))
 
-    from ..contrib import staging
+    from ...contrib import staging
     citations = []
     for h in forecast_hits + retro_hits:
         m = h["metadata"]
@@ -627,7 +627,7 @@ def synthesize(question, provider=None, model=None, calendar=None,
     # AFTER the evidence bar so it can never carry a brief alone. Observed: the
     # model honestly wrote "there are no identified gaps..." and the gate blocked
     # it as uncited, costing a retry.
-    from ..mcp import packs as mcp_packs
+    from ...mcp import packs as mcp_packs
     citations = [*citations, mcp_packs.gaps_citation(citations, gaps)]
 
     asked_on = datetime.now(timezone.utc).strftime("%B %Y")

@@ -21,7 +21,7 @@ from app.contrib import fetch_policy, identity, staging
 from app.gate import publish, record
 from app.geo import ingest, layer_values, vectors
 from app.mcp import assemble, packs, store
-from app.risk import synthesis as risk
+from app.packs.risk import synthesis as risk
 
 from test_landcover_pack import lc_env  # noqa: F401  (fixture reuse)
 

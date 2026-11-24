@@ -39,7 +39,7 @@ from app.contrib import fetch_policy, identity, prepare, staging
 from app.contrib.prepare import api_points, clip, from_folder
 from app.geo import ingest, schema, tiffs, vecio, vectors
 from app.mcp import assemble, registry, store
-from app.risk import synthesis as risk
+from app.packs.risk import synthesis as risk
 
 from test_prepare_api_points import API_HOSTS, OBIS_Q, QUERY, _Host as _ApiHost, _handler as _api_handler
 from test_prepare_clip import (GULF, RISK_POLY, _FeatureServer, _GeoServer, _admin, _gpkg,

@@ -847,7 +847,7 @@ def _where_to_test(name: str, bbox, arg: str, family: str | None = None) -> str:
         pass
     try:
         from ..geo import stacks as _stacks
-        from ..land_cover.synthesis import landcover_stacks
+        from ..packs.land_cover.synthesis import landcover_stacks
         for sid, row in landcover_stacks().items():
             ext = row.get("extent") or {}
             if _inside(box, ext.get("lon"), ext.get("lat")):

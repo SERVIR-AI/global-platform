@@ -32,7 +32,7 @@ from app.config import get_settings
 from app.contrib import fetch_policy, identity, jobs, staging
 from app.geo import ingest, schema, tiffs
 from app.mcp import assemble, feeds, packs, registry, store
-from app.risk import synthesis as risk
+from app.packs.risk import synthesis as risk
 
 OWNER = identity.Caller("user_owner", "gis@hub.test", False, "bound")
 OTHER = identity.Caller("user_other", "analyst@hub.test", False, "bound")

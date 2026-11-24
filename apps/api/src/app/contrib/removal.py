@@ -137,7 +137,7 @@ def remove_raster(layer: str) -> dict:
 def remove_pack(pack_id: str) -> dict:
     """Point at the file — a contributed pack IS its module; built-ins refuse."""
     from ..mcp import packs
-    ext = Path(__file__).resolve().parents[1] / "packs_ext"
+    ext = Path(__file__).resolve().parents[1] / "packs" / "packs_ext"
     mod = ext / f"{pack_id.replace('-', '_')}.py"
     if mod.is_file():
         mod.unlink()

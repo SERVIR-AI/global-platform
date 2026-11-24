@@ -186,7 +186,7 @@ def test_every_other_feed_declines_a_param_it_does_not_take(hub, log):
 def test_a_feed_declares_its_bbox_like_a_table_and_the_pack_reads_it(hub, auto, log):
     """A Gulf of Nicoya checklist could declare only countries, so it was cited in a
     Térraba-Sierpe answer: "865 of its 865 row(s) are about Terraba-Sierpe"."""
-    from app.land_cover.synthesis import _scope_miss
+    from app.packs.land_cover.synthesis import _scope_miss
     hub["api"][OBIS_URL] = OBIS
     out = staging.submit("feed", _feed("test_nicoya_checklist", OBIS_URL, OBIS_FIELDS,
                                        countries="Costa Rica", bbox=NICOYA), OWNER)
@@ -373,7 +373,7 @@ def _change_map(lands):
 def test_a_withdrawn_stack_year_leaves_the_catalog_and_the_default_stack_choice(lands, log):
     """A change map contributed as a land-cover year became the default stack for its
     area; once approved, nothing over MCP could take it down."""
-    from app.land_cover import synthesis as lc
+    from app.packs.land_cover import synthesis as lc
     out = _change_map(lands)
     assert out["status"] == "approved", out
     assert "landcover_toychange" in lc.landcover_stacks()
@@ -495,7 +495,7 @@ def test_every_staged_kind_carries_the_marker_and_the_landed_one_drops_it(hub, l
     for row in (pts, tbl, meta):
         assert row["review"].startswith("UNREVIEWED PREVIEW — staged contribution")
     assert "held for a human reviewer because its text holds 2 e-mail addresses" in meta["review"]
-    from app.land_cover.synthesis import _document_citation
+    from app.packs.land_cover.synthesis import _document_citation
     assert _document_citation(1, {"metadata": meta}, None)["review_status"].startswith("UNREVIEWED PREVIEW")
     # a row staged before the marker existed is marked on the way out
     staging.STAGED_FEEDS["test_preview_tbl"].pop("review")
