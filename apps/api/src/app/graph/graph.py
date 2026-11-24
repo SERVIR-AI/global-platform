@@ -375,8 +375,7 @@ def fetch(state: State) -> dict:
                 rasters_clipped.append(layer)
         c = aoi.get("counts") or {}
         trace = [f"boundary → {aoi['name']}  [{aoi.get('how') or 'cached AOI'}]",
-                 f"exposure (OSM) → roads {c.get('roads', '?')} · hospitals {c.get('hospitals', '?')} · "
-                 f"schools {c.get('schools', '?')} · buildings {c.get('buildings', '?')}"]
+                 "exposure (OSM) → " + " · ".join(f"{ly} {c.get(ly, '?')}" for ly in ingest.ASSET_LAYERS)]
         if state.get("tiffs"):
             bits = [f"{l} (computed: Hazard × Vulnerability)" if l.startswith("risk_") and l.endswith("_l2")
                     else f"{l} clipped" for l in state["tiffs"]]

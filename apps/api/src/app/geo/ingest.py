@@ -21,7 +21,7 @@ from rasterio.windows import from_bounds
 from shapely.geometry import LineString, Point, box, mapping, shape
 
 from ..config import get_settings
-from . import drive_tifs, tiffs, vectors
+from . import drive_tifs, registry, tiffs, vectors
 
 HEADERS = {"User-Agent": "grp-mvp/0.1 (disaster-risk research prototype)"}
 NOMINATIM = "https://nominatim.openstreetmap.org"
@@ -49,7 +49,8 @@ NEAR_KM = 100.0           # contributed areas offered beside an approximate box 
 # Bump when place resolution changes meaning. Cached areas of interest stamped with an
 # older value are re-resolved on next use rather than served from a stale boundary.
 RESOLVER_VERSION = 8
-ASSET_LAYERS = ("roads", "hospitals", "schools", "buildings")
+# Fetched per area: the counted layers, and roads, which are measured, not counted.
+ASSET_LAYERS = ("roads", *registry.COUNTABLE)
 OVERPASS_TIMEOUT = 60          # client HTTP timeout (was 180) — fail over a stalled mirror fast
 OVERPASS_SERVER_TIMEOUT = 55   # Overpass server-side [timeout:] budget per query
 
@@ -1509,10 +1510,7 @@ def _bundle(adir, info, skip=()):
             "approximate": bool(info.get("approximate")),
             "nearby_contributed": info.get("nearby_contributed") or [],
             "admin": os.path.join(adir, "admin.geojson"),
-            "roads": os.path.join(adir, "roads.geojson"),
-            "hospitals": os.path.join(adir, "hospitals.geojson"),
-            "schools": os.path.join(adir, "schools.geojson"),
-            "buildings": os.path.join(adir, "buildings.geojson"),
+            **{ly: os.path.join(adir, f"{ly}.geojson") for ly in ASSET_LAYERS},
             **{ly: os.path.join(adir, f"{ly}.geojson") for ly in _contributed_layers()
                if ly not in skip}}
 

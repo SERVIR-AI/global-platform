@@ -204,12 +204,12 @@ def _in_risk_region(entry: dict, cov: dict) -> bool:
 
 def _risk_builtin_assets() -> list[str]:
     """People when a count grid is landed, then the built-in OSM classes."""
-    from ..geo import tiffs
+    from ..geo import ingest, tiffs
     try:
         people = any(k.startswith("population_") for k in tiffs.catalog())
     except Exception:
         people = False
-    return (["people"] if people else []) + ["roads", "schools", "hospitals", "buildings"]
+    return (["people"] if people else []) + list(ingest.ASSET_LAYERS)
 
 
 @budget.once
