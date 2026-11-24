@@ -51,7 +51,7 @@ async def _caller(request: Request) -> identity.Caller:
             if not sub:
                 raise HTTPException(status_code=401, detail="token carries no subject",
                                     headers=_challenge())
-            cid, label = str(sub), str(claims.get("email") or sub)
+            cid, label = identity.labelled(str(sub), claims)
             return identity.Caller(cid, label, identity._is_reviewer(cid, label, "token"),
                                    "token")
     if settings.grp_oauth_enabled or settings.grp_allow_anonymous:

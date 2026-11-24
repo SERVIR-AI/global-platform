@@ -2,11 +2,10 @@
 reads.
 
 Resolution order:
-  1. The OAuth access token the MCP transport verified: id = the token subject
-     (AuthKit user id), label = the `email` claim when the token carries one,
-     else the id. Email is NOT guaranteed in an AuthKit access token, so the id
-     is what reviewer lists and ownership checks are keyed on; the label is for
-     humans.
+  1. The OAuth access token the MCP transport verified: id = label = the token
+     subject (AuthKit user id). Every record carries the label and records reach
+     public answers, so a name or e-mail the token carries is held apart
+     (people.py) and shown only to the people who review a contribution.
   2. OAuth off on a DEV BOX (not an open deployment, see GRP_ALLOW_ANONYMOUS):
      the `X-GRP-Dev-Identity` request header, so two local sandboxes can play
      contributor and reviewer. Never honoured when OAuth is on or the deployment
@@ -119,7 +118,15 @@ def _from_token() -> tuple[str, str] | None:
     sub = claims.get("sub") or getattr(tok, "subject", None) or getattr(tok, "client_id", None)
     if not sub:
         return None
-    return str(sub), str(claims.get("email") or sub)
+    return labelled(str(sub), claims)
+
+
+def labelled(sub: str, claims: dict) -> tuple[str, str]:
+    """(id, label) for a verified token's subject: both the id. The name and e-mail it
+    carries are held apart for reviewers (people.py)."""
+    from . import people
+    people.seen(sub, claims.get("email"), claims.get("name"))
+    return sub, sub
 
 
 def _from_dev_header() -> str | None:
@@ -143,7 +150,9 @@ def _is_reviewer(cid: str, label: str, source: str) -> bool:
             return False                  # fail closed: no store, no reviewer
     listed = {r.strip().lower() for r in get_settings().grp_reviewers if r.strip()}
     if listed:
-        return cid.lower() in listed or label.lower() in listed
+        from . import people
+        email = people.held_email(cid)       # an e-mail entry matches the verified token's
+        return cid.lower() in listed or label.lower() in listed or bool(email and email.lower() in listed)
     return source == "local-dev"
 
 
