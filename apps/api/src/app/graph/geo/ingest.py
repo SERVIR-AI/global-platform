@@ -1369,6 +1369,8 @@ def ensure_aoi(place=None, geometry=None, layers=None, name=None, area_cap_km2=N
             emit({"kind": "cache", "what": "contributed_layer", "layer": layer,
                   "not_applicable": na["reason"]})
             continue
+        if vectors.family(entry) != "points":
+            continue        # measured from its master file when a pack asks; nothing reads a clip
         with _lock(dest):
             emit({"kind": "cache", "what": "contributed_layer", "layer": layer,
                   "dest": short_path(dest), "was_cached": os.path.exists(dest)})
@@ -1518,8 +1520,9 @@ def _bundle(adir, info, skip=()):
 
 
 def _contributed_layers():
+    """The contributed layers an area's bundle holds a clip of: the point layers."""
     from . import vectors
-    return list(vectors.visible())
+    return [layer for layer, entry in vectors.visible().items() if vectors.family(entry) == "points"]
 
 
 def hazard_clip(aoi, layer, max_pixels=None):
