@@ -14,6 +14,7 @@ import rasterio
 from . import align as align_mod
 from . import combine as combine_mod
 from . import resolver
+from .store import CLASS_MAX
 
 
 def _metrics(ours, oracle):
@@ -27,8 +28,8 @@ def _metrics(ours, oracle):
     b = oracle[active].astype("int16")
     diff = np.abs(a - b)
     confusion = {}
-    for ours_c in range(6):
-        for orac_c in range(6):
+    for ours_c in range(CLASS_MAX + 1):
+        for orac_c in range(CLASS_MAX + 1):
             c = int(((a == ours_c) & (b == orac_c)).sum())
             if c:
                 confusion[f"ours{ours_c}/oracle{orac_c}"] = c

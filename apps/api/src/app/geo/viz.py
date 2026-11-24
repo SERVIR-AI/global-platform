@@ -28,7 +28,8 @@ def legend_colored(hazard):
     """{class: {label, color}} for `hazard` — server owns the colors. Falls back to a generic
     severity ramp when the layer carries no catalog legend (e.g. a user-uploaded BYOD layer)."""
     labels = tiffs.legend(hazard) if hazard else {}
-    return {s: {"label": labels.get(s, _DEFAULT_LABELS[s]), "color": SEVERITY_COLORS[s]} for s in range(1, 6)}
+    return {s: {"label": labels.get(s, _DEFAULT_LABELS[s]), "color": SEVERITY_COLORS[s]}
+            for s in range(1, store.CLASS_MAX + 1)}
 
 
 def _features(path):
@@ -111,7 +112,7 @@ def _vectorized_hazard(clip_path):
     with rasterio.open(clip_path) as src:
         arr = src.read(1)
         feats = []
-        for cls in range(1, 6):
+        for cls in range(1, store.CLASS_MAX + 1):
             m = (arr == cls).astype("uint8")
             if not m.any():
                 continue

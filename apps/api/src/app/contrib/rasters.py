@@ -32,9 +32,6 @@ _DECLARED_REQUIRED = ("dtype", "valid_min", "valid_max")
 _NAME = re.compile(r"[a-z][a-z0-9_]{2,79}")     # the name becomes a file name and a catalog key
 
 
-CLASS_MAX = 5     # the class contract every reader indexes by: 1..5, 0 = nodata
-
-
 def namespaces() -> dict:
     """{prefix: rule} — every namespace a contributed raster may take, each rule
     carrying its `role`; read from the schema on every call."""

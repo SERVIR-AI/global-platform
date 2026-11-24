@@ -35,7 +35,7 @@ _FLOOD_LINEAGE = "ADPC hazard_flood.tif, derived from JRC GLOFAS v2.1"
 
 # A computed risk grid carries no catalog legend; these are the platform's own
 # class labels for the 1-5 risk scale (the same scale the hub's indicator scheme uses).
-_RISK_LABELS = {1: "Very Low", 2: "Low", 3: "Moderate", 4: "High", 5: "Very High"}
+_RISK_LABELS = {k: v.title() for k, v in viz._DEFAULT_LABELS.items()}
 
 
 def _l2_risk(aoi, hz, trace, gaps):
@@ -313,7 +313,7 @@ def _severity_text(by_severity: dict, legend: dict, noun: str = "class") -> str:
 
 def _series(sid: str, by_severity: dict, legend: dict, unit: str) -> dict | None:
     pts = []
-    for cls in range(1, 6):
+    for cls in range(1, geostore.CLASS_MAX + 1):
         v = (by_severity or {}).get(cls, (by_severity or {}).get(str(cls)))
         pts.append({"t": f"class {cls}", "v": int(v or 0),
                     "c": legend.get(cls, "")})
@@ -1152,7 +1152,7 @@ _PARSE_TOOLS = [{
                 "hazard": {"type": "string",
                            "description": "hazard type, e.g. flood, cyclone, "
                                           "earthquake, drought, fire"},
-                "min_severity": {"type": "integer", "minimum": 1, "maximum": 5},
+                "min_severity": {"type": "integer", "minimum": 1, "maximum": geostore.CLASS_MAX},
                 "focus": {"type": "string"},
             },
             "required": ["place", "hazard"],

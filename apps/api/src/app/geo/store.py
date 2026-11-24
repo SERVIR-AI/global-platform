@@ -33,7 +33,7 @@ def count_in_hazard(aoi, hazard, layer, min_severity=1):
         raise ValueError(f"unknown layer: {layer}")
     boundary = _boundary(aoi)
     sev = _Severity(aoi[hazard])
-    by_severity = {s: 0 for s in range(1, 6)}
+    by_severity = {s: 0 for s in range(1, CLASS_MAX + 1)}
     for ft in _features(aoi[layer]):
         coords = ft["geometry"]["coordinates"]
         if boundary.contains(Point(coords)):
@@ -94,7 +94,7 @@ def people_in_hazard(aoi, hazard, pop_layer, min_severity=1):
     inside = rasterio.features.geometry_mask([boundary.__geo_interface__],
                                              out_shape=counts.shape, transform=pop_T, invert=True)
     total = float(counts[inside].sum())
-    by_severity = {s: int(round(float(counts[inside & (classes == s)].sum()))) for s in range(1, 6)}
+    by_severity = {s: int(round(float(counts[inside & (classes == s)].sum()))) for s in range(1, CLASS_MAX + 1)}
     count = sum(c for s, c in by_severity.items() if s >= min_severity)
     # Honesty about the grids: resolution ratio and sub-cell offset.
     ratio = hz_res / pop_res if pop_res else 1.0
@@ -118,7 +118,7 @@ def roads_in_hazard(aoi, hazard, min_severity=1):
     """Length (km) of road in `aoi` by `hazard` severity class (1-5)."""
     boundary = _boundary(aoi)
     sev = _Severity(aoi[hazard])
-    by_severity = {s: 0.0 for s in range(1, 6)}
+    by_severity = {s: 0.0 for s in range(1, CLASS_MAX + 1)}
     total = 0.0
     for ft in _features(aoi["roads"]):
         coords = ft["geometry"]["coordinates"]
