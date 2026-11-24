@@ -84,7 +84,7 @@ export const Graph: FC<{ data: ProvenanceData }> = ({ data }) => {
   const [canvas, setCanvas] = useState({ w: 0, h: 0 });
   const [hover, setHover] = useState<string | null>(null);
 
-  const register = (id: string) => (el: HTMLElement | null) => {
+  const setNode = (id: string, el: HTMLElement | null) => {
     if (el) nodeRefs.current.set(id, el);
     else nodeRefs.current.delete(id);
   };
@@ -196,7 +196,7 @@ export const Graph: FC<{ data: ProvenanceData }> = ({ data }) => {
         <div className="w-52 shrink-0 flex flex-col gap-2 relative">
           <div className="absolute left-3 top-4 bottom-4 w-px bg-base-300" />
           <div
-            ref={register('question')}
+            ref={(el) => setNode('question', el)}
             {...hoverProps('question')}
             className={cn(
               'relative rounded-lg border border-base-300 bg-base-200 p-2 text-[0.7rem] italic transition-opacity',
@@ -206,7 +206,7 @@ export const Graph: FC<{ data: ProvenanceData }> = ({ data }) => {
             “{data.question}”
           </div>
           <div
-            ref={register('parse')}
+            ref={(el) => setNode('parse', el)}
             {...hoverProps('parse')}
             className={cn(
               'relative rounded-lg border border-dashed border-violet-400 bg-base-100 p-2 text-[0.7rem] transition-opacity',
@@ -227,7 +227,7 @@ export const Graph: FC<{ data: ProvenanceData }> = ({ data }) => {
           {data.feeds.map((f) => (
             <div
               key={f.id}
-              ref={register(f.id)}
+              ref={(el) => setNode(f.id, el)}
               {...hoverProps(f.id)}
               className={cn(
                 'relative rounded-lg border bg-base-100 p-2 text-[0.7rem] transition-opacity',
@@ -289,7 +289,11 @@ export const Graph: FC<{ data: ProvenanceData }> = ({ data }) => {
                 <div className="mt-1 flex flex-col gap-1">
                   {doc.citations.map((c) => (
                     <div key={c.n} {...hoverProps(`cite-${c.n}`)}>
-                      <ChunkNode citation={c} lit={active(`cite-${c.n}`)} register={register(`cite-${c.n}`)} />
+                      <ChunkNode
+                        citation={c}
+                        lit={active(`cite-${c.n}`)}
+                        register={(el) => setNode(`cite-${c.n}`, el)}
+                      />
                       {!usedCites.has(c.n) && (
                         <div className="text-[0.58rem] text-base-content/40 px-1">
                           retrieved, not cited by any claim
@@ -342,7 +346,7 @@ export const Graph: FC<{ data: ProvenanceData }> = ({ data }) => {
                 {claims.map((claim) => (
                   <div
                     key={claim.id}
-                    ref={register(claim.id)}
+                    ref={(el) => setNode(claim.id, el)}
                     {...hoverProps(claim.id)}
                     className={cn(
                       'rounded-lg border-l-4 border border-base-300 bg-base-100 p-2 text-[0.7rem] leading-snug transition-opacity cursor-default',
