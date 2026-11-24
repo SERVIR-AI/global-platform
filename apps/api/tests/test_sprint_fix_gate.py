@@ -445,7 +445,7 @@ def test_a_paged_api_says_first_n_of_m(monkeypatch):
 # ------------------------------------------------------------- 13. hints
 def test_a_hint_points_at_a_pack_that_reaches_the_layer(gate, monkeypatch, log):
     from app.geo import tiffs
-    from app.land_cover import synthesis as lc
+    from app.packs.land_cover import synthesis as lc
     monkeypatch.setattr(tiffs, "catalog", lambda include_staged=True: {
         "hazard_flood": {"title": "flood", "extent": {"lon": [92.0, 141.2], "lat": [-11.1, 28.7]}},
         "risk_cr_temp": {"title": "a contributed risk layer"}})

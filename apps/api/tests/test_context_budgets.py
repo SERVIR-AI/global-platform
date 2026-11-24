@@ -134,7 +134,7 @@ def test_the_handshake_hands_out_the_composed_instructions(log):
 # --------------------------------------------------------------------------- derived, not typed
 def _catalog_names() -> set[str]:
     """Every NAME the registries hold that belongs in capabilities, never in the opening."""
-    from app.land_cover.synthesis import landcover_stacks
+    from app.packs.land_cover.synthesis import landcover_stacks
     from app.geo import vectors
     names = set()
     for row in landcover_stacks().values():
@@ -163,7 +163,7 @@ def test_a_contributed_stack_moves_the_count_and_names_itself_at_its_home(lc_env
     """A second stack lands: the opening's count follows it, its name reaches assemble_pack's
     description (keywords) and its title the guide (coverage by name), and every text stays
     inside its budget."""
-    from app.land_cover import synthesis
+    from app.packs.land_cover import synthesis
     rows = dict(synthesis.landcover_stacks())
     first = next(iter(rows.values()))
     rows["landcover_testland"] = {**first, "title": "Testland mangrove extent",
@@ -851,7 +851,7 @@ def _grow(monkeypatch, n_stacks=6, n_feeds=8, n_points=3, n_polys=3):
     """Contributions as a busy hub would land them: stacks over new countries, live feeds,
     point layers inside the risk region and polygon layers — names long, as real ones are."""
     from app.geo import registry as geo_registry, vectors
-    from app.land_cover import synthesis
+    from app.packs.land_cover import synthesis
     rows = dict(synthesis.landcover_stacks())
     first = next(iter(rows.values()))
     for i in range(n_stacks):

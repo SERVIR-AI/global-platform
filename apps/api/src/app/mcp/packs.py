@@ -19,7 +19,7 @@ from . import budget
 
 def _gather_food_security(target: dict, focus: str, trace: list,
                           extras: dict) -> tuple[list, list, dict]:
-    from ..food_security import synthesis
+    from ..packs.food_security import synthesis
     parsed = {"country": target.get("country", ""), "crop": target.get("crop", ""),
               "focus": focus}
     return synthesis.gather_evidence(
@@ -29,18 +29,18 @@ def _gather_food_security(target: dict, focus: str, trace: list,
 
 
 def _fs_sections() -> list[str]:
-    from ..food_security import synthesis
+    from ..packs.food_security import synthesis
     return list(synthesis.SECTIONS)
 
 
 def _gather_risk(target: dict, focus: str, trace: list,
                  extras: dict) -> tuple[list, list, dict]:
-    from ..risk import synthesis as risk_synthesis
+    from ..packs.risk import synthesis as risk_synthesis
     return risk_synthesis.gather_risk_evidence(target, focus, trace, extras)
 
 
 def _risk_sections() -> list[str]:
-    from ..risk import synthesis as risk_synthesis
+    from ..packs.risk import synthesis as risk_synthesis
     return list(risk_synthesis.SECTIONS)
 
 
@@ -67,17 +67,17 @@ def _risk_corpus_state() -> dict:
 
 def _gather_land_cover(target: dict, focus: str, trace: list,
                        extras: dict) -> tuple[list, list, dict]:
-    from ..land_cover import synthesis
+    from ..packs.land_cover import synthesis
     return synthesis.gather_land_cover_evidence(target, focus, trace, extras)
 
 
 def _lc_sections() -> list[str]:
-    from ..land_cover import synthesis
+    from ..packs.land_cover import synthesis
     return list(synthesis.SECTIONS)
 
 
 def _lc_manifest() -> dict:
-    from ..land_cover import synthesis
+    from ..packs.land_cover import synthesis
     return synthesis.manifest()
 
 
@@ -348,7 +348,7 @@ def _lc_classes() -> list[str]:
     """Every class name in the registered stacks' legends, each once, the most shared first
     (read once per rebuild: every render of a fitted text asks for it)."""
     try:
-        from ..land_cover.synthesis import _fold, landcover_stacks
+        from ..packs.land_cover.synthesis import _fold, landcover_stacks
         rows = landcover_stacks()
     except Exception:
         return []
@@ -370,7 +370,7 @@ def _lc_stacks_words() -> tuple[str, str]:
     moment it lands. Every contributed legend run together read as one product's
     seventy classes."""
     try:
-        from ..land_cover.synthesis import landcover_stacks
+        from ..packs.land_cover.synthesis import landcover_stacks
         from ..geo import stacks as _stacks
         rows = landcover_stacks()
     except Exception:
@@ -403,7 +403,7 @@ def _lc_where() -> list[str]:
     """Where the land-cover pack answers, from the registered stacks' declared
     countries (else their titles) — never a typed list."""
     try:
-        from ..land_cover.synthesis import landcover_stacks
+        from ..packs.land_cover.synthesis import landcover_stacks
         rows = landcover_stacks()
     except Exception:
         rows = {}
@@ -424,7 +424,7 @@ def _lc_summary() -> str:
 def _lc_covers() -> str:
     """Counts only (stacks, classes, span, countries) for the budgeted opening."""
     try:
-        from ..land_cover.synthesis import _fold, landcover_stacks
+        from ..packs.land_cover.synthesis import _fold, landcover_stacks
         from ..geo import stacks as _stacks
         rows = landcover_stacks()
     except Exception:
@@ -508,7 +508,7 @@ def _lc_maps() -> tuple[list[str], list[str]]:
     land-cover question is routed on (budget.ROUTE, budget.PLACE): the family covering the most
     countries first; an untitled stack adds its countries, never its id."""
     try:
-        from ..land_cover.synthesis import landcover_stacks
+        from ..packs.land_cover.synthesis import landcover_stacks
         rows = landcover_stacks()
     except Exception:
         rows = {}
@@ -547,7 +547,7 @@ def _lc_stack_choices() -> list[dict]:
     question names it by (its product family, its product), countries, years, extent, and the
     `classes` its legend then takes."""
     try:
-        from ..land_cover.synthesis import landcover_stacks
+        from ..packs.land_cover.synthesis import landcover_stacks
         from ..geo import stacks as _stacks
         rows = landcover_stacks()
     except Exception:
@@ -633,7 +633,7 @@ def _fs_values(key: str) -> list[str]:
     except Exception:
         said = []
     try:
-        from ..food_security import calendar
+        from ..packs.food_security import calendar
         cal = calendar.load() or {}
         more = ([str(c) for c in cal] if key == "countries" else
                 [str(k) for crops in cal.values() for k in (crops or {})])
@@ -861,7 +861,7 @@ def _lc_usage_notes() -> str:
     sizes and whether any declares an accuracy — two sentences that were typed for
     the first stack and stayed wrong for every stack after it."""
     try:
-        from ..land_cover.synthesis import landcover_stacks, stack_cell_deg
+        from ..packs.land_cover.synthesis import landcover_stacks, stack_cell_deg
         rows = landcover_stacks()
     except Exception:
         rows = {}
@@ -888,20 +888,20 @@ EXT_ERRORS: dict[str, str] = {}
 
 
 def _load_ext_packs() -> None:
-    """Merge app.packs_ext.<id> modules (each exporting SPEC) into PACKS.
+    """Merge app.packs.packs_ext.<id> modules (each exporting SPEC) into PACKS.
     Contributed packs are droppable files, like declarative feeds. A module that
     fails to import or collides records an error and is skipped."""
     import importlib
     import pkgutil
 
     try:
-        from .. import packs_ext
+        from ..packs import packs_ext
     except ImportError:
         return
     for info in pkgutil.iter_modules(packs_ext.__path__):
         name = info.name
         try:
-            mod = importlib.import_module(f"..packs_ext.{name}", __package__)
+            mod = importlib.import_module(f"..packs.packs_ext.{name}", __package__)
             spec = getattr(mod, "SPEC", None)
             if not isinstance(spec, dict):
                 EXT_ERRORS[name] = "module has no SPEC dict"

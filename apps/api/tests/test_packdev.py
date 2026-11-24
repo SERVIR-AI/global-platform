@@ -93,7 +93,7 @@ def test_ext_loader_records_errors_instead_of_crashing(tmp_path, monkeypatch, lo
         "        'gather': lambda t, f, tr, e: ([], [], {}),\n"
         "        'sections': lambda: ['## A'], 'corpus': None,\n"
         "        'default_focus': lambda t: ''}\n")
-    import app.packs_ext as ext
+    import app.packs.packs_ext as ext
     monkeypatch.setattr(ext, "__path__", [str(tmp_path)])
     monkeypatch.setattr(packs, "EXT_ERRORS", {})
     saved = dict(packs.PACKS)

@@ -12,7 +12,7 @@ from shapely.geometry import box
 
 from app.config import get_settings
 from app.geo import ingest, stacks
-from app.land_cover import fire
+from app.packs.land_cover import fire
 from app.mcp import assemble
 
 from test_landcover_pack import H, LEFT, LEGEND, PX, TOP, W, lc_env  # noqa: F401  (fixture reuse)

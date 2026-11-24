@@ -8,7 +8,7 @@ domain's receipts would have carried the wrong output contract.
 import pytest
 
 from app.mcp import compose, registry, store
-from app.risk import synthesis as risk_synthesis
+from app.packs.risk import synthesis as risk_synthesis
 
 
 def _fake_out(**over):

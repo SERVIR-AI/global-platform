@@ -33,7 +33,7 @@ from app.contrib import fetch_policy, identity, prepare, staging
 from app.contrib.prepare import api_points
 from app.geo import ingest, schema, vectors
 from app.mcp import assemble, registry, store
-from app.risk import synthesis as risk
+from app.packs.risk import synthesis as risk
 
 OWNER = identity.Caller("user_owner", "gis@hub.test", False, "bound")
 GULF = (-85.2977, 9.9337, -84.7561, 10.2968)        # the gulf box the hand files were cut to

@@ -11,7 +11,7 @@ from app.config import get_settings
 from app.contrib import rasters, staging
 from app.geo import combine, ingest, store, vectors
 from app.mcp import assemble, packs
-from app.risk import synthesis as risk
+from app.packs.risk import synthesis as risk
 
 
 # ----------------------------------------------------------------- H1: coverage
@@ -210,7 +210,7 @@ def test_risk_feeds_are_cited_only_where_they_speak(monkeypatch, log):
 
 
 def test_a_pack_bound_table_clears_the_food_security_evidence_bar():
-    from app.food_security import synthesis as fs
+    from app.packs.food_security import synthesis as fs
     assert not fs._has_evidence([{"kind": "index", "brief_role": "driver"}, {"kind": "calendar"}], "Malawi")
     malawi_table = {"kind": "index", "brief_role": "pack-source", "countries": ["Malawi"]}
     assert fs._has_evidence([malawi_table], "Malawi")
@@ -228,7 +228,7 @@ def test_every_kind_carries_the_auto_approve_note_into_its_citation(monkeypatch,
     log("OUTPUT", prov[:120])
     assert prov.startswith("Review: auto-approved")
     # a staged driver feed previews AS a driver, carrying who staged it
-    from app.food_security import synthesis as fs
+    from app.packs.food_security import synthesis as fs
     from app.mcp import feeds, registry
     monkeypatch.setattr(registry, "FEEDS", {})
     monkeypatch.setattr(staging, "visible_staged_feeds_for_pack", lambda pack: {
@@ -260,7 +260,7 @@ def test_pack_summaries_name_what_the_catalog_holds_today(monkeypatch, log):
                                                        "subjects": [], "publishers": []})
     fs_summary = packs.text(packs.PACKS["food-security"], "summary")
     assert "sorghum" in fs_summary and "Malawi" in fs_summary
-    from app.food_security import synthesis as fs
+    from app.packs.food_security import synthesis as fs
     assert "Malawi" in fs._parse_system() and "anywhere is in scope" in fs._parse_system()
     assert packs.target_shapes() == "country+crop | place+hazard | place+year"
     assert "land cover: place + year [+ year_to, classes, stack]" in packs.target_shapes_long()

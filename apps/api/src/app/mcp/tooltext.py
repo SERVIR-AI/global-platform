@@ -18,7 +18,7 @@ def _libraries() -> str:
 def _calendars() -> str:
     """The hub-default crop calendars, by country and crop."""
     try:
-        from ..food_security import calendar
+        from ..packs.food_security import calendar
         cal = calendar.load()
     except Exception:
         return "none configured"

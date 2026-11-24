@@ -814,7 +814,7 @@ Then tell me which platform URL your trust chrome resolves against.</code></pre>
     <tr><td>Raster</td><td>a manifest .yml anywhere (points at the GeoTIFF)</td>
         <td>file into <code>cache/tiffs/</code>, rows into <code>conf/tiffs.contrib.yml</code>
             + <code>conf/raster_schema.contrib.yml</code></td></tr>
-    <tr><td>Domain pack</td><td><code>apps/api/src/app/packs_ext/&lt;id&gt;.py</code> — the file IS the pack</td>
+    <tr><td>Domain pack</td><td><code>apps/api/src/app/packs/packs_ext/&lt;id&gt;.py</code> — the file IS the pack</td>
         <td>nothing else; restart to register</td></tr>
   </table></div>
 
@@ -911,7 +911,7 @@ uv run --project apps/api python -m app.contrib.cli add-raster manifest.yml</cod
   contract.</p>
 
   <h3>E. A whole domain pack &mdash; step by step</h3>
-  <p><strong>Sample:</strong> <a href="samples/demo-pack.py">demo-pack.py</a> — the complete worked example below as a drop-in file: copy to <code>apps/api/src/app/packs_ext/</code>, run the doctor, restart. Verified live: advertised in capabilities, receipt minted, unsupported targets declined.</p>
+  <p><strong>Sample:</strong> <a href="samples/demo-pack.py">demo-pack.py</a> — the complete worked example below as a drop-in file: copy to <code>apps/api/src/app/packs/packs_ext/</code>, run the doctor, restart. Verified live: advertised in capabilities, receipt minted, unsupported targets declined.</p>
   <p>A pack is one Python file. Everything else &mdash; the groundedness gate, receipts, the
   evidence panel, the auto-appended gaps citation, the execution trace &mdash; is the
   platform&rsquo;s job, not yours. Your file answers exactly three questions: <em>what does a
@@ -922,7 +922,7 @@ uv run --project apps/api python -m app.contrib.cli add-raster manifest.yml</cod
   <p><strong>Step 1 &mdash; scaffold.</strong> Pick an id and your target keys (the parameters
   a consumer supplies):</p>
 <pre><code>uv run --project apps/api python -m app.contrib.cli new-pack coastal-tides place
-# -&gt; apps/api/src/app/packs_ext/coastal_tides.py   (the whole pack)</code></pre>
+# -&gt; apps/api/src/app/packs/packs_ext/coastal_tides.py   (the whole pack)</code></pre>
   <p>The scaffold already passes the doctor and mints receipts with its demo evidence, so
   every edit you make starts from a working state, not a blank page.</p>
 

@@ -4,7 +4,7 @@ Kenya + Zambia maize under El Nino, three periods: current 2026-27 event,
 2023-24 analog, 2015-16 analog. URLs verified by the 2026-07-13 corpus research
 (docs/food-security/corpus-blueprint.md). Failures log and skip — never abort.
 
-Run:  PYTHONPATH=apps/api/src uv run python -m app.food_security.seed_corpus
+Run:  PYTHONPATH=apps/api/src uv run python -m app.packs.food_security.seed_corpus
 """
 
 from __future__ import annotations
@@ -14,8 +14,8 @@ import time
 
 import requests
 
-from ..rag import docloader
-from ..rag.store import Corpus
+from ...rag import docloader
+from ...rag.store import Corpus
 
 BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
               "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36")

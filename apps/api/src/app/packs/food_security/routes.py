@@ -15,10 +15,10 @@ from fastapi.responses import FileResponse
 from openai import OpenAIError
 from pydantic import BaseModel, Field, field_validator
 
-from ..config import Provider, get_settings
-from ..llm import MissingAPIKey
-from ..rag import docloader
-from ..rag.store import Corpus, CorpusError, may_read
+from ...config import Provider, get_settings
+from ...llm import MissingAPIKey
+from ...rag import docloader
+from ...rag.store import Corpus, CorpusError, may_read
 from . import calendar as crop_calendar
 from . import cropmonitor, synthesis
 
@@ -295,7 +295,7 @@ def _refuse_unless_visible(corpus: Corpus, doc_id: str, request: Request | None 
     served to its contributor and reviewers, a landed one to whom the authorization store
     admits (may_read); a rejected or withdrawn preview (index rows gone, raw kept for
     replay) only to its contributor and reviewers as well."""
-    from ..contrib import identity
+    from ...contrib import identity
     # The requester, from the request's headers; a direct call with no request (tests) reads the
     # bound caller. Resolving with no request would be the box operator, who may view everything.
     caller = identity.from_headers(request.headers) if request is not None else identity.current()
@@ -304,7 +304,7 @@ def _refuse_unless_visible(corpus: Corpus, doc_id: str, request: Request | None 
         if not may_read(found["metadata"], caller):
             raise HTTPException(status_code=404, detail="unknown doc_id")
         return
-    from ..mcp import store
+    from ...mcp import store
     rec = next((r for r in store.list_contributions(kind="document")
                 if (r.get("preview") or {}).get("doc_id") == doc_id), None)
     if rec and rec.get("status") != "approved" \
@@ -341,7 +341,7 @@ def rag_document(doc_id: str, request: Request = None):
 
 def _archived_elsewhere(doc_id: str, request: Request | None = None):
     """The same document in another pack's library, if that is where it lives."""
-    from ..mcp import packs
+    from ...mcp import packs
     for name in {p.get("corpus") for p in packs.PACKS.values() if p.get("corpus")}:
         if name == _CORPUS:
             continue
@@ -352,7 +352,7 @@ def _archived_elsewhere(doc_id: str, request: Request | None = None):
         found = other.find(doc_id)
         if found is None:
             continue          # absent from the index is not permission
-        from ..contrib import identity
+        from ...contrib import identity
         caller = identity.from_headers(request.headers) if request is not None else identity.current()
         if not may_read(found["metadata"], caller):
             continue

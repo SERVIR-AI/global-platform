@@ -34,7 +34,7 @@ from app.contrib import identity, prepare, remote_clip, staging
 from app.contrib.prepare import mosaic
 from app.geo import ingest, schema, tiffs
 from app.mcp import assemble, packs, store
-from app.risk import synthesis as risk
+from app.packs.risk import synthesis as risk
 
 OWNER = identity.Caller("user_owner", "gis@hub.test", False, "bound")
 B = (103.0, 13.0, 103.02, 13.02)              # the risk world: 20 x 20 cells of 0.001 deg

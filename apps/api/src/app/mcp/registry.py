@@ -9,7 +9,7 @@ import os
 import re
 import threading
 
-from ..food_security import calendar as fs_calendar
+from ..packs.food_security import calendar as fs_calendar
 from ..rag.store import Corpus, CorpusError
 from . import budget, packs
 
@@ -438,7 +438,7 @@ def pack_manifest(pack_id: str = "food-security") -> dict:
                     "display_name": spec.get("display_name", pack_id),
                     "status": "manifest unavailable",
                     "reason": f"{type(exc).__name__}: {exc}"}
-    from ..food_security import synthesis  # local: avoids importing llm deps at module load
+    from ..packs.food_security import synthesis  # local: avoids importing llm deps at module load
     corpus = _corpus_summary()
     gaps = [
         "climate feeds (CHIRPS/CHIRTS/ERA5) — pending hub data lists",

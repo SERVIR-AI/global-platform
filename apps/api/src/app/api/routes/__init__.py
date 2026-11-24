@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from ...food_security.routes import router as food_security_router
+from ...packs.food_security.routes import router as food_security_router
 from .chat import router as chat_router
 from .contribute import router as contribute_router
 from .health import router as health_router

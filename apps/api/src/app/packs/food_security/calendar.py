@@ -8,7 +8,7 @@ import calendar as _cal
 
 import yaml
 
-from ..config import get_settings
+from ...config import get_settings
 
 _BASELINE_URL = "https://www.cropmonitor.org/baseline-data"
 

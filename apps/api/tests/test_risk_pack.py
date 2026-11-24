@@ -8,7 +8,7 @@ import pytest
 
 from app.gate import publish, record
 from app.mcp import assemble, packs
-from app.risk import synthesis as risk
+from app.packs.risk import synthesis as risk
 
 
 @pytest.fixture

@@ -37,7 +37,7 @@ from app.contrib import fetch_policy, identity, prepare, rasters, staging
 from app.contrib.prepare import recode
 from app.geo import ingest, schema, tiffs, vectors
 from app.mcp import assemble, packs, registry, store
-from app.risk import synthesis as risk
+from app.packs.risk import synthesis as risk
 
 OWNER = identity.Caller("user_owner", "gis@hub.test", False, "bound")
 LEGEND = {1: "Mangrove", 2: "Non-mangrove"}

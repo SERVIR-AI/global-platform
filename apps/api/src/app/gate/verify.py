@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 
-from ..food_security import synthesis
+from ..packs.food_security import synthesis
 from ..mcp import loop, packs, store
 from . import grounded
 

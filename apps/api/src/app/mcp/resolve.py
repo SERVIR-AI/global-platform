@@ -10,7 +10,7 @@ from __future__ import annotations
 import calendar as _cal
 from datetime import date
 
-from ..food_security import calendar as fs_calendar
+from ..packs.food_security import calendar as fs_calendar
 
 _MONTHS = {m.lower(): i for i, m in enumerate(_cal.month_name) if m}
 _MONTHS.update({m.lower(): i for i, m in enumerate(_cal.month_abbr) if m})

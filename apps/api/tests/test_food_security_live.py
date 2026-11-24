@@ -11,7 +11,7 @@ import os
 import pytest
 
 from app.config import get_settings
-from app.food_security import cropmonitor
+from app.packs.food_security import cropmonitor
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("CROPMONITOR_LIVE", "").lower() not in ("1", "true", "yes"),

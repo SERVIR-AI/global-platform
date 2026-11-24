@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import get_settings
-from app.food_security import cropmonitor, synthesis
+from app.packs.food_security import cropmonitor, synthesis
 from app.mcp import feeds, registry
 from app.main import app
 from app.rag.embed import ProviderEmbedder
@@ -307,7 +307,7 @@ def test_conditions_truncation_is_visible(brief_env, monkeypatch):
 def test_calendar_phase_math_handles_wrapping_windows():
     """Deterministic season phases, incl. windows that wrap the year end (A7.1:
     the asked-in month changes the framing)."""
-    from app.food_security import calendar as cal
+    from app.packs.food_security import calendar as cal
     zambia = {"season": "Main season", "planting": [11, 12], "harvest": [4, 6]}
     assert cal._phase(11, zambia) == "planting window"
     assert cal._phase(2, zambia) == "growing season"          # wraps the year end
@@ -320,7 +320,7 @@ def test_calendar_phase_math_handles_wrapping_windows():
 def test_calendar_citation_default_vs_adjusted(brief_env):
     """A7.2 AC: changing season start/end changes the brief's evidence — and the
     adjustment is visibly marked, never silently absorbed."""
-    from app.food_security import calendar as cal
+    from app.packs.food_security import calendar as cal
     default = cal.citation("Kenya", "maize", asked_month=7)
     assert default and default["adjusted"] is False
     assert "hub default" in default["text"] and "Long rains" in default["text"]
@@ -445,7 +445,7 @@ def test_absent_calendar_is_citable_evidence(brief_env):
     carry a citation. With no calendar there was nothing to cite, so the model wrote
     an uncited paragraph and the gate killed the whole brief. An absent calendar is
     now a real entry saying so."""
-    from app.food_security import calendar as cal
+    from app.packs.food_security import calendar as cal
     c = cal.citation(country="kenya", crop="", asked_month=8)
     assert c is not None and c["kind"] == "calendar"
     assert "NO CROP CALENDAR APPLIES" in c["text"]

@@ -297,7 +297,7 @@ def test_seam_measures_named_vectors_for_any_pack_and_declines_unknown_names(vec
     assert _as(OWNER, lambda: vectors_step.check(["nope"])) and "unknown vector layer" in _as(OWNER, lambda: vectors_step.check(["nope"]))
     assert vectors_step.check(None) is None
     # the risk pack's counted assets stay point layers: a line layer is not an "asset"
-    from app.risk import synthesis as risk
+    from app.packs.risk import synthesis as risk
     assert "test_rivers" not in _as(OWNER, risk._asset_layers)
 
 
@@ -576,7 +576,7 @@ def test_land_cover_usage_notes_and_gaps_derive_from_the_stacks(binary_stack, mo
 def test_land_cover_cites_its_library_when_it_holds_something(binary_stack, monkeypatch, log):
     """A document in the land-cover library is searched for and cited; an empty
     library is a declared gap."""
-    from app.land_cover import synthesis as lc
+    from app.packs.land_cover import synthesis as lc
 
     class FakeCorpus:
         name = "land-cover"
@@ -802,7 +802,7 @@ def test_connect_time_text_follows_contributions(binary_stack):
     the next time a client connects, and the instructions' derived counts follow it — the
     instructions are budgeted to counts; names live in the description and the manifest."""
     import asyncio
-    from app.land_cover.synthesis import landcover_stacks
+    from app.packs.land_cover.synthesis import landcover_stacks
     from app.mcp import budget, server
     mw = next(m for m in server.mcp.middleware if type(m).__name__ == "_LiveText")
     mw._at = 0.0
@@ -866,7 +866,7 @@ def test_within_restricts_any_packs_area_and_overlaps_count_once(binary_stack, t
 
 
 def test_reference_list_passages_are_not_cited():
-    from app.land_cover import synthesis as lc
+    from app.packs.land_cover import synthesis as lc
     refs = ("Adame, M. F., et al. (2012). Carbon stocks. Estuaries 35, 1-10. doi:10.1007/x "
             "Alongi, D. M. (2010) Wetlands. Bouillon, S. et al. 2008 Global Biogeochem. doi:10.1029/y "
             "Donato, D. C. et al. (2011) Nat. Geosci. 4, 293. Kauffman, J. B. et al. 2011 Wetlands 31, 343. "

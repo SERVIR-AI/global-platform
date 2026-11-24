@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..food_security import cropmonitor
+from ..packs.food_security import cropmonitor
 from . import budget, climate_indices, enso_forecast, registry
 
 

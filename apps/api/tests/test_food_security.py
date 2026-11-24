@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import get_settings
-from app.food_security import cropmonitor
+from app.packs.food_security import cropmonitor
 from app.main import app
 
 # The service's real quirks, miniaturized: December is skipped (no 202212), crop
@@ -403,7 +403,7 @@ def test_seed_corpus_sources_are_wellformed():
     """Every seed entry carries the provenance the ingest endpoint enforces, valid
     enum tags, https URLs, and correct CPC month->pub_date derivation."""
     import re
-    from app.food_security.seed_corpus import SOURCES, cpc_discussions
+    from app.packs.food_security.seed_corpus import SOURCES, cpc_discussions
     assert len(SOURCES) >= 60
     for e in SOURCES:
         m = e["metadata"]

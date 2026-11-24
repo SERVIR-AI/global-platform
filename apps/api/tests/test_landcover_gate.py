@@ -68,7 +68,7 @@ def test_a_hub_stack_lands_through_the_gate_year_by_year(gate_env, log):
     assert stacks.layer_for("landcover_toy", 2022) == "landcover_toy_2022"
     assert schema.schema_for("landcover_toy_2022")["valid_max"] == 3
     assert tiffs.catalog()["landcover_toy_2021"]["internal"] is True
-    from app.land_cover import synthesis
+    from app.packs.land_cover import synthesis
     assert "landcover_toy" in synthesis.landcover_stacks()
 
 

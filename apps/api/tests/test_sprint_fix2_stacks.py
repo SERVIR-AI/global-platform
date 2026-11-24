@@ -17,7 +17,7 @@ from shapely.geometry import box, shape
 
 from app.contrib import fetch_policy, identity, rasters, staging
 from app.geo import layer_values, schema, stacks, tiffs
-from app.land_cover import synthesis as lc
+from app.packs.land_cover import synthesis as lc
 from app.mcp import assemble, packs
 
 from test_sprint_fix_landcover import H, LEFT, POLY, PX, TOP, W, _write, lc_env  # noqa: F401
