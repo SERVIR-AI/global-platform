@@ -13,14 +13,31 @@ from ...config import get_settings
 from ...mcp.budget import once
 
 _LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+_PARSED: dict = {}      # {path: (stamp, document)}: each contracts file parsed once per change
+
+
+def _parsed(path):
+    """A contracts file parsed once per change of its (mtime, size) stamp: a pack reads the
+    contracts 10 to 27 times, and the contributed file grows with every raster. The document
+    is shared, so callers copy before adding to it. A missing file raises FileNotFoundError."""
+    from .tiffs import _stamp
+    stamp = _stamp(path)
+    if stamp is None:
+        raise FileNotFoundError(str(path))
+    hit = _PARSED.get(str(path))
+    if hit is None or hit[0] != stamp:
+        with open(path) as f:
+            hit = (stamp, yaml.load(f, Loader=_LOADER) or {})
+        _PARSED[str(path)] = hit
+    return hit[1]
 
 
 def _doc():
-    with open(get_settings().raster_schema_path) as f:
-        doc = yaml.safe_load(f) or {}
+    doc = dict(_parsed(get_settings().raster_schema_path))
+    doc["layers"] = dict(doc.get("layers") or {})
+    doc["stacks"] = dict(doc.get("stacks") or {})
     try:
-        with open(get_settings().raster_schema_contrib_path) as f:
-            contrib = (yaml.safe_load(f) or {}).get("layers") or {}
+        contrib = _parsed(get_settings().raster_schema_contrib_path).get("layers") or {}
         layers = doc.setdefault("layers", {})
         layers.update({k: v for k, v in contrib.items() if k not in layers})
     except FileNotFoundError:
@@ -78,8 +95,7 @@ def roles():
     instead of inheriting a guess; the hand-authored rule wins on a clash."""
     out = dict(_doc().get("roles") or {})
     try:
-        with open(get_settings().raster_schema_contrib_path) as f:
-            contrib = (yaml.safe_load(f) or {}).get("roles") or {}
+        contrib = _parsed(get_settings().raster_schema_contrib_path).get("roles") or {}
         out.update({k: v for k, v in contrib.items() if k not in out})
     except FileNotFoundError:
         pass
