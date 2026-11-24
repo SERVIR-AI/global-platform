@@ -5,8 +5,9 @@ import json
 
 import pytest
 
+from app.gate import publish
 from app.graph.geo import operations, vectors
-from app.mcp import assemble, publish, store
+from app.mcp import assemble, store
 from app.risk import synthesis as risk
 
 

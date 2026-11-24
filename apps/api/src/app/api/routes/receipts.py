@@ -12,7 +12,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Response
 
-from ...mcp import record, store
+from ...gate import record
+from ...mcp import store
 
 router = APIRouter(prefix="/resolve")
 

@@ -180,7 +180,7 @@ def test_the_data_route_and_the_receipt_follow_the_same_answer(env, file_host):
     """The raster download route refuses with 404 for a caller the store refuses, and
     a receipt records the store's decision per cited contribution."""
     from app.api.routes import raster as route
-    from app.mcp import record
+    from app.gate import record
     up = _submit(file_host, visibility="hub")
     cid = up["contribution_id"]
     _as(REVIEWER, lambda: staging.approve(cid, REVIEWER))

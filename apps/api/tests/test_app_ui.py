@@ -169,7 +169,8 @@ def test_sources_carry_a_platform_absolute_archived_link(monkeypatch, log):
     Built from a hand-made pack, not assemble(): retrieval needs the embeddings API,
     and a suite that reaches the network fails on someone else's timeout.
     """
-    from app.mcp import record, store
+    from app.gate import record
+    from app.mcp import store
     monkeypatch.setenv("GRP_PUBLIC_BASE", "http://10.1.30.110:8080")
     pack_id = store.save_pack({
         "country": "Kenya", "crop": "maize", "citations": [

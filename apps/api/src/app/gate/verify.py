@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 
 from ..food_security import synthesis
-from . import loop, packs, store
+from ..mcp import loop, packs, store
 
 
 def groundedness(draft: str, pack_id: str) -> dict:

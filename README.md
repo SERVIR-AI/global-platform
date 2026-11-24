@@ -140,7 +140,8 @@ apps/
 ├── api/                      FastAPI app (the uv workspace member)
 │   ├── src/app/
 │   │   ├── main.py           app factory: /mcp, /api and the web build on one origin
-│   │   ├── mcp/              MCP server and tools; assemble, verify, publish, record; budgets; SQLite store
+│   │   ├── mcp/              MCP server and tools; assemble; budgets; SQLite store
+│   │   ├── gate/             the answer gate's steps, shared by every pack: verify, publish, record
 │   │   ├── contrib/          contribution gate: kinds, fetch policy, preparation ops, methods, jobs
 │   │   ├── food_security/    food-security pack: gatherer, crop calendar, Crop Monitor, REST routes;
 │   │   │                     its synthesis.py also holds the gate (check_grounded) every pack uses

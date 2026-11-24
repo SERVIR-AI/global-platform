@@ -272,7 +272,7 @@ def test_same_owner_cannot_stage_the_same_document_twice(env, log):
 
 
 def test_preview_packs_reports_and_receipts_resolve_only_for_owner_and_reviewers(env, log):
-    from app.mcp import record
+    from app.gate import record
     tok = _as(OWNER)
     try:
         pack_id = store.save_pack({"pack": "food-security", "target": {"country": "Kenya"},

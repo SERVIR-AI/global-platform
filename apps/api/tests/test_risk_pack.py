@@ -6,7 +6,8 @@ Numbers the gate can check, no network, no Drive."""
 
 import pytest
 
-from app.mcp import assemble, packs, publish, record
+from app.gate import publish, record
+from app.mcp import assemble, packs
 from app.risk import synthesis as risk
 
 

@@ -26,9 +26,10 @@ from mcp.types import Icon
 
 from . import (app_ui, assemble, auth, budget, compose, context, feeds, fetch, instructions,
                loop, weights_ui,
-               publish, record, registry, resolve, shape, start, store, tooltext, ui, verify)
+               registry, resolve, shape, start, store, tooltext, ui)
 from ..config import get_settings
 from ..contrib import identity
+from ..gate import publish, record, verify
 from .. import __version__
 
 log = logging.getLogger(__name__)

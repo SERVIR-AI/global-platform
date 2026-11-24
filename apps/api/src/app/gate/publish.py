@@ -20,7 +20,8 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 
-from . import loop, record, store, verify
+from ..mcp import loop, store
+from . import record, verify
 
 
 def _insight(pack_id: str, draft: str) -> dict:
@@ -74,7 +75,7 @@ def _vector_prepared(name: str) -> list[str]:
     """A vector layer's stored ingest notes, from its registry row (the measured
     record does not carry them)."""
     try:
-        from . import vectors as _vectors
+        from ..mcp import vectors as _vectors
         return _notes((_vectors.registered().get(name) or {}).get("prepared"))
     except Exception:
         return []
