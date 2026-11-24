@@ -44,7 +44,7 @@ def _logical(name):
     for pre in ("hazard_", "risk_"):
         if stem.startswith(pre):
             stem = stem[len(pre):]
-    stem = re.sub(r"_l2(?:__[0-9a-f]{6,})?$", "", stem)
+    stem = re.sub(combine.L2_SUFFIX, "", stem)
     if stem in nm:
         return stem
     for key, v in nm.items():        # match the actual tif names (handles landslides->landslide)

@@ -365,7 +365,7 @@ def fetch(state: State) -> dict:
         for layer in state.get("tiffs") or []:
             # risk_flood_l2, or risk_flood_l2__<weights tag> once the grid started
             # carrying the identity of the weights it was computed from.
-            _l2 = re.match(r"^risk_(.+?)_l2(?:__[0-9a-f]{6,})?$", layer)
+            _l2 = re.match(r"^risk_(.+?)" + combine.L2_SUFFIX, layer)
             if _l2:                                                     # computed Layer-2 risk grid
                 hazard = "hazard_" + _l2.group(1)
                 aoi = {**aoi, layer: combine.combine_l2(aoi, hazard)}

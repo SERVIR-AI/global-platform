@@ -146,6 +146,10 @@ def _weights_tag(weights: dict) -> str:
     return hashlib.sha1(payload.encode()).hexdigest()[:8]
 
 
+# A Layer-2 grid's name ends in _l2, or in _l2__ and its weights tag.
+L2_SUFFIX = r"_l2(?:__[0-9a-f]{6,})?$"
+
+
 def _recipe_weights(hazard: str) -> dict:
     """The recipe's own weights for this hazard, ignoring any staged proposal."""
     import re as _re
