@@ -77,7 +77,7 @@ def attach(pack: str, target: dict, stats: dict, citations: list, gaps: list,
     (numbered after the last) and a gap per failure. Returns the `methods` block — the
     results by method — or None when the pack has none that apply."""
     from ..contrib import methods
-    from . import feeds
+    from ..feeds import feeds
     try:
         rows = methods.for_pack(pack)
     except Exception as exc:                       # the pack never fails on its methods

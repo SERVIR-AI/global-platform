@@ -30,8 +30,9 @@ from rasterio.transform import from_bounds
 
 from app.config import get_settings
 from app.contrib import fetch_policy, identity, jobs, staging
+from app.feeds import feeds
 from app.geo import ingest, schema, tiffs
-from app.mcp import assemble, feeds, packs, registry, store
+from app.mcp import assemble, packs, registry, store
 from app.packs.risk import synthesis as risk
 
 OWNER = identity.Caller("user_owner", "gis@hub.test", False, "bound")

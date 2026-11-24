@@ -7,8 +7,9 @@ import logging
 import re
 
 from app.contrib import staging
+from app.feeds import feeds
 from app.gate import publish, record
-from app.mcp import assemble, budget, feeds, instructions, loop, packs, registry, resolve, shape, skills
+from app.mcp import assemble, budget, instructions, loop, packs, registry, resolve, shape, skills
 from app.mcp.server import INSTRUCTIONS, _capabilities, _instructions, build_a_tool, mcp
 from test_contrib_methods import BOX, _threshold, _units, env  # noqa: F401  (a contributed table + method)
 from test_landcover_pack import lc_env  # noqa: F401  (a contributed, synthetic stack)

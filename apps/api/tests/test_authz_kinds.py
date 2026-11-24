@@ -13,8 +13,9 @@ import pytest
 
 from app.config import get_settings
 from app.contrib import staging
+from app.feeds import feeds
 from app.geo import vectors
-from app.mcp import feeds, fetch, registry
+from app.mcp import fetch, registry
 from app.rag.embed import ProviderEmbedder
 from app.rag.store import Corpus
 

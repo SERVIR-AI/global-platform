@@ -13,7 +13,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..packs.food_security import cropmonitor
-from . import budget, climate_indices, enso_forecast, registry
+from ..mcp import budget, registry
+from . import climate_indices, enso_forecast
 
 
 def scope_miss(spec: dict, countries, bounds=None):

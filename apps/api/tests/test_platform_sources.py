@@ -7,9 +7,10 @@ import pytest
 
 from app.config import get_settings
 from app.contrib import staging
+from app.feeds import feeds
 from app.packs.food_security import cropmonitor, synthesis as fs
 from app.gate import grounded, publish, record, verify
-from app.mcp import assemble, budget, compose, feeds, instructions, loop, packs
+from app.mcp import assemble, budget, compose, instructions, loop, packs
 from app.mcp import shape, store
 from app.mcp.server import mcp
 from app.rag.embed import ProviderEmbedder

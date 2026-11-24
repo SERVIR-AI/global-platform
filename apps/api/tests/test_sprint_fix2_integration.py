@@ -19,11 +19,12 @@ from shapely.geometry import box, mapping, shape
 
 from app.config import get_settings
 from app.contrib import catalog_io, fetch_policy, identity, rasters, removal, staging, tables
+from app.feeds import feeds
 from app.gate import publish, record
 from app.geo import align, combine, ingest, schema, stacks, tiffs, vectors
 from app.packs.land_cover import synthesis as lc
 from app.packs.food_security import synthesis as fs
-from app.mcp import app_ui, assemble, feeds, packs, registry, store
+from app.mcp import app_ui, assemble, packs, registry, store
 from app.rag import filters as rag_filters
 from app.packs.risk import synthesis as risk
 

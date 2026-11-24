@@ -44,8 +44,9 @@ def _boundaries(tmp_path, reg, layer, title, country, features) -> None:
 def _registry(tmp_path, monkeypatch, squeezed=False) -> dict:
     """The live-like registry with Ecuador's protected areas as a boundary layer and the MapBiomas
     validation points feed; `squeezed` adds live's other countries (as in test_fast_connect)."""
+    from app.feeds import feeds
     from app.geo import ingest, vectors
-    from app.mcp import feeds, registry
+    from app.mcp import registry
     reg = live_sized(tmp_path, LIVE_STACKS)
     _boundaries(tmp_path, reg, "ec_protected_areas", "Protected areas of Ecuador (MAATE SNAP)", "Ecuador", [
         _poly("Manglares El Salado", -79.98, -2.26, 0.05, 0.05, country="Ecuador"),
@@ -279,7 +280,8 @@ def test_a_points_feed_of_a_product_the_pack_maps_steers_to_it(salado, monkeypat
     """feeds_query on the MapBiomas Ecuador validation points: one line inside NOTE_CHARS names the
     land-cover pack, the call with the stack, and says these are sample points with no receipt; a
     feed of no mapped product carries none, and a decline is left as it was."""
-    from app.mcp import budget, feeds
+    from app.feeds import feeds
+    from app.mcp import budget
     monkeypatch.setitem(feeds.ADAPTERS, "generic_json", lambda params, spec: {
         "as_of": "2025", "count": 2, "summary": "2 points", "query_receipt": "stub",
         "url": "https://example.invalid/points.json", "stale_data": None,

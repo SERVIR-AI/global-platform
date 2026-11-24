@@ -9,7 +9,7 @@ import os
 
 import pytest
 
-from app.mcp import enso_forecast, feeds
+from app.feeds import enso_forecast, feeds
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("IRI_LIVE", "").lower() not in ("1", "true", "yes"),

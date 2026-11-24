@@ -8,7 +8,8 @@ import yaml
 
 from app.config import get_settings
 from app.contrib import fetch_policy, identity, removal, staging
-from app.mcp import feeds, registry, store
+from app.feeds import feeds
+from app.mcp import registry, store
 
 OWNER = identity.Caller("user_owner", "hydrologist@hub.test", False, "bound")
 OTHER = identity.Caller("user_other", "analyst@hub.test", False, "bound")

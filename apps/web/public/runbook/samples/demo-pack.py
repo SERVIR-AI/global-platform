@@ -7,7 +7,7 @@ pack registers itself. Validate first:
 
 
 def gather(target, focus, trace, extras):
-    from app.mcp import feeds
+    from app.feeds import feeds
 
     place = target["place"]
     trace.append(f"coastal-tides[{place}]")

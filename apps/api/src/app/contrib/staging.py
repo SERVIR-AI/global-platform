@@ -697,7 +697,7 @@ def _feed_spec(m: dict) -> dict:
     """The row a feed manifest serves through, staged or landed: its scope in the
     shape a table's takes (`countries` a list of names, `bbox` four floats — the
     packs read both before citing it) and its params said from its own fields."""
-    from ..mcp import feeds
+    from ..feeds import feeds
     from . import tables
     row = {k: v for k, v in m.items() if k not in ("dataset", "countries", "bbox")}
     row.update(tables.scope_fields(m))
@@ -721,7 +721,7 @@ def _feed_row(rec: dict) -> dict:
 def _prepare_feed(m: dict) -> dict:
     """The spec must actually answer before it is staged: one live query through
     the adapter, so a wrong index name or a dead URL is refused, not staged."""
-    from ..mcp import feeds
+    from ..feeds import feeds
     taken = _table_name_taken(m["dataset"])
     if taken:
         raise Declined(taken)

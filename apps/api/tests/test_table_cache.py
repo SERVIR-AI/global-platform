@@ -4,7 +4,7 @@ import hashlib
 
 import pytest
 
-from app.mcp import feeds
+from app.feeds import feeds
 
 
 def _spec(path, sha):

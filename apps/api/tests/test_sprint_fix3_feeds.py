@@ -3,7 +3,7 @@ LAST record in publication order as 'latest'. The real OBIS page mixed offset da
 'Z', bare dates, YYYY-MM, ranges and missing dates; one missing date made the sort give
 up, so 'latest 2021-08-22' was served over records reaching 2026-07-08."""
 from app.contrib import staging
-from app.mcp import feeds
+from app.feeds import feeds
 
 from test_sprint_fix2_gate import OWNER, _as, _feed, auto, hub  # noqa: F401  (fixture reuse)
 

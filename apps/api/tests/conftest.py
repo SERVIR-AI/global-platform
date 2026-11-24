@@ -207,7 +207,7 @@ def _fetch_to_file_follows_fetch(monkeypatch):
 def _fresh_feed_caches():
     """Each test starts with empty per-worker table and address-check caches: a verdict
     or a parsed table kept from another test's files must not answer for this one's."""
-    from app.mcp import feeds
+    from app.feeds import feeds
     feeds._TABLE_CACHE.clear()
     feeds._URL_CHECKS.clear()
     yield

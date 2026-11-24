@@ -270,7 +270,7 @@ def _rows_are(spec: dict, records=None) -> str:
     """What a dataset's rows are, from its own fields and words: sample points when they carry a
     latitude and a longitude and the dataset says it is a sample (validation, training, survey
     plots), point records when they only carry coordinates, else its own records."""
-    from . import feeds
+    from ..feeds import feeds
     fetch = (spec or {}).get("fetch") or {}
     names = list(fetch.get("fields") or fetch.get("columns") or [])
     if not names and isinstance(records, list) and records and isinstance(records[0], dict):

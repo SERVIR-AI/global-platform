@@ -6,7 +6,7 @@ import pytest
 
 from app.config import get_settings
 from app.contrib import tables
-from app.mcp import feeds
+from app.feeds import feeds
 
 
 CSV = "Month,Rainfall_mm\n2026-05,12.5\n2026-06,3.0\n2026-07,0.5\n"

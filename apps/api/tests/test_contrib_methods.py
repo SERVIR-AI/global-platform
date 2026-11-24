@@ -8,7 +8,8 @@ import pytest
 
 from app.config import get_settings
 from app.contrib import methods, staging
-from app.mcp import feeds, loop, methods_step, packs, registry, store
+from app.feeds import feeds
+from app.mcp import loop, methods_step, packs, registry, store
 
 UNITS_CSV = ("Unit,Lon,Lat,PctRestorable,RestorableHa,Class\n"
              "OpenCoast_61060,104.88,-2.10,99,343,OpenCoast\n"
