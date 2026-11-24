@@ -519,7 +519,7 @@ def test_vector_measures_reach_the_evidence_view_and_replay_verifies_them(binary
     """A line layer measured inside a land-cover answer: the pack carries the record
     and the boundary, publish's insight tables it, and a receipt's replay re-measures
     the layer and confirms the hash; a removed layer is reported, not passed."""
-    from app.mcp import publish, record
+    from app.gate import publish, record
     from app.contrib import removal
     s = get_settings()
     monkeypatch.setattr(s, "grp_mattermost_webhook", "")

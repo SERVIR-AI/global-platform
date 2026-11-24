@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from . import feeds, loop, store, ui
+from ..mcp import feeds, loop, store, ui
 
 
 def _abs(path: str) -> str:
@@ -31,7 +31,7 @@ def gate_notes(checks: dict | None) -> dict:
 
 def _offered(pack: dict) -> tuple:
     """The receipt components the pack's row says its evidence fits (`components`, data)."""
-    from . import packs
+    from ..mcp import packs
     row = packs.PACKS.get(pack.get("pack") or "food-security") or {}   # no field: a legacy FS pack
     return tuple(row.get("components") or ())
 
@@ -133,7 +133,7 @@ def replay_view(receipt: dict) -> dict:
     if pack.get("vectors"):
         # Re-measure each contributed layer inside the stored boundary: a changed or
         # removed layer shows up here, in words, rather than passing as verified.
-        from . import vectors as _vectors_step
+        from ..mcp import vectors as _vectors_step
         verified = _vectors_step.verify(pack)
         if verified:
             view["vectors_verified"] = verified
@@ -174,7 +174,7 @@ def _embed_url(component: str, rid: str) -> str | None:
     """The platform's own embed address for a component and receipt, from the theme
     (so GRP_PUBLIC_BASE governs it, exactly as it governs the resolver)."""
     try:
-        from . import ui
+        from ..mcp import ui
         base = ui.tokens()["product"]["embed_base"]
         return base["url"] + base["path"].format(component=component, receipt_id=rid)
     except Exception:

@@ -10,7 +10,8 @@ for the loop itself.
 import asyncio
 import pytest
 
-from app.mcp import assemble, packs, publish, record, store, verify
+from app.gate import publish, record, verify
+from app.mcp import assemble, packs, store
 
 
 @pytest.fixture

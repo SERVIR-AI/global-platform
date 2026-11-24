@@ -400,7 +400,7 @@ def test_driver_feeds_reach_the_pack_and_are_marked_as_pulls(brief_env):
     """A3.1: the Pillar-1 drivers must actually land in the evidence pack, carry
     the no-local-inference constraint in their own text (so it survives into the
     receipt, not just the prompt), and be typed as live pulls."""
-    from app.mcp import record
+    from app.gate import record
     brief_env([GOOD_BRIEF])
     citations, gaps, stats = synthesis.gather_evidence(PARSED, trace=[])
     # Index citations are now drivers PLUS pack-bound sources (a contributed table

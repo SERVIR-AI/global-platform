@@ -236,7 +236,7 @@ def test_presence_of_stale_data_is_not_staleness(log):
 def test_a_healthy_pull_mints_a_receipt_with_no_stale_flag(log):
     """End to end: the receipt must not caveat a live read. This is the assertion
     that would have caught the deploy-time regression."""
-    from app.mcp import record
+    from app.gate import record
     pack = {"citations": [
         {"n": 1, "kind": "index", "source": "NOAA CPC", "pub_date": "MJJ 2026",
          "stale_data": {"cadence": "monthly", "served_stale": False}},
@@ -337,7 +337,8 @@ def test_receipt_points_at_platform_components_not_a_hand_rolled_visual(log):
     """We briefly generated our own mermaid graph. Wrong: the platform already ships
     `provenance_graph`, receipt_bound and delivered as an EMBED so it re-resolves
     live. A receipt should name the component, not invent a picture."""
-    from app.mcp import assemble, record
+    from app.gate import record
+    from app.mcp import assemble
     p = assemble.assemble(country="kenya", crop="maize")
     r = record.record(pack_id=p["pack_id"], question="El Nino in Kenya")
     rw = r["render_with"]
@@ -352,7 +353,8 @@ def test_receipt_points_at_platform_components_not_a_hand_rolled_visual(log):
 def test_anything_showing_a_verdict_routes_through_embed(log):
     """ui_embed re-resolves at view time, so the verdict cannot be frozen into a
     page. Any other delivery for a verdict would break rule 5."""
-    from app.mcp import assemble, record
+    from app.gate import record
+    from app.mcp import assemble
     p = assemble.assemble(country="kenya", crop="maize")
     rw = record.record(pack_id=p["pack_id"], question="q")["render_with"]
     verdict_bearing = [rw["provenance"], rw["verdict"]]

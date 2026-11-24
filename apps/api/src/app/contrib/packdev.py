@@ -114,7 +114,8 @@ def _lint_citations(citations: list) -> list[str]:
 
 def doctor(pack_id: str) -> dict:
     """Lint + full loop dry-run for one registered pack. All failures at once."""
-    from ..mcp import assemble, packs, publish
+    from ..gate import publish
+    from ..mcp import assemble, packs
 
     report: dict = {"pack": pack_id, "checks": [], "failures": []}
 

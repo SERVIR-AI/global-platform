@@ -12,9 +12,10 @@ from __future__ import annotations
 import hashlib
 
 from ..food_security import synthesis
+from ..gate import record
 from ..llm import MissingAPIKey
 from ..rag.store import CorpusError
-from . import assemble, context, loop, record, registry, store
+from . import assemble, context, loop, registry, store
 
 
 def _run_foodsecurity_brief(question, override, override_country, override_crop,

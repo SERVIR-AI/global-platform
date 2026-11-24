@@ -10,8 +10,9 @@ import rasterio
 from rasterio.transform import from_origin
 
 from app.config import get_settings
+from app.gate import publish
 from app.graph.geo import ingest, stacks
-from app.mcp import assemble, packs, publish, store
+from app.mcp import assemble, packs, store
 
 LEGEND = {1: "Water body", 2: "Snow and glacier", 3: "Forest", 4: "Riverbed",
           5: "Built-up area", 6: "Cropland", 7: "Bare soil", 8: "Bare rock", 9: "Grassland"}
