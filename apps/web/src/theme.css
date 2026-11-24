@@ -1,5 +1,5 @@
 /* GENERATED from conf/ui_theme.json (theme grp v0).
-   Do not hand-edit — run: uv run python -m app.mcp.ui --write-app */
+   Do not hand-edit — run: uv run python -m app.ui.ui --write-app */
 
 @plugin "daisyui/theme" {
   name: "grp";

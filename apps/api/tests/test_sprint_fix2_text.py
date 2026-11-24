@@ -26,9 +26,10 @@ from app.contrib import fetch_policy, identity, rasters, staging
 from app.gate import publish
 from app.geo import stacks
 from app.packs.land_cover import synthesis as lc
-from app.mcp import app_ui, assemble, fetch, packs, registry, store
+from app.mcp import assemble, fetch, packs, registry, store
 from app.rag import filters as rag_filters
 from app.rag.store import Corpus
+from app.ui import app_ui
 
 W = H = 10
 PX = 0.001

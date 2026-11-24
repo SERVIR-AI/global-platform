@@ -24,9 +24,10 @@ from app.gate import publish, record
 from app.geo import align, combine, ingest, schema, stacks, tiffs, vectors
 from app.packs.land_cover import synthesis as lc
 from app.packs.food_security import synthesis as fs
-from app.mcp import app_ui, assemble, packs, registry, store
+from app.mcp import assemble, packs, registry, store
 from app.rag import filters as rag_filters
 from app.packs.risk import synthesis as risk
+from app.ui import app_ui
 
 from test_fetch_policy import FakeResponse, transport  # noqa: F401  (a scripted transport)
 from test_layer_values import POLY as RISK_POLY, world  # noqa: F401  (the risk pack's toy area)

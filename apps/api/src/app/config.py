@@ -162,7 +162,7 @@ class Settings(BaseSettings):
 
     # --- Figma (live design tokens) ---
     # Read-only. Variables API needs Enterprise; on this plan we read the document
-    # tree instead, so mcp/figma.py reports what it cannot resolve.
+    # tree instead, so ui/figma.py reports what it cannot resolve.
     figma_token: str | None = None
     figma_file_key: str = "Fq6ffqege1xqUeCDyLYTfK"
 

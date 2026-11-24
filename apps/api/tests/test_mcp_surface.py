@@ -11,7 +11,7 @@ which is exactly the kind of change this guards.
 import asyncio
 
 from app.mcp import packs
-from app.mcp.app_ui import UI_URI
+from app.ui.app_ui import UI_URI
 from app.mcp.server import mcp
 
 TOOLS = {
@@ -45,7 +45,7 @@ def test_resources_cover_the_app_the_guide_and_every_pack(log):
     """One manifest per PACKS row, plus both MCP Apps and the human guide."""
     uris = {str(r.uri) for r in asyncio.run(mcp.list_resources())}
     log("OUTPUT", str(sorted(uris)))
-    from app.mcp.weights_ui import UI_URI as WEIGHTS_UI_URI
+    from app.ui.weights_ui import UI_URI as WEIGHTS_UI_URI
     from app.mcp import skills
     expected = {UI_URI, WEIGHTS_UI_URI, "servirplatform://how-to-use",
                 "servirplatform://places"} | {

@@ -1,5 +1,5 @@
 """An embed binds what its component declares: a receipt, or a place for the area monitor."""
-from app.mcp import ui
+from app.ui import ui
 
 
 def test_the_area_monitor_binds_a_place_and_the_others_a_receipt():

@@ -4,7 +4,7 @@ The web app imports generated artifacts (theme.css, theme.ts) and `ui.design`
 serves the same tokens — so "looks like the platform" can't drift. Nothing here
 hardcodes a colour; edit the JSON and regenerate:
 
-    uv run python -m app.mcp.ui --write-app
+    uv run python -m app.ui.ui --write-app
 
 The honesty conventions ride WITH the paint: `trust_rules` and `voice` travel in
 the token payload, so a vibe-coded UI inherits unverified-by-default even on
@@ -18,7 +18,7 @@ import os
 from pathlib import Path
 
 from ..config import get_settings
-from .budget import once
+from ..mcp.budget import once
 
 _APP_WEB = Path(__file__).resolve().parents[4] / "web" / "src"
 
@@ -74,7 +74,7 @@ def daisy_theme(t: dict | None = None) -> str:
 def app_css(t: dict | None = None) -> str:
     t = t or tokens()
     return (f"/* GENERATED from conf/ui_theme.json (theme {t['id']} {t['version']}).\n"
-            "   Do not hand-edit — run: uv run python -m app.mcp.ui --write-app */\n\n"
+            "   Do not hand-edit — run: uv run python -m app.ui.ui --write-app */\n\n"
             + daisy_theme(t) + "\n\n" + css_vars(t) + "\n")
 
 
@@ -85,7 +85,7 @@ def app_ts(t: dict | None = None) -> str:
             "provenance": t["provenance"], "validationLevels": t["validation_levels"],
             "trustRules": t["trust_rules"], "voice": t["voice"]}
     return ("// GENERATED from conf/ui_theme.json — do not hand-edit.\n"
-            "// Regenerate: uv run python -m app.mcp.ui --write-app\n"
+            "// Regenerate: uv run python -m app.ui.ui --write-app\n"
             "export const theme = " + json.dumps(body, indent=2) + " as const;\n")
 
 

@@ -1,5 +1,5 @@
 // GENERATED from conf/ui_theme.json — do not hand-edit.
-// Regenerate: uv run python -m app.mcp.ui --write-app
+// Regenerate: uv run python -m app.ui.ui --write-app
 export const theme = {
   "id": "grp",
   "version": "v0",

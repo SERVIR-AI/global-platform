@@ -144,6 +144,7 @@ apps/
 │   │   ├── gate/             the answer gate every pack goes through: the check (grounded.py), verify,
 │   │   │                     publish, record
 │   │   ├── feeds/            live feeds: the entry point and adapters, climate indices, the ENSO forecast
+│   │   ├── ui/               the design language, the MCP Apps views and the Figma tokens
 │   │   ├── contrib/          contribution gate: kinds, fetch policy, preparation ops, methods, jobs
 │   │   ├── packs/            the domain packs
 │   │   │   ├── food_security/  food-security pack: gatherer, crop calendar, Crop Monitor, REST routes

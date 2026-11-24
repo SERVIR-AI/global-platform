@@ -24,13 +24,13 @@ from fastmcp.exceptions import ToolError
 from fastmcp.server.middleware import Middleware
 from mcp.types import Icon
 
-from . import (app_ui, assemble, auth, budget, compose, context, fetch, instructions,
-               loop, weights_ui,
-               registry, resolve, shape, start, store, tooltext, ui)
+from . import (assemble, auth, budget, compose, context, fetch, instructions, loop,
+               registry, resolve, shape, start, store, tooltext)
 from ..config import get_settings
 from ..contrib import identity
 from ..feeds import feeds
 from ..gate import publish, record, verify
+from ..ui import app_ui, ui, weights_ui
 from .. import __version__
 
 log = logging.getLogger(__name__)
