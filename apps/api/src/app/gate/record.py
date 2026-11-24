@@ -9,7 +9,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from ..feeds import feeds
-from ..mcp import loop, store, ui
+from ..mcp import loop, store
+from ..ui import ui
 
 
 def _abs(path: str) -> str:
@@ -175,7 +176,7 @@ def _embed_url(component: str, rid: str) -> str | None:
     """The platform's own embed address for a component and receipt, from the theme
     (so GRP_PUBLIC_BASE governs it, exactly as it governs the resolver)."""
     try:
-        from ..mcp import ui
+        from ..ui import ui
         base = ui.tokens()["product"]["embed_base"]
         return base["url"] + base["path"].format(component=component, receipt_id=rid)
     except Exception:

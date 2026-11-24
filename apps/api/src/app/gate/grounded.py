@@ -654,7 +654,7 @@ def _platform_bases() -> list[str]:
     public URL. A link under one of them is the platform's, never the web's."""
     bases = [get_settings().grp_public_url]
     try:
-        from ..mcp import ui
+        from ..ui import ui
         product = ui.tokens()["product"]
         bases += [product["resolver"]["base"], product["embed_base"]["url"]]
     except Exception:

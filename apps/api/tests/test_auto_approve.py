@@ -22,7 +22,7 @@ def test_auto_approve_is_on_by_default_and_review_is_one_switch_away(monkeypatch
 def test_the_weights_picker_tells_the_truth_under_either_switch(monkeypatch, log):
     """Auto-approve on: the picker says a valid proposal is live at once and handles the
     'approved' reply; off: it promises review, as before."""
-    from app.mcp import weights_ui
+    from app.ui import weights_ui
     monkeypatch.setattr(get_settings(), "grp_auto_approve", True)
     on = weights_ui.html()
     assert "AUTO-APPROVES" in on and 'd.status === "approved"' in on

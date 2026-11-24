@@ -510,7 +510,7 @@ def _design_language() -> dict:
     """So a builder learns from platform_capabilities that the design language is
     live, rather than only discovering it if they happen to call ui_catalog."""
     try:
-        from . import figma
+        from ..ui import figma
         c = figma.read_components()
         return {"source": "figma-live", "file": c["provenance"]["file"],
                 "last_modified": c["provenance"]["last_modified"],

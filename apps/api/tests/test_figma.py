@@ -8,7 +8,7 @@ resolve.
 
 import pytest
 
-from app.mcp import figma
+from app.ui import figma
 
 
 @pytest.fixture(autouse=True)
@@ -119,7 +119,7 @@ def test_no_token_configured_declines_clearly(monkeypatch, log):
 def test_design_falls_back_to_config_when_figma_is_down(monkeypatch, log):
     """ui_design must never fail and never serve an empty palette. A consumer
     mid-build gets the committed theme instead, and is TOLD that is what happened."""
-    from app.mcp import ui
+    from app.ui import ui
     monkeypatch.setattr(figma, "read_tokens",
                         lambda *a, **k: (_ for _ in ()).throw(figma.FigmaUnavailable("down")))
     out = ui.design("tokens")
@@ -134,7 +134,7 @@ def test_design_falls_back_to_config_when_figma_is_down(monkeypatch, log):
 def test_design_says_which_source_it_served(monkeypatch, log):
     """The fallback is silent in BEHAVIOUR and loud in the PAYLOAD. A builder must
     never have to guess whether they got the live file or a copy."""
-    from app.mcp import ui
+    from app.ui import ui
     monkeypatch.setattr(figma, "read_tokens", lambda *a, **k: {
         "colors": {"Servir_Blue": "#2380B0"}, "declared_styles": [],
         "conflicts": [{"kind": "duplicate_value", "name": "White", "detail": "x"}],
@@ -150,7 +150,7 @@ def test_design_says_which_source_it_served(monkeypatch, log):
 def test_live_colours_do_not_overwrite_semantic_roles(monkeypatch, log):
     """`palette` is the role map every component is built on. Letting a colour page
     rename roles would restyle the whole UI the moment a designer edits a swatch."""
-    from app.mcp import ui
+    from app.ui import ui
     monkeypatch.setattr(figma, "read_tokens", lambda *a, **k: {
         "colors": {"primary": "#FF0000"}, "declared_styles": [], "conflicts": [],
         "provenance": {"file": "f", "last_modified": "x"}})
@@ -180,7 +180,7 @@ def test_variant_properties_are_parsed_not_string_matched(monkeypatch, log):
 def test_ambiguous_variant_request_declines_rather_than_picking(monkeypatch, log):
     """Two variants match a partial request. Returning either would hand a builder a
     logo they did not ask for, on a ground it may not suit."""
-    from app.mcp import ui
+    from app.ui import ui
     monkeypatch.setattr(figma, "read_components", lambda *a, **k: {"sets": [
         {"name": "L", "node_id": "1:1", "variants": [
             {"node_id": "1:2", "treatment": "Primary", "layout": "Horizontal"},
@@ -194,7 +194,7 @@ def test_ambiguous_variant_request_declines_rather_than_picking(monkeypatch, log
 def test_a_rendered_asset_states_that_its_url_expires(monkeypatch, log):
     """Figma image URLs expire. A page that hotlinks one breaks silently weeks later,
     so the expiry ships with the asset."""
-    from app.mcp import ui
+    from app.ui import ui
     monkeypatch.setattr(figma, "read_components", lambda *a, **k: {"sets": [
         {"name": "L", "node_id": "1:1",
          "variants": [{"node_id": "1:2", "treatment": "Black"}]}]})
@@ -209,7 +209,7 @@ def test_a_rendered_asset_states_that_its_url_expires(monkeypatch, log):
 
 def test_catalog_still_lists_our_recipes_when_figma_is_down(monkeypatch, log):
     """Our own components are unaffected by a third party being unreachable."""
-    from app.mcp import ui
+    from app.ui import ui
     monkeypatch.setattr(figma, "read_components",
                         lambda *a, **k: (_ for _ in ()).throw(figma.FigmaUnavailable("down")))
     out = ui.catalog()
@@ -239,7 +239,7 @@ def test_live_type_scale_reaches_the_consumer(monkeypatch, log):
     """Caught by running the real thing, not by a test: the reader extracted 10 type
     styles and ui.design surfaced the config's 3, because the live scale was never
     wired through. Both are present now, and separate."""
-    from app.mcp import ui
+    from app.ui import ui
     monkeypatch.setattr(figma, "read_tokens", lambda *a, **k: {
         "colors": {}, "declared_styles": [], "conflicts": [],
         "typography": [{"family": "Roboto Condensed", "weight": 300, "size_px": 36}],

@@ -240,7 +240,7 @@ def test_the_app_strips_the_verdict_before_rendering(pack, log):
     surface freezes what is in it. Previously `evidence_payload` guarded only the
     standalone browser path, so on the real MCP Apps path the verdict rode straight
     into the renderer."""
-    from app.mcp import app_ui
+    from app.ui import app_ui
     out = publish.answer(pack["pack_id"], _passing_draft(pack), question="q")
     tmpl = app_ui.template()
     log("OUTPUT", f"tool result carries: {[k for k in app_ui._VERDICT_FIELDS if k in out]}")
@@ -256,7 +256,7 @@ def test_the_apps_field_list_is_generated_not_retyped(log):
     """A hand-copied list in the JS would drift from the Python tuple the moment a
     field is added, and the drift would be invisible until a verdict rendered."""
     import json as _json
-    from app.mcp import app_ui
+    from app.ui import app_ui
     injected = app_ui.template().split("const VERDICT_FIELDS = ")[1].split(";")[0]
     log("OUTPUT", injected)
     assert _json.loads(injected) == list(app_ui._VERDICT_FIELDS)
@@ -268,7 +268,7 @@ def test_trust_chrome_can_be_pointed_at_the_deployed_platform(monkeypatch, log):
     deployed server handed every consumer a resolver URL pointing at THEIR OWN
     machine. Dead resolve links, dead embeds, no provenance graph — rule 5 says the
     verdict resolves against the PLATFORM, so the platform must know its address."""
-    from app.mcp import ui
+    from app.ui import ui
     monkeypatch.setenv("GRP_PUBLIC_BASE", "http://10.1.30.110:8080/")
     t = ui.tokens()
     log("OUTPUT", t["product"]["resolver"]["base"])
@@ -280,7 +280,7 @@ def test_trust_chrome_can_be_pointed_at_the_deployed_platform(monkeypatch, log):
 
 def test_localhost_stays_the_default_for_development(log):
     """Unset means dev: the override must not become a required variable."""
-    from app.mcp import ui
+    from app.ui import ui
     log("CHECK", "no GRP_PUBLIC_BASE -> committed theme values")
     assert ui.tokens()["product"]["resolver"]["base"].startswith("http://localhost")
 
@@ -306,7 +306,7 @@ def test_the_panel_is_capability_gated_analytics(log):
     """User: a proper analytics tool. The unlock is tools/call through the host —
     and it must be GATED on hostCapabilities.serverTools, with the pack snapshot
     still fully usable when the host does not proxy."""
-    from app.mcp import app_ui
+    from app.ui import app_ui
     html = app_ui.template()
     log("CHECK", "bridge, gating, live-vs-pack honesty, analogues, overlay, stats")
     assert 'method: "tools/call"' in html

@@ -9,7 +9,7 @@ something, which is what failed when we only asked in the instructions.
 import asyncio
 import json
 
-from app.mcp import app_ui
+from app.ui import app_ui
 
 
 def _receipt(**over):
