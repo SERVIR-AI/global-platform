@@ -91,7 +91,7 @@ const geometryLayer = (geometry: NonNullable<ChatRequest['geometry']>): Layer =>
   // rectangle from the (already reprojected) extent.
   const feature = Array.isArray(geometry)
     ? new Feature(fromExtent(transformExtent(geometry as Bbox, DATA_PROJECTION, VIEW_PROJECTION)))
-    : new Feature(geoJSON.readGeometry(geometry, readOptions));
+    : new Feature(geoJSON.readGeometry(geometry, readOptions) ?? undefined);
   return new VectorLayer({ source: new VectorSource({ features: [feature] }), style: aoiStyle });
 };
 
