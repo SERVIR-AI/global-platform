@@ -224,7 +224,7 @@ actionlint) and an amd64 image build. A push also publishes the image to
 `ghcr.io/servir-ai/global-platform` by digest with signed provenance, then boots it and
 checks that `/api/health` reports the commit. Dependabot bumps dependencies weekly, and
 `deploy/ci/github-settings.sh` holds the repository settings as code (the ruleset on
-`main`, read-only tokens, pinned actions, secret scanning).
+`main`, read-only tokens, pinned actions, secret scanning, merged branches deleted).
 
 ## Deploy
 
