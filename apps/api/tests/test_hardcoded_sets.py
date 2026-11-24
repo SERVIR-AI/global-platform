@@ -50,6 +50,28 @@ def test_a_layer_that_does_not_cover_the_area_is_not_clipped(tmp_path, monkeypat
     assert len(asked) == 1
 
 
+def test_only_point_layers_are_clipped_into_a_new_area(tmp_path, monkeypatch, log):
+    """Lines and polygons are measured from their master file when a pack asks; a clip of
+    them would cost a full parse of the master on the first question about every area."""
+    monkeypatch.setattr(get_settings(), "cache_dir", tmp_path)
+    monkeypatch.setattr(ingest, "_fetch_layer", lambda layer, bbox, boundary: [])
+    monkeypatch.setattr(ingest, "_reverse_country", lambda lon, lat: "Cambodia")
+    here = [103.0, 13.0, 103.3, 13.2]
+    def here_(title, **geometry):
+        return {**_entry(here, title=title, countries=["Cambodia"]), **geometry}
+    layers = {"wells": here_("wells", geometry="points"),
+              "undeclared": here_("no geometry recorded"),                # counted as points
+              "rivers": here_("rivers", geometry="lines"),
+              "paddies": here_("rice paddies", geometry="polygons")}
+    monkeypatch.setattr(vectors, "visible", lambda: layers)
+    clipped = []
+    monkeypatch.setattr(vectors, "clip_into", lambda adir, boundary, layer, entry: (clipped.append(layer), 0)[1])
+    b = ingest.ensure_aoi(geometry=[103.16, 13.07, 103.24, 13.15], layers=["hospitals"])
+    log("OUTPUT", f"clipped={clipped}")
+    assert sorted(clipped) == ["undeclared", "wells"]
+    assert "wells" in b and "undeclared" in b and "rivers" not in b and "paddies" not in b
+
+
 def test_country_names_are_matched_forgivingly():
     B = type("B", (), {"bounds": (0, 0, 1, 1)})()
     assert vectors.not_applicable(_entry([0, 0, 1, 1], countries=["Viet Nam"]), B, "Vietnam") is None
