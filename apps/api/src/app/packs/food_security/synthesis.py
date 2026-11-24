@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 from ...config import get_settings
 from ...gate import grounded
-from ...llm import build_client, default_model
+from ...llm import build_client, default_model, token_counts
 from ...rag.store import Corpus, source_block
 from . import calendar as crop_calendar
 from . import cropmonitor
@@ -81,18 +81,12 @@ Write EXACTLY these markdown sections and nothing else:
 Do not write a Sources section — the system appends it."""
 
 
-def _usage(resp) -> dict:
-    u = getattr(resp, "usage", None)
-    return {"in": getattr(u, "prompt_tokens", 0) or 0,
-            "out": getattr(u, "completion_tokens", 0) or 0} if u else {"in": 0, "out": 0}
-
-
 def _parse(client, model, question, trace, usage):
     resp = client.chat.completions.create(
         model=model, max_tokens=300, tools=_PARSE_TOOLS,
         messages=[{"role": "system", "content": _parse_system()},
                   {"role": "user", "content": question}])
-    usage.append(_usage(resp))
+    usage.append(token_counts(resp))
     msg = resp.choices[0].message
     if not msg.tool_calls:
         trace.append("parse -> out of scope (no tool call)")
@@ -655,7 +649,7 @@ def synthesize(question, provider=None, model=None, calendar=None,
         # check below so the next occurrence names itself.
         resp = client.chat.completions.create(model=model, max_tokens=3000,
                                               messages=messages)
-        usage.append(_usage(resp))
+        usage.append(token_counts(resp))
         draft = (resp.choices[0].message.content or "").strip()
         if getattr(resp.choices[0], "finish_reason", None) == "length":
             trace.append(f"synthesis attempt {attempt} -> TRUNCATED at max_tokens; "
