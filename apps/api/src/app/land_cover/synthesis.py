@@ -1670,6 +1670,7 @@ def synthesize(question: str, provider: str | None = None, model: str | None = N
 
     from ..config import get_settings
     from ..food_security import synthesis as fs
+    from ..gate import grounded
     from ..llm import build_client, default_model
     from ..mcp import packs as mcp_packs
 
@@ -1742,7 +1743,7 @@ def synthesize(question: str, provider: str | None = None, model: str | None = N
             trace.append(f"synthesis attempt {attempt} -> model declined")
             return fs._declined(draft, trace=trace, usage=usage,
                                 citations=citations, stats=stats) | base
-        check = fs.check_grounded(draft, citations, sections=SECTIONS)
+        check = grounded.check_grounded(draft, citations, sections=SECTIONS)
         check["attempts"] = attempt
         trace.append(f"groundedness attempt {attempt} -> "
                      + ("PASS" if check["passed"]

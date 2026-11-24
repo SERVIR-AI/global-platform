@@ -141,10 +141,10 @@ apps/
 │   ├── src/app/
 │   │   ├── main.py           app factory: /mcp, /api and the web build on one origin
 │   │   ├── mcp/              MCP server and tools; assemble; budgets; SQLite store
-│   │   ├── gate/             the answer gate's steps, shared by every pack: verify, publish, record
+│   │   ├── gate/             the answer gate every pack goes through: the check (grounded.py), verify,
+│   │   │                     publish, record
 │   │   ├── contrib/          contribution gate: kinds, fetch policy, preparation ops, methods, jobs
-│   │   ├── food_security/    food-security pack: gatherer, crop calendar, Crop Monitor, REST routes;
-│   │   │                     its synthesis.py also holds the gate (check_grounded) every pack uses
+│   │   ├── food_security/    food-security pack: gatherer, crop calendar, Crop Monitor, REST routes
 │   │   ├── land_cover/       land-cover pack: gatherer in synthesis.py
 │   │   ├── risk/             risk pack: gatherer in synthesis.py
 │   │   ├── packs_ext/        drop-in packs

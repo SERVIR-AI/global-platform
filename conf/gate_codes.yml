@@ -1,4 +1,4 @@
-# Code lists the groundedness gate reads (app/food_security/synthesis.py): which bare hosts are
+# Code lists the groundedness gate reads (app/gate/grounded.py): which bare hosts are
 # country web domains, and which marks and words name a currency. Data, not code: edit it here.
 # Lists of codes are space-separated strings (YAML would read a bare NO as false).
 

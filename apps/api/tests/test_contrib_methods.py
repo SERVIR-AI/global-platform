@@ -295,7 +295,7 @@ def test_a_method_that_holds_elsewhere_is_not_run_here(env, log):
 
 
 def test_the_gate_sees_the_platforms_numbers(env):
-    from app.food_security.synthesis import check_grounded
+    from app.gate.grounded import check_grounded
     _units(env)
     staging.submit("method", _threshold())
     _, cits, _, _ = _seam("land-cover", {"place": "Test Province", "year": "2020"},

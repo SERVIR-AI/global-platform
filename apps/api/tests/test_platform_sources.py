@@ -8,7 +8,7 @@ import pytest
 from app.config import get_settings
 from app.contrib import staging
 from app.food_security import cropmonitor, synthesis as fs
-from app.gate import publish, record, verify
+from app.gate import grounded, publish, record, verify
 from app.mcp import assemble, budget, compose, feeds, instructions, loop, packs
 from app.mcp import shape, store
 from app.mcp.server import mcp
@@ -239,7 +239,7 @@ CITS = [{"n": 1, "kind": "exposure", "source": "platform", "title": "people in t
 
 
 def _gate(body: str, cits=CITS) -> dict:
-    return fs.check_grounded("## Answer\n\n" + body, cits, sections=["## Answer"])
+    return grounded.check_grounded("## Answer\n\n" + body, cits, sections=["## Answer"])
 
 
 def test_the_gate_blocks_web_links_and_passes_the_packs_own(log):
@@ -280,7 +280,7 @@ def test_the_gate_blocks_web_links_and_passes_the_packs_own(log):
         r = _gate(body)
         log("OUTPUT", f"{name}: passed={r['passed']}")
         assert r["passed"] and not r["links_not_served"], (name, r["failures"])
-    assert not fs._links("chirps-v2.0.2020.nc, v3.0 and 2020.net")       # digit labels: no host
+    assert not grounded._links("chirps-v2.0.2020.nc, v3.0 and 2020.net")       # digit labels: no host
     with_link = [{**CITS[0], "text": CITS[0]["text"] + f" Outlook: {WEB}; see {DOMAIN}."}, CITS[1]]
     for name in ("a web URL", "a bare domain"):
         assert _gate(blocked[name], with_link)["passed"], name       # served once the pack carries it
@@ -290,7 +290,7 @@ def test_the_gate_reads_magnitudes_and_numbers_in_words(log):
     """'3.2 million' was read as 3.2, a small fraction under the >= 10 rule, and never checked.
     Each figure is blocked while the pack does not hold it and passes once it does, with the
     rounding of the unit it is written in."""
-    assert fs._spelled("3.2 million")[0] == "3200000" and "3.2" not in fs._number_set("3200000")
+    assert grounded._spelled("3.2 million")[0] == "3200000" and "3.2" not in grounded._number_set("3200000")
     cases = {"7.4 million people": "7,400,000 people", "1.5 billion dollars": "US$1,500,000,000",
              "fifteen thousand hectares": "15,000 ha", "45k households": "45,000 households",
              "two hundred schools": "200 schools", "US$9.8M in damage": "9,800,000 dollars",
@@ -372,8 +372,8 @@ def _largest_figure(p: dict):
     for c in p["citations"]:
         if c.get("kind") == "gaps":
             continue
-        for v, tok, _unit, _sig, written, count_of, cell, _kind in fs._vouchers(str(c.get("text") or "")):
-            if written and not count_of and not cell and fs._load_bearing(tok) and v == int(v) \
+        for v, tok, _unit, _sig, written, count_of, cell, _kind in grounded._vouchers(str(c.get("text") or "")):
+            if written and not count_of and not cell and grounded._load_bearing(tok) and v == int(v) \
                     and (best is None or v > best[1]):
                 best = (c, int(v))
     return best
@@ -403,14 +403,14 @@ def _still_passes_and_leaks_block(p: dict, log, label):
         assert out["status"] == "blocked", (label, leak)
         assert any("contribute the source so the platform serves it" in f for f in out["failures"])
     if hit and hit[1] >= 1000:
-        evid = fs._figures(" ".join(str(c.get("text") or "") for c in p["citations"]))
+        evid = grounded._figures(" ".join(str(c.get("text") or "") for c in p["citations"]))
         v = next(k * hit[1] for k in (7, 11, 13, 17) if all(
             abs(float(e) - k * hit[1]) > _magnitude(k * hit[1])[1] for e in evid))
         out = publish.answer(p["pack_id"], _draft(p, f"About {_magnitude(v)[0]} [{hit[0]['n']}]."), "q")
         log("OUTPUT", f"{label}: inflated '{_magnitude(v)[0]}' -> {out['status']}")
         assert out["status"] == "blocked" and "numbers that appear in no citation" in out["failures"][0]
     # an invented round count in digits: no x100 'conversion' from an unrelated figure
-    evid = fs._figures(" ".join(str(c.get("text") or "") for c in p["citations"]) + str(p.get("stats")))
+    evid = grounded._figures(" ".join(str(c.get("text") or "") for c in p["citations"]) + str(p.get("stats")))
     for fig in [f for f in range(1100, 9900, 100) if str(f) not in evid][:6]:
         out = publish.answer(p["pack_id"], _draft(p, f"An estimated {fig:,} people were displaced [1]."), "q")
         assert out["status"] == "blocked", (label, fig, out.get("numbers_derived"))
@@ -446,9 +446,9 @@ def test_the_gate_notes_ride_the_reply_and_the_receipt(lc_env, log):  # noqa: F8
     """Which pack figure vouched for each figure, and every warning, on publish_answer's reply,
     the stored receipt and a later record_receipt, not only in the report."""
     p = assemble.assemble(pack="land-cover", place="Test District", year=2000, year_to=2022)
-    evid = fs._figures(" ".join(str(c.get("text") or "") for c in p["citations"]))
+    evid = grounded._figures(" ".join(str(c.get("text") or "") for c in p["citations"]))
     c, ha = next((c, f"{float(tok) * 100:g}") for c in p["citations"] if c.get("kind") != "gaps"
-                 for _v, tok, unit, sig, written, _n, _cell, _kind in fs._vouchers(str(c.get("text") or ""))
+                 for _v, tok, unit, sig, written, _n, _cell, _kind in grounded._vouchers(str(c.get("text") or ""))
                  if unit == "km2" and sig >= 3 and written and f"{float(tok) * 100:g}" not in evid)
     out = publish.answer(p["pack_id"], _draft(p, f"That class covers {ha} ha [{c['n']}]."), "q")
     log("OUTPUT", f"{ha} ha: {out.get('numbers_derived')}")
@@ -520,7 +520,7 @@ def test_a_year_shaped_count_reads_the_same_in_a_draft_and_its_pack(log):
     assert _gate(count, with_text(" 2000 people moved."))["passed"]
     assert not _gate(count, with_text(" The floods of 2000 were severe."))["passed"]
     assert _gate("In 2020 farmers planted less maize [1].")["passed"]
-    pack_side = fs._merged([fs._evidence("In 2020 farmers planted less; 2000 people moved.")])
+    pack_side = grounded._merged([grounded._evidence("In 2020 farmers planted less; 2000 people moved.")])
     log("OUTPUT", f"years the pack states: {sorted(pack_side.years)}")
     assert "2020" in pack_side.years and "2000" not in pack_side.years
 
@@ -532,10 +532,10 @@ def test_the_code_lists_are_data_and_every_code(log):
     import yaml
     codes = yaml.safe_load(get_settings().gate_codes_path.read_text())
     iso = set(codes["iso_3166_alpha2"].lower().split())
-    assert len(iso) >= 249 and fs._CC == iso - set(codes["english_word_codes"].lower().split())
-    assert {"pe", "bo", "ec", "id"} & fs._CC == {"pe", "bo", "ec"}       # 'id' is an English word
+    assert len(iso) >= 249 and grounded._CC == iso - set(codes["english_word_codes"].lower().split())
+    assert {"pe", "bo", "ec", "id"} & grounded._CC == {"pe", "bo", "ec"}       # 'id' is an English word
     for mark in ("₡", "₮", "₭", "៛", "؋", "MNT ", "CRC ", "KSh ", "K"):
-        assert fs._currency().search(f"cost {mark}"), mark
+        assert grounded._currency().search(f"cost {mark}"), mark
     for money in ("₡3 million", "MNT 3 million", "3 million kip", "3 million colones",
                   "Le 3 million in damage"):
         r = _gate(f"Losses reached {money} [1].")              # the pack holds 3,215,433 PEOPLE
@@ -624,12 +624,12 @@ def test_a_table_not_landed_here_is_named_by_its_file_never_a_host_path(tmp_path
 def test_the_gate_reads_the_evidence_and_the_draft_once(monkeypatch):
     """Each citation's text and fields, and the platform's own figures, are read once per check;
     each paragraph once (the attribution check reuses both)."""
-    real, calls = fs._spelled, []
-    monkeypatch.setattr(fs, "_spelled", lambda text, ambiguous=True: calls.append(ambiguous)
+    real, calls = grounded._spelled, []
+    monkeypatch.setattr(grounded, "_spelled", lambda text, ambiguous=True: calls.append(ambiguous)
                         or real(text, ambiguous))
     cits = [CITS[0], {**CITS[0], "n": 2, "text": "4,000 ha of forest."}, {**CITS[1], "n": 3}]
-    fs.check_grounded("## Answer\n\nA 12,040 ha figure [1].\n\nAnd 4,000 ha [2].", cits,
-                      sections=["## Answer"], extra_evidence={"area_km2": 120.4})
+    grounded.check_grounded("## Answer\n\nA 12,040 ha figure [1].\n\nAnd 4,000 ha [2].", cits,
+                            sections=["## Answer"], extra_evidence={"area_km2": 120.4})
     assert calls.count(False) == 2 * len(cits) + 1 and calls.count(True) == 3
 
 
@@ -643,7 +643,7 @@ def test_a_missing_code_list_never_stops_the_gate(tmp_path, log):
     src = Path(__file__).resolve().parents[1] / "src"
     env = {**os.environ, "GATE_CODES_PATH": str(tmp_path / "absent.yml"),
            "CACHE_DIR": str(tmp_path / "cache"), "PYTHONPATH": str(src)}
-    run = subprocess.run([sys.executable, "-c", "from app.food_security import synthesis as s; "
+    run = subprocess.run([sys.executable, "-c", "from app.gate import grounded as s; "
                           "print(len(s._CC), callable(s.check_grounded))"],
                          env=env, capture_output=True, text=True, timeout=120)
     log("OUTPUT", f"rc={run.returncode} out={run.stdout.strip()} err={run.stderr.strip()[-160:]}")
