@@ -297,8 +297,8 @@ def test_seam_measures_named_vectors_for_any_pack_and_declines_unknown_names(vec
     assert _as(OWNER, lambda: vectors_step.check(["nope"])) and "unknown vector layer" in _as(OWNER, lambda: vectors_step.check(["nope"]))
     assert vectors_step.check(None) is None
     # the risk pack's counted assets stay point layers: a line layer is not an "asset"
-    from app.packs.risk import synthesis as risk
-    assert "test_rivers" not in _as(OWNER, risk._asset_layers)
+    from app.geo import registry as geo_registry
+    assert "test_rivers" not in _as(OWNER, geo_registry.countable)
 
 
 # --------------------------------------------- a freshly contributed stack, end to end

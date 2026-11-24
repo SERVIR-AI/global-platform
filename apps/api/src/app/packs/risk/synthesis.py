@@ -18,7 +18,7 @@ from __future__ import annotations
 import os
 import re
 
-from ...geo import (combine, ingest, layer_values, rasterstats, schema,
+from ...geo import (combine, ingest, layer_values, rasterstats, registry as geo_registry, schema,
                     store as geostore, tiffs, viz)
 
 SECTIONS = (
@@ -27,17 +27,6 @@ SECTIONS = (
     "## What's missing and how to weigh it",
     "## Reading the severity scale",
 )
-
-_ASSETS = ("hospitals", "schools", "buildings")     # built-in, from OSM
-
-
-def _asset_layers() -> tuple:
-    """Built-in point assets plus every contributed POINT layer the caller may see.
-    A contributed line or polygon layer reaches a risk answer through the seam's
-    vector step (assemble_pack(..., vectors=[...])), not as a counted asset."""
-    from ...geo import vectors
-    return _ASSETS + tuple(l for l, e in vectors.visible().items()
-                           if l not in _ASSETS and vectors.family(e) == "points")
 
 # Only hazard_flood's lineage is stated in conf/tiffs.yml; announcing that the
 # other eight are unattributed is part of the evidence, not a footnote.
@@ -395,9 +384,9 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
                                for k in tiffs.catalog() if k.startswith("hazard_"))))
     min_sev = int(extras.get("min_severity") or 1)
     map_layer = extras.get("map_layer")
-    if map_layer and map_layer not in _asset_layers():
+    if map_layer and map_layer not in geo_registry.countable():
         raise ValueError(f"unknown map_layer {map_layer!r} — one of: "
-                         + ", ".join(_asset_layers()))
+                         + ", ".join(geo_registry.countable()))
     legend = tiffs.legend(hz)
 
     geometry = extras.get("geometry")
@@ -533,7 +522,7 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
             f"{aoi.get('name', place)}: the area is ~{aoi.get('area_km2')} km², over "
             "the asset budget, so those layers were never fetched. They are ABSENT "
             "from this pack, not zero. Ask about a smaller area to get them."))
-    for layer in _asset_layers():
+    for layer in geo_registry.countable():
         if layer in declined:
             continue
         na = (aoi.get("vectors_not_applicable") or {}).get(layer)
@@ -681,7 +670,7 @@ def gather_risk_evidence(target: dict, focus: str, trace: list,
     risk_key, risk_weights = _l2_risk(aoi, hz, trace, gaps)
     if risk_key:
         rk_sev = geostore._Severity(aoi[risk_key])
-        for layer in _asset_layers():
+        for layer in geo_registry.countable():
             if layer not in aoi:
                 continue
             if layer in declined:
@@ -1072,7 +1061,7 @@ def _headline_layer(counts, risk_key, preferred=None):
     key = "at_risk" if risk_key else "exposed"
     if preferred and preferred in counts:
         return preferred
-    contributed = [l for l in counts if l not in _ASSETS and l != "roads"
+    contributed = [l for l in counts if l not in geo_registry.COUNTABLE and l != "roads"
                    and not str(l).startswith("people:")]
     for layer in ("hospitals", "schools", *contributed, "buildings"):
         c = counts.get(layer) or {}
