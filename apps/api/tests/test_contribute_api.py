@@ -123,7 +123,9 @@ def test_oauth_on_accepts_a_verified_bearer_and_attributes_it(isolated, monkeypa
     assert r.status_code == 200, r.text
     rec = store.load_contribution(r.json()["contribution_id"])
     assert rec["contributor_id"] == "user_TEST123"
-    assert rec["contributor_label"] == "hub@example.test"
+    assert rec["contributor_label"] == "user_TEST123"         # records reach public answers
+    from app.contrib import people
+    assert people.describe("user_TEST123") == "hub@example.test"   # kept for reviewers
 
 
 def test_no_token_at_all_still_gets_the_challenge(monkeypatch):

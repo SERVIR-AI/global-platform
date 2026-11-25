@@ -24,7 +24,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from ..mcp import store
-from . import catalog_io, fetch_policy, identity, prepare, sources
+from . import catalog_io, fetch_policy, identity, people, prepare, sources
 from . import methods as _methods
 
 _ATTESTED = ("title", "description", "source", "license", "vintage", "countries")
@@ -3119,6 +3119,7 @@ def submit(kind: str, manifest, caller: identity.Caller | None = None) -> dict:
                "contributor_id": caller.id, "contributor_label": caller.label,
                **({"held_for_review": hold} if hold else {}), **auto.record()}
         ident = store.save_contribution(rec)
+        people.keep(caller.id)                        # who contributes is shown to reviewers
         _release(slot)                                # the record counts from here
         slot = None
         refused = _authz_submit(ident, caller, sharing)
@@ -3458,12 +3459,12 @@ def _line(rec: dict) -> dict:
     return {k: v for k, v in out.items() if v is not None}
 
 
-def _page(rows: list, offset: int, budget: int) -> tuple[list, int]:
+def _page(rows: list, offset: int, budget: int, line_of=None) -> tuple[list, int]:
     """(the lines of rows[offset:] that fit `budget` characters, how many are left)."""
     import json
     shown, used = [], 0
     for rec in rows[offset:]:
-        line = _line(rec)
+        line = (line_of or _line)(rec)
         n = len(json.dumps(line, default=str)) + 2
         if shown and used + n > budget:
             break
@@ -3487,6 +3488,8 @@ def status(contribution_id: str | None = None, caller: identity.Caller | None = 
                 return job
         if rec is None or not (caller.is_reviewer or caller.owns(rec["contributor_id"])):
             return {"status": "declined", "note": f"unknown contribution {contribution_id!r}"}
+        if caller.owns(rec["contributor_id"]):
+            people.keep(caller.id)                # a contributor: shown to their reviewers
         return {"status": "ok", "contribution": _public(rec)}
     import json
     from . import jobs
@@ -3496,6 +3499,8 @@ def status(contribution_id: str | None = None, caller: identity.Caller | None = 
         offset = 0
     rows = [r for r in store.list_contributions(contributor_id=caller.id)
             if caller.owns(r["contributor_id"])]
+    if rows:
+        people.keep(caller.id)                    # a contributor: shown to their reviewers
     working = jobs.working(caller)
     budget = (STATUS_CHARS // 2 if caller.is_reviewer else STATUS_CHARS) \
         - len(json.dumps(working, default=str))
@@ -3516,7 +3521,10 @@ def status(contribution_id: str | None = None, caller: identity.Caller | None = 
                         "resubmit)")
     if caller.is_reviewer:
         queue = store.list_contributions(status="pending")
-        out["pending_review"], waiting = _page(queue, 0, STATUS_CHARS // 2)
+        known = store.load_people(r["contributor_id"] for r in queue)
+        out["pending_review"], waiting = _page(
+            queue, 0, STATUS_CHARS // 2,
+            lambda rec: {**_line(rec), "contributor": people.describe(rec["contributor_id"], known)})
         if waiting:
             out["pending_more"] = waiting
             out["note"] += (f"; {waiting} more pending — contribute_review(action='list') "
@@ -3587,7 +3595,32 @@ def review_list(caller: identity.Caller | None = None, status_filter: str = "pen
         return {"status": "declined",
                 "note": f"unknown filter {status_filter!r} — one of {', '.join(STATUSES)}, all"}
     rows = store.list_contributions(status=None if status_filter == "all" else status_filter)
-    return {"status": "ok", "filter": status_filter, "contributions": [_public(r) for r in rows]}
+    who, missing = _who(rows)
+    return {"status": "ok", "filter": status_filter,
+            "contributions": [{**_public(r), **who[r["contributor_id"]]} for r in rows],
+            **({"note": missing} if missing else {})}
+
+
+def _who(rows: list[dict]) -> tuple[dict[str, dict], str | None]:
+    """For the people who review these: each contributor as far as known (people.py), their
+    account id and their hubs; and why the hubs are missing if the store did not answer."""
+    from .. import authz
+    ids = list(dict.fromkeys(r["contributor_id"] for r in rows))
+    known = store.load_people(ids)
+    out, missing = {}, None
+    for cid in ids:
+        out[cid] = {"contributor": people.describe(cid, known), "contributor_id": cid}
+        if missing is not None or not authz.enabled():
+            continue
+        try:
+            hubs = authz.hubs_of(identity.Caller(cid, cid, False, "token"))
+        except authz.AuthzUnavailable as exc:
+            missing = (f"the authorization store did not answer ({exc}), so the hubs of the contributors "
+                       "from there on are not shown")
+            continue
+        if hubs:
+            out[cid]["contributor_hubs"] = hubs
+    return out, missing
 
 
 def approve(contribution_id: str, caller: identity.Caller | None = None,
@@ -3797,7 +3830,12 @@ def share(contribution_id: str | None, action: str = "show", visibility: str | N
         return {"status": "declined", "note": f"unknown contribution {contribution_id!r}"}
     try:
         if action == "show":
-            return {"status": "ok", "sharing": authz.sharing(contribution_id)}
+            shown = authz.sharing(contribution_id)
+            if caller.is_reviewer:                # names for reviewers only, never an oracle
+                ids = list(dict.fromkeys(shown["owner"] + shown["shared_users"]))
+                known = store.load_people(ids)
+                shown["people"] = {u: people.describe(u, known) for u in ids}
+            return {"status": "ok", "sharing": shown}
         refusal = _authz_refuses(caller, "can_share", contribution_id)
         if refusal:
             return {"status": "declined", "note": refusal}

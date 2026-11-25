@@ -45,6 +45,10 @@ def _connect() -> sqlite3.Connection:
                 "(id TEXT PRIMARY KEY, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, "
                 "status TEXT NOT NULL, kind TEXT NOT NULL, contributor_id TEXT NOT NULL, "
                 "body TEXT NOT NULL)")
+    # Who an account id is (contrib/people.py): kept for people who contribute, shown to reviewers.
+    con.execute("CREATE TABLE IF NOT EXISTS people "
+                "(user_id TEXT PRIMARY KEY, email TEXT, name TEXT, source TEXT NOT NULL, "
+                "updated_at TEXT NOT NULL)")
     return con
 
 
@@ -255,6 +259,60 @@ def load_contribution(ident: str) -> dict | None:
     finally:
         con.close()
     return json.loads(row[0]) if row else None
+
+
+def save_person(user_id: str, email: str | None, name: str | None, source: str) -> None:
+    """Keep what is known about an account id. A token's name replaces the stored one, so a
+    cleared name clears, except that a token without a name leaves a name the operator
+    recorded; an e-mail, and anything the operator leaves out, keeps the stored value."""
+    keeps = "excluded.name IS NULL AND people.source = 'operator'"
+    name_sql = (f"CASE WHEN {keeps} THEN people.name ELSE excluded.name END" if source == "token"
+                else "COALESCE(excluded.name, people.name)")
+    source_sql = f"CASE WHEN {keeps} THEN people.source ELSE excluded.source END"
+    con = _connect()
+    try:
+        with con:
+            con.execute(
+                "INSERT INTO people(user_id, email, name, source, updated_at) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(user_id) DO UPDATE SET email = COALESCE(excluded.email, people.email), "
+                f"name = {name_sql}, source = {source_sql}, updated_at = excluded.updated_at",
+                (user_id, email, name, source, _now()))
+    finally:
+        con.close()
+
+
+def forget_person(user_id: str) -> bool:
+    con = _connect()
+    try:
+        with con:
+            return con.execute("DELETE FROM people WHERE user_id = ?", (user_id,)).rowcount > 0
+    finally:
+        con.close()
+
+
+def contributor_counts() -> dict[str, int]:
+    """{contributor id: how many contributions} over every record, most first."""
+    con = _connect()
+    try:
+        rows = con.execute("SELECT contributor_id, COUNT(*) FROM contributions GROUP BY contributor_id "
+                           "ORDER BY COUNT(*) DESC, contributor_id").fetchall()
+    finally:
+        con.close()
+    return dict(rows)
+
+
+def load_people(user_ids) -> dict[str, dict]:
+    """{user id: {email, name}} for the ids that are known."""
+    ids = [u for u in dict.fromkeys(user_ids) if u]
+    if not ids:
+        return {}
+    con = _connect()
+    try:
+        rows = con.execute(f"SELECT user_id, email, name FROM people WHERE user_id IN "
+                           f"({', '.join('?' * len(ids))})", ids).fetchall()
+    finally:
+        con.close()
+    return {u: {"email": e, "name": n} for u, e, n in rows}
 
 
 def list_contributions(status: str | None = None, contributor_id: str | None = None,
