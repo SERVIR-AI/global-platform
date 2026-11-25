@@ -106,7 +106,7 @@ def test_the_rule_sits_in_the_core_next_to_the_receipt_rule(log):
     """Tier 1, right after the canonical loop, inside the 2,048 chars an older client keeps;
     the web-search clause the answer-here section carried is merged into it, not repeated."""
     rule = instructions.PLATFORM_SOURCES
-    full, core = instructions.compose(), instructions.core()
+    full, core = instructions.compose(), instructions._fitted()[0]
     at = full.index(rule)
     log("OUTPUT", f"rule {len(rule)} chars at {at}-{at + len(rule)}; core {len(core):,}; "
                   f"total {len(full):,}")
@@ -373,7 +373,8 @@ def _largest_figure(p: dict):
     for c in p["citations"]:
         if c.get("kind") == "gaps":
             continue
-        for v, tok, _unit, _sig, written, count_of, cell, _kind in grounded._vouchers(str(c.get("text") or "")):
+        vouchers = grounded._merged([grounded._evidence(str(c.get("text") or ""))]).vouchers
+        for v, tok, _unit, _sig, written, count_of, cell, _kind in vouchers:
             if written and not count_of and not cell and grounded._load_bearing(tok) and v == int(v) \
                     and (best is None or v > best[1]):
                 best = (c, int(v))
@@ -404,14 +405,14 @@ def _still_passes_and_leaks_block(p: dict, log, label):
         assert out["status"] == "blocked", (label, leak)
         assert any("contribute the source so the platform serves it" in f for f in out["failures"])
     if hit and hit[1] >= 1000:
-        evid = grounded._figures(" ".join(str(c.get("text") or "") for c in p["citations"]))
+        evid = grounded._evidence(" ".join(str(c.get("text") or "") for c in p["citations"])).figures
         v = next(k * hit[1] for k in (7, 11, 13, 17) if all(
             abs(float(e) - k * hit[1]) > _magnitude(k * hit[1])[1] for e in evid))
         out = publish.answer(p["pack_id"], _draft(p, f"About {_magnitude(v)[0]} [{hit[0]['n']}]."), "q")
         log("OUTPUT", f"{label}: inflated '{_magnitude(v)[0]}' -> {out['status']}")
         assert out["status"] == "blocked" and "numbers that appear in no citation" in out["failures"][0]
     # an invented round count in digits: no x100 'conversion' from an unrelated figure
-    evid = grounded._figures(" ".join(str(c.get("text") or "") for c in p["citations"]) + str(p.get("stats")))
+    evid = grounded._evidence(" ".join(str(c.get("text") or "") for c in p["citations"]) + str(p.get("stats"))).figures
     for fig in [f for f in range(1100, 9900, 100) if str(f) not in evid][:6]:
         out = publish.answer(p["pack_id"], _draft(p, f"An estimated {fig:,} people were displaced [1]."), "q")
         assert out["status"] == "blocked", (label, fig, out.get("numbers_derived"))
@@ -447,9 +448,10 @@ def test_the_gate_notes_ride_the_reply_and_the_receipt(lc_env, log):  # noqa: F8
     """Which pack figure vouched for each figure, and every warning, on publish_answer's reply,
     the stored receipt and a later record_receipt, not only in the report."""
     p = assemble.assemble(pack="land-cover", place="Test District", year=2000, year_to=2022)
-    evid = grounded._figures(" ".join(str(c.get("text") or "") for c in p["citations"]))
+    evid = grounded._evidence(" ".join(str(c.get("text") or "") for c in p["citations"])).figures
     c, ha = next((c, f"{float(tok) * 100:g}") for c in p["citations"] if c.get("kind") != "gaps"
-                 for _v, tok, unit, sig, written, _n, _cell, _kind in grounded._vouchers(str(c.get("text") or ""))
+                 for _v, tok, unit, sig, written, _n, _cell, _kind in
+                 grounded._merged([grounded._evidence(str(c.get("text") or ""))]).vouchers
                  if unit == "km2" and sig >= 3 and written and f"{float(tok) * 100:g}" not in evid)
     out = publish.answer(p["pack_id"], _draft(p, f"That class covers {ha} ha [{c['n']}]."), "q")
     log("OUTPUT", f"{ha} ha: {out.get('numbers_derived')}")

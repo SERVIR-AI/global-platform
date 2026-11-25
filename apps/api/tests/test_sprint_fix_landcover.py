@@ -23,6 +23,7 @@ from app.geo import ingest
 from app.packs.land_cover import synthesis as lc
 from app.mcp import assemble, packs, registry, store, vectors as vectors_step
 from app.packs.risk import synthesis as risk
+from app.rag import filters as rag_filters
 
 W = H = 10
 PX = 0.001
@@ -363,18 +364,18 @@ def test_reference_lists_and_contents_pages_are_recognised_in_any_language():
               "EFUNA. 352p.\nAutora, B. 1996. El manglar de un estuario en Costa Rica. Turrialba, CR. CATIE. "
               "91p.\nNombre, C.; Otro, D. 2004. Plan de manejo. San José, CR. SINAC. 120p.\nTercero, E. 1992. "
               "Evaluación de impacto ambiental. Turrialba, CR. 45p.")
-    assert lc._looks_like_references(biblio)
-    assert lc._looks_like_references("In: Paris: Food and Agriculture Organization")
-    assert lc._looks_like_references("Referencias\nMINAE (2019). Informe nacional. San José.\n"
-                                     "SINAC (2021). Mapa de ecosistemas. San José.\nFAO (2007). The world's mangroves. Roma.")
+    assert rag_filters.looks_like_references(biblio)
+    assert rag_filters.looks_like_references("In: Paris: Food and Agriculture Organization")
+    assert rag_filters.looks_like_references("Referencias\nMINAE (2019). Informe nacional. San José.\n"
+                                             "SINAC (2021). Mapa de ecosistemas. San José.\nFAO (2007). The world's mangroves. Roma.")
     toc = ("Índice\n1. Introducción ........ 3\n2. Área de estudio ........ 5\n3. Métodos ........ 9\n"
            "4. Resultados ........ 14\n5. Discusión ........ 22")
-    assert lc._looks_like_references(toc)
-    assert not lc._looks_like_references(
+    assert rag_filters.looks_like_references(toc)
+    assert not rag_filters.looks_like_references(
         "La cobertura de manglar del Golfo de Nicoya pasó de 15620 ha en 1956 a 13516 ha en 2014, con la "
         "mayor pérdida entre 1956 y 1985 por la expansión de salinas y camaroneras.")
-    assert not lc._looks_like_references("Mangle alto: bosque de mangle de más de 10 m de altura, clasificado "
-                                         "en 2021 con imágenes de 2019 y 2020.")
+    assert not rag_filters.looks_like_references("Mangle alto: bosque de mangle de más de 10 m de altura, clasificado "
+                                                 "en 2021 con imágenes de 2019 y 2020.")
 
 
 # ------------------------------------------------------- 6. area-only answers

@@ -71,16 +71,16 @@ def test_health_route_mounts_without_touching_risk_routes():
 
 def test_resolve_month_reads_the_live_layer_list(fs_env):
     """A2.1: month -> layer id comes from the service's layer list, both input formats."""
-    assert cropmonitor.resolve_month("2022-11") == ("2022-11", 1)
-    assert cropmonitor.resolve_month("202211") == ("2022-11", 1)
-    assert cropmonitor.resolve_month("2023-1") == ("2023-01", 2)
-    assert cropmonitor.resolve_month(None) == ("2026-04", 3)   # None -> latest published
+    assert cropmonitor._resolve_month("2022-11")[:2] == ("2022-11", 1)
+    assert cropmonitor._resolve_month("202211")[:2] == ("2022-11", 1)
+    assert cropmonitor._resolve_month("2023-1")[:2] == ("2023-01", 2)
+    assert cropmonitor._resolve_month(None)[:2] == ("2026-04", 3)   # None -> latest published
 
 
 def test_resolve_month_handles_the_december_gap(fs_env):
     """A2.1: a skipped month declines with the nearest published alternative, no guessing."""
     with pytest.raises(cropmonitor.MonthNotAvailable) as exc:
-        cropmonitor.resolve_month("2022-12")
+        cropmonitor._resolve_month("2022-12")
     assert exc.value.nearest in ("2022-11", "2023-01")
     assert "not published" in str(exc.value)
 
@@ -90,17 +90,17 @@ def test_resolve_month_rejects_garbage(fs_env):
     the ambiguous 5-digit form ('20261' could be Jan or Dec plus a typo)."""
     for bad in ("april", "2026-13", "20261"):
         with pytest.raises(ValueError):
-            cropmonitor.resolve_month(bad)
+            cropmonitor._resolve_month(bad)
 
 
 def test_resolve_crop_maps_synonyms_to_season_names(fs_env):
     """A2.3: 'wheat' -> both season rows; an exact name beats containment matches."""
-    assert cropmonitor.resolve_crop("wheat", 3) == ["Spring Wheat", "Winter Wheat"]
-    assert cropmonitor.resolve_crop("maize", 3) == ["Maize 1", "Maize 2"]
-    assert cropmonitor.resolve_crop("rice", 3) == ["Rice"]       # exact, not Rice+Rice 1
-    assert cropmonitor.resolve_crop("ric", 3) == ["Rice", "Rice 1"]
+    assert cropmonitor._resolve_crop("wheat", 3)[0] == ["Spring Wheat", "Winter Wheat"]
+    assert cropmonitor._resolve_crop("maize", 3)[0] == ["Maize 1", "Maize 2"]
+    assert cropmonitor._resolve_crop("rice", 3)[0] == ["Rice"]       # exact, not Rice+Rice 1
+    assert cropmonitor._resolve_crop("ric", 3)[0] == ["Rice", "Rice 1"]
     with pytest.raises(cropmonitor.CropNotFound) as exc:
-        cropmonitor.resolve_crop("banana", 3)
+        cropmonitor._resolve_crop("banana", 3)
     assert "Teff" in exc.value.available
 
 
@@ -368,14 +368,14 @@ def test_degenerate_200_never_overwrites_last_good(fs_env, monkeypatch):
 def test_degenerate_crop_menu_never_overwrites_last_good(fs_env, monkeypatch):
     """The crop menu gets the same protection: a 200 with zero crop names is a
     hiccup, and a crop decline made off a stale menu says so."""
-    cropmonitor.distinct_crops(3)                    # prime last-good
+    cropmonitor._distinct_crops(3)                    # prime last-good
     monkeypatch.setattr(get_settings(), "cropmonitor_cache_ttl_hours", 0)
     monkeypatch.setattr(cropmonitor, "_fetch_json",
                         lambda url, params: LAYERS if url.endswith("FeatureServer")
                         else {"features": []})
-    assert "Maize 1" in cropmonitor.distinct_crops(3)   # served from last-good
+    assert "Maize 1" in cropmonitor._distinct_crops(3)[0]   # served from last-good
     with pytest.raises(cropmonitor.CropNotFound) as exc:
-        cropmonitor.resolve_crop("banana", 3)        # decline off the stale menu hedges
+        cropmonitor._resolve_crop("banana", 3)        # decline off the stale menu hedges
     assert "cached crop list" in str(exc.value)
 
 
@@ -395,7 +395,7 @@ def test_stale_served_conditions_carry_a_visible_marker(fs_env, monkeypatch):
     assert "could not be reached" in stale["stale_data"]["message"]
 
     with pytest.raises(cropmonitor.MonthNotAvailable) as exc:
-        cropmonitor.resolve_month("2022-12")         # decline from a stale list hedges
+        cropmonitor._resolve_month("2022-12")         # decline from a stale list hedges
     assert "newer months may exist" in str(exc.value)
 
 

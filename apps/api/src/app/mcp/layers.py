@@ -34,9 +34,6 @@ def check(layers) -> str | None:
     return layer_values.check_names(layers)
 
 
-RESERVED = ("_area", "_layer_defaults", "_class_grid")
-
-
 def strip_reserved(stats) -> tuple:
     """(area, defaults) popped from a gatherer's stats — call it on every path that
     persists them, used or not. The class map (`_class_grid`) goes too: its file path

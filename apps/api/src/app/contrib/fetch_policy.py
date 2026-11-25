@@ -81,7 +81,6 @@ class _Retryable(FetchRefused):
 # file shared with "Anyone with the link". Rewriting it here means every kind —
 # document, table, raster, vector — takes the link a contributor actually has.
 _DRIVE_HOSTS = ("drive.google.com", "docs.google.com")
-_DRIVE_CONTENT_HOST = "drive.usercontent.google.com"
 _DRIVE_ID = re.compile(r"/(?:file/)?d/([A-Za-z0-9_-]{10,})")
 # Files made IN Google Docs/Sheets/Slides live on docs.google.com too, but they are
 # not uploaded files: a Doc is fetched through its export URL, the others refused.

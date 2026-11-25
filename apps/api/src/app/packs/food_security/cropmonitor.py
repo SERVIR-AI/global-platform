@@ -263,12 +263,6 @@ def _resolve_month(month: str | None) -> tuple[str, int, float | None]:
     return key, index[key], stale_at
 
 
-def resolve_month(month: str | None) -> tuple[str, int]:
-    """Normalize 'YYYY-MM'/'YYYYMM' and map it to its layer id; None -> latest published."""
-    key, layer_id, _ = _resolve_month(month)
-    return key, layer_id
-
-
 def _distinct_crops(layer_id: int) -> tuple[list[str], float | None]:
     # A published layer with zero crop names is a service hiccup, not truth — the
     # check keeps a degenerate 200 from overwriting the last good crop menu. (The
@@ -283,11 +277,6 @@ def _distinct_crops(layer_id: int) -> tuple[list[str], float | None]:
     return sorted(n for n in names if n and n.strip()), stale_at
 
 
-def distinct_crops(layer_id: int) -> list[str]:
-    """The season-level crop names the service assesses for that month's layer."""
-    return _distinct_crops(layer_id)[0]
-
-
 def _resolve_crop(crop: str, layer_id: int) -> tuple[list[str], float | None]:
     crops, stale_at = _distinct_crops(layer_id)
     wanted = crop.strip().lower()
@@ -296,12 +285,6 @@ def _resolve_crop(crop: str, layer_id: int) -> tuple[list[str], float | None]:
     if not matched:
         raise CropNotFound(crop, crops, stale_at=stale_at)
     return matched, stale_at
-
-
-def resolve_crop(crop: str, layer_id: int) -> list[str]:
-    """A user's crop word -> the season-level names ('wheat' -> Winter + Spring Wheat).
-    Exact (case-insensitive) match wins; otherwise containment against the live list."""
-    return _resolve_crop(crop, layer_id)[0]
 
 
 def _sql_quote(value: str) -> str:

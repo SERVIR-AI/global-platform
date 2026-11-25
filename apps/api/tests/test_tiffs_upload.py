@@ -37,7 +37,7 @@ def test_multiband_upload_rejected(tif_writer, byod_env, log):
     assert r.status_code == 200
     assert body["ok"] is False and body["layer"] is None
     assert any("band" in m for m in body["mismatches"])
-    assert byod_registry.entries_for("t1") == {}                     # nothing registered
+    assert byod_registry.descriptions_for("t1") == {}                     # nothing registered
 
 
 def test_bad_extension_rejected(byod_env, log):

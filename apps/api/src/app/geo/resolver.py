@@ -54,12 +54,6 @@ def _logical(name):
     return stem
 
 
-def risk_key_for(hazard):
-    """The precomputed risk_<x> tif key for a hazard (handles landslides/landslide), or None."""
-    nm = _name_map().get(_logical(hazard))
-    return nm["risk"] if nm else None
-
-
 def options_for(hazard):
     """The answer paths available for a hazard, in order: exposure (raw hazard), risk L1
     (precomputed), risk L2 (computed). Each is (key, layer, label); only available ones."""

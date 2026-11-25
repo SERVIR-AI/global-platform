@@ -7,9 +7,7 @@ A hub's own layer lands once, as a master GeoJSON, and is clipped into each AOI
 bundle beside the OSM layers under the same name — so the exposure count that
 crosses hospitals with a hazard crosses a point layer with no new code, and any
 pack with an area can SUMMARISE a line or polygon layer inside it (`summarise`):
-how many, how many km, how many km², by a field the contributor names. A polygon
-layer whose features carry names is also a GAZETTEER (`named_area`): "Humedal
-Nacional Térraba-Sierpe" resolves to the hub's own boundary, not a geocoder's box.
+how many, how many km, how many km², by a field the contributor names.
 """
 
 from __future__ import annotations
@@ -27,7 +25,6 @@ from shapely.geometry import shape
 from shapely.ops import unary_union
 
 from ..mcp.budget import once
-from .namekey import name_key
 
 # WGS 84. Areas are computed on (lon, AUTHALIC latitude) with the authalic radius —
 # the sphere of the ellipsoid's own area, reached by an equal-area map — so they are
@@ -184,7 +181,7 @@ def _layer(entry: dict) -> dict:
     """A layer's master file parsed once and reused until the file changes: each
     feature's properties and id, its shapely geometry (a polygon repaired, None when
     unreadable) and an STRtree over them. Every measure — summarise, clip_into,
-    union_inside, the gazetteer — reads it here, so a national map is not re-parsed
+    union_inside — reads it here, so a national map is not re-parsed
     on every question and only the features near an area are ever looked at. The
     most recently used layers stay parsed, within a budget of coordinates."""
     import shapely
@@ -596,98 +593,4 @@ def summarise(entry: dict, boundary, cap_features: int = 250_000) -> dict:
             named.sort(key=lambda t: (-t[0], t[1]))
             out["largest_named"] = [{"name": n, "measure": round(m, 3)} for m, n in named[:_TOP]]
         out["unnamed"] = n_in - len(named)
-    return out
-
-
-# ------------------------------------------------------------------ gazetteer
-_NAME_INDEX: dict = {}       # layer -> (mtime, size, {normalised name: [(label, shapely geometry)]})
-
-
-def _name_index(layer: str, entry: dict) -> dict:
-    """{normalised name: [(label, geometry)]} for one polygon layer, built once per
-    master file and rebuilt when the file changes — a place lookup must not parse
-    40 MB of GeoJSON on every question. The geometries are the parsed layer's own,
-    repaired, so a merged boundary is never built from an invalid ring."""
-    path = master_path(entry)
-    try:
-        st = os.stat(path)
-    except OSError:
-        return {}
-    cached = _NAME_INDEX.get(layer)
-    if cached and cached[0] == st.st_mtime and cached[1] == st.st_size:
-        return cached[2]
-    index: dict = {}
-    key = entry["name_field"]
-    try:
-        lay = _layer(entry)
-    except (OSError, ValueError):
-        return {}
-    for props, geom in zip(lay["props"], lay["geoms"]):
-        label = props.get(key)
-        if label in (None, "") or geom is None:
-            continue
-        index.setdefault(name_key(label or "", keep_punctuation=True), []).append((str(label).strip(), geom))
-    _NAME_INDEX[layer] = (st.st_mtime, st.st_size, index)
-    return index
-
-
-def named_area(name: str) -> dict | None:
-    """A contributed polygon feature (or all features sharing a name) whose name
-    matches `name`: {"geometry": shapely, "label", "layer", "entry", "how", "matches"}.
-    Exact matches win; else one feature whose name contains the query (or the query
-    contains it) — several such are refused as ambiguous, in words. None when no
-    contributed polygon layer knows the name."""
-    q = name_key(name or "", keep_punctuation=True)
-    if not q or len(q) < 3:
-        return None
-    exact, partial = [], []
-    for layer, entry in visible().items():
-        if family(entry) != "polygons" or not entry.get("name_field"):
-            continue
-        for n, items in _name_index(layer, entry).items():
-            if n == q:
-                exact.extend((layer, entry, label, {"geometry": g}) for label, g in items)
-            elif len(q) >= 5 and (q in n or n in q):
-                partial.extend((layer, entry, label, {"geometry": g}) for label, g in items)
-    hits = exact or partial
-    if not hits:
-        return None
-    labels = sorted({(h[0], h[2]) for h in hits})
-    if not exact and len(labels) > 1:
-        return {"ambiguous": True, "matches": [f"{lab} ({lay})" for lay, lab in labels[:8]]}
-    if len(labels) > 1:                       # the same exact name in two layers
-        first_layer = hits[0][0]
-        hits = [h for h in hits if h[0] == first_layer]
-        labels = sorted({(h[0], h[2]) for h in hits})
-    layer, entry, label, _ = hits[0]
-    try:
-        geom = unary_union([h[3]["geometry"] for h in hits])
-    except Exception:
-        return None
-    if geom.is_empty:
-        return None
-    how = (f"contributed boundary: {label} from {entry.get('title') or layer} ({layer}; "
-           f"{entry.get('source') or 'source unstated'}, vintage {entry.get('vintage') or 'unstated'})"
-           + (f"; {len(hits)} features share this name and were merged" if len(hits) > 1 else "")
-           + ("" if exact else f" — matched '{name}' by part of the name"))
-    return {"geometry": geom, "label": label, "layer": layer, "entry": entry, "how": how,
-            "matches": len(hits), "ambiguous": False}
-
-
-def names(limit: int = 20) -> dict:
-    """{layer: [some names]} for the polygon layers that can serve as places."""
-    out = {}
-    for layer, entry in visible().items():
-        if family(entry) != "polygons" or not entry.get("name_field"):
-            continue
-        seen = []
-        for items in _name_index(layer, entry).values():
-            for label, _g in items:
-                if label not in seen:
-                    seen.append(label)
-                if len(seen) >= limit:
-                    break
-            if len(seen) >= limit:
-                break
-        out[layer] = seen
     return out

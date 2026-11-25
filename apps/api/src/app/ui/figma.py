@@ -79,22 +79,11 @@ def cached(key: str, build, ttl: int = _TTL) -> dict:
     return {**out, "cache": {"hit": False, "age_s": 0, "served_stale": False}}
 
 
-def invalidate(reason: str = "manual") -> dict:
-    """Drop the cache. Wired to a Figma webhook later; `webhooks:write` is in scope."""
-    n = len(_CACHE)
-    _CACHE.clear()
-    return {"status": "ok", "cleared": n, "reason": reason}
-
-
 def _walk(node: dict, out: list) -> list:
     out.append(node)
     for child in node.get("children", []):
         _walk(child, out)
     return out
-
-
-def _box(n: dict) -> dict:
-    return n.get("absoluteBoundingBox") or {}
 
 
 def _swatch_hexes(nodes: list) -> set:

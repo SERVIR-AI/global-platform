@@ -265,13 +265,8 @@ def test_line_and_polygon_layers_land_measure_inside_an_area_and_name_places(vec
     pa = _as(OWNER, lambda: vectors.summarise(reg["test_areas"], box(-85.2, 10.0, -85.0, 10.3)))
     assert pa["unit"] == "km2" and pa["features_inside"] == 1 and 200 < pa["total"] < 260   # 0.1 x 0.2 deg
 
-    # a contributed polygon's name resolves as a place: accent-insensitive, with the hub's `how`
-    hit = _as(OWNER, lambda: vectors.named_area("humedal nacional terraba-sierpe"))
-    assert hit and not hit["ambiguous"] and hit["label"].startswith("Humedal") and "contributed boundary" in hit["how"]
-    partial = _as(OWNER, lambda: vectors.named_area("Térraba-Sierpe"))
-    assert partial and partial["label"].startswith("Humedal")
-    assert _as(OWNER, lambda: vectors.named_area("Nowhere Bay")) is None
-    # ...and through the resolver and the AOI machinery, cached under its own key
+    # a contributed polygon's name resolves as a place through the resolver and the AOI machinery:
+    # accent-insensitive, with the hub's `how`, cached under its own key
     res = _as(OWNER, lambda: ingest.resolve_place("Humedal Nacional Terraba-Sierpe"))
     assert res["status"] == "ok" and res["is_contributed_boundary"] and 200 < res["area_km2"] < 260
     aoi = _as(OWNER, lambda: ingest.ensure_aoi(place="Humedal Nacional Terraba-Sierpe", layers=()))
@@ -866,10 +861,10 @@ def test_within_restricts_any_packs_area_and_overlaps_count_once(binary_stack, t
 
 
 def test_reference_list_passages_are_not_cited():
-    from app.packs.land_cover import synthesis as lc
+    from app.rag import filters as rag_filters
     refs = ("Adame, M. F., et al. (2012). Carbon stocks. Estuaries 35, 1-10. doi:10.1007/x "
             "Alongi, D. M. (2010) Wetlands. Bouillon, S. et al. 2008 Global Biogeochem. doi:10.1029/y "
             "Donato, D. C. et al. (2011) Nat. Geosci. 4, 293. Kauffman, J. B. et al. 2011 Wetlands 31, 343. "
             "Komiyama A. et al 2008 Aquat Bot 89, 128. Saenger P. 2002. Chmura G. et al. 2003. Twilley 1992.")
-    assert lc._looks_like_references(refs)
-    assert not lc._looks_like_references("Mangle alto: bosque de mangle de más de 10 m de altura, clasificado en 2021 con imágenes de 2019 y 2020.")
+    assert rag_filters.looks_like_references(refs)
+    assert not rag_filters.looks_like_references("Mangle alto: bosque de mangle de más de 10 m de altura, clasificado en 2021 con imágenes de 2019 y 2020.")

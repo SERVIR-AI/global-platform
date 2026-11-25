@@ -70,7 +70,7 @@ async def _manifest_text(request: Request, file: UploadFile | None) -> str:
         raw = await file.read()
     else:
         raw = await request.body()
-    cap = int(getattr(get_settings(), "grp_max_fetch_bytes", 0) or 0) or 5 * 1024 * 1024
+    cap = 5 * 1024 * 1024
     if len(raw) > cap:
         raise HTTPException(status_code=413, detail=f"manifest larger than {cap} bytes")
     try:

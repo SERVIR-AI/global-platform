@@ -463,8 +463,8 @@ def test_a_rounded_or_unit_converted_pack_figure_is_not_a_fabrication():
     magnitude of the same count traces to the pack; a sum, a difference, extra precision, an
     unnamed conversion, pixels for hectares or a figure with no origin blocks."""
     from app.gate import grounded
-    evid = grounded._vouchers("mangrove 957.5 ha; 408.4 km² classified; 12,797,972 pixels; "
-                              "extent 557.9 km² and 430.7 km²")
+    evid = grounded._merged([grounded._evidence("mangrove 957.5 ha; 408.4 km² classified; 12,797,972 pixels; "
+                                                "extent 557.9 km² and 430.7 km²")]).vouchers
     assert grounded._rounded_or_converted("957", evid)          # rounded
     assert grounded._rounded_or_converted("958", evid)          # the other rounding convention
     assert grounded._rounded_or_converted("40840", evid, units=["ha"])     # km² -> ha, exact
@@ -475,7 +475,8 @@ def test_a_rounded_or_unit_converted_pack_figure_is_not_a_fabrication():
     assert grounded._rounded_or_converted("957.53", evid) is None     # more precision than the pack
     assert grounded._rounded_or_converted("127.2", evid) is None      # a difference (557.9 - 430.7)
     assert grounded._rounded_or_converted("604", evid) is None        # no origin at all
-    assert grounded._rounded_or_converted("150", grounded._vouchers("a factor of 1.5")) is None  # base not load-bearing
+    assert grounded._rounded_or_converted(
+        "150", grounded._merged([grounded._evidence("a factor of 1.5")]).vouchers) is None  # base not load-bearing
 
 
 def test_check_grounded_passes_a_rounded_figure_and_records_how():
