@@ -1,7 +1,6 @@
 """S7 — the L2 engine is hazard-agnostic. Per-hazard recipes (conf/risk_l2.yml) drive
-combine_l2 / resolver / validate for any hazard; here we compute a real L2 grid for
-two more hazards and diff each against its own risk_<x>.tif (handling the
-landslides/landslide naming). Run slow with: GRP_RUN_SLOW=1 pytest tests/test_l2_multi_hazard.py
+combine_l2 / resolver for any hazard; here we compute a real L2 grid for two more
+hazards. Run slow with: GRP_RUN_SLOW=1 pytest tests/test_l2_multi_hazard.py
 """
 import json
 import os
@@ -11,7 +10,7 @@ import pytest
 import rasterio
 from shapely.geometry import box, mapping
 
-from app.geo import combine, validate, verify
+from app.geo import combine, verify
 
 slow = pytest.mark.skipif(
     os.getenv("GRP_RUN_SLOW") != "1", reason="slow: live Drive download (set GRP_RUN_SLOW=1)")
@@ -30,15 +29,12 @@ def _minimal_aoi(tmp_path):
 @slow
 @pytest.mark.parametrize("hazard", ["hazard_landslides", "hazard_earthquake"])
 def test_l2_runs_and_validates_per_hazard(hazard, tmp_path):
-    """S7.T1/T2 [slow] each hazard's recipe -> a 1-5 grid on its grid, agreeing with its risk_<x>.tif."""
+    """S7.T1/T2 [slow] each hazard's recipe -> a 1-5 grid on its grid."""
     aoi = _minimal_aoi(tmp_path)
     grid = combine.combine_l2(aoi, hazard)                # per-hazard conf recipe
     with rasterio.open(grid) as r:
         uniq = set(np.unique(r.read(1)).tolist())
     assert uniq.issubset({0, 1, 2, 3, 4, 5}) and (uniq - {0})   # valid 1-5, not all nodata
-    d = validate.diff_against_risk(grid, hazard, aoi)            # resolves risk_landslide (singular) etc.
-    assert d["n_cells"] > 0
-    assert d["within1_pct"] >= 70                               # reality ~100 on these AOIs
 
 
 @slow

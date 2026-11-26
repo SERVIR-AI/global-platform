@@ -309,11 +309,6 @@ def _fitted() -> tuple[str, str]:
     return t1, out
 
 
-def core() -> str:
-    """What a client keeping only budget.INSTRUCTIONS_CORE chars must still see."""
-    return _fitted()[0]
-
-
 def compose() -> str:
     """The instructions as sent at initialize, measured against both budgets."""
     t1, out = _fitted()

@@ -95,7 +95,7 @@ def test_instructions_fit_the_client_budgets(caplog, log):
     """Tier 1 inside the 2,048 a pre-v2.1.296 client kept; everything inside the 4,096 kept
     now — and composing them logs no overrun on this registry."""
     with caplog.at_level(logging.WARNING, logger="app.mcp.budget"):
-        full, core = instructions.compose(), instructions.core()
+        full, core = instructions.compose(), instructions._fitted()[0]
     log("OUTPUT", f"instructions {len(full):,} chars; core {len(core):,}")
     assert full == _instructions()        # both built here: the import-time text saw other methods
     assert len(core) <= budget.INSTRUCTIONS_CORE and len(full) <= budget.INSTRUCTIONS
@@ -150,7 +150,7 @@ def _catalog_names() -> set[str]:
 def test_the_opening_names_counts_not_layers(lc_env, log):  # noqa: F811
     """On a contributed catalog the opening carries the pack names and counts; the stack,
     class, hazard and feed names stay in platform_capabilities and assemble_pack."""
-    core = instructions.core()
+    core = instructions._fitted()[0]
     names = _catalog_names()
     leaked = sorted(n for n in names if n in core)
     log("OUTPUT", f"{len(names)} catalog names checked; opening: {core[:200]}...")
@@ -171,7 +171,7 @@ def test_a_contributed_stack_moves_the_count_and_names_itself_at_its_home(lc_env
                                   "countries": ["Testland"],
                                   "legend": {0: "Not mangrove", 1: "Mangrove"}}
     monkeypatch.setattr(synthesis, "landcover_stacks", lambda: rows)
-    core, desc = instructions.core(), registry.describe_assemble()
+    core, desc = instructions._fitted()[0], registry.describe_assemble()
     log("OUTPUT", core[:260])
     assert "2 stacks" in core and "Testland" not in core
     assert "Testland" in desc and len(desc) <= budget.TOOL_DESCRIPTION
@@ -186,7 +186,7 @@ def test_a_pack_without_a_covers_hook_says_so(monkeypatch, log):
     monkeypatch.setitem(packs.PACKS, "toy", {
         "display_name": "Toy Platform", "target_keys": ("site",), "target_doc": {"site": "x"},
         "gather": lambda *a, **k: ([], [], None), "sections": lambda *a: []})
-    core = instructions.core()
+    core = instructions._fitted()[0]
     log("OUTPUT", f"{len(core):,} chars: ...{core[core.index('Toy'):core.index('Toy') + 60]}")
     assert "4 domain packs" in core
     assert "Toy: coverage not declared by this pack (site)" in core
@@ -387,7 +387,7 @@ def test_the_texts_agree_on_the_first_call_and_the_lookup_rows(log):
     said one way); feeds_query leads with the subjects people ask; a lookup's hint says its rows
     stay out of a receipted brief."""
     tools = _tools()
-    assert "start_here(question) fills it" in instructions.core()
+    assert "start_here(question) fills it" in instructions._fitted()[0]
     assert tools["feeds_query"].startswith("CURRENT CLIMATE, CROP AND HAZARD DATA")
     assert "keep it out of a receipted brief" in loop.ENTRY_HINT["note"]
     assert len(loop.ENTRY_HINT["note"]) <= budget.NOTE_CHARS
@@ -817,14 +817,14 @@ def test_the_rule_lives_upstream_and_replies_carry_one_line(log):
     for name in ("assemble_pack", "feeds_query", "corpus_search"):
         assert instructions.SHORT["no_arithmetic"] in tools[name], name
         assert "NO ARITHMETIC" in tools[name] and "accept or reject" in tools[name], name
-    assert "NO ARITHMETIC BY DEFAULT" in instructions.core()
+    assert "NO ARITHMETIC BY DEFAULT" in instructions._fitted()[0]
     assert len(loop.NO_ARITHMETIC) <= budget.NOTE_CHARS
     assert loop.ENTRY_HINT["no_arithmetic"] == loop.NO_ARITHMETIC
     # MGV-529: a contributed feed's usage note ("sum hectares") rides every feeds_query reply;
     # the counter-rule is where that note is read, in the core, and in the reply line
     assert "'sum hectares'" in tools["feeds_query"] and "contribute_submit kind=method" in tools["feeds_query"]
     assert "computes and cites it for everyone" in tools["feeds_query"]
-    assert "'sum hectares'" in instructions.core() and "'sum hectares'" in loop.NO_ARITHMETIC
+    assert "'sum hectares'" in instructions._fitted()[0] and "'sum hectares'" in loop.NO_ARITHMETIC
     for key, line in loop.ENTRY_HINT.items():
         if isinstance(line, str):
             assert len(line) <= budget.NOTE_CHARS, key
@@ -889,7 +889,7 @@ def test_every_text_stays_inside_its_budget_as_contributions_grow(lc_env, monkey
     rows, layers = _grow(monkeypatch)
     with caplog.at_level(logging.WARNING, logger="app.mcp.budget"):
         sizes = {name: len(fn()) for name, fn in DESCRIBERS.items()}
-        full, core = instructions.compose(), instructions.core()
+        full, core = instructions.compose(), instructions._fitted()[0]
     log("OUTPUT", f"{sizes}; instructions {len(full):,}, core {len(core):,}")
     assert all(n <= budget.TOOL_DESCRIPTION for n in sizes.values()), sizes
     assert len(full) <= budget.INSTRUCTIONS and len(core) <= budget.INSTRUCTIONS_CORE
@@ -919,13 +919,13 @@ def test_instructions_fit_with_more_packs_and_a_summary_only_pack(monkeypatch, l
         "display_name": "Toy Platform", "target_keys": ("site",), "target_doc": {"site": "x"},
         "summary": "TOY — a summary-only extension pack", "gather": lambda *a, **k: ([], [], None),
         "sections": lambda *a: []})
-    core = instructions.core()
+    core = instructions._fitted()[0]
     assert "Toy: described at servirplatform://pack/toy (site)" in core
     monkeypatch.setitem(packs.PACKS, "toy2", {
         "display_name": "Second Toy Platform", "target_keys": ("site", "day"),
         "target_doc": {"site": "x", "day": "y"}, "gather": lambda *a, **k: ([], [], None),
         "sections": lambda *a: []})
-    full, core = instructions.compose(), instructions.core()
+    full, core = instructions.compose(), instructions._fitted()[0]
     log("OUTPUT", f"{len(full):,} / {len(core):,}: {core[:300]}")
     assert len(full) <= budget.INSTRUCTIONS and len(core) <= budget.INSTRUCTIONS_CORE
     assert "5 domain packs" in core and full.startswith(core)

@@ -410,8 +410,6 @@ def test_the_library_passes_over_reference_lists_and_documents_about_other_count
     assert "Nicoya report" in here and "Global guideline" in here
     assert "Guayaquil report" not in here and "Mekong note" not in here
     assert skipped["elsewhere"] == {"Ecuador": ["Guayaquil report"], "Viet Nam": ["Mekong note"]}
-    # one rule, one home: the land-cover name is the shared test
-    assert lc._looks_like_references is rag_filters.looks_like_references
     assert rag_filters.speaks_to(["Viet Nam"], ["Vietnam"]) and rag_filters.speaks_to([], ["Kenya"])
 
 

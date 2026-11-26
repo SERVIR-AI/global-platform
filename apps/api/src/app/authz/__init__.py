@@ -286,10 +286,6 @@ def check(user: str, relation: str, obj: str) -> bool:
                                                                object=obj)).allowed))
 
 
-def batch_check(user: str, relation: str, objects: list[str]) -> dict[str, bool]:
-    return {o: check(user, relation, o) for o in dict.fromkeys(objects)}
-
-
 def list_objects(user: str, relation: str, type_: str) -> set[str]:
     from openfga_sdk.client.models import ClientListObjectsRequest
     resp = _guard(lambda: _fga().list_objects(ClientListObjectsRequest(user=user, relation=relation,
@@ -357,18 +353,10 @@ def dataset(contribution_id: str) -> str:
     return f"dataset:{contribution_id}"
 
 
-def is_reviewer(caller) -> bool:
-    return check(user_key(caller), "reviewer", PLATFORM)
-
-
 def may_contribute(caller) -> bool:
     """Whether the caller holds the contributor role: by name, through a hub, as an operator,
     or through the entry that gives it to everyone who is signed in."""
     return check(user_key(caller), "contributor", PLATFORM)
-
-
-def is_operator(caller) -> bool:
-    return check(user_key(caller), "operator", PLATFORM)
 
 
 def hubs_of(caller) -> list[str]:

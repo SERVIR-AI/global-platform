@@ -65,13 +65,6 @@ class Caller:
             return True
         return str(contribution_id) in _visible_for(self)
 
-    @property
-    def hubs(self) -> list[str]:
-        from .. import authz
-        if not authz.enabled() or self.source == "anonymous":
-            return []
-        return _hubs_for(self)
-
 
 def _memo(key, compute):
     """Inside a request's budget snapshot the store is asked once per caller; outside
@@ -94,11 +87,6 @@ def _memo(key, compute):
 def _visible_for(caller) -> set[str]:
     from .. import authz
     return _memo(("visible", caller.id, caller.source), lambda: authz.visible_datasets(caller))
-
-
-def _hubs_for(caller) -> list[str]:
-    from .. import authz
-    return _memo(("hubs", caller.id, caller.source), lambda: authz.hubs_of(caller))
 
 
 # Set explicitly by tests and by the CLI; every MCP call resolves lazily from the

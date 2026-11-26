@@ -340,7 +340,7 @@ def test_every_text_fits_a_live_sized_registry_with_no_overrun(live, caplog, log
     from app.mcp import budget, instructions, server
     with caplog.at_level(logging.WARNING, logger="app.mcp.budget"):
         instr, descs, params = server.LIVE.build()
-        core = instructions.core()
+        core = instructions._fitted()[0]
     sizes = {n: len(d) for n, d in descs.items()}
     log("OUTPUT", f"{sizes}; instructions {len(instr):,}, core {len(core):,}")
     assert set(descs) == set(server.DESCRIBERS) and set(params) == set(server.PARAMS)

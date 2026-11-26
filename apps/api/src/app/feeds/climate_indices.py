@@ -23,9 +23,6 @@ _CACHE: dict[str, tuple[float, dict]] = {}
 _TTL = 6 * 3600          # monthly data; six hours is already over-fresh
 _MISSING = -9990.0       # PSL writes -9999.000 for "not yet published"
 
-# The 3-month overlapping seasons ONI is reported in, in order.
-_SEASONS = ["DJF", "JFM", "FMA", "MAM", "AMJ", "MJJ", "JJA", "JAS", "ASO", "SON", "OND", "NDJ"]
-
 
 class IndexUnavailable(Exception):
     """Upstream unreachable or unparseable — the caller declines with this text."""

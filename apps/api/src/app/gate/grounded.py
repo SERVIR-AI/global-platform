@@ -502,17 +502,6 @@ def _merged(reads) -> SimpleNamespace:
         years=set().union(*(r.years for r in reads)) - set().union(*(r.counted for r in reads)))
 
 
-def _figures(text: str) -> set[str]:
-    """Every number EVIDENCE states, as written and with its magnitudes read."""
-    return _evidence(text).figures
-
-
-def _vouchers(text: str) -> list[tuple]:
-    """EVIDENCE figures that may vouch by rounding or conversion: (value, as written, unit, sig.
-    digits, written in digits, count of, unit required, kind)."""
-    return _merged([_evidence(text)]).vouchers
-
-
 def _voucher_rows(text: str, spelled: str, meta: dict) -> tuple[list, set, dict]:
     """(rows, codes, counts) of `text` (links and DOIs blanked) and its magnitudes read: never a
     code, an id or a link's digits; a pixel count only for pixels; a cell only for its row's unit."""

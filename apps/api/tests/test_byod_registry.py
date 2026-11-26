@@ -38,8 +38,7 @@ def test_descriptions_and_per_thread_isolation(tif_writer, byod_env, log):
     desc = byod_registry.descriptions_for("t1")
     log("DESCRIPTIONS t1", desc)
     assert layer in desc and "flood" in desc[layer].lower()
-    assert layer in byod_registry.entries_for("t1")
-    assert byod_registry.entries_for("t2") == {}        # thread isolation
+    assert byod_registry.descriptions_for("t2") == {}        # thread isolation
 
 
 def test_failing_tif_is_never_registered(tif_writer, byod_env, log):
@@ -48,7 +47,7 @@ def test_failing_tif_is_never_registered(tif_writer, byod_env, log):
     layer, report = byod_registry.register("t1", hazard_label="flood", severity_scale="0-5", src_path=bad)
     log("REGISTER", f"layer={layer} ok={report.ok}")
     assert layer is None and report.ok is False
-    assert byod_registry.entries_for("t1") == {}
+    assert byod_registry.descriptions_for("t1") == {}
     assert os.path.exists(bad)                           # not moved
 
 

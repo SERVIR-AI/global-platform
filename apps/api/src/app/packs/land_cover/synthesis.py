@@ -1155,10 +1155,6 @@ def _library_hits(name, focus, labels, trace, gaps, k=3, countries=()):
     return corpus, hits[:2 * k]
 
 
-# The reference-list test is every pack's (rag.filters); the name stays for callers.
-_looks_like_references = _rag_filters.looks_like_references
-
-
 def _document_citation(n, h, corpus):
     from ...contrib import staging
     m = h.get("metadata") or {}

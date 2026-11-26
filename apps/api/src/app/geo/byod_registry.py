@@ -58,11 +58,6 @@ def register(thread_id: str, *, hazard_label: str, severity_scale: str, src_path
     return layer, report
 
 
-def entries_for(thread_id: str) -> dict[str, dict]:
-    """All BYOD layer entries registered for `thread_id` (empty if none)."""
-    return dict(_REGISTRY.get(thread_id, {}))
-
-
 def descriptions_for(thread_id: str) -> dict[str, str]:
     """{layer: description} to merge into the route menu for `thread_id`."""
     return {layer: e["description"] for layer, e in _REGISTRY.get(thread_id, {}).items()}
